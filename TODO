@@ -1,0 +1,46 @@
+General
+-------
+
+- Add game modes and menu (Start Game/Select Level/Options).
+
+- Keep track of the score
+
+- Multiplayer and network support
+
+- Better definition of Levels and Goals
+
+- Maybe new starwars scroller intro? How about a story first...
+
+- Better weights should be provided in flock.cc...
+
+
+Architectural
+-------------
+
+- Maybe generalize object grouping so there is an intermediaray class
+  ObjectGroup from which Flock would inherit. (Flock is now reference counted,
+  so it would mean making some changes again to it's architecture.)
+
+- Add support for conglomerate objects
+
+- Provide a configuration object which has decent defaults and reads
+  ~/.ssc/ssc.conf files
+
+- Use a generic event generation mechanism to abstract away from SDL
+
+
+Graphics
+--------
+
+- Objects are pretty simple looking; anyone willing to help to add textures and
+  nice special effects?
+
+
+Physics
+-------
+
+- Gravity was taken out of the game in the transition to ODE. I should put it
+  back in; probably via the move() method of each object.
+
+- Springs and joints would be a nice addition, allowing interesting behaviours
+  for conglomerate objects
