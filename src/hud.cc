@@ -70,7 +70,7 @@ void HUD::draw()
 
         draw::startPoints();
 
-        for (ScreenObject* i = Model::getInstance()->getHead(); i != 0; i = i->next)
+        for (ScreenObject* i = Model::getInstance()->getHead(); i != 0; i = i->next) {
             if (i->isAlive()) {
                 const ScreenObject& obj = *i;
                 int x = (int)obj.mPosition.x,
@@ -80,6 +80,7 @@ void HUD::draw()
                 draw::point(offx + (int)((x / (double)Screen::maxX()) * width),
                     offy + (int)((y / (double)Screen::maxY()) * height));
             }
+        }
         draw::endPoints();
     }
     draw::setMode(draw::DRAW_3D);

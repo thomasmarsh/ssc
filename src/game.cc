@@ -23,8 +23,9 @@ inline double fps(double wait)
     c = (c + 1) % FPS_SZ;
     times[c] = wait;
 
-    for (i = 0; i < FPS_SZ; ++i)
+    for (i = 0; i < FPS_SZ; ++i) {
         avg += times[i];
+    }
 
     return 1000 / (avg / FPS_SZ);
 };
@@ -54,8 +55,9 @@ Game::Game()
 
 void Game::setMode(GameMode mode)
 {
-    if (mMode == mode)
+    if (mMode == mode) {
         return;
+    }
 
     mMode = mode;
 
@@ -81,17 +83,19 @@ void Game::loop()
             mModel->update(dt);
             if (mLevel.completed())
                 mLevel++;
-        } else
+        } else {
             mModel->draw(dt, false);
+        }
 
         mController.poll(dt);
         delay();
 
         if (mController.wantExit()) {
-            if (mMode == MENU)
+            if (mMode == MENU) {
                 break;
-            else
+            } else {
                 setMode(MENU);
+            }
         }
     }
 
@@ -100,10 +104,11 @@ void Game::loop()
 
 void Game::delay()
 {
-    if (mController.isPaused())
+    if (mController.isPaused()) {
         SDL_Delay(100);
-    else
+    } else {
         SDL_Delay(mWait);
+    }
 
     mTime1 = SDL_GetTicks();
     double delta = mTime1 - mTime2;
@@ -124,16 +129,18 @@ void Game::delay()
         dt = 1.5;
     }
     static double cnt = 0;
-    if (cnt > 50)
+    if (cnt > 50) {
         fprintf(stderr, "fps: %.2f\n", mFramerate), cnt = 0;
+    }
     cnt += dt;
 
 #ifndef WINDOWS
     if (!mController.slowMotion()) {
-        if ((mWait > 1) && dt > 1.1)
+        if ((mWait > 1) && dt > 1.1) {
             mWait--;
-        else if ((mWait < 20) && (dt < .3))
+        } else if ((mWait < 20) && (dt < .3)) {
             mWait++;
+        }
     }
 #endif // WINDOWS
 }

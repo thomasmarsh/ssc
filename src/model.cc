@@ -39,8 +39,9 @@ void Model::addObject(ScreenObject* obj)
     }
     ScreenObject* current = mHead;
 
-    while (current->next)
+    while (current->next) {
         current = current->next;
+    }
 
     assert(current);
     current->next = obj;
@@ -83,15 +84,17 @@ void addParticle(double x, double y, double z,
     mParticles[mParticleId].time = time;
 
     mParticleId++;
-    if (mParticleId >= MAXPARTICLES)
+    if (mParticleId >= MAXPARTICLES) {
         mParticleId = 0;
+    }
 }
 
 extern bool mDrawP;
 inline void drawParticles(double dt, bool doMove)
 {
-    if (!mDrawP)
+    if (!mDrawP) {
         return;
+    }
     Coord3<double> pos;
     Particle *p, *lp;
 
@@ -200,8 +203,9 @@ inline void Model::draw(double dt, bool doMove)
 
     static Game* game = Game::getInstance();
 
-    if (game->getMode() == Game::MENU)
+    if (game->getMode() == Game::MENU) {
         game->drawMenu();
+    }
 
     glPopMatrix();
     draw::flipBuffers();
@@ -227,27 +231,31 @@ void Model::clearLevel(bool reset)
             i->setState(ScreenObject::DYING);
             i->setState(ScreenObject::DEAD);
 
-            if (i->next)
+            if (i->next) {
                 i->next->prev = i->prev;
-            if (i->prev)
+            }
+            if (i->prev) {
                 i->prev->next = i->next;
-            else
+            } else {
                 mHead = mHead->next;
+            }
 
             i = tmp->next;
 
             delete tmp;
             tmp = 0;
-        } else
+        } else {
             i = i->next;
+        }
     }
-    if (reset)
+    if (reset) {
         Global::ship->init();
+    }
 }
 
 void Model::update(double dt, bool doMove)
 {
     Environ::getInstance()->update(dt);
     draw(dt, doMove);
-    //      draw::checkErrors();
+    //draw::checkErrors();
 }

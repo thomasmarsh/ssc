@@ -48,16 +48,20 @@ void Level::operator++(int)
     level++;
 
     Global::audio->playSound(Audio::POWER, pos);
-    for (i = 0; i < ((MAX_BOGEYS * level) >> 4); i++)
+    for (i = 0; i < ((MAX_BOGEYS * level) >> 4); i++) {
         (void)new Bogey((rand() % Screen::maxX() / 50) * (double)50,
             (rand() % Screen::maxY() / 50) * (double)50);
-    for (i = 0; i < 15; i++)
+    }
+    for (i = 0; i < 15; i++) {
         (void)new Asteroid(drand48() * 100 + 50);
+    }
 
-    for (i = 0; i < (level - 1); i++)
+    for (i = 0; i < (level - 1); i++) {
         (void)new Smarty();
+    }
 
     //      for (i = 0; i < 15; i++) (void) new Fatso();
-    for (i = 0; i < (5 * level); i++)
+    for (i = 0; i < (5 * level); i++) {
         (void)new Lunatic();
+    }
 }

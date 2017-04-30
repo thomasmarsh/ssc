@@ -74,22 +74,27 @@ void ScreenObject::decelerate(double dt)
 void ScreenObject::move(double dt)
 {
     double amt = mass * mVelocity.z * dt * .1;
-    if (mVelocity.z < 0)
+    if (mVelocity.z < 0) {
         PhysicsObject::accelerate(0.0, 0.0, -amt);
-    if (mVelocity.z > 0)
+    }
+    if (mVelocity.z > 0) {
         PhysicsObject::accelerate(0.0, 0.0, amt);
-    if (speed > mMaxSpeed)
+    }
+    if (speed > mMaxSpeed) {
         decelerate(dt);
+    }
     reset();
 }
 
 void ScreenObject::rotate(double dir)
 {
     rotation += dir;
-    while (rotation > D_PI)
+    while (rotation > D_PI) {
         rotation -= D_PI;
-    while (rotation < 0)
+    }
+    while (rotation < 0) {
         rotation += D_PI;
+    }
 }
 
 void ScreenObject::reset()

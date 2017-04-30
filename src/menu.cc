@@ -39,10 +39,11 @@ void GameMenu::draw()
     int xo = 100, yo = 150;
 
     for (unsigned int i = 0; i < mNumMenus; ++i) {
-        if (mSelected == i)
+        if (mSelected == i) {
             face->setForegroundColor(1, 1, 0);
-        else
+        } else {
             face->setForegroundColor(1, 1, 1);
+        }
 
         face->draw(xo, Screen::mDisplay.y - yo - 20 * i,
             mMenuItem[i].text);
@@ -87,10 +88,11 @@ void GameMenu::moveUp()
 
 void GameMenu::moveDown()
 {
-    if (mSelected == (mNumMenus - 1))
+    if (mSelected == (mNumMenus - 1)) {
         mSelected = 0;
-    else
+    } else {
         mSelected++;
+    }
 }
 
 void GameMenu::moveLeft()

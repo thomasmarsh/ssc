@@ -41,10 +41,11 @@ public:
 
     void damage(double amt)
     {
-        if (amt > strength)
+        if (amt > strength) {
             strength = 0;
-        else
+        } else {
             strength -= amt;
+        }
         counter = 0;
     }
 
@@ -61,8 +62,9 @@ public:
         if (counter >= SHIELD_RECHARGE_RATE) {
             counter = 0;
             strength += .01;
-            if (strength > 1)
+            if (strength > 1) {
                 strength = 1;
+            }
         }
     }
 

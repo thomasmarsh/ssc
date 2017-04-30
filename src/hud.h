@@ -17,8 +17,9 @@ class HUD {
 public:
     inline static HUD* getInstance()
     {
-        if (!hud)
+        if (!hud) {
             hud = new HUD();
+        }
         return hud;
     }
 

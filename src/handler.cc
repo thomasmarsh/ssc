@@ -16,12 +16,14 @@ PlayHandler::PlayHandler()
 extern bool accelFlag;
 void PlayHandler::process(double dt)
 {
-    if (mController->isPaused())
+    if (mController->isPaused()) {
         return;
+    }
 
     // don't process input if the player is not alive
-    if (Global::ship->getState() != ScreenObject::ALIVE)
+    if (Global::ship->getState() != ScreenObject::ALIVE) {
         return;
+    }
 
     // dispatch events
     if (mouseMotion()) {
@@ -29,19 +31,23 @@ void PlayHandler::process(double dt)
             (double)((Screen::mDisplay.y >> 1) - mouseY()));
         Global::ship->rotate(0);
     } else {
-        if (keyPressed(SDLK_RIGHT))
+        if (keyPressed(SDLK_RIGHT)) {
             Global::ship->rotate(RAD(5) * dt);
-        if (keyPressed(SDLK_LEFT))
+        }
+        if (keyPressed(SDLK_LEFT)) {
             Global::ship->rotate(RAD(-5) * dt);
+        }
     }
 
-    if (keyPressed(SDLK_UP) || mouseButton(1))
+    if (keyPressed(SDLK_UP) || mouseButton(1)) {
         Global::ship->accelerate(dt), accelFlag = true;
-    else
+    } else {
         accelFlag = false;
+    }
 
-    if (keyPressed(SDLK_DOWN) || mouseButton(3))
+    if (keyPressed(SDLK_DOWN) || mouseButton(3)) {
         Global::ship->decelerate(dt);
+    }
 
     if (keyPressed(SDLK_a)) {
         Global::ship->fire();
@@ -72,18 +78,19 @@ void MenuHandler::process(double dt)
         menutm = 0;
         canmenu = true;
     }
-    if (!canmenu)
+    if (!canmenu) {
         return;
-    else if (mup)
+    } else if (mup) {
         mGameMenu->moveUp();
-    else if (mdown)
+    } else if (mdown) {
         mGameMenu->moveDown();
-    else if (mleft)
+    } else if (mleft) {
         mGameMenu->moveLeft();
-    else if (mright)
+    } else if (mright) {
         mGameMenu->moveRight();
-    else if (mexec)
+    } else if (mexec) {
         mGameMenu->exec(mController);
+    }
 
     mup = false, mdown = false, mexec = false, mleft = false, mright = false;
     canmenu = false;

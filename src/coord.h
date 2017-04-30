@@ -296,8 +296,9 @@ public:
     inline Self normalize()
     {
         T n = sqrt(dot(*this));
-        if (n > 0)
+        if (n > 0) {
             *this /= n;
+        }
         return *this;
     }
 

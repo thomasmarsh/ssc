@@ -15,7 +15,7 @@ void Mesh::normalize(double)
 
     std::vector<Triangle>::iterator i;
 
-    for (i = mTriangles.begin(); i != mTriangles.end(); ++i)
+    for (i = mTriangles.begin(); i != mTriangles.end(); ++i) {
         for (int j = 0; j < 3; j++) {
             Vertex& v = (*i)[j];
             if (min.x > v.vertex.x)
@@ -31,20 +31,24 @@ void Mesh::normalize(double)
             if (max.z < v.vertex.z)
                 max.z = v.vertex.z;
         }
+    }
 
     d = max - min;
     maxd = d.x;
-    if (maxd < d.y)
+    if (maxd < d.y) {
         maxd = d.y;
-    if (maxd < d.z)
+    }
+    if (maxd < d.z) {
         maxd = d.z;
+    }
 
     c = (min + max) / 2;
-    for (i = mTriangles.begin(); i != mTriangles.end(); ++i)
+    for (i = mTriangles.begin(); i != mTriangles.end(); ++i) {
         for (int j = 0; j < 3; j++) {
             (*i)[j].vertex -= c;
             (*i)[j].vertex /= maxd;
         }
+    }
 }
 
 void Mesh::smooth()
@@ -53,21 +57,28 @@ void Mesh::smooth()
     std::vector<Triangle>::iterator i;
     static Coord3<double> zero(0, 0, 0);
 
-    for (i = mTriangles.begin(); i != mTriangles.end(); ++i)
-        for (int j = 0; j < 3; j++)
+    for (i = mTriangles.begin(); i != mTriangles.end(); ++i) {
+        for (int j = 0; j < 3; j++) {
             normal_map[(*i)[j].vertex].set(zero);
+        }
+    }
 
-    for (i = mTriangles.begin(); i != mTriangles.end(); ++i)
-        for (int j = 0; j < 3; j++)
+    for (i = mTriangles.begin(); i != mTriangles.end(); ++i) {
+        for (int j = 0; j < 3; j++) {
             normal_map[(*i)[j].vertex] += (*i)[j].normal;
+        }
+    }
 
     std::map<Coord3<double>, Coord3<double>>::iterator m;
-    for (m = normal_map.begin(); m != normal_map.end(); ++m)
+    for (m = normal_map.begin(); m != normal_map.end(); ++m) {
         (*m).second.normalize();
+    }
 
-    for (i = mTriangles.begin(); i != mTriangles.end(); ++i)
-        for (int j = 0; j < 3; j++)
+    for (i = mTriangles.begin(); i != mTriangles.end(); ++i) {
+        for (int j = 0; j < 3; j++) {
             (*i)[j].normal = normal_map[(*i)[j].vertex];
+        }
+    }
 }
 
 void Mesh::setMapMode(MapMode mode)
@@ -120,6 +131,7 @@ void Mesh::draw()
     }
     glEnd();
 
-    if (mHasTexture)
+    if (mHasTexture) {
         glDisable(GL_TEXTURE_2D);
+    }
 }

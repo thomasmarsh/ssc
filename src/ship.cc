@@ -159,13 +159,14 @@ void Ship::upgrade()
 void Ship::move(double dt)
 {
     mFireCounter += dt;
-    if (getState() == ALIVE)
+    if (getState() == ALIVE) {
         shield.regenerate(dt);
-    else if (getState() == DYING) {
-        if (!explosion.finished)
+    } else if (getState() == DYING) {
+        if (!explosion.finished) {
             explosion.move(dt);
-        else
+        } else {
             init();
+        }
     }
     ScreenObject::move(dt);
 }
@@ -230,10 +231,11 @@ void Ship::draw()
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glPopMatrix();
         }
-        if (shield.getStrength() > 0)
+        if (shield.getStrength() > 0) {
             draw::setColor(.4, .3, .2);
-        else
+        } else {
             draw::setColor(.4, .3, .2, .5);
+        }
 
         glPushMatrix();
         glTranslated(mPosition.x, -mPosition.y, mPosition.z);
@@ -241,8 +243,9 @@ void Ship::draw()
         glCallList(SPHERE);
         glPopMatrix();
 
-    } else if (getState() == DYING)
+    } else if (getState() == DYING) {
         explosion.draw();
+    }
 }
 
 inline void launch(Ship& ship,
@@ -260,10 +263,11 @@ inline void launch(Ship& ship,
 
 void Ship::fire()
 {
-    if (mFireCounter >= mRateOfFire)
+    if (mFireCounter >= mRateOfFire) {
         mFireCounter = 0;
-    else
+    } else {
         return;
+    }
 
     launch(*this, 0, radius + 5, 0);
 
@@ -287,7 +291,7 @@ extern bool mDrawP;
 
 void Ship::accelerate(double amt)
 {
-    if (mDrawP)
+    if (mDrawP) {
         for (int i = 0; i < (rand() % 30); i++) {
             float p = RAD((rand() % 61) - 30);
             double r, g, b;
@@ -304,6 +308,7 @@ void Ship::accelerate(double amt)
                 sin(p) * mMaxSpeed * .5,
                 r, g, b, t);
         }
+    }
 
     ScreenObject::accelerate(amt);
 }
@@ -318,8 +323,9 @@ extern bool mGodMode;
 
 void Ship::damage(double amt)
 {
-    if (mGodMode)
+    if (mGodMode) {
         return;
+    }
 
     static float pos[3] = { 0.0, 0.0, 0.0 };
     if (shield.getStrength() == 0) {
@@ -332,8 +338,9 @@ void Ship::damage(double amt)
                 explosion.init(*this);
             }
             mLife = 0;
-        } else
+        } else {
             mLife -= amt;
+        }
     } else {
         Global::audio->playSound(Audio::LIFE_LOSE, pos);
         shield.damage(amt);

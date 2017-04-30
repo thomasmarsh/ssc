@@ -21,8 +21,9 @@ public:
 
     static Config* getInstance()
     {
-        if (!mInstance)
+        if (!mInstance) {
             mInstance = new Config;
+        }
         return mInstance;
     }
 

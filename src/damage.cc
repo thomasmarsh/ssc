@@ -13,15 +13,17 @@
 
 bool Ship::collision(ScreenObject& obj)
 {
-    if (obj.ownerType() == PLAYER_TYPE)
+    if (obj.ownerType() == PLAYER_TYPE) {
         return false;
+    }
+
     switch (obj.type()) {
     case MISSILE_TYPE:
         damage(.10);
         break;
     case BOGEY_TYPE:
     case SMARTY_TYPE:
-        //              damage(.01);
+        //damage(.01);
         break;
     case LUNATIC_TYPE:
         damage(.005);
@@ -44,16 +46,18 @@ bool Bogey::collision(ScreenObject& obj)
 {
     if (obj.mFlocking) {
         double d = distance(mPosition, obj.mPosition);
-        if (d > 0 && d < 50)
+        if (d > 0 && d < 50) {
             interact(obj);
+        }
     }
 
     switch (obj.type()) {
     case MISSILE_TYPE:
-        if (obj.ownerType() != BOGEY_TYPE)
+        if (obj.ownerType() != BOGEY_TYPE) {
             damage(.10);
-        else
+        } else {
             return false;
+        }
         break;
     case LUNATIC_TYPE:
         damage(.005);

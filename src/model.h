@@ -24,8 +24,9 @@ private:
 public:
     static inline Model* getInstance()
     {
-        if (!mInstance)
+        if (!mInstance) {
             mInstance = new Model;
+        }
         return mInstance;
     }
 

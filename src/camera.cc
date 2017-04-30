@@ -241,8 +241,9 @@ Coord3<double> Camera::constDist(double off)
 
     const double distance = offset.length();
 
-    if (distance == 0)
+    if (distance == 0) {
         return mPosition;
+    }
 
     Coord3<double> unitOffset, newOffset;
     unitOffset = offset / distance;

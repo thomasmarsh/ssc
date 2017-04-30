@@ -34,28 +34,40 @@ void Controller::keyUp(int keysym) {
     switch (keysym) {
     case SDLK_PAUSE:
         mPause = !mPause;
+        break;
     case SDLK_r:
         HUD::getInstance()->toggleRadar();
+        break;
     case SDLK_c:
         Model::getInstance()->cycleCameraView();
+        break;
     case SDLK_s:
         mSlowMo = !mSlowMo;
+        break;
     case SDLK_g:
         mGodMode = !mGodMode;
+        break;
     case SDLK_m:
         Global::ship->upgrade();
+        break;
     case SDLK_k:
         mKill = !mKill;
+        break;
     case SDLK_z:
         mSetZ = !mSetZ;
+        break;
     case SDLK_p:
         mDrawP = !mDrawP;
+        break;
     case SDLK_l:
         mDrawBLINE = !mDrawBLINE;
+        break;
     case SDLK_y:
         Model::getInstance()->clearLevel();
+        break;
     default:
         mHandler->releaseKey((SDLKey)keysym);
+        break;
     }
 }
 
@@ -94,10 +106,12 @@ void Controller::poll(double dt)
             break;
         }
 
-        if (mQuit)
+        if (mQuit) {
             return;
+        }
     }
 
-    if (dt > 0)
+    if (dt > 0) {
         mHandler->process(dt);
+    }
 }

@@ -17,10 +17,12 @@ NeuralNetwork<4, 6, 2> Smarty::brain;
 
 inline double fixR(double r)
 {
-    while (r > D_PI)
+    while (r > D_PI) {
         r -= D_PI;
-    while (r < 0)
+    }
+    while (r < 0) {
         r += D_PI;
+    }
     return r;
 }
 
@@ -31,7 +33,7 @@ extern bool mDrawP;
 
 void Smarty::accelerate(double amt)
 {
-    if (mDrawP)
+    if (mDrawP) {
         for (int i = 0; i < (rand() % 30); i++) {
             float p = RAD((rand() % 61) - 30);
             double r, g, b;
@@ -47,6 +49,7 @@ void Smarty::accelerate(double amt)
                 sin(p) * 15 * .5,
                 r, g, b, t);
         }
+    }
     ScreenObject::accelerate(amt);
 }
 
@@ -83,10 +86,12 @@ void Smarty::rotate(double amt)
 {
     rotation += amt;
 
-    while (rotation > D_PI)
+    while (rotation > D_PI) {
         rotation -= D_PI;
-    while (rotation < 0)
+    }
+    while (rotation < 0) {
         rotation += D_PI;
+    }
 }
 
 #define LOG(a)                  \
@@ -97,7 +102,11 @@ inline double fzAngle(Coord3<double>& c)
 {
     return FUZZ(atan2(c.x, -c.y));
 }
-inline double fzMag(double m, Coord3<double>& c) { return c.length() / m; }
+
+inline double fzMag(double m, Coord3<double>& c)
+{
+    return c.length() / m;
+}
 
 void Smarty::move(double dt)
 {
@@ -107,10 +116,11 @@ void Smarty::move(double dt)
         // train based on last position
         ppp = mDiff - mLastPosition;
         double d = ppp.length();
-        if (d >= 1)
+        if (d >= 1) {
             d = 1 / (d * d * d);
-        else
+        } else {
             d = 0;
+        }
         d = 1 - d;
         double data1[4] = { fzAngle(mDiff), fzAngle(mVelocity), fzMag(mMaxSpeed, mVelocity), dt };
         double result1[2] = { fzAngle(mDiff), d };
@@ -132,8 +142,9 @@ void Smarty::move(double dt)
         rotation = DFUZ(result2[0]);
         accelerate(result2[1] * dt * .5);
     } else if (isDying()) {
-        if (mExplosion.finished)
+        if (mExplosion.finished) {
             setState(DEAD);
+        }
         mExplosion.move(dt);
     }
     ScreenObject::move(dt);
@@ -142,6 +153,7 @@ void Smarty::move(double dt)
 bool Smarty::collision(ScreenObject& obj)
 {
     return true;
+#if 0
     static float pos[3] = { 0.0, 0.0, 0.0 };
 
     if (isAlive()) {
@@ -153,6 +165,7 @@ bool Smarty::collision(ScreenObject& obj)
         return true;
     }
     return false;
+#endif
 }
 
 void Smarty::draw()
@@ -163,6 +176,7 @@ void Smarty::draw()
         draw::setColor(r, g, b);
         glCallList(SMARTY);
         glPopMatrix();
-    } else if (isDying())
+    } else if (isDying()) {
         mExplosion.draw();
+    }
 }

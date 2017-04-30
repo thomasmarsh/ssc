@@ -24,8 +24,9 @@ void Missile::move(double dt)
 
     age += dt;
 
-    if (age > MAX_MISSILE_AGE)
+    if (age > MAX_MISSILE_AGE) {
         setState(DEAD);
+    }
 }
 
 Missile::Missile(ObjectType owner,
@@ -89,15 +90,16 @@ inline void DrawPlayerMissile(Coord3<double>& mPosition, bool player = true)
     glEnable(GL_TEXTURE_2D);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     for (int i = 0; i < NUM_AMMO_TYPES; ++i) {
-        if (player)
+        if (player) {
             glColor4d(1, .5, .2, .7);
-        else
+        } else {
             glColor4d(0, 1, 0, .8);
+        }
         glBindTexture(GL_TEXTURE_2D, ammoTex[i]);
         glPushMatrix();
         glTranslated(mPosition.x, -mPosition.y, mPosition.z);
         glRotated(rand() % 360, 0, 0, 1);
-        //              glRotated((rand() % 4) * 90, 0, 0, 1);
+        //glRotated((rand() % 4) * 90, 0, 0, 1);
         glBegin(GL_QUADS);
         glTexCoord2i(0, 0);
         glNormal3i(0, 0, 1);
@@ -121,8 +123,9 @@ inline void DrawPlayerMissile(Coord3<double>& mPosition, bool player = true)
 
 void Missile::draw()
 {
-    if (owner_type == PLAYER_TYPE)
+    if (owner_type == PLAYER_TYPE) {
         DrawPlayerMissile(mPosition);
-    else
+    } else {
         DrawPlayerMissile(mPosition, false);
+    }
 }

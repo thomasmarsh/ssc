@@ -69,8 +69,9 @@ struct Neuron {
     inline Neuron()
         : mOutput(0)
     {
-        for (int i = 0; i < N; ++i)
+        for (int i = 0; i < N; ++i) {
             mWeights[i] = .5 - rand() / double(RAND_MAX);
+        }
     }
 };
 
@@ -101,15 +102,17 @@ public:
         double sum;
 
         for (i = 0; i < NUM_HIDDEN; ++i) {
-            for (j = 0, sum = 0; j < NUM_INPUT; ++j)
+            for (j = 0, sum = 0; j < NUM_INPUT; ++j) {
                 sum += mHidden[i].mWeights[j] * data[j];
+            }
             mHidden[i].mOutput = SIGMOID::sigmoid(sum);
         }
 
         for (i = 0; i < NUM_OUTPUT; ++i) {
-            for (j = 0, sum = 0; j < NUM_HIDDEN; ++j)
+            for (j = 0, sum = 0; j < NUM_HIDDEN; ++j) {
                 sum += mOutput[i].mWeights[j]
                     * mHidden[j].mOutput;
+            }
             result[i] = SIGMOID::sigmoid(sum);
         }
     }
@@ -144,31 +147,37 @@ public:
 
             // if the error is low enough we can bail out
 
-            if (MSE < maxMSE)
+            if (MSE < maxMSE) {
                 break;
+            }
 
             // calculate the hidden layer error terms
 
             for (i = 0; i < NUM_HIDDEN; ++i) {
-                for (j = 0, sum = 0; j < NUM_OUTPUT; ++j)
+                for (j = 0, sum = 0; j < NUM_OUTPUT; ++j) {
                     sum += dtOutput[j]
                         * mOutput[j].mWeights[i];
+                }
                 dtHidden[i] = sum * mHidden[i].mOutput
                     * (1 - mHidden[i].mOutput);
             }
 
             // update the output weights
 
-            for (i = 0; i < NUM_OUTPUT; ++i)
-                for (j = 0; j < NUM_HIDDEN; ++j)
+            for (i = 0; i < NUM_OUTPUT; ++i) {
+                for (j = 0; j < NUM_HIDDEN; ++j) {
                     mOutput[i].mWeights[j] += eta * dtOutput[i]
                         * mHidden[j].mOutput;
+                }
+            }
 
             // update the hidden weights
 
-            for (i = 0; i < NUM_HIDDEN; ++i)
-                for (j = 0; j < NUM_INPUT; ++j)
+            for (i = 0; i < NUM_HIDDEN; ++i) {
+                for (j = 0; j < NUM_INPUT; ++j) {
                     mHidden[i].mWeights[j] += eta * dtHidden[i] * data[j];
+                }
+            }
         }
     }
 

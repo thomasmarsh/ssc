@@ -18,8 +18,9 @@
 
 inline double min(double a, double b)
 {
-    if (a < b)
+    if (a < b) {
         return a;
+    }
     return b;
 }
 
@@ -64,12 +65,15 @@ inline double Scurve(double x, double a, double b)
 
 inline double picurve(double tri[], double value)
 {
-    if (value == tri[1])
+    if (value == tri[1]) {
         return 1;
-    if (value <= tri[0])
+    }
+    if (value <= tri[0]) {
         return 0;
-    if (value >= tri[2])
+    }
+    if (value >= tri[2]) {
         return 0;
+    }
 
     double a, b, c;
 
@@ -86,16 +90,17 @@ inline double picurve(double tri[], double value)
 inline double membership(double tri[], double value)
 {
     double v = 0;
-    if (value == tri[1])
+    if (value == tri[1]) {
         v = 1;
-    else if (value <= tri[0])
+    } else if (value <= tri[0]) {
         v = 0;
-    else if (value >= tri[2])
+    } else if (value >= tri[2]) {
         v = 0;
-    else if (value < tri[1])
+    } else if (value < tri[1]) {
         v = (1 / (tri[1] - tri[0])) * (value - tri[0]);
-    else
+    } else {
         v = (1 / (tri[2] - tri[1])) * (tri[2] - value);
+    }
 
     //      double p = picurve(tri, value);
     //      fprintf(stderr, "d=%.2f (%.2f, %.2f)\n", fabs(p-v), v, p);
@@ -111,25 +116,30 @@ template <typename R, typename A, typename B, typename C>
 inline double FuzzyControl(double a, double b)
 {
     // keep everything within bounds
-    if (a < A::MBF[0][0])
+    if (a < A::MBF[0][0]) {
         a = A::MBF[0][0];
-    else if (a > A::MBF[A::FUZZY_LAST - 1][2])
+    } else if (a > A::MBF[A::FUZZY_LAST - 1][2]) {
         a = A::MBF[A::FUZZY_LAST - 1][2];
-    if (b < B::MBF[0][0])
+    }
+    if (b < B::MBF[0][0]) {
         b = B::MBF[0][0];
-    else if (b > B::MBF[B::FUZZY_LAST - 1][2])
+    } else if (b > B::MBF[B::FUZZY_LAST - 1][2]) {
         b = B::MBF[B::FUZZY_LAST - 1][2];
+    }
 
     // initialize the container for membership value results
     double squares[B::FUZZY_LAST];
-    for (int i = 0; i < B::FUZZY_LAST; ++i)
+    for (int i = 0; i < B::FUZZY_LAST; ++i) {
         squares[i] = 0;
+    }
 
     // calculate membership values
-    for (int i = 0; i < A::FUZZY_LAST; ++i)
-        for (int j = 0; j < B::FUZZY_LAST; ++j)
+    for (int i = 0; i < A::FUZZY_LAST; ++i) {
+        for (int j = 0; j < B::FUZZY_LAST; ++j) {
             squares[R::rules[i * j].c] += min(membership(A::MBF[i], a),
                 membership(B::MBF[j], b));
+        }
+    }
 
     double output(0), div(0);
 
@@ -138,8 +148,9 @@ inline double FuzzyControl(double a, double b)
         output += C::MBF[i][0] * squares[i];
         div += squares[i];
     }
-    if (div == 0)
+    if (div == 0) {
         return 0;
+    }
     return output / div;
 }
 

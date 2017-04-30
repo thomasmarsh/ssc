@@ -52,8 +52,9 @@ bool GraphicContext::createWindow(const char* title, int w, int h, int b, bool f
     HUD::init();
 
     int flags = SDL_OPENGL;
-    if (fullscreen)
+    if (fullscreen) {
         flags |= SDL_FULLSCREEN;
+    }
     flags |= SDL_GL_DOUBLEBUFFER;
     flags |= SDL_HWPALETTE;
 
@@ -65,10 +66,12 @@ bool GraphicContext::createWindow(const char* title, int w, int h, int b, bool f
         exit(-1);
     }
 
-    if (videoInfo->hw_available)
+    if (videoInfo->hw_available) {
         flags |= SDL_HWSURFACE;
-    if (videoInfo->blit_hw)
+    }
+    if (videoInfo->blit_hw) {
         flags |= SDL_HWACCEL;
+    }
 
     int rs(0), gs(0), bs(0), ds(0);
     if (b == 24) {
@@ -107,8 +110,9 @@ bool GraphicContext::createWindow(const char* title, int w, int h, int b, bool f
 void GraphicContext::resizeScene(int w, int h)
 {
 
-    if (h == 0)
+    if (h == 0) {
         h = 1;
+    }
 
     glViewport(0, 0, w, h);
     draw::setupGL();

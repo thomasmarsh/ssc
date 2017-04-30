@@ -83,8 +83,9 @@ AudioSDLMixer::AudioSDLMixer()
 
 AudioSDLMixer::~AudioSDLMixer()
 {
-    for (int i = 0; i < NUM_SOUND_TYPES; i++)
+    for (int i = 0; i < NUM_SOUND_TYPES; i++) {
         Mix_FreeChunk(sounds[i]);
+    }
     Mix_CloseAudio();
 }
 

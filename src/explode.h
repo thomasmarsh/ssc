@@ -95,12 +95,14 @@ public:
 
     inline void move(double dt)
     {
-        for (unsigned int i = 0; i < NUM_TRIANGLES; i++)
+        for (unsigned int i = 0; i < NUM_TRIANGLES; i++) {
             triangles[i].move(dt);
+        }
 
         age += dt;
-        if (age > LIFE_TIME)
+        if (age > LIFE_TIME) {
             finished = true;
+        }
     }
 
     inline void draw()
@@ -110,8 +112,9 @@ public:
         glDisable(GL_LIGHT1);
         float a = 1.0 - age / LIFE_TIME;
         draw::setColor(r, g, b, a);
-        for (unsigned int i = 0; i < NUM_TRIANGLES; i++)
+        for (unsigned int i = 0; i < NUM_TRIANGLES; i++) {
             triangles[i].draw();
+        }
         glEnable(GL_LIGHTING);
         glEnable(GL_LIGHT0);
         glEnable(GL_LIGHT1);

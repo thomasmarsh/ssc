@@ -49,8 +49,9 @@ void NearCallback(void* data, dGeomID g1, dGeomID g2)
     // for Ray objects, we can perform avoidance and bailout early
 
     if ((a && a->type == COLLISION_RAY) || (b && b->type == COLLISION_RAY)) {
-        if ((ca && cb) && (ca != cb) && (a->type != b->type))
+        if ((ca && cb) && (ca != cb) && (a->type != b->type)) {
             ca->avoid(cb), cb->avoid(ca);
+        }
 
         return;
     }
@@ -72,8 +73,9 @@ void NearCallback(void* data, dGeomID g1, dGeomID g2)
 
     // if there is no bouncing to be done then bailout
 
-    if (!bounce_a && !bounce_b)
+    if (!bounce_a && !bounce_b) {
         return;
+    }
 
     // ----------------------------------------------------------------
     //
@@ -98,8 +100,9 @@ void NearCallback(void* data, dGeomID g1, dGeomID g2)
 
     // bail out if there aren't any contacts
 
-    if (numContacts == 0)
+    if (numContacts == 0) {
         return;
+    }
 
     // ----------------------------------------------------------------
     //
@@ -115,11 +118,12 @@ void NearCallback(void* data, dGeomID g1, dGeomID g2)
             environ->mContactGroup,
             contact + i);
 
-        if (bounce_a && bounce_b)
+        if (bounce_a && bounce_b) {
             dJointAttach(c, b1, b2);
-        else if (bounce_a)
+        } else if (bounce_a) {
             dJointAttach(c, b1, 0);
-        else
+        } else {
             dJointAttach(c, 0, b2);
+        }
     }
 }

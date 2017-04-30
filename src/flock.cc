@@ -40,8 +40,9 @@ void FlockMember::disband()
 {
     if (mFlock) {
         mFlock->disband();
-        if (mFlock->mNumMembers == 0)
+        if (mFlock->mNumMembers == 0) {
             delete mFlock;
+        }
         mFlock = 0;
     }
 }
@@ -54,8 +55,9 @@ FlockMember::~FlockMember()
 void FlockMember::setState(ObjectState state)
 {
     // remove from flock if dying
-    if (isDying() || isDead())
+    if (isDying() || isDead()) {
         disband();
+    }
 
     ScreenObject::setState(state);
 }
@@ -130,15 +132,17 @@ public:
         Coord3<double> t;
 
         t = a - b;
-        if (t.x > 1)
+        if (t.x > 1) {
             fx += (1 - (1 / t.x)) * weight;
-        else if (t.x < -1)
+        } else if (t.x < -1) {
             fx -= (1 - (1 / -t.x)) * weight;
+        }
 
-        if (t.y > 1)
+        if (t.y > 1) {
             fy += (1 - (1 / t.y)) * weight;
-        else if (t.y < -1)
+        } else if (t.y < -1) {
             fy -= (1 - (1 / -t.y)) * weight;
+        }
         count += weight;
     }
 
@@ -160,24 +164,28 @@ void FlockMember::move(double dt)
 {
     ScreenObject::move(dt);
 
-    if (mFlock)
+    if (mFlock) {
         mFlock->updateCentroid(*this);
+    }
 
     // we need at least another member to flock
-    if (mFlock && mFlock->mNumMembers == 1)
+    if (mFlock && mFlock->mNumMembers == 1) {
         disband();
+    }
 
     // bailout if not in a flock
-    if (!mFlock)
+    if (!mFlock) {
         return;
+    }
 
     // check if random target has expired
     mFlock->checkTarget(dt);
 
     // decelerate if going too fast
     speed = hypot(mVelocity.x, mVelocity.y);
-    if (speed > mMaxSpeed)
+    if (speed > mMaxSpeed) {
         decelerate(dt);
+    }
 
     // A new force vector
     static Coord3<double> rndDir;
@@ -207,8 +215,9 @@ void FlockMember::move(double dt)
         mAvoidCount = 0;
     }
 
-    if (Global::ship->isAlive() && onScreen())
+    if (Global::ship->isAlive() && onScreen()) {
         ac.accumulate(Global::ship->mPosition, mPosition, F_SHIP);
+    }
 
     ac.finalize(mMaxSpeed);
     double fx = ac.getFX();
@@ -249,13 +258,15 @@ void Flock::setTarget()
 
 void Flock::checkTarget(double dt)
 {
-    if (mMembersUpdated > 0)
+    if (mMembersUpdated > 0) {
         return;
+    }
 
     mTargetAge += dt * mNumMembers;
 
-    if ((mTargetAge > MAX_TARGET_AGE) || ((square(mTarget.x - mCenterPos.x) + square(mTarget.y - mCenterPos.y)) <= 1000))
+    if ((mTargetAge > MAX_TARGET_AGE) || ((square(mTarget.x - mCenterPos.x) + square(mTarget.y - mCenterPos.y)) <= 1000)) {
         setTarget();
+    }
 }
 
 void Flock::updateCentroid(FlockMember& obj)

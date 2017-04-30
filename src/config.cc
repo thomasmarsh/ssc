@@ -15,8 +15,9 @@ bool isfile(const char* path)
 {
     struct stat st;
 
-    if (0 == stat(path, &st))
+    if (0 == stat(path, &st)) {
         return true;
+    }
     return false;
 }
 

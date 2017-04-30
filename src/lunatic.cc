@@ -42,10 +42,12 @@ void Lunatic::rotate(double amt)
 {
     rotation += amt;
 
-    while (rotation > D_PI)
+    while (rotation > D_PI) {
         rotation -= D_PI;
-    while (rotation < 0)
+    }
+    while (rotation < 0) {
         rotation += D_PI;
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -257,32 +259,36 @@ Rule RULES[] = {
 
 inline double membership(double tri[], double value)
 {
-    if (value == tri[1])
+    if (value == tri[1]) {
         return 1;
-    if (value < tri[0])
+    }
+    if (value < tri[0] || value > tri[2]) {
         return 0;
-    if (value > tri[2])
-        return 0;
+    }
 
-    if (value < tri[1])
+    if (value < tri[1]) {
         return (1 / (tri[1] - tri[0])) * (value - tri[0]);
+    }
     return (1 / (tri[2] - tri[1])) * (tri[2] - value);
 }
 
 inline double min(double a, double b)
 {
-    if (a < b)
+    if (a < b) {
         return a;
+    }
     return b;
 }
 
 double RunFuzzy(double angle, double speed)
 {
     // normalize angle
-    while (angle < 0)
+    while (angle < 0) {
         angle += D_PI;
-    while (angle > D_PI)
+    }
+    while (angle > D_PI) {
         angle -= D_PI;
+    }
 
     // normalize speed
     if (speed > 7)
@@ -295,8 +301,9 @@ double RunFuzzy(double angle, double speed)
     double SM = 0, AM = 0;
     int best_r = 0;
     double squares[P_LAST];
-    for (int i = 0; i < P_LAST; i++)
+    for (int i = 0; i < P_LAST; i++) {
         squares[i] = 0;
+    }
 
     Power P;
     for (int i = 0, r = 0; i < S_LAST; i++) {
@@ -365,8 +372,9 @@ double calcSign(Coord3<double>& pos, Coord3<double>& vel)
 
     d = distance(pos, Global::ship->mPosition);
 
-    if (distance(p2, Global::ship->mPosition) > d)
+    if (distance(p2, Global::ship->mPosition) > d) {
         return -1;
+    }
     return 1;
 }
 
@@ -375,12 +383,14 @@ void Lunatic::move(double dt)
     if (isAlive()) {
         if (dir) {
             alpha -= .01 * dt;
-            if (alpha <= 0)
+            if (alpha <= 0) {
                 alpha = 0, dir = !dir;
+            }
         } else {
             alpha += .01 * dt;
-            if (alpha >= .7)
+            if (alpha >= .7) {
                 alpha = .7, dir = !dir;
+            }
         }
 
         if (onScreen() && Global::ship->isAlive()) {
@@ -403,10 +413,11 @@ void Lunatic::move(double dt)
                 double sr = Global::ship->mVelocity.angle();
                 rotation = mVelocity.angle();
                 double output = RunFuzzy(sr - rotation, sign * speed);
-                if (sign < 0)
+                if (sign < 0) {
                     output = 2;
-                else
+                } else {
                     output = fabs((output + 1) / 2);
+                }
             }
 
             rotation = atan2(mDisplace.x, -mDisplace.y);
@@ -416,8 +427,9 @@ void Lunatic::move(double dt)
             accelerate((float)(rand() % 400) / 1000.0);
         }
     } else if (isDying()) {
-        if (mExplosion.finished)
+        if (mExplosion.finished) {
             setState(DEAD);
+        }
         mExplosion.move(dt);
     }
     ScreenObject::move(dt);
@@ -443,6 +455,7 @@ void Lunatic::draw()
     if (isAlive()) {
         draw::setColor(r, g, b, alpha);
         draw::sphere(mPosition, radius);
-    } else if (isDying())
+    } else if (isDying()) {
         mExplosion.draw();
+    }
 }

@@ -35,8 +35,9 @@ public:
     void disband();
     void avoid(Collidable* other)
     {
-        if (!mFlock)
+        if (!mFlock) {
             return;
+        }
         Coord3<double> delta = mPosition - other->mPosition;
         mAvoidance += delta;
         mAvoidCount++;

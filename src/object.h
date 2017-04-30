@@ -100,8 +100,9 @@ public:
     inline virtual void setState(ObjectState state)
     {
         mState = state;
-        if (mState == DYING)
+        if (mState == DYING) {
             disable();
+        }
     }
 
 public:
@@ -155,16 +156,19 @@ public:
 public:
     inline bool shouldCollide(Collidable* other)
     {
-        if (!isAlive())
+        if (!isAlive()) {
             return false;
+        }
 
-        if (!other)
+        if (!other) {
             return true;
+        }
 
         const CollisionData* data = other->collisionData();
 
-        if (!data)
+        if (!data) {
             return true;
+        }
 
         switch (data->type) {
         case COLLISION_WALL:

@@ -80,8 +80,9 @@ private:
             dVector3 center = { 1500, 1500, 0 },
                      extents = { 10, 0, 10, 0 };
             mSpace = dQuadTreeSpaceCreate(0, center, extents, 7);
-        } else
+        } else {
             mSpace = dHashSpaceCreate(0);
+        }
 
         mContactGroup = dJointGroupCreate(0);
 
@@ -98,8 +99,9 @@ public:
 
     static Environ* getInstance()
     {
-        if (!mInstance)
+        if (!mInstance) {
             mInstance = new Environ;
+        }
         return mInstance;
     }
 

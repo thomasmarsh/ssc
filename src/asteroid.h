@@ -16,11 +16,13 @@ public:
     ~Asteroid() {}
 
     void draw();
+
     void move(double dt)
     {
         rot += rot_amt * dt;
         ScreenObject::move(dt);
     }
+
     bool collision(ScreenObject& other) { return true; }
 
     void split(int seed, double strength);

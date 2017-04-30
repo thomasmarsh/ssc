@@ -32,8 +32,9 @@ public:
 
     static Game* getInstance()
     {
-        if (!mInstance)
+        if (!mInstance) {
             mInstance = new Game;
+        }
         return mInstance;
     }
 

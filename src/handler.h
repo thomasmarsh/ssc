@@ -30,10 +30,12 @@ protected:
 public:
     EventHandler()
     {
-        for (int c = 0; c < SDLK_LAST; c++)
+        for (int c = 0; c < SDLK_LAST; c++) {
             mKeymap[c] = false;
-        for (int i = 0; i < 4; i++)
+        }
+        for (int i = 0; i < 4; i++) {
             mMouseButton[i] = false;
+        }
         mMouseMove = false;
     }
     virtual ~EventHandler() {}
