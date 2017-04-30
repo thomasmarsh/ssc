@@ -4,6 +4,8 @@
 #include "coord.h"
 #include "ode/ode.h"
 
+#include <algorithm>
+
 //! The ERP specifies what proportion of the joint error will be fixed during
 //! the next simulation step. If ERP=0 then no correcting force is applied and
 //! the bodies will eventually drift apart as the simulation proceeds. If ERP=1
@@ -383,6 +385,15 @@ public:
 
 		// set mass
 		dMass m;
+        if (radius < 0) {
+            fprintf(stderr, "radius error: %g\n", radius);
+        }
+        if (mass < 0) {
+            fprintf(stderr, "mass error: %g\n", mass);
+        }
+
+        radius = std::max(radius, 1.0);
+        mass = std::max(mass, 1.0);
 		dMassSetSphereTotal(&m, mass, radius);
 		dBodySetMass(mBody, &m);
 

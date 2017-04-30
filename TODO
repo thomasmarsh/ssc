@@ -44,3 +44,138 @@ Physics
 
 - Springs and joints would be a nice addition, allowing interesting behaviours
   for conglomerate objects
+
+
+IDEAS:
+
+------------------------------------------------------------------------------
+1. New Enemies
+------------------------------------------------------------------------------
+
+1.1 Mines
+=========
+
+Mines react on proximity and have countdown timer to explosion
+
+[Source: R-Type]
+
+1.2 Launchers
+=============
+
+Launchers are attached to other objects (e.g., to asteroids or walls), and
+spawn new objects (ships, missiles, mines, etc..)
+
+[Source: R-Type]
+
+
+1.3 Lunatics
+============
+
+Lunatics have negative mass; they don't work in ODE because overlap is not
+allowed, so they have to be implemented externally. I believe using joints
+is the best approach.
+
+[Source: Koules]
+
+
+1.4 Black holes
+===============
+
+Suck you in. Same problems as 1.3 regarding ODE. At the cost of adding the
+following to ScreenObject:
+
+	if (mRespondGravity)
+	{
+		for (int i = 0; i < Gravity::numSources(); ++i)
+		{
+			static Coord3<double> gravity;
+
+			gravity = Gravity::getGravity(i);
+
+			PhysicsObject::accelerate(gravity.x,
+						  gravity.y,
+						  gravity.z);
+		}
+	}
+
+[Source: Koules]
+
+
+1.5 Worms
+=========
+
+Spheres linked in a chain. They could fire or just approach player. Killing
+one link in the chain should result in two separate chains.
+
+	void move(double dt)
+	{
+		// links don't think, just the head
+		if (mPrev) return;
+		
+		// normal accel logic
+	}
+
+[Source: Original]
+
+
+1.6 Bosses
+==========
+
+There should be some big objects with lots of different attacks at, say,
+every five levels.
+
+[Source: Common]
+
+
+------------------------------------------------------------------------------
+2. Power-ups
+------------------------------------------------------------------------------
+
+There could be serveral power-up types:
+
+	- health (addition & restoration)
+	- shield (addition & restoration)
+	- time-limited invulnerability
+	- 2x shoot rate (10 seconds)
+	- hold+charge+release=fire (rtype style firing)
+
+Power-ups should come from big enemies, or be random and rare.
+
+
+------------------------------------------------------------------------------
+3. New Weapons
+------------------------------------------------------------------------------
+
+	- kill-all fireball
+	- megablast centered around ship
+
+Weapons could be split into standard missile and bomb types. I imagine bouncey
+missiles as currently, and bombs that explode with a big damage radius.
+
+[Source: User comment]
+
+
+------------------------------------------------------------------------------
+4. Level goals
+------------------------------------------------------------------------------
+
+4.1 Defeat all enemies
+======================
+
+The most basic level goal. May be time limited. Can be limited to specific
+type of object (e.g., kill all bogies)
+
+
+4.2 Capture the Flag
+====================
+
+Reach a static point. Can also have extended CtF where the player must
+reach a series of points in correct order. May be time limited.
+
+
+------------------------------------------------------------------------------
+5. Internal Level Structure
+------------------------------------------------------------------------------
+
+Rather than a bound play area, it would be nice to have corridors and walls
+in a more free-form/maze fashion.

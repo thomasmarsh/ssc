@@ -45,8 +45,9 @@ void PlayHandler::process(double dt)
 	if (keyPressed(SDLK_DOWN) || mouseButton(3))
 		Global::ship->decelerate(dt);
 
-	if (keyPressed(SDLK_a))
+	if (keyPressed(SDLK_a)) {
 		Global::ship->fire();
+    }
 }
 
 
