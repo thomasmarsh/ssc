@@ -17,33 +17,33 @@
 class Screen
 {
 public:
-	static inline int maxX() { return mGameArea.x; }
-	static inline int maxY() { return mGameArea.y; }
+        static inline int maxX() { return mGameArea.x; }
+        static inline int maxY() { return mGameArea.y; }
 
-	static inline double fieldOfView() { return fov; }
-	static inline double zNear() { return zn; }
-	static inline double zFar() { return zf; }
+        static inline double fieldOfView() { return fov; }
+        static inline double zNear() { return zn; }
+        static inline double zFar() { return zf; }
 
-	static inline double aspectRatio()
-	{
-		return ((double) mDisplay.x / (double) mDisplay.y);
-	}
+        static inline double aspectRatio()
+        {
+                return ((double) mDisplay.x / (double) mDisplay.y);
+        }
 
-	static inline void init()
-	{
-		Config* conf = Config::getInstance();
-		mDisplay = conf->getResolution();
-		mGameArea = conf->getGameArea();
-		fov = conf->getFOV();
-		zn = conf->getZNear();
-		zf = conf->getZFar();
-	}
+        static inline void init()
+        {
+                Config* conf = Config::getInstance();
+                mDisplay = conf->getResolution();
+                mGameArea = conf->getGameArea();
+                fov = conf->getFOV();
+                zn = conf->getZNear();
+                zf = conf->getZFar();
+        }
 
-	static Coord2<int> mDisplay, mGameArea;
-	static double fov, zn, zf;
+        static Coord2<int> mDisplay, mGameArea;
+        static double fov, zn, zf;
 };
 
-#define SX(o)	((o)->mPosition.x)
-#define SY(o)	((o)->mPosition.y)
+#define SX(o)   ((o)->mPosition.x)
+#define SY(o)   ((o)->mPosition.y)
 
 #endif // SSC_SCREEN_H

@@ -18,21 +18,21 @@
 class Lunatic : public ScreenObject
 {
 private:
-	Lunatic(Lunatic&);
-	Explosion<10> mExplosion;
+        Lunatic(Lunatic&);
+        Explosion<10> mExplosion;
 
 public:
-	Lunatic();
-	~Lunatic();
+        Lunatic();
+        ~Lunatic();
 
-	void draw();
+        void draw();
 
-	void rotate(double amt);
-	void move(double dt);
-	bool collision(ScreenObject &other);
+        void rotate(double amt);
+        void move(double dt);
+        bool collision(ScreenObject &other);
 
-	double alpha;
-	bool dir;
+        double alpha;
+        bool dir;
 };
 
 

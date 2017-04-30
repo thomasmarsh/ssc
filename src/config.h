@@ -6,72 +6,72 @@
 
 class Config
 {
-	// ------------------------------------------------------------------
-	//
-	// Lifecycle managment
-	//
-	// ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        //
+        // Lifecycle managment
+        //
+        // ------------------------------------------------------------------
 
 private:
-	friend class ConfigParser;
-	Config();
-	static Config* mInstance;
+        friend class ConfigParser;
+        Config();
+        static Config* mInstance;
 public:
-	static void destroy();
+        static void destroy();
 
-	static Config* getInstance()
-	{
-		if (!mInstance)
-			mInstance = new Config;
-		return mInstance;
-	}
+        static Config* getInstance()
+        {
+                if (!mInstance)
+                        mInstance = new Config;
+                return mInstance;
+        }
 
-	// ------------------------------------------------------------------
-	//
-	// Major operations
-	//
-	// ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        //
+        // Major operations
+        //
+        // ------------------------------------------------------------------
 
-	void readFile();
-	void saveFile();
-	void handleArguments(int argc, char **argv);
+        void readFile();
+        void saveFile();
+        void handleArguments(int argc, char **argv);
 
-	// ------------------------------------------------------------------
-	//
-	// Accessors
-	//
-	// ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        //
+        // Accessors
+        //
+        // ------------------------------------------------------------------
 
-	// video and game
-	Coord2<int> getResolution() { return mResolution; }
-	Coord2<int> getGameArea() { return mGameArea; }
-	unsigned int getColorDepth() { return mColorDepth; }
-	bool fullscreen() { return mFullScreen; }
+        // video and game
+        Coord2<int> getResolution() { return mResolution; }
+        Coord2<int> getGameArea() { return mGameArea; }
+        unsigned int getColorDepth() { return mColorDepth; }
+        bool fullscreen() { return mFullScreen; }
 
-	// camera
-	double getFOV() { return mFOV; }
-	double getZNear() { return mZNear; }
-	double getZFar() { return mZFar; }
+        // camera
+        double getFOV() { return mFOV; }
+        double getZNear() { return mZNear; }
+        double getZFar() { return mZFar; }
 
-	// audio
-	bool playSound() { return mPlaySound; }
-	bool playMusic() { return mPlayMusic; }
-	double soundVol() { return mSoundVol; }
-	double musicVol() { return mMusicVol; }
+        // audio
+        bool playSound() { return mPlaySound; }
+        bool playMusic() { return mPlayMusic; }
+        double soundVol() { return mSoundVol; }
+        double musicVol() { return mMusicVol; }
 
 private:
-	// ------------------------------------------------------------------
-	//
-	// Member variables
-	//
-	// ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        //
+        // Member variables
+        //
+        // ------------------------------------------------------------------
 
-	Coord2<int> mResolution, mGameArea;
-	double mFOV, mZNear, mZFar;
-	bool mPlaySound, mPlayMusic;
-	double mSoundVol, mMusicVol;
-	unsigned int mColorDepth;
-	bool mFullScreen;
+        Coord2<int> mResolution, mGameArea;
+        double mFOV, mZNear, mZFar;
+        bool mPlaySound, mPlayMusic;
+        double mSoundVol, mMusicVol;
+        unsigned int mColorDepth;
+        bool mFullScreen;
 };
 
 #endif // SSC_CONFIG_H

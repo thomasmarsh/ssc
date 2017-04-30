@@ -17,9 +17,9 @@
 
 namespace Global
 {
-	extern Audio *audio;
-	extern Ship *ship;
-	extern Coord3<double> normal;
+        extern Audio *audio;
+        extern Ship *ship;
+        extern Coord3<double> normal;
 }
 
 #endif // SSC_GLOBAL_H

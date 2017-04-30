@@ -13,13 +13,13 @@
 
 namespace Global
 {
-	Audio* audio=0;
-	Ship* ship=0;
-	Coord3<double> normal;
+        Audio* audio=0;
+        Ship* ship=0;
+        Coord3<double> normal;
 }
 
 namespace draw
 {
-	DrawMode mDrawMode = DRAW_3D;
-	GLUquadricObj *mSphere = gluNewQuadric();
+        DrawMode mDrawMode = DRAW_3D;
+        GLUquadricObj *mSphere = gluNewQuadric();
 }

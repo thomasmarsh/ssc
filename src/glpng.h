@@ -30,20 +30,20 @@ extern "C" {
 #endif
 
 #ifdef _MSC_VER
-	#ifdef _DEBUG
-		#pragma comment (lib, "glpngd.lib")
-	#else
-		#pragma comment (lib, "glpng.lib")
-	#endif
+        #ifdef _DEBUG
+                #pragma comment (lib, "glpngd.lib")
+        #else
+                #pragma comment (lib, "glpng.lib")
+        #endif
 #endif
 
 /* XXX This is from Win32's <windef.h> */
 #ifndef APIENTRY
-	#if (_MSC_VER >= 800) || defined(_STDCALL_SUPPORTED)
-		#define APIENTRY    __stdcall
-	#else
-		#define APIENTRY
-	#endif
+        #if (_MSC_VER >= 800) || defined(_STDCALL_SUPPORTED)
+                #define APIENTRY    __stdcall
+        #else
+                #define APIENTRY
+        #endif
 #endif
 
 /* Mipmapping parameters */
@@ -71,21 +71,21 @@ extern "C" {
 #define PNG_BLEND8     8 /* a = sqrt(r*r+g*g+b*b)                          */
 
 typedef struct {
-	unsigned int Width;
-	unsigned int Height;
-	unsigned int Depth;
-	unsigned int Alpha;
+        unsigned int Width;
+        unsigned int Height;
+        unsigned int Depth;
+        unsigned int Alpha;
 } pngInfo;
 
 typedef struct {
-	unsigned int Width;
-	unsigned int Height;
-	unsigned int Depth;
-	unsigned int Alpha;
+        unsigned int Width;
+        unsigned int Height;
+        unsigned int Depth;
+        unsigned int Alpha;
 
-	unsigned int Components;
-	unsigned char *Data;
-	unsigned char *Palette;
+        unsigned int Components;
+        unsigned char *Data;
+        unsigned char *Palette;
 } pngRawInfo;
 
 extern int APIENTRY pngLoadRaw(const char *filename, pngRawInfo *rawinfo);

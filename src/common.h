@@ -37,7 +37,7 @@
 
 namespace std
 {
-	typedef unsigned int size_t;
+        typedef unsigned int size_t;
 }
 
 #endif // WINDOWS
@@ -49,13 +49,13 @@ const double D_PI = 2 * M_PI;
 
 inline double RAD(double deg)
 {
-	return deg / 180.0 * M_PI;
+        return deg / 180.0 * M_PI;
 }
 
 
 inline double DEG(double rad)
 {
-	return rad * 180.0 / M_PI;
+        return rad * 180.0 / M_PI;
 }
 
 inline double square(double n) { return n*n; }

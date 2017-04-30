@@ -15,24 +15,24 @@
 
 int main(int argc, char** argv)
 {
-	Config *conf = Config::getInstance();
-	conf->handleArguments(argc, argv);
+        Config *conf = Config::getInstance();
+        conf->handleArguments(argc, argv);
 
-	srand(time(NULL));
-	Global::audio = new AudioSDLMixer();
-	Global::audio->setSoundVolume(conf->soundVol());
+        srand(time(NULL));
+        Global::audio = new AudioSDLMixer();
+        Global::audio->setSoundVolume(conf->soundVol());
 
-    dInitODE();
-	Screen::init();
+        dInitODE();
+        Screen::init();
 
-	GraphicContext().createWindow(
-			"Testing",
-			Screen::mDisplay.x, Screen::mDisplay.y,
-			conf->getColorDepth(),
-			conf->fullscreen());
+        GraphicContext().createWindow(
+                        "Testing",
+                        Screen::mDisplay.x, Screen::mDisplay.y,
+                        conf->getColorDepth(),
+                        conf->fullscreen());
 
-	Game::getInstance()->loop();
+        Game::getInstance()->loop();
 
-	// not reached
-	return 0;
+        // not reached
+        return 0;
 }

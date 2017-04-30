@@ -16,40 +16,40 @@
 class Missile : public ScreenObject
 {
 private:
-	Missile(Missile&);
+        Missile(Missile&);
 public:
-	double age;
-	ObjectType owner_type;
+        double age;
+        ObjectType owner_type;
 
-	Missile(ObjectType t,
-		double rotation,
-		double x, double y, double z,
-		double fx, double fy, double fz);
-	~Missile();
+        Missile(ObjectType t,
+                double rotation,
+                double x, double y, double z,
+                double fx, double fy, double fz);
+        ~Missile();
 
-	ObjectType ownerType() { return owner_type; }
-	void draw();
-	void move(double dt);
+        ObjectType ownerType() { return owner_type; }
+        void draw();
+        void move(double dt);
 
-	bool collision(ScreenObject &other);
+        bool collision(ScreenObject &other);
 };
 
 class Bomb : public ScreenObject
 {
 public:
-	double mAge;
-	ObjectType mOwnerType;
+        double mAge;
+        ObjectType mOwnerType;
 
-	Bomb(ObjectType t,
-	     double x, double y, double z,
-	     double fx, double fy, double fz);
+        Bomb(ObjectType t,
+             double x, double y, double z,
+             double fx, double fy, double fz);
 
-	~Bomb();
+        ~Bomb();
 
-	void draw();
-	void move(double dt);
+        void draw();
+        void move(double dt);
 
-	bool collision(ScreenObject &other);
+        bool collision(ScreenObject &other);
 };
 
 #endif // SSC_MISSILE_H

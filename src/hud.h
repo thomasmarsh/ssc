@@ -16,35 +16,35 @@
 class HUD
 {
 public:
-	inline static HUD* getInstance()
-	{
-		if (!hud) hud = new HUD();
-		return hud;
-	}
+        inline static HUD* getInstance()
+        {
+                if (!hud) hud = new HUD();
+                return hud;
+        }
 
-	static void init()
-	{
-		getInstance()->initialize();
-	}
+        static void init()
+        {
+                getInstance()->initialize();
+        }
 
-	void toggleRadar() { mShowRadar = !mShowRadar; }
-	void update(Ship*);
-	void draw();
+        void toggleRadar() { mShowRadar = !mShowRadar; }
+        void update(Ship*);
+        void draw();
 
 private:
-	Ship *ship;
-	bool mShowRadar;
+        Ship *ship;
+        bool mShowRadar;
 
-	void initialize();
+        void initialize();
 
-	//  -- statics --
+        //  -- statics --
 
-	static HUD *hud;
+        static HUD *hud;
 
-	static const char* SPEED_TEXT;
-	static const char* ANGLE_TEXT;
+        static const char* SPEED_TEXT;
+        static const char* ANGLE_TEXT;
 
-	HUD();
+        HUD();
 };
 
 #endif // SSC_HUD_H

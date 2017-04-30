@@ -22,178 +22,178 @@
 // ScreenObject is the base class for all on-screen objects which appear
 // in the game and provides the following behaviours:
 //
-// 	- collision detection and other physics
-// 	- typing (ObjectType)
-// 	- parent typing (virtual)
-// 	- statefulness (alive/dead)
+//      - collision detection and other physics
+//      - typing (ObjectType)
+//      - parent typing (virtual)
+//      - statefulness (alive/dead)
 //
 // --------------------------------------------------------------------------
 
 class ScreenObject : public PhysicsObject
 {
 public:
-	// ------------------------------------------------------------------
-	//
-	// ENUM TYPES
-	//
-	// ------------------------------------------------------------------
-	friend class Model;
-	friend class Flock;
-	friend class HUD;
+        // ------------------------------------------------------------------
+        //
+        // ENUM TYPES
+        //
+        // ------------------------------------------------------------------
+        friend class Model;
+        friend class Flock;
+        friend class HUD;
 
-	enum ObjectType
-	{
-		PLAYER_TYPE,
-		MISSILE_TYPE,
-		BOGEY_TYPE,
-		FATSO_TYPE,
-		LUNATIC_TYPE,
-		BLACKHOLE_TYPE,
-		ASTEROID_TYPE,
-		SMARTY_TYPE
-	};
-
-
-	enum ObjectState
-	{
-		CREATE,
-		ALIVE,
-		DYING,
-		DEAD
-	};
-
-	inline bool isAlive() { return mState == ALIVE; }
-	inline bool isDead() { return mState == DEAD; }
-	inline bool isDying() { return mState == DYING; }
-
-	inline ScreenObject* getAddress() { return this; }
-
-	// ------------------------------------------------------------------
-	//
-	// STATIC VARS
-	//
-	// ------------------------------------------------------------------
-
-	virtual void behave();
-	virtual void interact(ScreenObject &) {}
+        enum ObjectType
+        {
+                PLAYER_TYPE,
+                MISSILE_TYPE,
+                BOGEY_TYPE,
+                FATSO_TYPE,
+                LUNATIC_TYPE,
+                BLACKHOLE_TYPE,
+                ASTEROID_TYPE,
+                SMARTY_TYPE
+        };
 
 
-	// ------------------------------------------------------------------
-	//
-	// CTOR & DTOR
-	//
-	// ------------------------------------------------------------------
+        enum ObjectState
+        {
+                CREATE,
+                ALIVE,
+                DYING,
+                DEAD
+        };
 
-	ScreenObject(ObjectType t,
-		     int radius, double mass, double ms,
-		     double x, double y, double z=0,
-		     double fx=0, double fy=0, double fz=0);
+        inline bool isAlive() { return mState == ALIVE; }
+        inline bool isDead() { return mState == DEAD; }
+        inline bool isDying() { return mState == DYING; }
 
-	virtual ~ScreenObject();
+        inline ScreenObject* getAddress() { return this; }
 
-	
-	// ------------------------------------------------------------------
-	//
-	// ACCESSORS AND SETTERS
-	//
-	// ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        //
+        // STATIC VARS
+        //
+        // ------------------------------------------------------------------
 
-	// accessors
-	inline ObjectType type() { return mType; }
-	inline ObjectState getState() { return mState; }
-	virtual ObjectType ownerType() { return mType; }
-
-	// setters
-	inline virtual void setState(ObjectState state)
-	{
-		mState = state;
-		if (mState == DYING) disable();
-	}
+        virtual void behave();
+        virtual void interact(ScreenObject &) {}
 
 
-public:
-	// ------------------------------------------------------------------
-	//
-	// MOTION AND ROTATION
-	//
-	// ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        //
+        // CTOR & DTOR
+        //
+        // ------------------------------------------------------------------
 
-	bool onScreen();
+        ScreenObject(ObjectType t,
+                     int radius, double mass, double ms,
+                     double x, double y, double z=0,
+                     double fx=0, double fy=0, double fz=0);
 
-	virtual void accelerate(double amt);
-	virtual void decelerate(double dt);
-	virtual void move(double dt);
-	virtual void rotate(double dir);
+        virtual ~ScreenObject();
+
+        
+        // ------------------------------------------------------------------
+        //
+        // ACCESSORS AND SETTERS
+        //
+        // ------------------------------------------------------------------
+
+        // accessors
+        inline ObjectType type() { return mType; }
+        inline ObjectState getState() { return mState; }
+        virtual ObjectType ownerType() { return mType; }
+
+        // setters
+        inline virtual void setState(ObjectState state)
+        {
+                mState = state;
+                if (mState == DYING) disable();
+        }
+
 
 public:
+        // ------------------------------------------------------------------
+        //
+        // MOTION AND ROTATION
+        //
+        // ------------------------------------------------------------------
 
-	// ------------------------------------------------------------------
-	//
-	// MEMBER VARIABLES
-	//
-	// ------------------------------------------------------------------
+        bool onScreen();
 
-	float r, g, b;		// color of this object
+        virtual void accelerate(double amt);
+        virtual void decelerate(double dt);
+        virtual void move(double dt);
+        virtual void rotate(double dir);
 
-	double rotation;	// rotation in radians
-	int radius;		// draw radius
+public:
 
-	bool mFlocking;		// whether this object participates in flocking
+        // ------------------------------------------------------------------
+        //
+        // MEMBER VARIABLES
+        //
+        // ------------------------------------------------------------------
+
+        float r, g, b;          // color of this object
+
+        double rotation;        // rotation in radians
+        int radius;             // draw radius
+
+        bool mFlocking;         // whether this object participates in flocking
 
 protected:
-	bool mGravity;
-	Coord2<double>	mGravityAffect;
+        bool mGravity;
+        Coord2<double>  mGravityAffect;
 
 protected:
-	ObjectType mType;
-	ObjectState mState;
-	double mMaxSpeed;
+        ObjectType mType;
+        ObjectState mState;
+        double mMaxSpeed;
 
 public:
-	// ------------------------------------------------------------------
-	//
-	// COLLISION DETECTION
-	//
-	// ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        //
+        // COLLISION DETECTION
+        //
+        // ------------------------------------------------------------------
 
-	virtual void reset();
+        virtual void reset();
 
 public:
-	inline bool shouldCollide(Collidable *other)
-	{
-		if (!isAlive()) return false;
+        inline bool shouldCollide(Collidable *other)
+        {
+                if (!isAlive()) return false;
 
-		if (!other) return true;
+                if (!other) return true;
 
-		const CollisionData *data = other->collisionData();
+                const CollisionData *data = other->collisionData();
 
-		if (!data) return true;
+                if (!data) return true;
 
-		switch (data->type)
-		{
-		case COLLISION_WALL:
-			return true;
-		case COLLISION_SCREENOBJECT:
-			return collision(*((ScreenObject*) (data->ptr)));
-		case COLLISION_RAY:
-			return false;
-		}
-		return true;
-	}
+                switch (data->type)
+                {
+                case COLLISION_WALL:
+                        return true;
+                case COLLISION_SCREENOBJECT:
+                        return collision(*((ScreenObject*) (data->ptr)));
+                case COLLISION_RAY:
+                        return false;
+                }
+                return true;
+        }
 
-	virtual bool collision(ScreenObject& obj) = 0;
+        virtual bool collision(ScreenObject& obj) = 0;
 
 
-	// ------------------------------------------------------------------
-	//
-	// CONTRACTUAL REQUIREMENTS
-	//
-	// ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        //
+        // CONTRACTUAL REQUIREMENTS
+        //
+        // ------------------------------------------------------------------
 
-	virtual void draw() = 0;
+        virtual void draw() = 0;
 
-	ScreenObject *next, *prev;
-	bool mDecelFlag;
+        ScreenObject *next, *prev;
+        bool mDecelFlag;
 };
 
 #endif // SSC_OBJECT_H

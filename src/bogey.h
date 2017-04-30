@@ -27,29 +27,29 @@ const unsigned int BOGEY_NUM_EYES = 2;
 class Bogey : public FlockMember
 {
 public:
-	Bogey(double x, double y, double z=0);
-	~Bogey();
+        Bogey(double x, double y, double z=0);
+        ~Bogey();
 
-	static unsigned int num_alive;
+        static unsigned int num_alive;
 
-	void draw();
-	void fire(double dt);
-	void move(double dt);
-	void accelerate(double dt);
+        void draw();
+        void fire(double dt);
+        void move(double dt);
+        void accelerate(double dt);
 
-	bool collision(ScreenObject &obj);
-	void damage(double amt);
+        bool collision(ScreenObject &obj);
+        void damage(double amt);
 
-	void rotate(double amt);
-	void sync();
+        void rotate(double amt);
+        void sync();
 
-	double rx, ry;
-	Shield shield;
-	Explosion<20> explosion;
-	Ray *mRay[BOGEY_NUM_EYES];
+        double rx, ry;
+        Shield shield;
+        Explosion<20> explosion;
+        Ray *mRay[BOGEY_NUM_EYES];
 
-	float lr, lg, lb;
-	double lx[BOGEY_NUM_EYES], ly[BOGEY_NUM_EYES];
+        float lr, lg, lb;
+        double lx[BOGEY_NUM_EYES], ly[BOGEY_NUM_EYES];
 };
 
 #endif // SSC_BOGEY_H

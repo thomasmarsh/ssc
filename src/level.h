@@ -16,14 +16,14 @@
 class Level
 {
 public:
-	Level();
-	virtual ~Level();
+        Level();
+        virtual ~Level();
 
-	void setLevel(int);
+        void setLevel(int);
 
-	void operator ++ (int);
+        void operator ++ (int);
 
-	bool completed();
+        bool completed();
 private:
 };
 

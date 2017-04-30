@@ -17,21 +17,21 @@ const unsigned int STAR_SCALING = 70;
 
 struct Star
 {
-	Coord3<unsigned int> pos;
-	float r, g, b, a;
+        Coord3<unsigned int> pos;
+        float r, g, b, a;
 };
 
 class StarField
 {
 public:
-	StarField() { init(); }
-	~StarField() {}
+        StarField() { init(); }
+        ~StarField() {}
 
-	void draw();
+        void draw();
 
 private:
-	void init();
-	StarField(StarField&);
+        void init();
+        StarField(StarField&);
 };
 
 #endif // SSC_STARFIELD_H

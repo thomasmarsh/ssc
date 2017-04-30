@@ -17,45 +17,45 @@ class Controller;
 class EventHandler
 {
 private:
-	inline void mouseMove() { mMouseMove = true; }
-	inline void clearMouseMove() { mMouseMove = false; }
-	bool mMouseMove;
+        inline void mouseMove() { mMouseMove = true; }
+        inline void clearMouseMove() { mMouseMove = false; }
+        bool mMouseMove;
 
-	bool mKeymap[SDLK_LAST];
-	bool mMouseButton[4];
-	int x, y;
+        bool mKeymap[SDLK_LAST];
+        bool mMouseButton[4];
+        int x, y;
 protected:
-	Controller *mController;
+        Controller *mController;
 public:
-	EventHandler()
-	{
-		for (int c = 0; c < SDLK_LAST; c++)
-			mKeymap[c] = false;
-		for (int i = 0; i < 4; i++)
-			mMouseButton[i] = false;
-		mMouseMove = false;
-	}
-	virtual ~EventHandler() {}
+        EventHandler()
+        {
+                for (int c = 0; c < SDLK_LAST; c++)
+                        mKeymap[c] = false;
+                for (int i = 0; i < 4; i++)
+                        mMouseButton[i] = false;
+                mMouseMove = false;
+        }
+        virtual ~EventHandler() {}
 
-	void setController(Controller *c) { mController = c; }
+        void setController(Controller *c) { mController = c; }
 
-	// controller interface
-	virtual inline void pressKey(SDLKey c) { mKeymap[c] = true; }
-	virtual inline void releaseKey(SDLKey c) { mKeymap[c] = false; }
-	virtual inline void mouseMotion(int mx, int my) { x = mx, y = my; mouseMove(); }
-	virtual inline void pressMouseButton(int b) { mMouseButton[b] = true; }
-	virtual inline void releaseMouseButton(int b) { mMouseButton[b] = false; }
+        // controller interface
+        virtual inline void pressKey(SDLKey c) { mKeymap[c] = true; }
+        virtual inline void releaseKey(SDLKey c) { mKeymap[c] = false; }
+        virtual inline void mouseMotion(int mx, int my) { x = mx, y = my; mouseMove(); }
+        virtual inline void pressMouseButton(int b) { mMouseButton[b] = true; }
+        virtual inline void releaseMouseButton(int b) { mMouseButton[b] = false; }
 
-	virtual void process(double dt) = 0;
+        virtual void process(double dt) = 0;
 
 protected:
-	// client (subclass) interface
-	inline bool mouseMotion() { bool m = mMouseMove; mMouseMove = false; return m; }
-	inline bool keyPressed(SDLKey c) { return mKeymap[c]; }
+        // client (subclass) interface
+        inline bool mouseMotion() { bool m = mMouseMove; mMouseMove = false; return m; }
+        inline bool keyPressed(SDLKey c) { return mKeymap[c]; }
 
-	inline int mouseX() { return x; }
-	inline int mouseY() { return y; }
-	inline bool mouseButton(int b) { return mMouseButton[b]; }
+        inline int mouseX() { return x; }
+        inline int mouseY() { return y; }
+        inline bool mouseButton(int b) { return mMouseButton[b]; }
 };
 
 
@@ -70,8 +70,8 @@ protected:
 class PlayHandler : public EventHandler
 {
 public:
-	PlayHandler();
-	void process(double dt);
+        PlayHandler();
+        void process(double dt);
 };
 
 
@@ -88,12 +88,12 @@ class GameMenu;
 class MenuHandler : public EventHandler
 {
 public:
-	MenuHandler();
-	void process(double dt);
-	void pressKey(SDLKey c);
-	void setMenu(GameMenu *m) { mGameMenu = m; }
+        MenuHandler();
+        void process(double dt);
+        void pressKey(SDLKey c);
+        void setMenu(GameMenu *m) { mGameMenu = m; }
 private:
-	GameMenu *mGameMenu;
+        GameMenu *mGameMenu;
 };
 
 #endif // SSC_HANDLER_H

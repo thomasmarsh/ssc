@@ -16,20 +16,20 @@
 class Controller
 {
 public:
-	Controller();
-	~Controller();
+        Controller();
+        ~Controller();
 
-	inline bool wantExit() { bool tmp = mQuit; mQuit = false; return tmp; }
-	inline void setQuit() { mQuit = true; }
-	inline bool isPaused() { return mPause; }
-	inline void unPause() { mPause = false; }
-	inline bool slowMotion() { return mSlowMo; }
-	void poll(double dt);
-	void setHandler(EventHandler *h) { mHandler = h; }
+        inline bool wantExit() { bool tmp = mQuit; mQuit = false; return tmp; }
+        inline void setQuit() { mQuit = true; }
+        inline bool isPaused() { return mPause; }
+        inline void unPause() { mPause = false; }
+        inline bool slowMotion() { return mSlowMo; }
+        void poll(double dt);
+        void setHandler(EventHandler *h) { mHandler = h; }
 private:
-	EventHandler *mHandler;
+        EventHandler *mHandler;
 
-	bool mQuit, mPause, mSlowMo;
+        bool mQuit, mPause, mSlowMo;
 };
 
 #endif // SSC_CONTROL_H
