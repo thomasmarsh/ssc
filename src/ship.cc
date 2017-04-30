@@ -15,7 +15,6 @@
 #include "glpng.h"
 
 const unsigned int SHIP_SHIELD_RADIUS = 12;
-const unsigned int SHIP_RADIUS = 10;
 const unsigned int SHIP_MAX_SPEED = 15;
 const double SHIP_MASS = 10.0;
 

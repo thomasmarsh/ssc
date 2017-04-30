@@ -8,6 +8,8 @@ cc_binary(
     '-Ithird_party/glpng/include',
     '-I/usr/local/include',
     '-I/usr/local/include/freetype2',
+    '-Wall',
+    '-Wno-deprecated-declarations',
   ],
   linkopts = [
 #   '-ltcmalloc',

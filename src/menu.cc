@@ -129,7 +129,7 @@ void GameMenu::clear()
 }
 
 
-void GameMenu::addItem(char *text, MenuAction action, MenuModify modify)
+void GameMenu::addItem(const char *text, MenuAction action, MenuModify modify)
 {
         mMenuItem[mNumMenus].text = text;
         mMenuItem[mNumMenus].action = action;

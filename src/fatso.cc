@@ -24,7 +24,7 @@ Fatso::Fatso()
         r = .8, g = .7, b = .6;
         setState(ALIVE);
 
-        if (FATSO == -1);
+        if (FATSO == -1)
         {
                 FATSO = glGenLists(1);
                 glNewList(FATSO, GL_COMPILE);

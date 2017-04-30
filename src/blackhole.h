@@ -27,6 +27,8 @@ public:
 
         ~BlackHole();
 
+        using ScreenObject::move;
+
         void move() {}
         bool collision(ScreenObject&) { return false; }
         void bounce(double, double, double, int, double) {}

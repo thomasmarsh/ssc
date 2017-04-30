@@ -120,6 +120,8 @@ public:
 
         bool onScreen();
 
+        using PhysicsObject::accelerate;
+
         virtual void accelerate(double amt);
         virtual void decelerate(double dt);
         virtual void move(double dt);

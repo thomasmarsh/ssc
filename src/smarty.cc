@@ -89,8 +89,6 @@ void Smarty::rotate(double amt)
 }
 
 
-const double TRAIN_RATE = 100;
-
 #define LOG(a)  fprintf(stderr, "%s\n", a); fflush(stderr)
 
 inline double fzAngle(Coord3<double> &c) { return FUZZ(atan2(c.x, -c.y)); }

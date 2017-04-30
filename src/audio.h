@@ -43,7 +43,7 @@ public:
 protected:
         virtual void initSound();
 
-        char *fileNames[NUM_SOUND_TYPES];
+        const char *fileNames[NUM_SOUND_TYPES];
 };
 
 class SoundInfo

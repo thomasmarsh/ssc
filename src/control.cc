@@ -13,8 +13,6 @@
 #include "hud.h"
 #include "global.h"
 
-const unsigned int FRAMERATE = 50;
-
 static SDL_Event event;
 
 bool mGodMode = false,

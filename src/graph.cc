@@ -44,7 +44,7 @@ void GraphicContext::initGL()
 }
 
 
-bool GraphicContext::createWindow(char* title, int w, int h, int b, bool fullscreen)
+bool GraphicContext::createWindow(const char* title, int w, int h, int b, bool fullscreen)
 {
         if (SDL_Init(SDL_INIT_VIDEO) < 0)
         {

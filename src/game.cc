@@ -13,8 +13,6 @@
 
 Game *Game::mInstance = 0;
 
-const unsigned int FRAMERATE = 50, DISP_FACT = 1;
-
 const int FPS_SZ=100;
 inline double fps(double wait)
 {

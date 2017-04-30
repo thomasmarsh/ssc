@@ -72,24 +72,22 @@ void FlockMember::interact(ScreenObject &other)
 void FlockMember::initiateFlocking(FlockMember &other)
 {
         // both already have a flock
-        if (mFlock && other.mFlock)
-        {
+        if (mFlock && other.mFlock) {
                 if ((mFlock->mNumMembers > other.mFlock->mNumMembers) ||
-                    (mFlock->mMaxMembers > other.mFlock->mMaxMembers))
-                        if (!mFlock->isFull())
-                        {
+                    (mFlock->mMaxMembers > other.mFlock->mMaxMembers)) {
+                        if (!mFlock->isFull()) {
                                 other.mFlock->disband();
                                 other.mFlock = mFlock;
                                 mFlock->addMember();
                         }
-                else if ((other.mFlock->mNumMembers > mFlock->mNumMembers) ||
-                         (other.mFlock->mMaxMembers > mFlock->mMaxMembers))
-                        if (!other.mFlock->isFull())
-                        {
+                } else if ((other.mFlock->mNumMembers > mFlock->mNumMembers) ||
+                         (other.mFlock->mMaxMembers > mFlock->mMaxMembers)) {
+                        if (!other.mFlock->isFull()) {
                                 mFlock->disband();
                                 mFlock = other.mFlock;
                                 mFlock->addMember();
                         }
+                }
                 return;
         }
 

@@ -17,7 +17,7 @@ public:
         GraphicContext();
         ~GraphicContext();
 
-        bool createWindow(char* title, int w, int h, int b, bool fullscreen);
+        bool createWindow(const char* title, int w, int h, int b, bool fullscreen);
         void closeWindow();
         void resizeScene(int w, int h);
 

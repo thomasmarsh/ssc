@@ -29,7 +29,7 @@ enum MenuModify
 struct MenuItem
 {
         //! Text message associated with the current menu item
-        char *text;
+        const char *text;
 
         //! The action to perform when item is activated
         MenuAction action;
@@ -56,7 +56,7 @@ public:
         void moveRight();
 private:
         void clear();
-        void addItem(char *text, MenuAction action, MenuModify=MENU_M_NONE);
+        void addItem(const char *text, MenuAction action, MenuModify=MENU_M_NONE);
         unsigned int mSelected, mNumMenus;
         MenuItem mMenuItem[10];
 };
