@@ -13,11 +13,6 @@
 #include "draw.h"
 #include "asteroid.h"
 
-#include <SDL/SDL.h>
-#include <GL/gl.h>
-#include <GL/glu.h>
-
-
 int main(int argc, char** argv)
 {
 	Config *conf = Config::getInstance();
@@ -27,6 +22,7 @@ int main(int argc, char** argv)
 	Global::audio = new AudioSDLMixer();
 	Global::audio->setSoundVolume(conf->soundVol());
 
+    dInitODE();
 	Screen::init();
 
 	GraphicContext().createWindow(

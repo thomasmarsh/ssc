@@ -169,7 +169,8 @@ public:
 	inline void update(double dt)
 	{
 		dSpaceCollide(mSpace, 0, NearCallback);
-		dWorldStepFast1(mWorld, dt, 5);
+		//dWorldStepFast1(mWorld, dt, 5);
+        dWorldStep(mWorld, dt);// , 5)
 		dJointGroupEmpty(mContactGroup);
 	}
 };

@@ -22,6 +22,7 @@
 
 #include <iostream>
 #include <iomanip>
+#include <cmath>
 #include "font.h"
 
 namespace OGLFT {
