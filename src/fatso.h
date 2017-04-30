@@ -17,19 +17,17 @@ const unsigned int FATSO_SPEED = 7;
 const unsigned int FATSO_RADIUS = 50;
 const double FATSO_MASS = 200.0;
 
-class Fatso : public ScreenObject
-{
+class Fatso : public ScreenObject {
 private:
-        Fatso(Fatso&);
+    Fatso(Fatso&);
+
 public:
+    Fatso();
+    ~Fatso();
 
-        Fatso();
-        ~Fatso();
-
-        void draw();
-        void move(double dt) { ScreenObject::move(dt); }
-        bool collision(ScreenObject&) { return true; }
+    void draw();
+    void move(double dt) { ScreenObject::move(dt); }
+    bool collision(ScreenObject&) { return true; }
 };
-
 
 #endif // SSC_FATSO_H

@@ -53,146 +53,128 @@
 //      - no more new/delete calls (especially when training!)
 //      - minor optimizations throughout
 
-
 #ifndef SSC_NEURAL_H
 #define SSC_NEURAL_H
 
 #include <cmath>
 #include <cstdlib>
 
-
 // ---------------------------------------------------------------------------
 
 template <int N>
-struct Neuron
-{
-        double mWeights[N];
-        double mOutput;
+struct Neuron {
+    double mWeights[N];
+    double mOutput;
 
-        inline
-        Neuron() : mOutput(0)
-        {
-                for (int i = 0; i < N; ++i)
-                        mWeights[i] = .5 - rand() / double(RAND_MAX);
-        }
+    inline Neuron()
+        : mOutput(0)
+    {
+        for (int i = 0; i < N; ++i)
+            mWeights[i] = .5 - rand() / double(RAND_MAX);
+    }
 };
-
 
 // ---------------------------------------------------------------------------
 
-struct sigmoid_functor
-{
-        static inline
-        double sigmoid(double data)
-        {
-                return (1.0 / (1.0 + exp(-data)));
-        }
+struct sigmoid_functor {
+    static inline double sigmoid(double data)
+    {
+        return (1.0 / (1.0 + exp(-data)));
+    }
 };
-
 
 // ---------------------------------------------------------------------------
 
-template
-<
-        int NUM_INPUT,
-        int NUM_HIDDEN,
-        int NUM_OUTPUT,
-        typename SIGMOID=sigmoid_functor
->
-class NeuralNetwork
-{
+template <
+    int NUM_INPUT,
+    int NUM_HIDDEN,
+    int NUM_OUTPUT,
+    typename SIGMOID = sigmoid_functor>
+class NeuralNetwork {
 public:
-        // -------------------------------------------------------------------
+    // -------------------------------------------------------------------
 
-        inline
-        void run(double data[],
-                 double result[])
-        {
-                int i, j;
-                double sum;
+    inline void run(double data[],
+        double result[])
+    {
+        int i, j;
+        double sum;
 
-                for (i=0; i < NUM_HIDDEN; ++i) {
-                        for (j=0, sum=0; j < NUM_INPUT; ++j)
-                                sum += mHidden[i].mWeights[j] * data[j];
-                        mHidden[i].mOutput = SIGMOID::sigmoid(sum);
-                }
-
-                for (i=0; i < NUM_OUTPUT; ++i) {
-                        for (j=0, sum=0; j < NUM_HIDDEN; ++j)
-                                sum += mOutput[i].mWeights[j]
-                                        * mHidden[j].mOutput;
-                        result[i] = SIGMOID::sigmoid(sum);
-                }
+        for (i = 0; i < NUM_HIDDEN; ++i) {
+            for (j = 0, sum = 0; j < NUM_INPUT; ++j)
+                sum += mHidden[i].mWeights[j] * data[j];
+            mHidden[i].mOutput = SIGMOID::sigmoid(sum);
         }
 
-
-        // -------------------------------------------------------------------
-
-        inline
-        void train(double data[],
-                   double desired[],
-                   double maxMSE,
-                   double eta,
-                   int maxiter)
-        {
-                static double output[NUM_OUTPUT],
-                              dtOutput[NUM_OUTPUT],
-                              dtHidden[NUM_HIDDEN];
-
-                double MSE, sum;
-                int i, j;
-
-                maxMSE *= 2;
-
-                for (int iter=0; iter < maxiter; ++iter)
-                {
-                        run(data, output);
-
-                        // calculate output layer error terms
-
-                        for (i=0, MSE=0; i < NUM_OUTPUT; ++i)
-                        {
-                                dtOutput[i] = desired[i] - output[i];
-                                MSE += dtOutput[i] * dtOutput[i];
-                                dtOutput[i] *= output[i] * (1-output[i]);
-                        }
-
-                        // if the error is low enough we can bail out
-
-                        if (MSE < maxMSE) break;
-
-                        // calculate the hidden layer error terms
-
-                        for (i=0; i < NUM_HIDDEN; ++i)
-                        {
-                                for (j=0, sum=0; j < NUM_OUTPUT; ++j)
-                                        sum += dtOutput[j]
-                                                * mOutput[j].mWeights[i];
-                                dtHidden[i] =
-                                        sum * mHidden[i].mOutput
-                                            * (1-mHidden[i].mOutput);
-                        }
-
-                        // update the output weights
-                        
-                        for (i=0; i < NUM_OUTPUT; ++i)
-                                for (j=0; j < NUM_HIDDEN; ++j)
-                                        mOutput[i].mWeights[j] +=
-                                                eta * dtOutput[i]
-                                                    * mHidden[j].mOutput;
-
-                        // update the hidden weights
-
-                        for (i=0; i < NUM_HIDDEN; ++i)
-                                for (j=0; j < NUM_INPUT; ++j)
-                                        mHidden[i].mWeights[j] +=
-                                                eta * dtHidden[i] * data[j];
-                }
+        for (i = 0; i < NUM_OUTPUT; ++i) {
+            for (j = 0, sum = 0; j < NUM_HIDDEN; ++j)
+                sum += mOutput[i].mWeights[j]
+                    * mHidden[j].mOutput;
+            result[i] = SIGMOID::sigmoid(sum);
         }
+    }
+
+    // -------------------------------------------------------------------
+
+    inline void train(double data[],
+        double desired[],
+        double maxMSE,
+        double eta,
+        int maxiter)
+    {
+        static double output[NUM_OUTPUT],
+            dtOutput[NUM_OUTPUT],
+            dtHidden[NUM_HIDDEN];
+
+        double MSE, sum;
+        int i, j;
+
+        maxMSE *= 2;
+
+        for (int iter = 0; iter < maxiter; ++iter) {
+            run(data, output);
+
+            // calculate output layer error terms
+
+            for (i = 0, MSE = 0; i < NUM_OUTPUT; ++i) {
+                dtOutput[i] = desired[i] - output[i];
+                MSE += dtOutput[i] * dtOutput[i];
+                dtOutput[i] *= output[i] * (1 - output[i]);
+            }
+
+            // if the error is low enough we can bail out
+
+            if (MSE < maxMSE)
+                break;
+
+            // calculate the hidden layer error terms
+
+            for (i = 0; i < NUM_HIDDEN; ++i) {
+                for (j = 0, sum = 0; j < NUM_OUTPUT; ++j)
+                    sum += dtOutput[j]
+                        * mOutput[j].mWeights[i];
+                dtHidden[i] = sum * mHidden[i].mOutput
+                    * (1 - mHidden[i].mOutput);
+            }
+
+            // update the output weights
+
+            for (i = 0; i < NUM_OUTPUT; ++i)
+                for (j = 0; j < NUM_HIDDEN; ++j)
+                    mOutput[i].mWeights[j] += eta * dtOutput[i]
+                        * mHidden[j].mOutput;
+
+            // update the hidden weights
+
+            for (i = 0; i < NUM_HIDDEN; ++i)
+                for (j = 0; j < NUM_INPUT; ++j)
+                    mHidden[i].mWeights[j] += eta * dtHidden[i] * data[j];
+        }
+    }
+
 private:
-        Neuron<NUM_INPUT> mHidden[NUM_HIDDEN];
-        Neuron<NUM_HIDDEN> mOutput[NUM_OUTPUT];
+    Neuron<NUM_INPUT> mHidden[NUM_HIDDEN];
+    Neuron<NUM_HIDDEN> mOutput[NUM_OUTPUT];
 };
-
 
 #endif // SSC_NEURAL_H

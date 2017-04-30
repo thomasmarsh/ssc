@@ -11,29 +11,26 @@
 #ifndef SSC_LUNATIC_H
 #define SSC_LUNATIC_H
 
-#include "object.h"
 #include "explode.h"
+#include "object.h"
 
-
-class Lunatic : public ScreenObject
-{
+class Lunatic : public ScreenObject {
 private:
-        Lunatic(Lunatic&);
-        Explosion<10> mExplosion;
+    Lunatic(Lunatic&);
+    Explosion<10> mExplosion;
 
 public:
-        Lunatic();
-        ~Lunatic();
+    Lunatic();
+    ~Lunatic();
 
-        void draw();
+    void draw();
 
-        void rotate(double amt);
-        void move(double dt);
-        bool collision(ScreenObject &other);
+    void rotate(double amt);
+    void move(double dt);
+    bool collision(ScreenObject& other);
 
-        double alpha;
-        bool dir;
+    double alpha;
+    bool dir;
 };
-
 
 #endif // SSC_LUNATIC_H

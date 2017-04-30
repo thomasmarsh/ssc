@@ -2,132 +2,124 @@
 
 //! The static Environ instance
 
-Environ *Environ::mInstance = 0;
-
+Environ* Environ::mInstance = 0;
 
 //! Defines the maximum number of contact points we will consider
 
 const unsigned int MAX_CONTACTS = 5;
 
-
-void NearCallback(void *data, dGeomID g1, dGeomID g2)
+void NearCallback(void* data, dGeomID g1, dGeomID g2)
 {
-        // Contact point information
-        static dContact contact[MAX_CONTACTS];
-        // Our environment
-        static Environ *environ = Environ::getInstance();
-        // just a counter used in the loops
-        static unsigned int i, numContacts;
-        // declare whether object a or b should bounce
-        static bool bounce_a, bounce_b;
+    // Contact point information
+    static dContact contact[MAX_CONTACTS];
+    // Our environment
+    static Environ* environ = Environ::getInstance();
+    // just a counter used in the loops
+    static unsigned int i, numContacts;
+    // declare whether object a or b should bounce
+    static bool bounce_a, bounce_b;
 
+    // ----------------------------------------------------------------
+    //
+    // INITIALIZATION
+    //
+    // ----------------------------------------------------------------
 
-        // ----------------------------------------------------------------
-        //
-        // INITIALIZATION
-        //
-        // ----------------------------------------------------------------
+    // get the body information associated with each geometry
+    dBodyID b1 = dGeomGetBody(g1), b2 = dGeomGetBody(g2);
 
-        // get the body information associated with each geometry
-        dBodyID b1 = dGeomGetBody(g1), b2 = dGeomGetBody(g2);
+    // if we already have a contact joint, we can bail out here
+    if (b1 && b2 && dAreConnected(b1, b2))
+        return;
 
-        // if we already have a contact joint, we can bail out here
-        if (b1 && b2 && dAreConnected(b1, b2))
-                return;
+    // get the CollisionData object from the ODE geometry
+    CollisionData *a = (CollisionData*)dGeomGetData(g1),
+                  *b = (CollisionData*)dGeomGetData(g2);
 
-        // get the CollisionData object from the ODE geometry
-        CollisionData *a = (CollisionData *) dGeomGetData(g1),
-                      *b = (CollisionData *) dGeomGetData(g2);
-        
-        // try to get the Collidable instance from the CollisionData
-        Collidable *ca = (a ? ((Collidable *) a->ptr) : 0);
-        Collidable *cb = (b ? ((Collidable *) b->ptr) : 0);
+    // try to get the Collidable instance from the CollisionData
+    Collidable* ca = (a ? ((Collidable*)a->ptr) : 0);
+    Collidable* cb = (b ? ((Collidable*)b->ptr) : 0);
 
+    // ----------------------------------------------------------------
+    //
+    // RAY COLLISION
+    //
+    // ----------------------------------------------------------------
 
-        // ----------------------------------------------------------------
-        //
-        // RAY COLLISION
-        //
-        // ----------------------------------------------------------------
+    // for Ray objects, we can perform avoidance and bailout early
 
-        // for Ray objects, we can perform avoidance and bailout early
+    if ((a && a->type == COLLISION_RAY) || (b && b->type == COLLISION_RAY)) {
+        if ((ca && cb) && (ca != cb) && (a->type != b->type))
+            ca->avoid(cb), cb->avoid(ca);
 
-        if ((a && a->type == COLLISION_RAY) || (b && b->type == COLLISION_RAY))
-        {
-                if ((ca && cb) && (ca != cb) && (a->type != b->type))
-                        ca->avoid(cb), cb->avoid(ca);
+        return;
+    }
 
-                return;
-        }
+    // ----------------------------------------------------------------
+    //
+    // BOUNCE DETERMINATION
+    //
+    // ----------------------------------------------------------------
 
+    // initalize to no bouncing
+    bounce_a = false, bounce_b = false;
 
-        // ----------------------------------------------------------------
-        //
-        // BOUNCE DETERMINATION
-        //
-        // ----------------------------------------------------------------
+    // try to call Collidable::shouldCollide() on the object
+    // if it is valid, otherwise we will ensure it bounces
 
-        // initalize to no bouncing
-        bounce_a = false, bounce_b = false;
+    bounce_a = (ca ? (ca->shouldCollide(cb)) : true);
+    bounce_b = (cb ? (cb->shouldCollide(ca)) : true);
 
-        // try to call Collidable::shouldCollide() on the object
-        // if it is valid, otherwise we will ensure it bounces
+    // if there is no bouncing to be done then bailout
 
-        bounce_a = (ca ? (ca->shouldCollide(cb)) : true);
-        bounce_b = (cb ? (cb->shouldCollide(ca)) : true);
+    if (!bounce_a && !bounce_b)
+        return;
 
-        // if there is no bouncing to be done then bailout
+    // ----------------------------------------------------------------
+    //
+    // COLLISION DETECTION
+    //
+    // ----------------------------------------------------------------
 
-        if (!bounce_a && !bounce_b)
-                return;
+    // initialize the contacts for bounciness
+    for (i = 0; i < MAX_CONTACTS; ++i) {
+        contact[i].surface.mode = dContactBounce | dContactApprox1;
+        contact[i].surface.mu = dInfinity;
+        contact[i].surface.bounce = 1;
+        contact[i].surface.bounce_vel = .01;
+    }
 
+    // dCollide will find all the contact points between the two
+    // objects if they exists
 
-        // ----------------------------------------------------------------
-        //
-        // COLLISION DETECTION
-        //
-        // ----------------------------------------------------------------
+    numContacts = dCollide(g1, g2, MAX_CONTACTS,
+        &contact[0].geom,
+        sizeof(dContact));
 
-        // initialize the contacts for bounciness
-        for (i = 0; i < MAX_CONTACTS; ++i)
-        {
-                contact[i].surface.mode = dContactBounce | dContactApprox1;
-                contact[i].surface.mu = dInfinity;
-                contact[i].surface.bounce = 1;
-                contact[i].surface.bounce_vel = .01;
-        }
+    // bail out if there aren't any contacts
 
+    if (numContacts == 0)
+        return;
 
-        // dCollide will find all the contact points between the two
-        // objects if they exists
+    // ----------------------------------------------------------------
+    //
+    // COLLISION RESPONSE
+    //
+    // ----------------------------------------------------------------
 
-        numContacts = dCollide(g1, g2, MAX_CONTACTS,
-                               &contact[0].geom,
-                               sizeof(dContact));
+    // for each contact, create a contact joint (this is what
+    // performs the collision response in the next dWorldStep
 
-        // bail out if there aren't any contacts
+    for (i = 0; i < numContacts; ++i) {
+        dJointID c = dJointCreateContact(environ->mWorld,
+            environ->mContactGroup,
+            contact + i);
 
-        if (numContacts == 0)
-                return;
-
-
-        // ----------------------------------------------------------------
-        //
-        // COLLISION RESPONSE
-        //
-        // ----------------------------------------------------------------
-
-        // for each contact, create a contact joint (this is what
-        // performs the collision response in the next dWorldStep
-
-        for (i = 0; i < numContacts; ++i)
-        {
-                dJointID c = dJointCreateContact(environ->mWorld,
-                                                 environ->mContactGroup,
-                                                 contact+i);
-
-                if (bounce_a && bounce_b) dJointAttach(c, b1, b2);
-                else if (bounce_a)      dJointAttach(c, b1, 0);
-                else                    dJointAttach(c, 0, b2);
-        }
+        if (bounce_a && bounce_b)
+            dJointAttach(c, b1, b2);
+        else if (bounce_a)
+            dJointAttach(c, b1, 0);
+        else
+            dJointAttach(c, 0, b2);
+    }
 }

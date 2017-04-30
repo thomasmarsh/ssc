@@ -17,23 +17,21 @@ const unsigned int BLACKHOLE_SPEED = 7;
 const unsigned int BLACKHOLE_RADIUS = 10;
 const double BLACKHOLE_MASS = 100.0;
 
-class BlackHole : public ScreenObject
-{
+class BlackHole : public ScreenObject {
 private:
-        BlackHole(BlackHole&);
+    BlackHole(BlackHole&);
+
 public:
+    BlackHole(double x, double y);
 
-        BlackHole(double x, double y);
+    ~BlackHole();
 
-        ~BlackHole();
+    using ScreenObject::move;
 
-        using ScreenObject::move;
-
-        void move() {}
-        bool collision(ScreenObject&) { return false; }
-        void bounce(double, double, double, int, double) {}
-        void draw();
+    void move() {}
+    bool collision(ScreenObject&) { return false; }
+    void bounce(double, double, double, int, double) {}
+    void draw();
 };
-
 
 #endif // SSC_BLACKHOLE_H

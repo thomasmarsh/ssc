@@ -18,24 +18,23 @@ const unsigned int SMARTY_MAX_SPEED = 10;
 const unsigned int SMARTY_RADIUS = 15;
 const double SMARTY_MASS = 20.0;
 
-class Smarty : public ScreenObject
-{
+class Smarty : public ScreenObject {
 private:
-        Smarty(Smarty&);
-        Explosion<10> mExplosion;
-        static NeuralNetwork<4,6,2> brain; // shared brain! how cool is that?
-        Coord3<double> mLastPosition, mLastForce, mLastShipPos;
+    Smarty(Smarty&);
+    Explosion<10> mExplosion;
+    static NeuralNetwork<4, 6, 2> brain; // shared brain! how cool is that?
+    Coord3<double> mLastPosition, mLastForce, mLastShipPos;
+
 public:
-        Smarty();
-        ~Smarty();
+    Smarty();
+    ~Smarty();
 
-        void draw();
+    void draw();
 
-        void rotate(double amt);
-        void move(double dt);
-        bool collision(ScreenObject &other);
-        void accelerate(double dt);
+    void rotate(double amt);
+    void move(double dt);
+    bool collision(ScreenObject& other);
+    void accelerate(double dt);
 };
-
 
 #endif // SSC_SMARTY_H

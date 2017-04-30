@@ -11,18 +11,17 @@
 #ifndef SSC_GRAPH_H
 #define SSC_GRAPH_H
 
-class GraphicContext
-{
+class GraphicContext {
 public:
-        GraphicContext();
-        ~GraphicContext();
+    GraphicContext();
+    ~GraphicContext();
 
-        bool createWindow(const char* title, int w, int h, int b, bool fullscreen);
-        void closeWindow();
-        void resizeScene(int w, int h);
+    bool createWindow(const char* title, int w, int h, int b, bool fullscreen);
+    void closeWindow();
+    void resizeScene(int w, int h);
 
 private:
-        void initGL();
+    void initGL();
 };
 
 #endif // SSC_GRAPH_H

@@ -12,14 +12,13 @@
 #define SSC_GLOBAL_H
 
 #include "audio.h"
-#include "ship.h"
 #include "missile.h"
+#include "ship.h"
 
-namespace Global
-{
-        extern Audio *audio;
-        extern Ship *ship;
-        extern Coord3<double> normal;
+namespace Global {
+extern Audio* audio;
+extern Ship* ship;
+extern Coord3<double> normal;
 }
 
 #endif // SSC_GLOBAL_H

@@ -13,23 +13,22 @@
 #include "graph.h"
 
 BlackHole::BlackHole(double x, double y)
-        : ScreenObject(BLACKHOLE_TYPE, BLACKHOLE_RADIUS, BLACKHOLE_MASS, 0,
-                       x, y, 0,
-                       0, 0, 0)
+    : ScreenObject(BLACKHOLE_TYPE, BLACKHOLE_RADIUS, BLACKHOLE_MASS, 0,
+          x, y, 0,
+          0, 0, 0)
 {
-        mGravity = true;
+    mGravity = true;
 
-        r = 0, g = 1, b = 0;
-        setState(ALIVE);
+    r = 0, g = 1, b = 0;
+    setState(ALIVE);
 }
 
 BlackHole::~BlackHole()
 {
 }
 
-
 void BlackHole::draw()
 {
-        draw::setColor(r,g,b,1.0);
-        draw::sphere(mPosition, radius);
+    draw::setColor(r, g, b, 1.0);
+    draw::sphere(mPosition, radius);
 }

@@ -15,36 +15,34 @@
 int FATSO = -1;
 
 Fatso::Fatso()
-        : ScreenObject(FATSO_TYPE, FATSO_RADIUS, FATSO_MASS, 100,
-                       (double) (rand() % (Screen::maxX()-2*FATSO_RADIUS)) + FATSO_RADIUS,
-                       (double) (rand() % (Screen::maxY()-2*FATSO_RADIUS)) + FATSO_RADIUS,
-                       0,
-                       0, 0, 0)
+    : ScreenObject(FATSO_TYPE, FATSO_RADIUS, FATSO_MASS, 100,
+          (double)(rand() % (Screen::maxX() - 2 * FATSO_RADIUS)) + FATSO_RADIUS,
+          (double)(rand() % (Screen::maxY() - 2 * FATSO_RADIUS)) + FATSO_RADIUS,
+          0,
+          0, 0, 0)
 {
-        r = .8, g = .7, b = .6;
-        setState(ALIVE);
+    r = .8, g = .7, b = .6;
+    setState(ALIVE);
 
-        if (FATSO == -1)
-        {
-                FATSO = glGenLists(1);
-                glNewList(FATSO, GL_COMPILE);
-                GLUquadricObj *m = gluNewQuadric();
-                gluSphere(m, radius, radius+3, 10);
-                gluDeleteQuadric(m);
-                glEndList();
-        }
+    if (FATSO == -1) {
+        FATSO = glGenLists(1);
+        glNewList(FATSO, GL_COMPILE);
+        GLUquadricObj* m = gluNewQuadric();
+        gluSphere(m, radius, radius + 3, 10);
+        gluDeleteQuadric(m);
+        glEndList();
+    }
 }
 
 Fatso::~Fatso()
 {
 }
 
-
 void Fatso::draw()
 {
-        glPushMatrix();
-        glTranslated(mPosition.x, -mPosition.y, mPosition.z);
-        draw::setColor(r,g,b,1.0);
-        glCallList(FATSO);
-        glPopMatrix();
+    glPushMatrix();
+    glTranslated(mPosition.x, -mPosition.y, mPosition.z);
+    draw::setColor(r, g, b, 1.0);
+    glCallList(FATSO);
+    glPopMatrix();
 }
