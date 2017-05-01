@@ -137,7 +137,7 @@ inline double FuzzyControl(double a, double b)
     for (int i = 0; i < A::FUZZY_LAST; ++i) {
         for (int j = 0; j < B::FUZZY_LAST; ++j) {
             squares[R::rules[i * j].c] += min(membership(A::MBF[i], a),
-                membership(B::MBF[j], b));
+                                              membership(B::MBF[j], b));
         }
     }
 

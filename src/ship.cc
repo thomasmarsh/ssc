@@ -31,10 +31,10 @@ GLuint ammoFlash1;
 
 Ship::Ship(double x, double y)
     : ScreenObject(PLAYER_TYPE,
-          SHIP_SHIELD_RADIUS,
-          SHIP_MASS,
-          SHIP_MAX_SPEED,
-          x, y)
+                   SHIP_SHIELD_RADIUS,
+                   SHIP_MASS,
+                   SHIP_MAX_SPEED,
+                   x, y)
 {
     r = g = 1;
     b = 0;
@@ -203,9 +203,9 @@ void Ship::draw()
 
             glBlendFunc(GL_SRC_ALPHA, GL_ONE);
             glColor4d(c1[0] * c1f + c2[0] * c2f,
-                c1[1] * c1f + c2[1] * c2f,
-                c1[2] * c1f + c2[2] * c2f,
-                c1[3] * c1f + c2[3] * c2f);
+                      c1[1] * c1f + c2[1] * c2f,
+                      c1[2] * c1f + c2[2] * c2f,
+                      c1[3] * c1f + c2[3] * c2f);
             glColor4d(1, 1, 1, 1);
 
             glEnable(GL_TEXTURE_2D);
@@ -249,16 +249,16 @@ void Ship::draw()
 }
 
 inline void launch(Ship& ship,
-    double dir,
-    double dist,
-    double ang)
+                   double dir,
+                   double dist,
+                   double ang)
 {
     (void)new Missile(ScreenObject::PLAYER_TYPE,
-        ship.rotation + dir,
-        ship.mPosition.x + (dist * sin(ship.rotation + ang)),
-        ship.mPosition.y - (dist * cos(ship.rotation + ang)),
-        ship.mPosition.z,
-        ship.mVelocity.x, ship.mVelocity.y, ship.mVelocity.z);
+                      ship.rotation + dir,
+                      ship.mPosition.x + (dist * sin(ship.rotation + ang)),
+                      ship.mPosition.y - (dist * cos(ship.rotation + ang)),
+                      ship.mPosition.z,
+                      ship.mVelocity.x, ship.mVelocity.y, ship.mVelocity.z);
 }
 
 void Ship::fire()
@@ -301,12 +301,12 @@ void Ship::accelerate(double amt)
             double t = (double)((rand() % 120)) / 5.0;
 
             addParticle(mPosition.x - radius * sin(rotation) + ((rand() % 7) - 3),
-                mPosition.y + radius * cos(rotation) + ((rand() % 7) - 3),
-                mPosition.z + (rand() % 7) - 3,
-                -sin(rotation + p) * mMaxSpeed * .5,
-                cos(rotation + p) * mMaxSpeed * .5,
-                sin(p) * mMaxSpeed * .5,
-                r, g, b, t);
+                        mPosition.y + radius * cos(rotation) + ((rand() % 7) - 3),
+                        mPosition.z + (rand() % 7) - 3,
+                        -sin(rotation + p) * mMaxSpeed * .5,
+                        cos(rotation + p) * mMaxSpeed * .5,
+                        sin(p) * mMaxSpeed * .5,
+                        r, g, b, t);
         }
     }
 

@@ -240,8 +240,8 @@ public:
     inline Self operator^(Self const& o) const
     {
         Self result(y * o.z - z * o.y,
-            z * o.x - x * o.z,
-            x * o.y - y * o.x);
+                    z * o.x - x * o.z,
+                    x * o.y - y * o.x);
         return result;
     }
 

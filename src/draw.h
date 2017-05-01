@@ -30,7 +30,7 @@
 
 namespace draw {
 enum DrawMode { DRAW_2D,
-    DRAW_3D };
+                DRAW_3D };
 
 extern DrawMode mDrawMode;
 extern GLUquadricObj* mSphere;
@@ -134,7 +134,7 @@ inline void sphere(Coord3<double>& pos, double r, int add = 3, int b = 10)
 }
 
 inline void line(double x1, double y1, double z1,
-    double x2, double y2, double z2)
+                 double x2, double y2, double z2)
 {
     glPushMatrix();
     glBegin(GL_LINES);

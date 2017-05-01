@@ -7,8 +7,8 @@
 class Asteroid : public ScreenObject {
 public:
     enum Size { LARGE = 20,
-        MEDIUM = 10,
-        SMALL = 5 };
+                MEDIUM = 10,
+                SMALL = 5 };
 
     Asteroid(double);
     void setup(double, int, int);
@@ -28,9 +28,9 @@ public:
     void split(int seed, double strength);
 
     Coord3<double> midpoint(Coord3<double>& p0,
-        Coord3<double>& p1,
-        Coord3<double>& bc,
-        int seed, double strength);
+                            Coord3<double>& p1,
+                            Coord3<double>& bc,
+                            int seed, double strength);
 
     int points() { return 10; }
 

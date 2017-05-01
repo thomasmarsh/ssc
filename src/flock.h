@@ -27,9 +27,9 @@ class Flock;
 class FlockMember : public ScreenObject {
 public:
     FlockMember(ObjectType type,
-        int radius, double mass, double ms,
-        double x, double y, double z = 0,
-        double fx = 0, double fy = 0, double fz = 0);
+                int radius, double mass, double ms,
+                double x, double y, double z = 0,
+                double fx = 0, double fy = 0, double fz = 0);
     virtual ~FlockMember();
 
     void disband();

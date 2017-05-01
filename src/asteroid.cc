@@ -5,11 +5,11 @@ const double ASTEROID_MASS = 1000;
 
 Asteroid::Asteroid(double sz)
     : ScreenObject(ASTEROID_TYPE,
-          ((sz - 50) > 0) ? ((int)sz - 50) : 10, // radius
-          ASTEROID_MASS,
-          100, // maxspeed
-          rand() % Screen::maxX(), rand() % Screen::maxY(), 0,
-          0, 0, 0)
+                   ((sz - 50) > 0) ? ((int)sz - 50) : 10, // radius
+                   ASTEROID_MASS,
+                   100, // maxspeed
+                   rand() % Screen::maxX(), rand() % Screen::maxY(), 0,
+                   0, 0, 0)
     , mFirstDraw(true)
 {
     setup(sz, -1, -1);
@@ -20,9 +20,9 @@ Asteroid::Asteroid(double sz)
 }
 
 inline void pushTriangle(std::vector<Triangle>& tri,
-    double x1, double y1, double z1,
-    double x2, double y2, double z2,
-    double x3, double y3, double z3)
+                         double x1, double y1, double z1,
+                         double x2, double y2, double z2,
+                         double x3, double y3, double z3)
 {
     Triangle tt;
     tt.v1.vertex.set(x1, y1, z1);
@@ -70,9 +70,9 @@ void Asteroid::setup(double size, int iter, int seed)
 }
 
 inline Coord3<double> Asteroid::midpoint(Coord3<double>& p0,
-    Coord3<double>& p1,
-    Coord3<double>& bc,
-    int seed, double strength)
+                                         Coord3<double>& p1,
+                                         Coord3<double>& bc,
+                                         int seed, double strength)
 {
     static Coord3<double> swap, tmp, mp;
     bool swapped = false;

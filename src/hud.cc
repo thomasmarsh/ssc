@@ -78,7 +78,7 @@ void HUD::draw()
 
                 draw::setColor(obj.r, obj.g, obj.b);
                 draw::point(offx + (int)((x / (double)Screen::maxX()) * width),
-                    offy + (int)((y / (double)Screen::maxY()) * height));
+                            offy + (int)((y / (double)Screen::maxY()) * height));
             }
         }
         draw::endPoints();

@@ -25,9 +25,9 @@ static const double MAX_TARGET_AGE = 50 * 1000;
 // --------------------------------------------------------------------------
 
 FlockMember::FlockMember(ObjectType type,
-    int radius, double mass, double ms,
-    double x, double y, double z,
-    double fx, double fy, double fz)
+                         int radius, double mass, double ms,
+                         double x, double y, double z,
+                         double fx, double fy, double fz)
     : ScreenObject(type, radius, mass, ms, x, y, z, fx, fy, fz)
     , mFlock(0)
     , mAvoidance(0, 0, 0)
@@ -126,8 +126,8 @@ public:
     }
 
     inline void accumulate(Coord3<double>& a,
-        Coord3<double>& b,
-        int weight)
+                           Coord3<double>& b,
+                           int weight)
     {
         Coord3<double> t;
 
@@ -190,7 +190,7 @@ void FlockMember::move(double dt)
     // A new force vector
     static Coord3<double> rndDir;
     rndDir.set((rand() % 5) - 2,
-        (rand() % 5) - 2, 0);
+               (rand() % 5) - 2, 0);
 
     static FlockAccum ac;
     ac.reset();
@@ -240,7 +240,7 @@ Flock::Flock()
     , mTarget(0, 0, 0)
     , mTargetAge((double)(rand() % (int)MAX_TARGET_AGE))
     , mMaxMembers(((rand() % (FLOCK_MAX_MEMBERS - FLOCK_MIN_MEMBERS - 1))
-          + FLOCK_MIN_MEMBERS))
+                   + FLOCK_MIN_MEMBERS))
     , mNumMembers(0)
     , mMembersUpdated(0)
 {

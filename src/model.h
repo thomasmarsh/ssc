@@ -50,8 +50,8 @@ private:
 };
 
 void addParticle(double x, double y, double z,
-    double fx, double fy, double fz,
-    double r = 1, double g = 1, double b = 1,
-    double time = 20);
+                 double fx, double fy, double fz,
+                 double r = 1, double g = 1, double b = 1,
+                 double time = 20);
 
 #endif // SSC_MODEL_H

@@ -22,9 +22,9 @@ public:
     ObjectType owner_type;
 
     Missile(ObjectType t,
-        double rotation,
-        double x, double y, double z,
-        double fx, double fy, double fz);
+            double rotation,
+            double x, double y, double z,
+            double fx, double fy, double fz);
     ~Missile();
 
     ObjectType ownerType() { return owner_type; }
@@ -40,8 +40,8 @@ public:
     ObjectType mOwnerType;
 
     Bomb(ObjectType t,
-        double x, double y, double z,
-        double fx, double fy, double fz);
+         double x, double y, double z,
+         double fx, double fy, double fz);
 
     ~Bomb();
 

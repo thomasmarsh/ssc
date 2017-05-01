@@ -16,13 +16,13 @@
 bool ScreenObject::onScreen()
 {
     return ((square(mPosition.x - Global::ship->mPosition.x) + square(mPosition.y - Global::ship->mPosition.y))
-        <= square(600));
+            <= square(600));
 }
 
 ScreenObject::ScreenObject(ObjectType t,
-    int nradius, double nmass, double ms,
-    double x, double y, double z,
-    double fx, double fy, double fz)
+                           int nradius, double nmass, double ms,
+                           double x, double y, double z,
+                           double fx, double fy, double fz)
     : PhysicsObject(nradius, nmass, x, y, z, fx, fy, fz, (void*)this)
     , rotation(0)
     , radius(nradius)

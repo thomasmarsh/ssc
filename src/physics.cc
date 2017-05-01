@@ -95,8 +95,8 @@ void NearCallback(void* data, dGeomID g1, dGeomID g2)
     // objects if they exists
 
     numContacts = dCollide(g1, g2, MAX_CONTACTS,
-        &contact[0].geom,
-        sizeof(dContact));
+                           &contact[0].geom,
+                           sizeof(dContact));
 
     // bail out if there aren't any contacts
 
@@ -115,8 +115,8 @@ void NearCallback(void* data, dGeomID g1, dGeomID g2)
 
     for (i = 0; i < numContacts; ++i) {
         dJointID c = dJointCreateContact(environ->mWorld,
-            environ->mContactGroup,
-            contact + i);
+                                         environ->mContactGroup,
+                                         contact + i);
 
         if (bounce_a && bounce_b) {
             dJointAttach(c, b1, b2);

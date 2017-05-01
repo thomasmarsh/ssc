@@ -96,7 +96,7 @@ public:
     // -------------------------------------------------------------------
 
     inline void run(double data[],
-        double result[])
+                    double result[])
     {
         int i, j;
         double sum;
@@ -111,7 +111,7 @@ public:
         for (i = 0; i < NUM_OUTPUT; ++i) {
             for (j = 0, sum = 0; j < NUM_HIDDEN; ++j) {
                 sum += mOutput[i].mWeights[j]
-                    * mHidden[j].mOutput;
+                       * mHidden[j].mOutput;
             }
             result[i] = SIGMOID::sigmoid(sum);
         }
@@ -120,10 +120,10 @@ public:
     // -------------------------------------------------------------------
 
     inline void train(double data[],
-        double desired[],
-        double maxMSE,
-        double eta,
-        int maxiter)
+                      double desired[],
+                      double maxMSE,
+                      double eta,
+                      int maxiter)
     {
         static double output[NUM_OUTPUT],
             dtOutput[NUM_OUTPUT],
@@ -156,10 +156,10 @@ public:
             for (i = 0; i < NUM_HIDDEN; ++i) {
                 for (j = 0, sum = 0; j < NUM_OUTPUT; ++j) {
                     sum += dtOutput[j]
-                        * mOutput[j].mWeights[i];
+                           * mOutput[j].mWeights[i];
                 }
                 dtHidden[i] = sum * mHidden[i].mOutput
-                    * (1 - mHidden[i].mOutput);
+                              * (1 - mHidden[i].mOutput);
             }
 
             // update the output weights
@@ -167,7 +167,7 @@ public:
             for (i = 0; i < NUM_OUTPUT; ++i) {
                 for (j = 0; j < NUM_HIDDEN; ++j) {
                     mOutput[i].mWeights[j] += eta * dtOutput[i]
-                        * mHidden[j].mOutput;
+                                              * mHidden[j].mOutput;
                 }
             }
 

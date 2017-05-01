@@ -16,10 +16,10 @@ int FATSO = -1;
 
 Fatso::Fatso()
     : ScreenObject(FATSO_TYPE, FATSO_RADIUS, FATSO_MASS, 100,
-          (double)(rand() % (Screen::maxX() - 2 * FATSO_RADIUS)) + FATSO_RADIUS,
-          (double)(rand() % (Screen::maxY() - 2 * FATSO_RADIUS)) + FATSO_RADIUS,
-          0,
-          0, 0, 0)
+                   (double)(rand() % (Screen::maxX() - 2 * FATSO_RADIUS)) + FATSO_RADIUS,
+                   (double)(rand() % (Screen::maxY() - 2 * FATSO_RADIUS)) + FATSO_RADIUS,
+                   0,
+                   0, 0, 0)
 {
     r = .8, g = .7, b = .6;
     setState(ALIVE);

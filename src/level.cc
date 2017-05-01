@@ -50,7 +50,7 @@ void Level::operator++(int)
     Global::audio->playSound(Audio::POWER, pos);
     for (i = 0; i < ((MAX_BOGEYS * level) >> 4); i++) {
         (void)new Bogey((rand() % Screen::maxX() / 50) * (double)50,
-            (rand() % Screen::maxY() / 50) * (double)50);
+                        (rand() % Screen::maxY() / 50) * (double)50);
     }
     for (i = 0; i < 15; i++) {
         (void)new Asteroid(drand48() * 100 + 50);

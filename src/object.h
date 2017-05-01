@@ -79,9 +79,9 @@ public:
     // ------------------------------------------------------------------
 
     ScreenObject(ObjectType t,
-        int radius, double mass, double ms,
-        double x, double y, double z = 0,
-        double fx = 0, double fy = 0, double fz = 0);
+                 int radius, double mass, double ms,
+                 double x, double y, double z = 0,
+                 double fx = 0, double fy = 0, double fz = 0);
 
     virtual ~ScreenObject();
 

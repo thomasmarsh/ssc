@@ -89,7 +89,7 @@ public:
     unsigned int mDisplayList, mTextureId;
 
     enum MapMode { PLANAR,
-        CYLINDRICAL };
+                   CYLINDRICAL };
 
     Mesh()
         : mHasTexture(true)

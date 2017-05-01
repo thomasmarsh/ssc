@@ -20,8 +20,8 @@ public:
     void cycle();
 
     void set(double px, double py, double pz, // position
-        double vx, double vy, double vz, // view
-        double ux, double uy, double uz); // up
+             double vx, double vy, double vz, // view
+             double ux, double uy, double uz); // up
 
     // rotates the camera's view around the position using
     // axis-angle rotation
@@ -29,15 +29,15 @@ public:
 
     // rotate the camera around a point (the player)
     void rotateAroundPoint(Coord3<double>& center,
-        double angle, double x, double y, double z);
+                           double angle, double x, double y, double z);
 
     void move(double speed);
 
     Coord3<double> mPosition, mView, mUp, mTarget;
 
     void setTarget(Coord3<double>& target,
-        double rot,
-        double speed)
+                   double rot,
+                   double speed)
     {
         mTarget.set(target);
         mTargetRotation = rot;
@@ -45,9 +45,9 @@ public:
     }
 
     void smoothCameraMove(Coord3<double>& pos,
-        Coord3<double>& view,
-        Coord3<double>& up,
-        double dt);
+                          Coord3<double>& view,
+                          Coord3<double>& up,
+                          double dt);
 
 private:
     Coord3<double> constDist(double offset);

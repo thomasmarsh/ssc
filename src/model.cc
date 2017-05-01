@@ -72,9 +72,9 @@ Particle mParticles[MAXPARTICLES];
 unsigned int mParticleId = 0;
 
 void addParticle(double x, double y, double z,
-    double fx, double fy, double fz,
-    double r, double g, double b,
-    double time)
+                 double fx, double fy, double fz,
+                 double r, double g, double b,
+                 double time)
 {
     mParticles[mParticleId].mPosition.set(x, y, z);
     mParticles[mParticleId].mForce.set(fx, fy, fz);

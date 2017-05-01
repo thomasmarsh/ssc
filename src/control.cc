@@ -30,7 +30,8 @@ Controller::~Controller()
 {
 }
 
-void Controller::keyUp(int keysym) {
+void Controller::keyUp(int keysym)
+{
     switch (keysym) {
     case SDLK_PAUSE:
         mPause = !mPause;

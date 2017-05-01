@@ -30,13 +30,13 @@ void Missile::move(double dt)
 }
 
 Missile::Missile(ObjectType owner,
-    double rotation,
-    double x, double y, double z,
-    double fx, double fy, double fz)
+                 double rotation,
+                 double x, double y, double z,
+                 double fx, double fy, double fz)
     : ScreenObject(MISSILE_TYPE, MISSILE_RADIUS, MISSILE_MASS, 100,
-          x, y, z,
-          fx + sin(rotation) * MISSILE_SPEED,
-          fy - cos(rotation) * MISSILE_SPEED, fz)
+                   x, y, z,
+                   fx + sin(rotation) * MISSILE_SPEED,
+                   fy - cos(rotation) * MISSILE_SPEED, fz)
     , age(0)
     , owner_type(owner)
 {
@@ -78,7 +78,7 @@ inline void DrawPlayerMissile(Coord3<double>& mPosition, bool player = true)
         for (int i = 0; i < NUM_AMMO_TYPES; ++i) {
             snprintf(filename, 256, "../data/enemyAmmo%02d.png", i);
             ammoTex[i] = pngBind(filename, PNG_NOMIPMAPS, PNG_ALPHA,
-                &tmpInfo, GL_CLAMP, GL_LINEAR, GL_LINEAR);
+                                 &tmpInfo, GL_CLAMP, GL_LINEAR, GL_LINEAR);
             if (!ammoTex[i]) {
                 fprintf(stderr, "can't load %s\n", filename);
                 abort();

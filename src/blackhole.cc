@@ -14,8 +14,8 @@
 
 BlackHole::BlackHole(double x, double y)
     : ScreenObject(BLACKHOLE_TYPE, BLACKHOLE_RADIUS, BLACKHOLE_MASS, 0,
-          x, y, 0,
-          0, 0, 0)
+                   x, y, 0,
+                   0, 0, 0)
 {
     mGravity = true;
 

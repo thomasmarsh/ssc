@@ -357,9 +357,9 @@ public:
     double speed;
 
     PhysicsObject(double r, double _mass,
-        double x, double y, double z,
-        double fx, double fy, double fz,
-        void* data)
+                  double x, double y, double z,
+                  double fx, double fy, double fz,
+                  void* data)
         : mVelocity(fx, fy, fz)
         , mass(_mass)
         , radius(r)

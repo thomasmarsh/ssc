@@ -487,9 +487,9 @@ public:
      * \param alpha the alpha component of the foreground color.
      */
     void setForegroundColor(GLfloat red = 0.0,
-        GLfloat green = 0.0,
-        GLfloat blue = 0.0,
-        GLfloat alpha = 1.0);
+                            GLfloat green = 0.0,
+                            GLfloat blue = 0.0,
+                            GLfloat alpha = 1.0);
 
     /*!
      * This is the nominal color of the glyphs. A lot of other things
@@ -526,9 +526,9 @@ public:
      * \param alpha the alpha component of the background color.
      */
     void setBackgroundColor(GLfloat red = 1.0,
-        GLfloat green = 1.0,
-        GLfloat blue = 1.0,
-        GLfloat alpha = 0.0);
+                            GLfloat green = 1.0,
+                            GLfloat blue = 1.0,
+                            GLfloat alpha = 0.0);
 
     /*!
      * This is the nominal background color of the glyphs. A lot of other things
@@ -593,7 +593,7 @@ public:
      * \param horizontal_justification the new horizontal justification.
      */
     void setHorizontalJustification(enum HorizontalJustification
-            horizontal_justification)
+                                        horizontal_justification)
     {
         horizontal_justification_ = horizontal_justification;
     }
@@ -611,7 +611,7 @@ public:
      * \param vertical_justification the new vertical justification
      */
     void setVerticalJustification(enum VerticalJustification
-            vertical_justification)
+                                      vertical_justification)
     {
         vertical_justification_ = vertical_justification;
     }
@@ -849,7 +849,7 @@ public:
      * Defaults to 100 DPI.
      */
     Monochrome(const char* filename, float point_size = 12,
-        FT_UInt resolution = 100);
+               FT_UInt resolution = 100);
     /*!
      * \param font open FreeType FT_Face.
      * \param point_size the initial point size of the font to generate. A point

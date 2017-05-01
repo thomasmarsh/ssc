@@ -30,15 +30,15 @@ Camera::Camera()
 void Camera::apply()
 {
     gluLookAt(mPosition.x, mPosition.y, mPosition.z,
-        mView.x, mView.y, mView.z,
-        mUp.x, mUp.y, mUp.z);
+              mView.x, mView.y, mView.z,
+              mUp.x, mUp.y, mUp.z);
 
     Global::normal.set(-mUp);
 }
 
 void Camera::set(double px, double py, double pz,
-    double vx, double vy, double vz,
-    double ux, double uy, double uz)
+                 double vx, double vy, double vz,
+                 double ux, double uy, double uz)
 {
     mPosition.set(px, py, pz);
     mView.set(vx, vy, vz);
@@ -46,7 +46,7 @@ void Camera::set(double px, double py, double pz,
 }
 
 inline void doRotate(Coord3<double>& npos, Coord3<double>& pos,
-    double angle, double x, double y, double z)
+                     double angle, double x, double y, double z)
 {
     double ct = cos(angle), st = sin(angle);
 
@@ -73,8 +73,8 @@ void Camera::rotate(double angle, double x, double y, double z)
 }
 
 void Camera::rotateAroundPoint(Coord3<double>& center,
-    double angle,
-    double x, double y, double z)
+                               double angle,
+                               double x, double y, double z)
 {
     Coord3<double> npos, pos;
     pos = mPosition - center;
@@ -125,8 +125,8 @@ void Camera::update(double dt)
     case CAMERA_FIXED_DIST:
         newPos = constDist(150);
         newView.set(mTarget.x + 150 * sin(mTargetRotation),
-            mTarget.y + 150 * cos(mTargetRotation),
-            100);
+                    mTarget.y + 150 * cos(mTargetRotation),
+                    100);
         newUp.set(0, 0, 1);
         break;
     case CAMERA_FIXED_LOC:
@@ -136,16 +136,16 @@ void Camera::update(double dt)
         break;
     case CAMERA_OVERHEAD_HIGH:
         newPos.set((Screen::maxX() >> 1),
-            -(Screen::maxY() >> 1), 5000);
+                   -(Screen::maxY() >> 1), 5000);
         newView.set(newPos.x, newPos.y, 0);
         newUp.set(0, 1, 0);
         break;
     case CAMERA_FPS:
         newPos.set(mTarget.x - 100 * sin(mTargetRotation),
-            mTarget.y - 100 * cos(mTargetRotation), 40);
+                   mTarget.y - 100 * cos(mTargetRotation), 40);
         newView.set(mTarget.x + 1000 * sin(mTargetRotation),
-            mTarget.y + 1000 * cos(mTargetRotation),
-            0);
+                    mTarget.y + 1000 * cos(mTargetRotation),
+                    0);
         newUp.set(0, 0, 1);
         break;
     }
@@ -196,8 +196,8 @@ double inline clip(const double x, const double min, const double max)
 
 template <class T>
 void inline blendIntoAccumulator(const float smoothRate,
-    T& newValue,
-    T& smoothedAccumulator)
+                                 T& newValue,
+                                 T& smoothedAccumulator)
 {
     T tmp;
     tmp = interpolate(clip(smoothRate, 0, 1), smoothedAccumulator, newValue);
@@ -205,9 +205,9 @@ void inline blendIntoAccumulator(const float smoothRate,
 }
 
 void Camera::smoothCameraMove(Coord3<double>& pos,
-    Coord3<double>& view,
-    Coord3<double>& up,
-    double dt)
+                              Coord3<double>& view,
+                              Coord3<double>& up,
+                              double dt)
 {
     double speed = .3;
     double rate = dt * speed;

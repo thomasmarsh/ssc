@@ -28,7 +28,7 @@ void PlayHandler::process(double dt)
     // dispatch events
     if (mouseMotion()) {
         Global::ship->rotation = atan2((double)(mouseX() - (Screen::mDisplay.x >> 1)),
-            (double)((Screen::mDisplay.y >> 1) - mouseY()));
+                                       (double)((Screen::mDisplay.y >> 1) - mouseY()));
         Global::ship->rotate(0);
     } else {
         if (keyPressed(SDLK_RIGHT)) {

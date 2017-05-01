@@ -29,10 +29,10 @@ int BOGEY = -1;
 
 Bogey::Bogey(double x, double y, double z)
     : FlockMember(BOGEY_TYPE,
-          BOGEY_SHIELD_RADIUS,
-          BOGEY_MASS,
-          7,
-          x, y, z, 0, 0, 0)
+                  BOGEY_SHIELD_RADIUS,
+                  BOGEY_MASS,
+                  7,
+                  x, y, z, 0, 0, 0)
 {
     for (unsigned int i = 0; i < BOGEY_NUM_EYES; ++i) {
         mRay[i] = new Ray(this, radius);
@@ -135,12 +135,12 @@ void Bogey::accelerate(double amt)
             b = (double)(rand() % 30) / 100;
             double t = (double)((rand() % 120)) / 5.0;
             addParticle(mPosition.x - radius * sin(rotation) + ((rand() % 7) - 3),
-                mPosition.y + radius * cos(rotation) + ((rand() % 7) - 3),
-                mPosition.z + (rand() % 7) - 3,
-                -sin(rotation + p) * mMaxSpeed * .5,
-                cos(rotation + p) * mMaxSpeed * .5,
-                sin(p) * mMaxSpeed * .5,
-                r, g, b, t);
+                        mPosition.y + radius * cos(rotation) + ((rand() % 7) - 3),
+                        mPosition.z + (rand() % 7) - 3,
+                        -sin(rotation + p) * mMaxSpeed * .5,
+                        cos(rotation + p) * mMaxSpeed * .5,
+                        sin(p) * mMaxSpeed * .5,
+                        r, g, b, t);
         }
     }
     ScreenObject::accelerate(amt);
@@ -186,7 +186,7 @@ void Bogey::fire(double dt)
     double ss = shield.getStrength() * 10;
 
     double directionToShip = atan2((double)(SX(Global::ship) - SX(this)),
-        (double)(SY(this) - SY(Global::ship)));
+                                   (double)(SY(this) - SY(Global::ship)));
 
     fireCounter += dt;
     if (fireCounter >= (rateOfFire + ss)) {
@@ -198,10 +198,10 @@ void Bogey::fire(double dt)
     double error = 0;
 
     (void)new Missile(BOGEY_TYPE, directionToShip + error,
-        mPosition.x + (radius + 5) * sin(directionToShip + error),
-        mPosition.y - (radius + 5) * cos(directionToShip + error),
-        mPosition.z,
-        mVelocity.x, mVelocity.y, mVelocity.z);
+                      mPosition.x + (radius + 5) * sin(directionToShip + error),
+                      mPosition.y - (radius + 5) * cos(directionToShip + error),
+                      mPosition.z,
+                      mVelocity.x, mVelocity.y, mVelocity.z);
 
     Global::audio->playSound(Audio::BOOM, pos);
 }

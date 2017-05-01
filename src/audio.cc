@@ -99,8 +99,8 @@ void AudioSDLMixer::initSound()
 
     if (Mix_OpenAudio(22050, AUDIO_S16, 2, 512) < 0) {
         fprintf(stderr,
-            "Could not initialize SDL mixer: %s\n",
-            SDL_GetError());
+                "Could not initialize SDL mixer: %s\n",
+                SDL_GetError());
         exit(1);
     }
 

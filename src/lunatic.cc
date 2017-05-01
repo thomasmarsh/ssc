@@ -19,13 +19,13 @@ const double LUNATIC_MASS = 50.0;
 
 Lunatic::Lunatic()
     : ScreenObject(LUNATIC_TYPE,
-          LUNATIC_RADIUS,
-          LUNATIC_MASS,
-          LUNATIC_MAX_SPEED,
-          (double)(rand() % 500),
-          (double)(rand() % 500),
-          0,
-          0, 0, 0)
+                   LUNATIC_RADIUS,
+                   LUNATIC_MASS,
+                   LUNATIC_MAX_SPEED,
+                   (double)(rand() % 500),
+                   (double)(rand() % 500),
+                   0,
+                   0, 0, 0)
 {
     r = .9, g = .9, b = .9;
     alpha = (double)(rand() % 70) / 100;

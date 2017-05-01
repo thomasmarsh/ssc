@@ -46,7 +46,7 @@ void GameMenu::draw()
         }
 
         face->draw(xo, Screen::mDisplay.y - yo - 20 * i,
-            mMenuItem[i].text);
+                   mMenuItem[i].text);
     }
     draw::setMode(draw::DRAW_3D);
 }

@@ -42,12 +42,12 @@ void Smarty::accelerate(double amt)
             b = (double)(rand() % 30) / 100;
             double t = (double)((rand() % 120)) / 5.0;
             addParticle(mPosition.x - radius * sin(rotation) + ((rand() % 7) - 3),
-                mPosition.y + radius * cos(rotation) + ((rand() % 7) - 3),
-                mPosition.z + (rand() % 7) - 3,
-                -sin(rotation + p) * speed * .5,
-                cos(rotation + p) * speed * .5,
-                sin(p) * 15 * .5,
-                r, g, b, t);
+                        mPosition.y + radius * cos(rotation) + ((rand() % 7) - 3),
+                        mPosition.z + (rand() % 7) - 3,
+                        -sin(rotation + p) * speed * .5,
+                        cos(rotation + p) * speed * .5,
+                        sin(p) * 15 * .5,
+                        r, g, b, t);
         }
     }
     ScreenObject::accelerate(amt);
@@ -57,10 +57,10 @@ int SMARTY = -1;
 
 Smarty::Smarty()
     : ScreenObject(SMARTY_TYPE, SMARTY_RADIUS, SMARTY_MASS, SMARTY_MAX_SPEED,
-          (double)(rand() % Screen::maxX()),
-          (double)(rand() % Screen::maxY()),
-          0,
-          0, 0, 0)
+                   (double)(rand() % Screen::maxX()),
+                   (double)(rand() % Screen::maxY()),
+                   0,
+                   0, 0, 0)
 {
     mLastPosition.set(mPosition);
     mLastForce.set(mVelocity);

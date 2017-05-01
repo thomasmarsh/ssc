@@ -217,7 +217,7 @@ void Face::setResolution(FT_UInt resolution)
 // Note: Changing the background color also clears the display list cache.
 
 void Face::setBackgroundColor(GLfloat red, GLfloat green, GLfloat blue,
-    GLfloat alpha)
+                              GLfloat alpha)
 {
     if (background_color_[R] != red || background_color_[G] != green || background_color_[B] != blue || background_color_[A] != alpha) {
 
@@ -233,7 +233,7 @@ void Face::setBackgroundColor(GLfloat red, GLfloat green, GLfloat blue,
 // Note: Changing the foreground color also clears the display list cache.
 
 void Face::setForegroundColor(GLfloat red, GLfloat green, GLfloat blue,
-    GLfloat alpha)
+                              GLfloat alpha)
 {
     if (foreground_color_[R] != red || foreground_color_[G] != green || foreground_color_[B] != blue || foreground_color_[A] != alpha) {
 
@@ -329,7 +329,7 @@ void Face::setCharacterRotationReference(unsigned char c)
     if (f < faces_.size() && glyph_index != rotation_reference_glyph_) {
 
         FT_Error error = FT_Load_Glyph(faces_[f].face_, glyph_index,
-            FT_LOAD_DEFAULT);
+                                       FT_LOAD_DEFAULT);
 
         if (error != 0)
             return;
@@ -415,7 +415,7 @@ GLuint Face::compile(const char* s)
     glNewList(dlist, GL_COMPILE);
 
     glColor4f(foreground_color_[R], foreground_color_[G], foreground_color_[B],
-        foreground_color_[A]);
+              foreground_color_[A]);
     if (!advance_)
         glPushMatrix();
 
@@ -528,7 +528,7 @@ void Face::draw(GLfloat x, GLfloat y, unsigned char c)
     glTranslatef(x, y, 0.);
 
     glColor4f(foreground_color_[R], foreground_color_[G], foreground_color_[B],
-        foreground_color_[A]);
+              foreground_color_[A]);
 
     glRasterPos2i(0, 0);
 
@@ -585,7 +585,7 @@ void Face::draw(GLfloat x, GLfloat y, const char* s)
     glTranslatef(x, y, 0.);
 
     glColor4f(foreground_color_[R], foreground_color_[G], foreground_color_[B],
-        foreground_color_[A]);
+              foreground_color_[A]);
 
     glRasterPos2i(0, 0);
 
@@ -661,7 +661,7 @@ BBox Raster::measure(unsigned char c)
         return bbox;
 
     FT_Error error = FT_Load_Glyph(faces_[f].face_, glyph_index,
-        FT_LOAD_DEFAULT);
+                                   FT_LOAD_DEFAULT);
     if (error != 0)
         return bbox;
 
@@ -697,18 +697,18 @@ BBox Raster::measure(unsigned char c)
 
     GLdouble x, y, z;
     gluUnProject(bbox.x_min_, bbox.y_min_, 0., modelview, projection, viewport,
-        &x, &y, &z);
+                 &x, &y, &z);
     bbox.x_min_ = x - x0;
     bbox.y_min_ = y - y0;
 
     gluUnProject(bbox.x_max_, bbox.y_max_, 0., modelview, projection, viewport,
-        &x, &y, &z);
+                 &x, &y, &z);
     bbox.x_max_ = x - x0;
     bbox.y_max_ = y - y0;
 
     gluUnProject(bbox.advance_.dx_, bbox.advance_.dy_, 0., modelview, projection,
-        viewport,
-        &x, &y, &z);
+                 viewport,
+                 &x, &y, &z);
     bbox.advance_.dx_ = x - x0;
     bbox.advance_.dy_ = y - y0;
 
@@ -732,10 +732,10 @@ void Raster::setCharSize(void)
     FT_Error error;
     for (unsigned int i = 0; i < faces_.size(); i++) {
         error = FT_Set_Char_Size(faces_[i].face_,
-            (FT_F26Dot6)(point_size_ * 64),
-            (FT_F26Dot6)(point_size_ * 64),
-            resolution_,
-            resolution_);
+                                 (FT_F26Dot6)(point_size_ * 64),
+                                 (FT_F26Dot6)(point_size_ * 64),
+                                 resolution_,
+                                 resolution_);
         if (error != 0)
             return;
     }
@@ -747,8 +747,8 @@ void Raster::setCharSize(void)
 void Raster::setRotationOffset(void)
 {
     FT_Error error = FT_Load_Glyph(rotation_reference_face_,
-        rotation_reference_glyph_,
-        FT_LOAD_RENDER);
+                                   rotation_reference_glyph_,
+                                   FT_LOAD_RENDER);
 
     if (error != 0)
         return;
@@ -768,7 +768,7 @@ void Raster::clearCaches(void)
 }
 
 Monochrome::Monochrome(const char* filename, float point_size,
-    FT_UInt resolution)
+                       FT_UInt resolution)
     : Raster(filename, point_size, resolution)
 {
 }
@@ -855,14 +855,14 @@ void Monochrome::renderGlyph(FT_Face face, FT_UInt glyph_index)
         FT_Vector original_offset, rotation_offset;
 
         original_offset.x = (face->glyph->metrics.width / 2
-                                + face->glyph->metrics.horiBearingX)
-            / 64 * 0x10000L;
+                             + face->glyph->metrics.horiBearingX)
+                            / 64 * 0x10000L;
         original_offset.y = (FT_Pos)(rotation_offset_y_ * 0x10000L);
 
         rotation_offset = original_offset;
 
         FT_Vector_Rotate(&rotation_offset,
-            (FT_Angle)(character_rotation_z_ * 0x10000L));
+                         (FT_Angle)(character_rotation_z_ * 0x10000L));
 
         rotation_offset.x = original_offset.x - rotation_offset.x;
         rotation_offset.y = original_offset.y - rotation_offset.y;
@@ -889,11 +889,11 @@ void Monochrome::renderGlyph(FT_Face face, FT_UInt glyph_index)
     GLubyte* inverted_bitmap = invertBitmap(bitmap_glyph->bitmap);
 
     glBitmap(bitmap_glyph->bitmap.width, bitmap_glyph->bitmap.rows,
-        -bitmap_glyph->left,
-        bitmap_glyph->bitmap.rows - bitmap_glyph->top,
-        face->glyph->advance.x / 64.,
-        face->glyph->advance.y / 64.,
-        inverted_bitmap);
+             -bitmap_glyph->left,
+             bitmap_glyph->bitmap.rows - bitmap_glyph->top,
+             face->glyph->advance.x / 64.,
+             face->glyph->advance.y / 64.,
+             inverted_bitmap);
 
     FT_Done_Glyph(glyph);
 

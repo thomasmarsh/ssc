@@ -122,8 +122,8 @@ void Game::delay()
             // TODO: add some flashing in-game text with the
             // framerate warning
             fprintf(stderr,
-                "Could not maintain framerate 50 fps! (dt=%.2f)\n",
-                dt);
+                    "Could not maintain framerate 50 fps! (dt=%.2f)\n",
+                    dt);
             speedWarn = false;
         }
         dt = 1.5;
