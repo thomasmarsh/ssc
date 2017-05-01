@@ -13,19 +13,23 @@
 
 #include "ship.h"
 
+#include <memory>
+
 class HUD {
 public:
-    inline static HUD* getInstance()
+    inline static HUD& getInstance()
     {
-        if (!hud) {
-            hud = new HUD();
-        }
-        return hud;
+        static HUD instance;
+        return instance;
+        //if (!hud) {
+        //    hud = std::make_unique<HUD>();
+        //}
+        //return hud;
     }
 
     static void init()
     {
-        getInstance()->initialize();
+        getInstance().initialize();
     }
 
     void toggleRadar() { mShowRadar = !mShowRadar; }
@@ -40,7 +44,7 @@ private:
 
     //  -- statics --
 
-    static HUD* hud;
+    //static std::unique_ptr<HUD> hud;
 
     static const char* SPEED_TEXT;
     static const char* ANGLE_TEXT;

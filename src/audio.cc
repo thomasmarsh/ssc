@@ -91,9 +91,9 @@ AudioSDLMixer::~AudioSDLMixer()
 
 void AudioSDLMixer::initSound()
 {
-    Config* conf = Config::getInstance();
+    Config& conf = Config::getInstance();
 
-    if (!conf->playSound() && !conf->playMusic()) {
+    if (!conf.playSound() && !conf.playMusic()) {
         return;
     }
 
@@ -111,8 +111,8 @@ void AudioSDLMixer::initSound()
     Mix_ReserveChannels(1);
     Mix_PlayChannel(0, sounds[MUSIC_GAME], -1);
 
-    if (conf->playMusic()) {
-        Mix_Volume(0, (int)(MIX_MAX_VOLUME * conf->musicVol()));
+    if (conf.playMusic()) {
+        Mix_Volume(0, (int)(MIX_MAX_VOLUME * conf.musicVol()));
     } else {
         Mix_Volume(0, 0);
     }
@@ -122,14 +122,14 @@ void AudioSDLMixer::initSound()
 
 void AudioSDLMixer::playSound(SoundType type, float pos[3], int)
 {
-    if (Config::getInstance()->playSound()) {
+    if (Config::getInstance().playSound()) {
         Mix_PlayChannel(-1, sounds[type], 0);
     }
 }
 
 void AudioSDLMixer::setSoundVolume(float value)
 {
-    if (Config::getInstance()->playSound()) {
+    if (Config::getInstance().playSound()) {
         for (int i = 1; i < MIX_CHANNELS; i++) {
             Mix_Volume(i, (int)(MIX_MAX_VOLUME * value));
         }

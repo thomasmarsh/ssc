@@ -36,7 +36,7 @@ ScreenObject::ScreenObject(ObjectType t,
     , prev(0)
     , mDecelFlag(false)
 {
-    Model::getInstance()->addObject(this);
+    Model::getInstance().addObject(this);
     reset();
 }
 

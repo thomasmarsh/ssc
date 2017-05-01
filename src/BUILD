@@ -12,7 +12,7 @@ cc_binary(
     '-Wno-deprecated-declarations',
   ],
   linkopts = [
-#   '-ltcmalloc',
+#    '-ltcmalloc',
     '-framework GLUT',
     '-framework OpenGL',
     '-framework Cocoa',

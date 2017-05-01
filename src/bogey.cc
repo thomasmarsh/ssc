@@ -35,7 +35,7 @@ Bogey::Bogey(double x, double y, double z)
                   x, y, z, 0, 0, 0)
 {
     for (unsigned int i = 0; i < BOGEY_NUM_EYES; ++i) {
-        mRay[i] = new Ray(this, radius);
+        mRay[i] = std::make_shared<Ray>(this, radius);
     }
     mFlock = 0;
     mFlocking = true;
@@ -57,10 +57,7 @@ Bogey::Bogey(double x, double y, double z)
 Bogey::~Bogey()
 {
     for (unsigned int i = 0; i < BOGEY_NUM_EYES; ++i) {
-        if (mRay[i]) {
-            delete mRay[i];
-        }
-        mRay[i] = 0;
+        mRay[i] = nullptr;
     }
     num_alive--;
 }

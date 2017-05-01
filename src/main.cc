@@ -15,12 +15,12 @@
 
 int main(int argc, char** argv)
 {
-    Config* conf = Config::getInstance();
-    conf->handleArguments(argc, argv);
+    Config& conf = Config::getInstance();
+    conf.handleArguments(argc, argv);
 
     srand(time(NULL));
     Global::audio = new AudioSDLMixer();
-    Global::audio->setSoundVolume(conf->soundVol());
+    Global::audio->setSoundVolume(conf.soundVol());
 
     dInitODE();
     Screen::init();
@@ -28,10 +28,10 @@ int main(int argc, char** argv)
     GraphicContext().createWindow(
         "Testing",
         Screen::mDisplay.x, Screen::mDisplay.y,
-        conf->getColorDepth(),
-        conf->fullscreen());
+        conf.getColorDepth(),
+        conf.fullscreen());
 
-    Game::getInstance()->loop();
+    Game::getInstance().loop();
 
     // not reached
     return 0;

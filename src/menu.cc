@@ -55,7 +55,7 @@ void GameMenu::exec(Controller* c)
 {
     switch (mMenuItem[mSelected].action) {
     case MENU_START:
-        Game::getInstance()->setMode(Game::PLAY);
+        Game::getInstance().setMode(Game::PLAY);
         break;
     case MENU_QUIT:
         c->setQuit();

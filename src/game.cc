@@ -11,9 +11,8 @@
 #include "game.h"
 #include "screen.h"
 
-Game* Game::mInstance = 0;
-
 const int FPS_SZ = 100;
+
 inline double fps(double wait)
 {
     static double times[FPS_SZ], avg;
@@ -45,7 +44,7 @@ Game::Game()
 #endif
 {
     Global::ship = new Ship(100, 100);
-    mModel->setPlayerPos();
+    mModel.setPlayerPos();
     mLevel.setLevel(1);
     mMenuHandler.setMenu(&mGameMenu);
     mMenuHandler.setController(&mController);
@@ -63,11 +62,11 @@ void Game::setMode(GameMode mode)
 
     switch (mMode) {
     case PLAY:
-        mModel->startGame();
+        mModel.startGame();
         mLevel.setLevel(1);
         mController.setHandler(&mPlayHandler);
         mController.unPause();
-        Global::audio->setSoundVolume(Config::getInstance()->soundVol());
+        Global::audio->setSoundVolume(Config::getInstance().soundVol());
         break;
     case MENU:
         mController.setHandler(&mMenuHandler);
@@ -80,11 +79,11 @@ void Game::loop()
 {
     while (1) {
         if (!mController.isPaused() && (dt > 0)) {
-            mModel->update(dt);
+            mModel.update(dt);
             if (mLevel.completed())
                 mLevel++;
         } else {
-            mModel->draw(dt, false);
+            mModel.draw(dt, false);
         }
 
         mController.poll(dt);

@@ -444,7 +444,7 @@ bool Lunatic::collision(ScreenObject& obj)
         Global::audio->playSound(Audio::EXPLO_POP, pos);
         mExplosion.init(*this);
     }
-    double dt = Game::getInstance()->dt;
+    double dt = Game::getInstance().dt;
     PhysicsObject& pobj = obj;
     pobj.accelerate(-pobj.mVelocity.x * dt * 2, -pobj.mVelocity.y * dt * 2, 0);
     return false;

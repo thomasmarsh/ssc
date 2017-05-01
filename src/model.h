@@ -16,21 +16,18 @@
 #include "object.h"
 #include "starfield.h"
 
+#include <vector>
+
 class Model {
 private:
-    static Model* mInstance;
     Model();
 
 public:
-    static inline Model* getInstance()
+    static inline Model& getInstance()
     {
-        if (!mInstance) {
-            mInstance = new Model;
-        }
-        return mInstance;
+        static Model instance;
+        return instance;
     }
-
-    ~Model();
 
     void addObject(ScreenObject* obj);
     void draw(double dt, bool doMove = true);
@@ -46,7 +43,7 @@ private:
     ScreenObject* mHead;
     StarField mStarField;
     Camera mCamera;
-    dSpaceID mSpaceId;
+    std::vector<std::shared_ptr<Wall>> mWalls;
 };
 
 void addParticle(double x, double y, double z,

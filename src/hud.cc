@@ -19,7 +19,6 @@ HUD::HUD()
 {
 }
 
-HUD* HUD::hud = 0;
 const char* HUD::SPEED_TEXT = "Speed:";
 const char* HUD::ANGLE_TEXT = "Angle:";
 
@@ -70,7 +69,7 @@ void HUD::draw()
 
         draw::startPoints();
 
-        for (ScreenObject* i = Model::getInstance()->getHead(); i != 0; i = i->next) {
+        for (ScreenObject* i = Model::getInstance().getHead(); i != 0; i = i->next) {
             if (i->isAlive()) {
                 const ScreenObject& obj = *i;
                 int x = (int)obj.mPosition.x,

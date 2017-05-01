@@ -62,8 +62,6 @@ private:
 
     //! static instance
 
-    static Environ* mInstance;
-
     //! private constructor
 
     Environ(bool useQuadTree = false)
@@ -97,12 +95,10 @@ public:
     //! there can be only one world at a time; this method takes the place
     //! of the constructor.
 
-    static Environ* getInstance()
+    static Environ& getInstance()
     {
-        if (!mInstance) {
-            mInstance = new Environ;
-        }
-        return mInstance;
+        static Environ instance;
+        return instance;
     }
 
     //! \name Factory Methods
@@ -266,16 +262,13 @@ public:
 // ---------------------------------------------------------------------------
 
 class Wall : public Collidable {
-private:
-    Environ* mEnviron;
-
 public:
     Wall(double a, double b, double c, double d)
     {
-        mEnviron = Environ::getInstance();
+        Environ& environ = Environ::getInstance();
 
-        mGeometry = mEnviron->newPlane(a, b, c, d);
-        mEnviron->setSpace(mGeometry);
+        mGeometry = environ.newPlane(a, b, c, d);
+        environ.setSpace(mGeometry);
         dGeomSetData(mGeometry, 0);
     }
 
@@ -296,19 +289,18 @@ public:
 
 class Ray : public Collidable {
 private:
-    Environ* mEnviron;
     Collidable* mParent;
     double radius;
 
 public:
     Ray(Collidable* p, double r = 100)
-        : mEnviron(Environ::getInstance())
-        , mParent(p)
+        : mParent(p)
         , radius(r)
     {
-        mGeometry = mEnviron->newSphere(radius);
+        Environ& environ = Environ::getInstance();
+        mGeometry = environ.newSphere(radius);
         setData(COLLISION_RAY, (void*)mParent);
-        mEnviron->setSpace(mGeometry);
+        environ.setSpace(mGeometry);
     }
     virtual ~Ray() { mParent = 0; }
 
@@ -348,7 +340,6 @@ public:
 class PhysicsObject : public Collidable {
 private:
     dBodyID mBody;
-    Environ* mEnviron;
 
 public:
     Coord3<double> mVelocity;
@@ -365,11 +356,10 @@ public:
         , radius(r)
         , speed(hypot(fx, fy))
     {
-        // point to global environment
-        mEnviron = Environ::getInstance();
+        Environ& environ = Environ::getInstance();
 
         // set all body params
-        mBody = mEnviron->newBody();
+        mBody = environ.newBody();
         dBodySetForce(mBody, fx, fy, fz);
         dBodySetLinearVel(mBody, fx, fy, fz);
 
@@ -388,8 +378,8 @@ public:
         dBodySetMass(mBody, &m);
 
         // set all geometry params
-        mGeometry = mEnviron->newSphere(radius);
-        mEnviron->setSpace(mGeometry);
+        mGeometry = environ.newSphere(radius);
+        environ.setSpace(mGeometry);
         dGeomSetBody(mGeometry, mBody);
         setData(COLLISION_SCREENOBJECT, data);
 

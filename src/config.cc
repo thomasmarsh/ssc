@@ -264,8 +264,6 @@ void ConfigParser::parse()
 
 // -------------------------------------------------------
 
-Config* Config::mInstance = 0;
-
 Config::Config()
     : mResolution(800, 600)
     , mGameArea(4000, 4000)

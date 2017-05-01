@@ -22,7 +22,6 @@ class Game {
 private:
     friend class Lunatic;
     Game();
-    static Game* mInstance;
 
 public:
     enum GameMode {
@@ -30,12 +29,10 @@ public:
         MENU,
     };
 
-    static Game* getInstance()
+    static Game& getInstance()
     {
-        if (!mInstance) {
-            mInstance = new Game;
-        }
-        return mInstance;
+        static Game instance;
+        return instance;
     }
 
     void loop();
@@ -46,7 +43,7 @@ public:
     inline void drawMenu() { mGameMenu.draw(); }
 
 private:
-    Model* mModel;
+    Model& mModel;
 
     Controller mController;
     PlayHandler mPlayHandler;

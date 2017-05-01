@@ -14,6 +14,8 @@
 #include "common.h"
 #include "object.h"
 
+#include <memory>
+
 class Flock;
 
 // --------------------------------------------------------------------------
@@ -51,7 +53,7 @@ public:
     void initiateFlocking(FlockMember& other);
 
 protected:
-    Flock* mFlock;
+    std::shared_ptr<Flock> mFlock;
     Coord3<double> mAvoidance;
     int mAvoidCount;
 };

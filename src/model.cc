@@ -14,7 +14,6 @@
 #include "hud.h"
 #include "physics.h"
 
-Model* Model::mInstance = 0;
 Environ* mEnviron;
 
 unsigned int numDead = 0;
@@ -23,10 +22,10 @@ extern double mFramerate;
 Model::Model()
     : mHead(0)
 {
-    (void)new Wall(1, 0, 0, 0);
-    (void)new Wall(0, 1, 0, 0);
-    (void)new Wall(-1, 0, 0, -Screen::maxX());
-    (void)new Wall(0, -1, 0, -Screen::maxY());
+    mWalls.push_back(std::make_shared<Wall>(1, 0, 0, 0));
+    mWalls.push_back(std::make_shared<Wall>(0, 1, 0, 0));
+    mWalls.push_back(std::make_shared<Wall>(-1, 0, 0, -Screen::maxX()));
+    mWalls.push_back(std::make_shared<Wall>(0, -1, 0, -Screen::maxY()));
 }
 
 void Model::addObject(ScreenObject* obj)
@@ -199,12 +198,12 @@ inline void Model::draw(double dt, bool doMove)
     // draw the HUD (Heads-Up-Display)
     //
 
-    HUD::getInstance()->draw();
+    HUD::getInstance().draw();
 
-    static Game* game = Game::getInstance();
+    Game& game = Game::getInstance();
 
-    if (game->getMode() == Game::MENU) {
-        game->drawMenu();
+    if (game.getMode() == Game::MENU) {
+        game.drawMenu();
     }
 
     glPopMatrix();
@@ -213,7 +212,7 @@ inline void Model::draw(double dt, bool doMove)
 
 void Model::setPlayerPos()
 {
-    HUD::getInstance()->update(Global::ship);
+    HUD::getInstance().update(Global::ship);
 }
 
 void Model::startGame() { clearLevel(true); }
@@ -255,7 +254,7 @@ void Model::clearLevel(bool reset)
 
 void Model::update(double dt, bool doMove)
 {
-    Environ::getInstance()->update(dt);
+    Environ::getInstance().update(dt);
     draw(dt, doMove);
     //draw::checkErrors();
 }

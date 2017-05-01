@@ -43,7 +43,7 @@ void Level::operator++(int)
 {
     unsigned int i;
 
-    Model::getInstance()->clearLevel(false);
+    Model::getInstance().clearLevel(false);
 
     level++;
 

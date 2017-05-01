@@ -30,12 +30,12 @@ public:
 
     static inline void init()
     {
-        Config* conf = Config::getInstance();
-        mDisplay = conf->getResolution();
-        mGameArea = conf->getGameArea();
-        fov = conf->getFOV();
-        zn = conf->getZNear();
-        zf = conf->getZFar();
+        Config& conf = Config::getInstance();
+        mDisplay = conf.getResolution();
+        mGameArea = conf.getGameArea();
+        fov = conf.getFOV();
+        zn = conf.getZNear();
+        zf = conf.getZFar();
     }
 
     static Coord2<int> mDisplay, mGameArea;

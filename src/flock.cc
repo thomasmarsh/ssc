@@ -29,7 +29,7 @@ FlockMember::FlockMember(ObjectType type,
                          double x, double y, double z,
                          double fx, double fy, double fz)
     : ScreenObject(type, radius, mass, ms, x, y, z, fx, fy, fz)
-    , mFlock(0)
+    , mFlock(nullptr)
     , mAvoidance(0, 0, 0)
     , mAvoidCount(0)
 {
@@ -40,10 +40,7 @@ void FlockMember::disband()
 {
     if (mFlock) {
         mFlock->disband();
-        if (mFlock->mNumMembers == 0) {
-            delete mFlock;
-        }
-        mFlock = 0;
+        mFlock = nullptr;
     }
 }
 
@@ -97,7 +94,7 @@ void FlockMember::initiateFlocking(FlockMember& other)
 
     // construct a new flock if we don't have one
     if (!mFlock) {
-        mFlock = new Flock();
+        mFlock = std::make_shared<Flock>();
         mFlock->addMember();
     }
 

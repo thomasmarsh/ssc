@@ -16,6 +16,8 @@
 #include "missile.h"
 #include "shield.h"
 
+#include <memory>
+
 const unsigned int MAX_BOGEYS = 400;
 const unsigned int BOGEY_SHIELD_RADIUS = 13;
 const unsigned int BOGEY_RADIUS = 10;
@@ -45,7 +47,7 @@ public:
     double rx, ry;
     Shield shield;
     Explosion<20> explosion;
-    Ray* mRay[BOGEY_NUM_EYES];
+    std::shared_ptr<Ray> mRay[BOGEY_NUM_EYES];
 
     float lr, lg, lb;
     double lx[BOGEY_NUM_EYES], ly[BOGEY_NUM_EYES];

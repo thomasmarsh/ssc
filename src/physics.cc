@@ -1,9 +1,5 @@
 #include "physics.h"
 
-//! The static Environ instance
-
-Environ* Environ::mInstance = 0;
-
 //! Defines the maximum number of contact points we will consider
 
 const unsigned int MAX_CONTACTS = 5;
@@ -13,7 +9,7 @@ void NearCallback(void* data, dGeomID g1, dGeomID g2)
     // Contact point information
     static dContact contact[MAX_CONTACTS];
     // Our environment
-    static Environ* environ = Environ::getInstance();
+    Environ& environ = Environ::getInstance();
     // just a counter used in the loops
     static unsigned int i, numContacts;
     // declare whether object a or b should bounce
@@ -114,8 +110,8 @@ void NearCallback(void* data, dGeomID g1, dGeomID g2)
     // performs the collision response in the next dWorldStep
 
     for (i = 0; i < numContacts; ++i) {
-        dJointID c = dJointCreateContact(environ->mWorld,
-                                         environ->mContactGroup,
+        dJointID c = dJointCreateContact(environ.mWorld,
+                                         environ.mContactGroup,
                                          contact + i);
 
         if (bounce_a && bounce_b) {

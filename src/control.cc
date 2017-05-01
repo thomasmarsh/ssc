@@ -37,10 +37,10 @@ void Controller::keyUp(int keysym)
         mPause = !mPause;
         break;
     case SDLK_r:
-        HUD::getInstance()->toggleRadar();
+        HUD::getInstance().toggleRadar();
         break;
     case SDLK_c:
-        Model::getInstance()->cycleCameraView();
+        Model::getInstance().cycleCameraView();
         break;
     case SDLK_s:
         mSlowMo = !mSlowMo;
@@ -64,7 +64,7 @@ void Controller::keyUp(int keysym)
         mDrawBLINE = !mDrawBLINE;
         break;
     case SDLK_y:
-        Model::getInstance()->clearLevel();
+        Model::getInstance().clearLevel();
         break;
     default:
         mHandler->releaseKey((SDLKey)keysym);

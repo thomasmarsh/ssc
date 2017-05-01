@@ -14,17 +14,14 @@ class Config {
 private:
     friend class ConfigParser;
     Config();
-    static Config* mInstance;
 
 public:
     static void destroy();
 
-    static Config* getInstance()
+    static Config& getInstance()
     {
-        if (!mInstance) {
-            mInstance = new Config;
-        }
-        return mInstance;
+        static Config instance;
+        return instance;
     }
 
     // ------------------------------------------------------------------
