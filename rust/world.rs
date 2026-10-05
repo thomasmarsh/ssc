@@ -1,9 +1,7 @@
 //! The universe is an unbounded grid of quadrants. Each quadrant's contents are a pure
 //! function of (world seed, quadrant id), so they can be regenerated at will.
 
-#[cfg(test)]
-use crate::genome::Weapon;
-use crate::genome::{GenePool, Niche, Species};
+use crate::genome::{GenePool, Niche, Species, Weapon};
 use crate::simulation::BodyKind;
 use bevy::prelude::Vec2;
 use std::f32::consts::TAU;
@@ -112,7 +110,25 @@ pub struct Phenotype {
     pub aggression: f32,
     /// Lean toward (+) or away from (-) heavy objects like asteroids and gravity wells.
     pub mass_affinity: f32,
+    /// How hard the place makes things: creatures here take proportionally less damage
+    /// and hit harder. One at HOME, growing with depth.
+    pub threat: f32,
 }
+
+impl Phenotype {
+    /// Damage multiplier for what a creature fires or rams with.
+    pub fn sharpness(&self) -> f32 {
+        1.0 + 0.6 * (self.threat - 1.0).max(0.0)
+    }
+}
+
+/// How much tougher and deadlier the fauna is at `depth` quadrants from home. One at HOME.
+pub fn threat(depth: f32) -> f32 {
+    1.0 + THREAT_PER_QUADRANT * depth.max(0.0)
+}
+
+/// Threat gained per quadrant of depth.
+const THREAT_PER_QUADRANT: f32 = 0.3;
 
 impl Default for Phenotype {
     fn default() -> Self {
@@ -121,14 +137,18 @@ impl Default for Phenotype {
             sensor_acuity: 1.0,
             aggression: 1.0,
             mass_affinity: 0.0,
+            threat: 1.0,
         }
     }
 }
 
 /// The latent description of a quadrant: a point in a continuous parameter space. All
-/// fields are in [0, 1]. Nothing downstream sees raw coordinates or noise, only this.
+/// fields are in [0, 1] except `depth`. Nothing downstream sees raw coordinates or noise,
+/// only this.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct QuadrantParams {
+    /// Quadrants from home (eased to zero near it). Unbounded; it sets the threat.
+    pub depth: f32,
     /// Grows with distance from the origin; the exploration curve.
     pub danger: f32,
     /// How hostile the local fauna is.
@@ -146,6 +166,7 @@ pub struct QuadrantParams {
 impl QuadrantParams {
     /// Quadrant (0, 0). Every 0.5 is neutral, so the policy yields the original population.
     pub const HOME: Self = Self {
+        depth: 0.0,
         danger: 0.0,
         aggression: 0.5,
         density: 0.5,
@@ -157,6 +178,7 @@ impl QuadrantParams {
     fn lerp(self, other: Self, t: f32) -> Self {
         let mix = |a: f32, b: f32| a + (b - a) * t;
         Self {
+            depth: mix(self.depth, other.depth),
             danger: mix(self.danger, other.danger),
             aggression: mix(self.aggression, other.aggression),
             density: mix(self.density, other.density),
@@ -206,6 +228,10 @@ fn field(seed: u64, channel: u64, at: Vec2) -> f32 {
     ((n - 0.5) * 1.8 + 0.5).clamp(0.0, 1.0)
 }
 
+/// Spatial frequency of the biome noise, per quadrant. Half of the original 0.14, so
+/// regions are twice as wide and a different place takes twice the travel to reach.
+const NOISE_FREQUENCY: f32 = 0.07;
+
 /// Distance from the origin (in quadrants) over which the home neighborhood fades out.
 const HOME_RADIUS: f32 = 1.5;
 
@@ -218,11 +244,12 @@ pub fn latent(seed: u64, id: QuadrantId) -> QuadrantParams {
     let r = q.length();
     let theta = q.y.atan2(q.x);
     let danger = 1.0 - (-r / 5.0).exp();
-    let at = q * 0.14;
+    let at = q * NOISE_FREQUENCY;
     // How much the angular flavor is felt grows with distance.
     let flavor = 1.0 - (-r / 2.0).exp();
     let tint = |base: f32, bias: f32| (base + (bias - 0.5) * 0.7 * flavor).clamp(0.0, 1.0);
     let wild = QuadrantParams {
+        depth: r,
         danger,
         aggression: (field(seed, 1, at) * 0.7 + danger * 0.3).clamp(0.0, 1.0),
         density: field(seed, 2, at),
@@ -232,6 +259,55 @@ pub fn latent(seed: u64, id: QuadrantId) -> QuadrantParams {
     };
     let home = (-(r / HOME_RADIUS).powi(2)).exp();
     wild.lerp(QuadrantParams::HOME, home)
+}
+
+/// What kind of station a base is. Each does a different job and looks different.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BaseKind {
+    /// Breeds the quadrant's fauna and harvests drifting rock for a guardian: organic pods.
+    Hive,
+    /// Tractors in rocks by the hundred and builds guardians; breeds little: industrial arms.
+    Foundry,
+    /// A fortress: no brood, four turrets, thick hull.
+    Bastion,
+    /// Seeds mines around itself and pulses rings of fire.
+    Depot,
+}
+
+impl BaseKind {
+    pub const ALL: [BaseKind; 4] = [Self::Hive, Self::Foundry, Self::Bastion, Self::Depot];
+
+    pub fn hull(self) -> f32 {
+        match self {
+            Self::Hive => 450.0,
+            Self::Foundry => 650.0,
+            Self::Bastion => 800.0,
+            Self::Depot => 550.0,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Hive => "hive",
+            Self::Foundry => "foundry",
+            Self::Bastion => "bastion",
+            Self::Depot => "depot",
+        }
+    }
+}
+
+/// What a drifting rock is made of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RockKind {
+    Plain,
+    /// Brittle; shatters into more pieces and gives up shield charge.
+    Ice,
+    /// Dense and tough; heavy to push, rich in salvage.
+    Ore,
+    /// Volatile: bursts when destroyed, hurting everything near it, and holds surges.
+    Crystal,
+    /// An inhabited shell that hatches creatures when approached or hurt.
+    Husk,
 }
 
 /// An entity to be placed when a quadrant is first loaded.
@@ -254,6 +330,13 @@ pub struct Spawn {
     pub guardian: Option<Species>,
     /// Joins this spawn to an earlier spawn (by index) with a tether.
     pub link: Option<u32>,
+    /// Bases only: what kind of station, and the pattern its turrets (or its depot) fire.
+    pub base_kind: Option<BaseKind>,
+    pub arms: Option<(Weapon, u8)>,
+    /// Asteroids: what it is made of.
+    pub rock: RockKind,
+    /// Husks only: the species inside and how many.
+    pub den: Option<(Species, u8)>,
 }
 
 impl Spawn {
@@ -270,6 +353,10 @@ impl Spawn {
             brood: None,
             guardian: None,
             link: None,
+            base_kind: None,
+            arms: None,
+            rock: RockKind::Plain,
+            den: None,
         }
     }
 
@@ -291,6 +378,11 @@ const NEST_RING_RADIUS: f32 = 130.0;
 const SAFE_RADIUS: f32 = 900.0;
 /// Separates the stream for structures, species choice and exotic fauna from the original one.
 const WILD_SALT: u64 = 0xA11C_E5ED_0000_0001;
+/// Separate streams for station kinds, rock kinds and husks, so adding variety never moves
+/// anything already placed.
+const STATION_SALT: u64 = 0x57A7_1010_0000_0003;
+const ROCK_SALT: u64 = 0x20C4_0000_0000_0005;
+const HUSK_SALT: u64 = 0x4D5C_0000_0000_0007;
 
 /// A quadrant's contents: a pure function of the world seed and its coordinates.
 pub fn generate(seed: u64, id: QuadrantId) -> Vec<Spawn> {
@@ -331,6 +423,7 @@ pub fn compose_with(
     let center = id.center();
     let extent = QUADRANT_SIZE / 2.0 - 250.0;
     let QuadrantParams {
+        depth,
         danger,
         aggression,
         density,
@@ -348,6 +441,7 @@ pub fn compose_with(
         sensor_acuity: 0.5 + tech,
         aggression: 0.5 + aggression,
         mass_affinity: (distortion - 0.5) * 2.0,
+        threat: threat(depth),
     };
 
     let place = |rng: &mut Rng| -> Vec2 {
@@ -445,7 +539,9 @@ pub fn compose_with(
     let above = |p: f32| (p - 0.5).max(0.0);
 
     // Nests: ring-shaped rock shelters with a few grazing creatures of a nesting species.
-    let nest_chance = (0.7 * above(swarm) + 0.3 * danger).min(0.8);
+    // Away from home, hollows are common: the gentler the neighborhood, the fewer.
+    let wildness = (depth / 1.5).min(1.0);
+    let nest_chance = (wildness * (0.3 + 0.7 * above(swarm) + 0.3 * danger)).min(0.85);
     for _ in 0..(wild.chance(nest_chance) as u32 + wild.chance(nest_chance * 0.4) as u32) {
         let heart = place(&mut wild);
         let gap = wild.int(0, NEST_STONES - 1);
@@ -491,10 +587,13 @@ pub fn compose_with(
         };
         let brood = pool.bred(niche, &mut wild);
         let guardian = pool.bred(Niche::Heavy, &mut wild);
+        let (base_kind, arms) = station(seed, id, params);
         out.push(Spawn {
             phenotype: genes,
             brood: Some(brood),
             guardian: Some(guardian),
+            base_kind: Some(base_kind),
+            arms,
             ..Spawn::at(BodyKind::Base, place(&mut wild))
         });
     }
@@ -539,15 +638,158 @@ pub fn compose_with(
         }
     }
 
+    // Inhabited rocks: shells that hatch their tenants when approached or hurt.
+    let mut den = Rng::new(hash2(seed ^ HUSK_SALT, id.x, id.y));
+    let husk_chance = (wildness * (0.25 + 0.5 * danger + 0.4 * above(swarm))).min(0.9);
+    for _ in 0..(den.chance(husk_chance) as u32 + den.chance(husk_chance * 0.35) as u32) {
+        let heart = place(&mut den);
+        let species = pool.any(&mut den);
+        let tenants = den
+            .int(2, 4)
+            .min((MAX_CLUSTER_PARTS / species.genome.parts()).max(1));
+        out.push(Spawn {
+            radius: Some(den.range(44.0, 58.0).min(ASTEROID_MAX_RADIUS)),
+            velocity: den.direction() * den.range(8.0, 25.0),
+            phenotype: genes,
+            rock: RockKind::Husk,
+            den: Some((species, tenants as u8)),
+            ..Spawn::at(BodyKind::Asteroid, heart)
+        });
+    }
+
+    // What each free rock is made of follows the neighborhood. Drawn from a position hash,
+    // not a stream, so HOME's rocks keep their places and only their make-up varies.
     for (index, spawn) in out.iter_mut().enumerate() {
+        if spawn.kind == BodyKind::Asteroid && !spawn.pinned && spawn.rock == RockKind::Plain {
+            let roll = (hash2(
+                seed ^ ROCK_SALT,
+                id.x.wrapping_mul(4099).wrapping_add(index as i32),
+                id.y,
+            ) >> 40) as f32
+                / 16_777_216.0;
+            spawn.rock = rock_for(roll, params);
+        }
         spawn.index = index as u32;
     }
     out
 }
 
+/// Chooses a rock's make-up from a uniform roll. Ice favors calm regions, ore advanced
+/// ones, crystal distorted ones (and never appears at home).
+fn rock_for(roll: f32, params: &QuadrantParams) -> RockKind {
+    let above = |p: f32| (p - 0.5).max(0.0) * 2.0;
+    let wildness = (params.depth / 1.5).min(1.0);
+    let crystal = 0.04 + 0.2 * above(params.distortion);
+    let ice = (0.16 + 0.2 * (1.0 - params.aggression)) * wildness;
+    let ore = (0.12 + 0.2 * above(params.tech) + 0.1 * params.density) * wildness;
+    let crystal = crystal * wildness;
+    if roll < crystal {
+        RockKind::Crystal
+    } else if roll < crystal + ice {
+        RockKind::Ice
+    } else if roll < crystal + ice + ore {
+        RockKind::Ore
+    } else {
+        RockKind::Plain
+    }
+}
+
+/// A new station's kind and what it shoots, from the quadrant's character on its own stream.
+fn station(seed: u64, id: QuadrantId, params: &QuadrantParams) -> (BaseKind, Option<(Weapon, u8)>) {
+    let mut rng = Rng::new(hash2(seed ^ STATION_SALT, id.x, id.y));
+    let above = |p: f32| (p - 0.5).max(0.0) * 2.0;
+    let weights = [
+        1.0 + 2.0 * above(params.swarm),
+        0.6 + 2.0 * above(params.density),
+        0.4 + 2.0 * above(params.tech) + params.danger,
+        0.4 + 2.0 * above(params.distortion) + above(params.aggression),
+    ];
+    let total: f32 = weights.iter().sum();
+    let mut roll = rng.f32() * total;
+    let mut kind = BaseKind::Depot;
+    for (candidate, weight) in BaseKind::ALL.iter().zip(weights) {
+        roll -= weight;
+        if roll < 0.0 {
+            kind = *candidate;
+            break;
+        }
+    }
+    let arms = match kind {
+        BaseKind::Hive | BaseKind::Foundry => None,
+        BaseKind::Depot => Some((Weapon::Nova, rng.int(9, 15) as u8)),
+        BaseKind::Bastion => {
+            let options = [
+                (Weapon::Projectile, 1.0),
+                (Weapon::Missile, 0.2 + above(params.tech)),
+                (
+                    Weapon::Needles,
+                    0.1 + above(params.tech) * (0.3 + params.danger),
+                ),
+                (Weapon::Nova, 0.2 + above(params.aggression)),
+                (
+                    Weapon::Spiral,
+                    0.1 + above(params.aggression) * (0.3 + params.danger),
+                ),
+            ];
+            let total: f32 = options.iter().map(|o| o.1).sum();
+            let mut roll = rng.f32() * total;
+            let mut weapon = Weapon::Projectile;
+            for (candidate, weight) in options {
+                roll -= weight;
+                if roll < 0.0 {
+                    weapon = candidate;
+                    break;
+                }
+            }
+            Some((weapon, crate::genome::volley_for(weapon, &mut rng)))
+        }
+    };
+    (kind, arms)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wild_structures_and_materials_are_diverse_and_repeatable() {
+        let mut stations = [0; 4];
+        let mut rocks = [0; 5];
+        let mut hollows = 0;
+        for x in 3..=12 {
+            for y in 3..=12 {
+                let id = QuadrantId { x, y };
+                let spawns = generate(0x535343, id);
+                assert_eq!(spawns, generate(0x535343, id));
+                for spawn in spawns {
+                    if let Some(kind) = spawn.base_kind {
+                        stations[BaseKind::ALL.iter().position(|k| *k == kind).unwrap()] += 1;
+                    }
+                    if spawn.kind == BodyKind::Asteroid {
+                        let index = match spawn.rock {
+                            RockKind::Plain => 0,
+                            RockKind::Ice => 1,
+                            RockKind::Ore => 2,
+                            RockKind::Crystal => 3,
+                            RockKind::Husk => 4,
+                        };
+                        rocks[index] += 1;
+                    }
+                    hollows += usize::from(spawn.pinned);
+                }
+            }
+        }
+        assert!(stations.iter().all(|n| *n > 0), "{stations:?}");
+        assert!(rocks.iter().all(|n| *n > 0), "{rocks:?}");
+        assert!(
+            rocks[4] >= 20 && hollows >= 160,
+            "inhabited rocks and hollows should be common"
+        );
+        for spawn in generate(0x535343, QuadrantId::ORIGIN) {
+            assert_eq!(spawn.rock, RockKind::Plain);
+            assert!(spawn.base_kind.is_none() && spawn.den.is_none());
+        }
+    }
 
     #[test]
     fn quadrant_math_handles_negative_coordinates() {
@@ -722,6 +964,7 @@ mod tests {
 
     fn wild_params() -> QuadrantParams {
         QuadrantParams {
+            depth: 12.0,
             danger: 0.8,
             aggression: 0.9,
             density: 0.6,

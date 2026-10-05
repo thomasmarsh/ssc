@@ -8,17 +8,24 @@
 mod chain;
 mod creature;
 mod ecology;
+mod loot;
 mod tether;
+pub mod upgrades;
+mod weapons;
 
 pub use chain::{Chain, Part};
-pub use ecology::{BaseState, GUARDIAN_COST};
+pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
+pub use loot::{Notice, Pickup};
 pub use tether::{Tether, TetherKind};
+use upgrades::{Item, Loadout, Stats};
+pub use weapons::{Mine, Shape};
 
 use crate::genome::{Diet, Genome, Species};
 use crate::world::{self, Phenotype, QuadrantId, QuadrantParams, Rng};
+use crate::world::{BaseKind, RockKind};
 use bevy::prelude::Vec2;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::f32::consts::{FRAC_PI_2, TAU};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 const MAX_BULLETS: usize = 512;
 const MAX_EFFECTS: usize = 128;
@@ -34,6 +41,24 @@ const HOME_LEASH: f32 = 800.0;
 /// Enemies this close to a destroyed base lose their bearings for a while.
 const ECOSYSTEM_RADIUS: f32 = 2200.0;
 const PLAYER_SPEED: f32 = 460.0;
+/// A destroyed crystal's burst.
+const CRYSTAL_BLAST: f32 = 150.0;
+const CRYSTAL_DAMAGE: f32 = 30.0;
+/// An inhabited rock hatches when the ship comes this close.
+const HUSK_TRIGGER: f32 = 320.0;
+/// Damage per ram level at a leisurely approach; faster impacts hurt more.
+const RAM_DAMAGE: f32 = 16.0;
+/// Fling strength per level of lunatic field (a Lunatic's own is 1).
+const AURA_FLING: f32 = 0.45;
+/// Spread shots fan this far apart and each carry a share of full damage; flank and
+/// stern guns likewise.
+const SPREAD_ANGLE: f32 = 0.14;
+const SPREAD_SHARE: f32 = 0.7;
+const SIDE_SHARE: f32 = 0.6;
+const NEEDLE_SHARE: f32 = 0.28;
+/// Seekers notice targets this close, and bend this fast per level.
+const SEEK_RANGE: f32 = 650.0;
+const SEEK_TURN: f32 = 2.4;
 /// Health per second a dust-grazing creature recovers.
 const DUST_HEAL: f32 = 1.5;
 /// A body touched by a flinging creature is thrown at least this fast (scaled by the
@@ -66,6 +91,30 @@ pub enum BodyKind {
     BlackHole,
     /// An ecosystem base: immovable, breeds creatures and harvests debris.
     Base,
+}
+
+/// The player's augmentations as the physics sees them; neutral for everything else.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rig {
+    /// Multiplier on damage taken.
+    pub guard: f32,
+    /// Ramming level: contact hurts what the ship touches.
+    pub ram: u8,
+    /// Lunatic field level: what touches the ship is flung.
+    pub aura: u8,
+    /// Gravity wells barely tug and cannot hurt.
+    pub ballast: bool,
+}
+
+impl Default for Rig {
+    fn default() -> Self {
+        Self {
+            guard: 1.0,
+            ram: 0,
+            aura: 0,
+            ballast: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -111,7 +160,13 @@ pub struct Body {
     pub enraged: bool,
     /// False when the body sits in a quadrant outside the active region.
     pub active: bool,
+    pub rig: Rig,
+    /// Asteroids: what the rock is made of, and what lives in a husk.
+    pub rock: RockKind,
+    pub den: Option<(Species, u8)>,
     wander: f32,
+    /// Rotation of a spiral emitter.
+    spin: f32,
     fire_cooldown: f32,
     contact_cooldown: f32,
     since_hit: f32,
@@ -125,6 +180,51 @@ pub struct Bullet {
     pub radius: f32,
     pub friendly: bool,
     pub remaining: f32,
+    pub damage: f32,
+    /// Bodies it can still pass through, how hard it bends toward targets, and the level of
+    /// its burst on impact (friendly shots only).
+    pub pierce: u8,
+    pub homing: u8,
+    pub blast: u8,
+    pub shape: Shape,
+    /// Hostile shots that steer toward the ship, in radians per second.
+    pub seek: f32,
+    /// Radius of the explosion where the shot ends (zero for none).
+    pub burst: f32,
+    /// A friendly shot that reaches it destroys it (missiles).
+    pub fragile: bool,
+    /// Bodies already pierced, so a shot inside one does not strike it every tick.
+    struck: [u64; 4],
+}
+
+impl Bullet {
+    pub fn friendly(position: Vec2, velocity: Vec2, remaining: f32) -> Self {
+        Self {
+            position,
+            velocity,
+            radius: 3.0,
+            friendly: true,
+            remaining,
+            damage: Stats::BASE.damage,
+            pierce: 0,
+            homing: 0,
+            blast: 0,
+            shape: Shape::Pellet,
+            seek: 0.0,
+            burst: 0.0,
+            fragile: false,
+            struck: [0; 4],
+        }
+    }
+
+    pub fn hostile(position: Vec2, velocity: Vec2, remaining: f32, damage: f32) -> Self {
+        Self {
+            radius: 4.0,
+            friendly: false,
+            damage,
+            ..Self::friendly(position, velocity, remaining)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,6 +249,14 @@ pub struct Game {
     pub effects: Vec<Effect>,
     pub tethers: Vec<Tether>,
     pub chains: BTreeMap<u32, Chain>,
+    /// Drops waiting to be collected.
+    pub pickups: Vec<Pickup>,
+    pub mines: Vec<Mine>,
+    /// What is bolted to the ship, and the stats that follow from it.
+    pub loadout: Loadout,
+    pub stats: Stats,
+    /// Recent things worth telling the player about (pickups, wrecks).
+    pub notices: Vec<Notice>,
     pub score: u64,
     pub lives: u32,
     pub game_over: bool,
@@ -158,6 +266,10 @@ pub struct Game {
     pub focus: Vec2,
     seed: u64,
     rng: Rng,
+    /// Loot has its own stream, so drops never disturb the gameplay one.
+    loot: Rng,
+    /// Cooldowns of the ship's missile pods, mine layer and nova pulse.
+    arm_clock: [f32; 3],
     next_id: u64,
     next_chain: u32,
     /// Spawns destroyed so far, per quadrant, so a quadrant reloads as it was left.
@@ -174,6 +286,12 @@ impl Game {
             effects: Vec::with_capacity(MAX_EFFECTS),
             tethers: Vec::new(),
             chains: BTreeMap::new(),
+            pickups: Vec::new(),
+            mines: Vec::new(),
+            arm_clock: [0.0; 3],
+            loadout: Loadout::default(),
+            stats: Stats::BASE,
+            notices: Vec::new(),
             score: 0,
             lives: 3,
             game_over: false,
@@ -182,6 +300,7 @@ impl Game {
             focus: Vec2::ZERO,
             seed,
             rng: Rng::new(seed),
+            loot: Rng::new(seed ^ loot::LOOT_SALT),
             next_id: 1,
             next_chain: 1,
             fallen: HashMap::new(),
@@ -248,19 +367,37 @@ impl Game {
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
         self.stream_quadrants();
+        self.update_loadout(dt);
+        let recharge = self.stats.recharge;
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             body.fire_cooldown = (body.fire_cooldown - dt).max(0.0);
             body.contact_cooldown = (body.contact_cooldown - dt).max(0.0);
             body.panic = (body.panic - dt).max(0.0);
             body.since_hit += dt;
             if body.since_hit > 2.0 {
-                body.shield = (body.shield + dt * 6.0).min(body.max_shield);
+                let rate = if body.kind == BodyKind::Player {
+                    recharge
+                } else {
+                    6.0
+                };
+                body.shield = (body.shield + dt * rate).min(body.max_shield);
             }
             if body.kind == BodyKind::Creature && body.genome.diet == Diet::Dust {
                 body.health = (body.health + dt * DUST_HEAL).min(body.max_health);
             }
         }
         self.control_player(dt, input);
+        self.update_arms(dt, input.fire);
+        if self.stats.shears {
+            // Shears cut a cord the moment it latches.
+            for tether in self
+                .tethers
+                .iter_mut()
+                .filter(|t| t.kind == TetherKind::Latch)
+            {
+                tether.health = 0.0;
+            }
+        }
         self.steer_creatures(dt);
         self.update_bases(dt);
         self.tend_broods(dt);
@@ -286,6 +423,9 @@ impl Game {
         // After contacts, so an impact cannot leave a joint stretched past its limit.
         self.constrain_chains();
         self.move_bullets(dt);
+        self.update_mines(dt);
+        self.update_husks();
+        self.update_pickups(dt);
         self.remove_destroyed();
     }
 
@@ -304,6 +444,12 @@ impl Game {
         }
         self.loaded
             .retain(|id| id.chebyshev_distance(home) <= UNLOAD_DISTANCE);
+        self.mines.retain(|m| {
+            QuadrantId::containing(m.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
+        });
+        self.pickups.retain(|p| {
+            QuadrantId::containing(p.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
+        });
         let loaded = &self.loaded;
         self.bodies.retain(|body| {
             body.kind == BodyKind::Player
@@ -339,6 +485,20 @@ impl Game {
                 body.health = radius * 1.6;
                 body.max_health = body.health;
             }
+            if body.kind == BodyKind::Asteroid {
+                body.rock = spawn.rock;
+                body.den = spawn.den;
+                let (toughness, density) = match spawn.rock {
+                    RockKind::Plain => (1.0, 1.0),
+                    RockKind::Ice => (0.7, 0.8),
+                    RockKind::Ore => (1.6, 2.2),
+                    RockKind::Crystal => (0.55, 1.0),
+                    RockKind::Husk => (1.5, 1.2),
+                };
+                body.health *= toughness;
+                body.max_health = body.health;
+                body.mass *= density;
+            }
             body.velocity = spawn.velocity;
             body.genes = spawn.phenotype;
             body.pinned = spawn.pinned;
@@ -348,7 +508,10 @@ impl Game {
             body.fire_cooldown = 1.0 + self.rng.f32() * 2.0;
             if let (Some(brood), Some(guardian)) = (spawn.brood, spawn.guardian) {
                 let timer = 2.0 + self.rng.f32() * 4.0;
-                body.base = Some(BaseState::new(brood, guardian, timer));
+                let kind = spawn.base_kind.unwrap_or(BaseKind::Hive);
+                body.health = kind.hull();
+                body.max_health = body.health;
+                body.base = Some(BaseState::new(brood, guardian, timer).of_kind(kind, spawn.arms));
             }
             if body.kind == BodyKind::Creature
                 && (body.genome.social == crate::genome::Social::Dweller
@@ -384,9 +547,14 @@ impl Game {
         if radius < MIN_SHARD_RADIUS || self.bodies.len() >= MAX_BODIES {
             return;
         }
-        let pieces = if rock.radius >= 45.0 { 3 } else { 2 };
+        // Ice splinters into more pieces.
+        let pieces =
+            if rock.radius >= 45.0 { 3 } else { 2 } + u32::from(rock.rock == RockKind::Ice);
         let start = self.rng.range(0.0, TAU);
         for piece in 0..pieces {
+            if self.bodies.len() >= MAX_BODIES {
+                break;
+            }
             let angle = start + piece as f32 * TAU / pieces as f32 + self.rng.range(-0.3, 0.3);
             let direction = Vec2::from_angle(angle);
             let mut shard = self.make_body(
@@ -394,7 +562,18 @@ impl Game {
                 rock.position + direction * rock.radius * 0.5,
             );
             shard.radius = radius;
-            shard.mass = radius * 0.6;
+            shard.rock = if rock.rock == RockKind::Husk {
+                RockKind::Plain
+            } else {
+                rock.rock
+            };
+            shard.mass = radius
+                * 0.6
+                * if shard.rock == RockKind::Ore {
+                    2.2
+                } else {
+                    1.0
+                };
             shard.health = radius * 1.6 * 0.8;
             shard.max_health = shard.health;
             shard.velocity = rock.velocity + direction * self.rng.range(70.0, 150.0);
@@ -404,6 +583,7 @@ impl Game {
     }
 
     fn control_player(&mut self, dt: f32, input: Input) {
+        let stats = self.stats;
         let Some(player) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
             return;
         };
@@ -413,7 +593,7 @@ impl Game {
         {
             player.angle = aim.y.atan2(aim.x);
         } else if input.turn.is_finite() {
-            player.angle += input.turn.clamp(-1.0, 1.0) * 3.8 * dt;
+            player.angle += input.turn.clamp(-1.0, 1.0) * stats.turn * dt;
         }
         player.angle = player.angle.rem_euclid(TAU);
         let direction = Vec2::new(player.angle.cos(), player.angle.sin());
@@ -422,24 +602,41 @@ impl Game {
         } else {
             0.0
         };
-        player.velocity += direction * thrust * 430.0 * dt;
+        player.velocity += direction * thrust * stats.thrust * dt;
         player.velocity *= (-dt * if input.brake { 5.0 } else { 0.07 }).exp();
         // Thrust cannot exceed top speed, but a fling is allowed to carry the ship past it
         // and bleeds off smoothly instead of snapping back.
         let speed = player.velocity.length();
-        if speed > PLAYER_SPEED {
-            let kept = PLAYER_SPEED + (speed - PLAYER_SPEED) * (-2.0 * dt).exp();
+        if speed > stats.top_speed {
+            let kept = stats.top_speed + (speed - stats.top_speed) * (-2.0 * dt).exp();
             player.velocity *= kept / speed;
         }
         if input.fire && player.fire_cooldown <= 0.0 && self.bullets.len() < MAX_BULLETS {
-            self.bullets.push(Bullet {
-                position: player.position + direction * (player.radius + 5.0),
-                velocity: player.velocity + direction * 720.0,
-                radius: 3.0,
-                friendly: true,
-                remaining: 1.7,
-            });
-            player.fire_cooldown = 0.16;
+            let (position, velocity, radius) = (player.position, player.velocity, player.radius);
+            // A needler trades rate of fire for a dense burst.
+            player.fire_cooldown = stats.fire_period * if stats.needles > 0 { 1.5 } else { 1.0 };
+            for (offset, share, shape) in volley(&stats, &mut self.rng) {
+                if self.bullets.len() >= MAX_BULLETS {
+                    break;
+                }
+                let aim = Vec2::from_angle(player.angle + offset);
+                let needle = shape == Shape::Needle;
+                let speed = stats.shot_speed * if needle { 1.5 } else { 1.0 };
+                let mut shot = Bullet::friendly(
+                    position + aim * (radius + 5.0),
+                    velocity + aim * speed,
+                    stats.shot_life,
+                );
+                shot.shape = shape;
+                if needle {
+                    shot.radius = 2.0;
+                }
+                shot.damage = stats.damage * share;
+                shot.pierce = stats.pierce;
+                shot.homing = stats.homing;
+                shot.blast = stats.blast;
+                self.bullets.push(shot);
+            }
         }
     }
 
@@ -460,10 +657,11 @@ impl Game {
                 let distance_squared = offset.length_squared();
                 if distance_squared < 550.0 * 550.0 {
                     let pull = offset * (7_000_000.0 / (distance_squared + 2500.0).powf(1.5));
-                    // Negative mass is repelled by gravity.
-                    body.velocity += pull.clamp_length_max(350.0) * dt * mass_sign(body);
+                    // Negative mass is repelled by gravity; ballast mostly shrugs it off.
+                    let ballast = if body.rig.ballast { 0.2 } else { 1.0 };
+                    body.velocity += pull.clamp_length_max(350.0) * dt * mass_sign(body) * ballast;
                     body.velocity = body.velocity.clamp_length_max(650.0);
-                    if distance_squared < (body.radius + 28.0).powi(2) {
+                    if !body.rig.ballast && distance_squared < (body.radius + 28.0).powi(2) {
                         damage(body, 35.0 * dt, invulnerability);
                     }
                 }
@@ -552,12 +750,10 @@ impl Game {
                     }
                 }
                 if a.kind == BodyKind::Player && a.contact_cooldown <= 0.0 {
-                    damage(a, contact_damage(b), invulnerability);
-                    a.contact_cooldown = 0.65;
+                    ram_contact(a, b, closing_speed, invulnerability);
                 }
                 if b.kind == BodyKind::Player && b.contact_cooldown <= 0.0 {
-                    damage(b, contact_damage(a), invulnerability);
-                    b.contact_cooldown = 0.65;
+                    ram_contact(b, a, closing_speed, invulnerability);
                 }
             }
         }
@@ -568,8 +764,32 @@ impl Game {
 
     fn move_bullets(&mut self, dt: f32) {
         let mut impacts = Vec::new();
+        // (where, radius, damage, body already struck, from the ship's side)
+        let mut blasts: Vec<(Vec2, f32, f32, u64, bool)> = Vec::new();
         let cords = self.cord_segments();
+        let ship = self.player().map(|p| p.position);
+        // Seekers home on hostile creatures and bases; gather them only if any are in flight.
+        let targets: Vec<Vec2> = if self.bullets.iter().any(|b| b.friendly && b.homing > 0) {
+            self.bodies
+                .iter()
+                .filter(|b| b.active && matches!(b.kind, BodyKind::Creature | BodyKind::Base))
+                .map(|b| b.position)
+                .collect()
+        } else {
+            Vec::new()
+        };
         for bullet in &mut self.bullets {
+            if bullet.friendly && bullet.homing > 0 {
+                steer_seeker(bullet, &targets, dt);
+            } else if !bullet.friendly
+                && bullet.seek > 0.0
+                && let Some(ship) = ship
+            {
+                let turn = bullet.velocity.angle_to(ship - bullet.position);
+                let limit = bullet.seek * dt;
+                bullet.velocity =
+                    Vec2::from_angle(turn.clamp(-limit, limit)).rotate(bullet.velocity);
+            }
             let previous = bullet.position;
             bullet.position += bullet.velocity * dt;
             bullet.remaining -= dt;
@@ -583,7 +803,7 @@ impl Game {
                         BodyKind::Player | BodyKind::Asteroid | BodyKind::BlackHole
                     )
                 };
-                if !target || body.health <= 0.0 {
+                if !target || body.health <= 0.0 || bullet.struck.contains(&body.id) {
                     continue;
                 }
                 if let Some(fraction) = segment_circle(
@@ -594,6 +814,27 @@ impl Game {
                 ) && hit.is_none_or(|(_, best)| fraction < best)
                 {
                     hit = Some((index, fraction));
+                }
+            }
+            // Mines use the swept path too: a rail particle can cross one in a tick.
+            if bullet.friendly {
+                let mine_hit = self
+                    .mines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| !m.friendly)
+                    .filter_map(|(i, m)| {
+                        segment_circle(previous, bullet.position, m.position, 12.0 + bullet.radius)
+                            .map(|t| (i, t))
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((index, fraction)) = mine_hit
+                    && hit.is_none_or(|(_, body_fraction)| fraction < body_fraction)
+                {
+                    self.mines[index].fuse = Some(self.mines[index].fuse.unwrap_or(0.05).min(0.05));
+                    bullet.remaining = 0.0;
+                    impacts.push(previous.lerp(bullet.position, fraction));
+                    continue;
                 }
             }
             if hit.is_none() && bullet.friendly {
@@ -610,20 +851,112 @@ impl Game {
             }
             if let Some((index, fraction)) = hit {
                 let body = &mut self.bodies[index];
-                damage(
-                    body,
-                    if bullet.friendly { 26.0 } else { 18.0 },
-                    self.player_invulnerability,
-                );
+                damage(body, bullet.damage, self.player_invulnerability);
                 if !is_fixed(body) {
                     body.velocity +=
                         bullet.velocity.normalize_or_zero() * (180.0 / body.mass) * mass_sign(body);
                 }
-                bullet.remaining = 0.0;
-                impacts.push(previous.lerp(bullet.position, fraction));
+                let at = previous.lerp(bullet.position, fraction);
+                if bullet.blast > 0 {
+                    blasts.push((
+                        at,
+                        blast_radius(bullet.blast),
+                        bullet.damage * 0.5,
+                        body.id,
+                        true,
+                    ));
+                }
+                if bullet.burst > 0.0 {
+                    blasts.push((
+                        at,
+                        bullet.burst,
+                        bullet.damage * 0.6,
+                        body.id,
+                        bullet.friendly,
+                    ));
+                    bullet.burst = 0.0;
+                }
+                if bullet.pierce > 0 {
+                    // Passes through, remembering what it struck.
+                    if let Some(slot) = bullet.struck.iter_mut().find(|id| **id == 0) {
+                        *slot = body.id;
+                    }
+                    bullet.pierce -= 1;
+                } else {
+                    bullet.remaining = 0.0;
+                }
+                impacts.push(at);
+            }
+        }
+        // Fragile shots (missiles) are destroyed by any friendly shot that reaches them.
+        let fragile: Vec<usize> = self
+            .bullets
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| !b.friendly && b.fragile && b.remaining > 0.0)
+            .map(|(i, _)| i)
+            .collect();
+        if !fragile.is_empty() {
+            for shooter in 0..self.bullets.len() {
+                if !self.bullets[shooter].friendly || self.bullets[shooter].remaining <= 0.0 {
+                    continue;
+                }
+                for &target in &fragile {
+                    let (a, b) = (&self.bullets[shooter], &self.bullets[target]);
+                    if b.remaining > 0.0
+                        && segment_circle(
+                            (a.position - a.velocity * dt) - (b.position - b.velocity * dt),
+                            a.position - b.position,
+                            Vec2::ZERO,
+                            a.radius + b.radius + 5.0,
+                        )
+                        .is_some()
+                    {
+                        let at = b.position;
+                        let (damage, burst) = (b.damage, b.burst);
+                        self.bullets[target].remaining = 0.0;
+                        self.bullets[target].burst = 0.0;
+                        if burst > 0.0 {
+                            blasts.push((at, burst, damage * 0.6, 0, false));
+                        }
+                        self.bullets[shooter].remaining = 0.0;
+                        impacts.push(at);
+                        break;
+                    }
+                }
+            }
+        }
+        // Shots that run out of flight burst where they end.
+        for bullet in &self.bullets {
+            if bullet.remaining <= 0.0 && bullet.burst > 0.0 {
+                blasts.push((
+                    bullet.position,
+                    bullet.burst,
+                    bullet.damage * 0.6,
+                    0,
+                    bullet.friendly,
+                ));
             }
         }
         self.bullets.retain(|b| b.remaining > 0.0);
+        let invulnerability = self.player_invulnerability;
+        for (at, radius, amount, direct, friendly) in blasts {
+            for body in self
+                .bodies
+                .iter_mut()
+                .filter(|b| b.active && b.id != direct)
+            {
+                if body.position.distance(at) >= radius + body.radius {
+                    continue;
+                }
+                if friendly && body.kind != BodyKind::Player {
+                    damage(body, amount, 0.0);
+                } else if !friendly && body.kind == BodyKind::Player {
+                    damage(body, amount, invulnerability);
+                }
+            }
+            self.effect(at, radius * 0.6, 0.3, EffectKind::Explosion);
+        }
         for position in impacts {
             self.effect(position, 16.0, 0.22, EffectKind::Impact);
         }
@@ -645,16 +978,25 @@ impl Game {
             let (kind, position, radius) = (body.kind, body.position, body.radius);
             self.effect(position, radius * 2.5, 0.65, EffectKind::Explosion);
             self.score = self.score.saturating_add(match kind {
-                BodyKind::Creature => body.genome.bounty as u64,
+                BodyKind::Creature => (body.genome.bounty * body.genes.threat) as u64,
                 BodyKind::Asteroid => 25,
                 BodyKind::Base => 500,
                 _ => 0,
             });
             match kind {
                 BodyKind::Player => lost_player = Some(position),
+                BodyKind::Asteroid if body.rock == RockKind::Crystal => {
+                    // Crystal does not break, it bursts: everything near is hurt, ship included.
+                    self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
+                    self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, true);
+                }
                 BodyKind::Asteroid => self.shatter(body),
                 BodyKind::Base => self.base_destroyed(position),
                 _ => {}
+            }
+            if kind != BodyKind::Player {
+                self.drop_loot(body);
+                self.siphon(body);
             }
             self.record_fallen(body);
         }
@@ -662,6 +1004,7 @@ impl Game {
             self.lives = self.lives.saturating_sub(1);
             self.bullets.retain(|bullet| bullet.friendly);
             self.tethers.retain(|t| t.kind != TetherKind::Latch);
+            self.shed_on_death(position);
             if self.lives == 0 {
                 self.game_over = true;
             } else {
@@ -694,6 +1037,11 @@ impl Game {
         let mut player = self.make_body(BodyKind::Player, position);
         player.angle = FRAC_PI_2;
         self.bodies.push(player);
+        self.refresh_stats();
+        if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
+            ship.health = ship.max_health;
+            ship.shield = ship.max_shield;
+        }
         self.focus = position;
         self.player_invulnerability = 2.5;
         self.effect(position, 50.0, 1.0, EffectKind::Respawn);
@@ -738,7 +1086,11 @@ impl Game {
             species: 0,
             parent: None,
             active: true,
+            rig: Rig::default(),
+            rock: RockKind::Plain,
+            den: None,
             wander: 0.0,
+            spin: 0.0,
             fire_cooldown: 0.0,
             contact_cooldown: 0.0,
             since_hit: 0.0,
@@ -787,7 +1139,7 @@ fn is_hurt(body: &Body) -> bool {
 
 fn contact_damage(body: &Body) -> f32 {
     match body.kind {
-        BodyKind::Creature => body.genome.contact_damage,
+        BodyKind::Creature => body.genome.contact_damage * body.genes.sharpness(),
         BodyKind::BlackHole => 22.0,
         BodyKind::Base => 15.0,
         BodyKind::Asteroid => 12.0,
@@ -797,10 +1149,10 @@ fn contact_damage(body: &Body) -> f32 {
 
 /// How hard a body throws what touches it: the fling gene plus a push for negative mass.
 fn fling_strength(body: &Body) -> f32 {
-    if body.kind == BodyKind::Creature {
-        body.genome.fling_strength()
-    } else {
-        0.0
+    match body.kind {
+        BodyKind::Creature => body.genome.fling_strength(),
+        BodyKind::Player => f32::from(body.rig.aura) * AURA_FLING,
+        _ => 0.0,
     }
 }
 
@@ -819,10 +1171,80 @@ fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) {
     {
         return;
     }
+    // Armor softens what the ship takes; deep-space fauna is simply harder to kill.
+    let amount = match body.kind {
+        BodyKind::Player => amount * body.rig.guard,
+        BodyKind::Creature => amount / body.genes.threat.max(1.0),
+        // Stations are meant to be taken down, so depth toughens them more gently.
+        BodyKind::Base => amount / body.genes.threat.max(1.0).sqrt(),
+        _ => amount,
+    };
     let absorbed = body.shield.min(amount);
     body.shield -= absorbed;
     body.health -= amount - absorbed;
     body.since_hit = 0.0;
+}
+
+/// Contact between the ship and `other`: the ship is hurt unless its lunatic field is on,
+/// and rams whatever it hits when fitted for it.
+fn ram_contact(ship: &mut Body, other: &mut Body, closing_speed: f32, invulnerability: f32) {
+    let harm = if ship.rig.aura > 0 {
+        0.0
+    } else {
+        contact_damage(other)
+    };
+    damage(ship, harm, invulnerability);
+    ship.contact_cooldown = 0.65;
+    if ship.rig.ram > 0 && other.kind != BodyKind::Player {
+        let force = (0.6 + closing_speed.abs() / 400.0).min(1.6);
+        damage(other, RAM_DAMAGE * f32::from(ship.rig.ram) * force, 0.0);
+    }
+}
+
+/// The shots one trigger pull sends out: (angle from the nose, share of full damage).
+fn volley(stats: &Stats, rng: &mut Rng) -> Vec<(f32, f32, Shape)> {
+    let mut shots = if stats.needles > 0 {
+        // Many thin particles in a narrow cone: small each, heavy in mass.
+        (0..5 + 4 * usize::from(stats.needles))
+            .map(|_| (rng.range(-0.07, 0.07), NEEDLE_SHARE, Shape::Needle))
+            .collect()
+    } else {
+        vec![(0.0, 1.0, Shape::Pellet)]
+    };
+    for n in 1..=stats.spread {
+        let fan = f32::from(n) * SPREAD_ANGLE;
+        shots.push((fan, SPREAD_SHARE, Shape::Pellet));
+        shots.push((-fan, SPREAD_SHARE, Shape::Pellet));
+    }
+    for n in 0..stats.broadside {
+        let angle = FRAC_PI_2 + f32::from(n) * FRAC_PI_4;
+        shots.push((angle, SIDE_SHARE, Shape::Pellet));
+        shots.push((-angle, SIDE_SHARE, Shape::Pellet));
+    }
+    if stats.tailgun > 0 {
+        shots.push((PI, SIDE_SHARE, Shape::Pellet));
+    }
+    shots
+}
+
+/// Radius of a friendly shot's burst.
+fn blast_radius(level: u8) -> f32 {
+    40.0 + 25.0 * f32::from(level)
+}
+
+/// Bends a seeker toward the nearest target in front of it, at a rate set by its level.
+fn steer_seeker(bullet: &mut Bullet, targets: &[Vec2], dt: f32) {
+    let heading = bullet.velocity.normalize_or_zero();
+    let best = targets
+        .iter()
+        .map(|&t| t - bullet.position)
+        .filter(|d| d.length() < SEEK_RANGE && heading.dot(d.normalize_or_zero()) > 0.5)
+        .min_by(|a, b| a.length_squared().total_cmp(&b.length_squared()));
+    if let Some(toward) = best {
+        let turn = heading.angle_to(toward);
+        let limit = f32::from(bullet.homing) * SEEK_TURN * dt;
+        bullet.velocity = Vec2::from_angle(turn.clamp(-limit, limit)).rotate(bullet.velocity);
+    }
 }
 
 /// First intersection along a swept projectile, avoiding tunneling at high speeds.
@@ -1197,13 +1619,7 @@ mod tests {
         // A shot from afar agitates it, and a second leaves it near death and berserk.
         let target = body(&game, id).position;
         set_player(&mut game, target - Vec2::new(0.0, 700.0), Vec2::ZERO);
-        let shot = |at: Vec2| Bullet {
-            position: at,
-            velocity: Vec2::ZERO,
-            radius: 3.0,
-            friendly: true,
-            remaining: 1.0,
-        };
+        let shot = |at: Vec2| Bullet::friendly(at, Vec2::ZERO, 1.0);
         game.bullets.push(shot(body(&game, id).position));
         game.step(DT, Input::default());
         game.step(DT, Input::default());
@@ -1253,13 +1669,11 @@ mod tests {
     fn shots_hit_along_their_path_and_drain_shields_first() {
         let mut game = empty_game();
         let id = spawn(&mut game, &Species::bogey(), Vec2::new(100.0, 0.0));
-        game.bullets.push(Bullet {
-            position: Vec2::new(50.0, 0.0),
-            velocity: Vec2::new(4000.0, 0.0),
-            radius: 3.0,
-            friendly: true,
-            remaining: 1.0,
-        });
+        game.bullets.push(Bullet::friendly(
+            Vec2::new(50.0, 0.0),
+            Vec2::new(4000.0, 0.0),
+            1.0,
+        ));
         game.step(0.05, Input::default());
         let target = body(&game, id);
         assert_eq!(target.shield, 0.0);
@@ -1695,13 +2109,11 @@ mod tests {
             stone.health = 20.0;
         }
         let spot = body(&game, target).position;
-        game.bullets.push(Bullet {
-            position: spot - Vec2::new(0.0, 1.0),
-            velocity: Vec2::ZERO,
-            radius: 3.0,
-            friendly: true,
-            remaining: 1.0,
-        });
+        game.bullets.push(Bullet::friendly(
+            spot - Vec2::new(0.0, 1.0),
+            Vec2::ZERO,
+            1.0,
+        ));
         game.step(DT, Input::default());
         assert!(game.bodies.iter().all(|b| b.id != target));
         assert!(

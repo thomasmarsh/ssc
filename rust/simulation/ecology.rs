@@ -4,7 +4,8 @@
 //! scattering in disarray. Grazing and brood-tending are genes any species can carry.
 
 use super::*;
-use crate::genome::Social;
+use crate::genome::{Social, Weapon};
+use crate::world::BaseKind;
 
 /// Most creatures of the brood species a base keeps alive near itself.
 pub const BROOD_CAP: usize = 10;
@@ -30,23 +31,53 @@ const GRAZE_HEAL: f32 = 0.8;
 
 #[derive(Clone, Debug)]
 pub struct BaseState {
+    pub kind: BaseKind,
     pub brood: Species,
     pub guardian: Species,
     /// Harvested material waiting to become something heavy.
     pub stock: f32,
+    /// Bastions and depots: the pattern fired and its size.
+    pub arms: Option<(Weapon, u8)>,
+    /// Cooldowns of the four turrets, and of a depot's mine seeding.
+    pub turrets: [f32; 4],
+    pub seeding: f32,
+    spin: f32,
     timer: f32,
 }
 
 impl BaseState {
+    /// A hive: the all-round station that breeds and harvests.
     pub fn new(brood: Species, guardian: Species, timer: f32) -> Self {
         Self {
+            kind: BaseKind::Hive,
             brood,
             guardian,
             stock: 0.0,
+            arms: None,
+            turrets: [1.0, 2.0, 3.0, 4.0],
+            seeding: 3.0,
+            spin: 0.0,
             timer,
         }
     }
+
+    pub fn of_kind(mut self, kind: BaseKind, arms: Option<(Weapon, u8)>) -> Self {
+        self.kind = kind;
+        self.arms = arms;
+        self
+    }
 }
+
+/// Turrets sit on the diagonals of a bastion, at this fraction of its radius.
+pub const TURRET_ANGLES: [f32; 4] = [
+    std::f32::consts::FRAC_PI_4,
+    3.0 * std::f32::consts::FRAC_PI_4,
+    5.0 * std::f32::consts::FRAC_PI_4,
+    7.0 * std::f32::consts::FRAC_PI_4,
+];
+const TURRET_REACH: f32 = 1250.0;
+const DEPOT_SIGHT: f32 = 2000.0;
+const DEPOT_NOVA_RANGE: f32 = 1000.0;
 
 /// A free, small rock: food for bases and grazers alike.
 pub(super) fn edible(body: &Body) -> bool {
@@ -67,15 +98,25 @@ impl Game {
             };
             let (center, genes) = (self.bodies[index].position, self.bodies[index].genes);
             let reach = self.bodies[index].radius;
+            let kind = self.bodies[index]
+                .base
+                .as_ref()
+                .map_or(BaseKind::Hive, |b| b.kind);
+            // Foundries haul rock in from afar; bastions and depots do not bother.
+            let (harvest_range, harvest_pull, haul) = match kind {
+                BaseKind::Hive => (HARVEST_RANGE, HARVEST_PULL, 1.0),
+                BaseKind::Foundry => (HARVEST_RANGE * 1.7, HARVEST_PULL * 1.4, 1.8),
+                BaseKind::Bastion | BaseKind::Depot => (0.0, 0.0, 0.0),
+            };
             let mut absorbed = 0.0;
             let mut taken = Vec::new();
             for rock in self.bodies.iter_mut().filter(|b| b.active && edible(b)) {
                 let offset = center - rock.position;
                 let distance = offset.length();
-                if distance > HARVEST_RANGE {
+                if distance > harvest_range {
                     continue;
                 }
-                rock.velocity += offset / distance.max(1.0) * HARVEST_PULL * dt;
+                rock.velocity += offset / distance.max(1.0) * harvest_pull * dt;
                 rock.velocity = rock.velocity.clamp_length_max(160.0);
                 // Collisions hold a rock just outside contact, so allow a small margin.
                 if distance < reach + rock.radius + 6.0 {
@@ -90,13 +131,20 @@ impl Game {
             let Some(state) = self.bodies[index].base.as_mut() else {
                 continue;
             };
-            state.stock += absorbed + PASSIVE_STOCK * dt;
+            state.stock += absorbed * haul + PASSIVE_STOCK * dt;
             state.timer -= dt;
             let (brood, guardian) = (state.brood, state.guardian);
-            let birth = state.timer <= 0.0;
+            let breeds: f32 = match kind {
+                BaseKind::Hive => 1.0,
+                BaseKind::Foundry => 0.45,
+                BaseKind::Depot => 0.5,
+                BaseKind::Bastion => 0.0,
+            };
+            let birth = state.timer <= 0.0 && breeds > 0.0;
             let build = state.stock >= GUARDIAN_COST;
-            if birth {
-                state.timer = BIRTH_PERIOD / genes.aggression.max(0.3) * self.rng.range(0.8, 1.2);
+            if state.timer <= 0.0 {
+                state.timer = BIRTH_PERIOD / (genes.aggression.max(0.3) * breeds.max(0.2))
+                    * self.rng.range(0.8, 1.2);
             }
             if build {
                 state.stock -= GUARDIAN_COST;
@@ -115,9 +163,119 @@ impl Game {
             if birth && local(self, &brood) < BROOD_CAP {
                 self.spawn_creature(&brood, center, genes);
             }
-            if build && local(self, &guardian) < GUARDIAN_CAP {
+            let guardians = if kind == BaseKind::Foundry {
+                GUARDIAN_CAP + 2
+            } else {
+                GUARDIAN_CAP
+            };
+            if build && local(self, &guardian) < guardians {
                 self.spawn_creature(&guardian, center, genes);
                 self.effect(center, 70.0, 0.6, EffectKind::Respawn);
+            }
+            self.station_arms(id, dt);
+        }
+    }
+
+    /// A bastion's turrets track and fire; a depot seeds mines and pulses rings.
+    fn station_arms(&mut self, id: u64, dt: f32) {
+        let Some(target) = self.player().map(|p| p.position) else {
+            return;
+        };
+        let Some(index) = self.bodies.iter().position(|b| b.id == id) else {
+            return;
+        };
+        let (center, radius, sharpness) = (
+            self.bodies[index].position,
+            self.bodies[index].radius,
+            self.bodies[index].genes.sharpness(),
+        );
+        let aggression = self.bodies[index].genes.aggression.max(0.3);
+        self.bodies[index].angle = (target - center).to_angle();
+        let Some(state) = self.bodies[index].base.as_mut() else {
+            return;
+        };
+        let Some((weapon, volley)) = state.arms else {
+            return;
+        };
+        let distance = center.distance(target);
+        let mut shots: Vec<(Vec2, Weapon, f32)> = Vec::new();
+        match state.kind {
+            BaseKind::Bastion => {
+                for (turret, angle) in state.turrets.iter_mut().zip(TURRET_ANGLES) {
+                    *turret -= dt;
+                    if *turret <= 0.0 && distance < TURRET_REACH {
+                        let origin = center + Vec2::from_angle(angle) * radius * 0.95;
+                        *turret = 2.4 * weapons::pace(weapon) / aggression;
+                        shots.push((origin, weapon, state.spin));
+                        state.spin += 0.5;
+                    }
+                }
+            }
+            BaseKind::Depot => {
+                state.seeding -= dt;
+                state.turrets[0] -= dt;
+                if state.seeding <= 0.0 && distance < DEPOT_SIGHT {
+                    state.seeding = 7.0 / aggression;
+                    shots.push((center, Weapon::Mine, 0.0));
+                }
+                if state.turrets[0] <= 0.0 && distance < DEPOT_NOVA_RANGE {
+                    state.turrets[0] = 4.5 / aggression;
+                    shots.push((center, weapon, 0.0));
+                }
+            }
+            BaseKind::Hive | BaseKind::Foundry => {}
+        }
+        for (origin, weapon, spin) in shots {
+            let aim = (target - origin).normalize_or_zero();
+            let muzzle = weapons::Muzzle {
+                origin,
+                aim,
+                velocity: Vec2::ZERO,
+                reach: TURRET_REACH,
+                shot_speed: 380.0,
+                sharpness,
+            };
+            let count = if weapon == Weapon::Mine { 3 } else { volley };
+            self.discharge(weapon, count, &muzzle, spin);
+        }
+    }
+
+    /// Husks crack open when the ship comes near or they are hurt, and their tenants pour
+    /// out already hunting.
+    pub(super) fn update_husks(&mut self) {
+        let ship = self.player().map(|p| p.position);
+        let mut hatching = Vec::new();
+        for body in self
+            .bodies
+            .iter_mut()
+            .filter(|b| b.active && b.den.is_some())
+        {
+            let provoked = body.health < body.max_health;
+            let near = ship.is_some_and(|p| p.distance(body.position) < HUSK_TRIGGER);
+            if (provoked || near)
+                && let Some((species, count)) = body.den.take()
+            {
+                body.rock = RockKind::Plain;
+                hatching.push((body.position, body.radius, body.genes, species, count));
+            }
+        }
+        for (position, radius, genes, species, count) in hatching {
+            self.effect(position, radius * 2.5, 0.5, EffectKind::Explosion);
+            for k in 0..count {
+                if self.bodies.len() + species.genome.parts() as usize >= MAX_BODIES {
+                    break;
+                }
+                let direction = Vec2::from_angle(
+                    k as f32 * TAU / f32::from(count.max(1)) + self.rng.range(-0.4, 0.4),
+                );
+                let mut body = self.make_creature(&species, position + direction * (radius + 30.0));
+                body.velocity = direction * 140.0;
+                body.genes = genes;
+                body.alert = true;
+                body.wander = direction.y.atan2(direction.x);
+                body.angle = body.wander;
+                body.fire_cooldown = 0.6 + self.rng.f32();
+                self.add_body(body);
             }
         }
     }
@@ -307,6 +465,133 @@ mod tests {
                     && b.position.distance(Vec2::new(0.0, 2000.0)) < 1100.0
             })
             .count()
+    }
+
+    #[test]
+    fn station_kinds_breed_harvest_and_fire_differently() {
+        for kind in BaseKind::ALL {
+            let (mut game, id) = base_game(Species::bogey(), 0.0);
+            game.teleport(Vec2::new(0.0, 1600.0));
+            let base = game
+                .bodies
+                .iter_mut()
+                .find(|b| b.id == id)
+                .unwrap()
+                .base
+                .as_mut()
+                .unwrap();
+            base.kind = kind;
+            base.arms = match kind {
+                BaseKind::Bastion => Some((Weapon::Missile, 2)),
+                BaseKind::Depot => Some((Weapon::Nova, 12)),
+                _ => None,
+            };
+            base.turrets = [0.0; 4];
+            base.seeding = 0.0;
+            game.update_bases(DT);
+            if kind == BaseKind::Bastion {
+                assert_eq!(near(&game, Species::bogey()), 0);
+                assert_eq!(game.bullets.len(), 8);
+                assert!(game.bullets.iter().all(|b| b.shape == Shape::Missile));
+            } else {
+                assert_eq!(near(&game, Species::bogey()), 1);
+            }
+            if kind == BaseKind::Depot {
+                assert_eq!(game.mines.len(), 3);
+                assert_eq!(game.bullets.len(), 12);
+            }
+            if matches!(kind, BaseKind::Hive | BaseKind::Foundry) {
+                assert!(game.bullets.is_empty() && game.mines.is_empty());
+            }
+        }
+        let haul = |kind| {
+            let (mut game, id) = base_game(Species::bogey(), 1e6);
+            game.bodies
+                .iter_mut()
+                .find(|b| b.id == id)
+                .unwrap()
+                .base
+                .as_mut()
+                .unwrap()
+                .kind = kind;
+            let rock = add(&mut game, BodyKind::Asteroid, Vec2::new(0.0, 2000.0));
+            game.bodies
+                .iter_mut()
+                .find(|b| b.id == rock)
+                .unwrap()
+                .radius = 20.0;
+            game.update_bases(DT);
+            body(&game, id).base.as_ref().unwrap().stock
+        };
+        assert!(haul(BaseKind::Foundry) > haul(BaseKind::Hive));
+        assert!(haul(BaseKind::Depot) < 1.0);
+    }
+
+    #[test]
+    fn every_station_can_be_shot_down_and_stays_destroyed_on_return() {
+        for kind in BaseKind::ALL {
+            let seed = 0x535343;
+            let quadrant = crate::simulation::tests::find_quadrant(seed, |spawns| {
+                spawns.iter().any(|s| s.base_kind == Some(kind))
+            });
+            let mut game = Game::new(seed);
+            game.teleport(quadrant.center());
+            game.step(DT, Input::default());
+            let station = game
+                .bodies
+                .iter()
+                .find(|b| b.base.as_ref().is_some_and(|s| s.kind == kind))
+                .unwrap();
+            let (id, at, origin) = (station.id, station.position, station.origin);
+            game.teleport(at + Vec2::X * 300.0);
+            game.step(DT, Input::default());
+            let station = body(&game, id);
+            let mut shot = Bullet::friendly(
+                station.position + Vec2::X * (station.radius + 10.0),
+                -Vec2::X * 2000.0,
+                1.0,
+            );
+            shot.damage = (station.max_health + station.max_shield + 1.0)
+                * station.genes.threat.max(1.0).sqrt();
+            game.bullets.push(shot);
+            game.step(DT, Input::default());
+            assert!(game.body(id).is_none(), "{kind:?} survived");
+            assert!(game.pickups.iter().any(|p| matches!(p.item, Item::Part(_))));
+            game.teleport(at + Vec2::X * 7.0 * world::QUADRANT_SIZE);
+            game.step(DT, Input::default());
+            game.teleport(at);
+            game.step(DT, Input::default());
+            assert!(game.bodies.iter().all(|b| b.origin != origin));
+        }
+    }
+
+    #[test]
+    fn inhabited_rocks_hatch_on_approach_or_damage_including_a_lethal_hit() {
+        for (distance, damage_amount) in [(200.0, 0.0), (700.0, 1.0), (700.0, 1000.0)] {
+            let mut game = empty_game();
+            let id = add(&mut game, BodyKind::Asteroid, Vec2::Y * distance);
+            let rock = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+            rock.rock = RockKind::Husk;
+            rock.den = Some((Species::bogey(), 3));
+            damage(rock, damage_amount, 0.0);
+            game.step(DT, Input::default());
+            assert_eq!(
+                game.bodies
+                    .iter()
+                    .filter(|b| b.kind == BodyKind::Creature)
+                    .count(),
+                3
+            );
+            assert!(game.bodies.iter().all(|b| b.den.is_none()));
+            game.step(DT, Input::default());
+            assert_eq!(
+                game.bodies
+                    .iter()
+                    .filter(|b| b.kind == BodyKind::Creature)
+                    .count(),
+                3
+            );
+        }
     }
 
     #[test]

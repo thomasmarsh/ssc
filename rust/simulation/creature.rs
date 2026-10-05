@@ -347,22 +347,7 @@ impl Game {
             let period = (g.fire_period + (body.id % 7) as f32 * 0.13) * pace
                 / body.genes.aggression.max(0.2);
             match g.weapon {
-                Weapon::Projectile => {
-                    let range = g.weapon_range * if body.enraged { 1.1875 } else { 1.0 };
-                    if distance < range && self.bullets.len() < MAX_BULLETS {
-                        let origin = body.position + direction * (body.radius + 5.0);
-                        let velocity = direction * g.shot_speed + body.velocity * 0.3;
-                        let remaining = g.weapon_range * 1.5 / g.shot_speed;
-                        self.bullets.push(Bullet {
-                            position: origin,
-                            velocity,
-                            radius: 4.0,
-                            friendly: false,
-                            remaining,
-                        });
-                        self.bodies[index].fire_cooldown = period;
-                    }
-                }
+                Weapon::None => {}
                 Weapon::Tether => {
                     let id = body.id;
                     if (TETHER_MIN_RANGE..g.weapon_range).contains(&distance)
@@ -378,7 +363,23 @@ impl Game {
                         self.bodies[index].fire_cooldown = g.fire_period;
                     }
                 }
-                Weapon::None => {}
+                weapon => {
+                    let range = g.weapon_range * if body.enraged { 1.1875 } else { 1.0 };
+                    if distance < range && self.bullets.len() < MAX_BULLETS {
+                        let muzzle = weapons::Muzzle {
+                            origin: body.position + direction * (body.radius + 5.0),
+                            aim: direction,
+                            velocity: body.velocity,
+                            reach: g.weapon_range,
+                            shot_speed: g.shot_speed,
+                            sharpness: body.genes.sharpness(),
+                        };
+                        let spin = body.spin;
+                        let spun = self.discharge(weapon, g.volley, &muzzle, spin);
+                        self.bodies[index].spin = spun;
+                        self.bodies[index].fire_cooldown = period * weapons::pace(weapon);
+                    }
+                }
             }
         }
     }

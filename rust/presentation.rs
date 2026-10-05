@@ -2,8 +2,9 @@
 use crate::Session;
 use bevy::{camera::ScalingMode, prelude::*};
 use ssc::genome::{Trigger, Weapon};
-use ssc::simulation::{Body, BodyKind, GUARDIAN_COST, TetherKind};
-use ssc::world::{QUADRANT_SIZE, hash2};
+use ssc::simulation::upgrades::{Item, Rarity, Slot};
+use ssc::simulation::{Body, BodyKind, GUARDIAN_COST, Game, Pickup, Shape, TetherKind};
+use ssc::world::{BaseKind, QUADRANT_SIZE, RockKind, hash2};
 
 /// World units visible top to bottom. Width follows the window's aspect ratio.
 pub const VIEW_HEIGHT: f32 = 900.0;
@@ -19,6 +20,15 @@ pub struct Hud;
 pub struct Overlay;
 #[derive(Component)]
 pub struct Legend;
+/// One line of the pickup feed (newest last), a span so each can take its rarity's color.
+#[derive(Component)]
+pub struct FeedLine(usize);
+/// One line of the ship panel: the five slots, then up to five running surges.
+#[derive(Component)]
+pub struct RigLine(usize);
+
+const FEED_LINES: usize = 5;
+const SURGE_LINES: usize = 5;
 
 pub fn setup(mut commands: Commands) {
     commands.spawn((
@@ -73,6 +83,49 @@ pub fn setup(mut commands: Commands) {
             ..default()
         },
     ));
+    commands
+        .spawn((
+            Text::new(""),
+            TextFont::from_font_size(14.0),
+            TextLayout::justify(Justify::Center),
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                bottom: px(70),
+                ..default()
+            },
+        ))
+        .with_children(|feed| {
+            for line in 0..FEED_LINES {
+                feed.spawn((
+                    FeedLine(line),
+                    TextSpan::new(""),
+                    TextFont::from_font_size(14.0),
+                    TextColor(MUTED),
+                ));
+            }
+        });
+    commands
+        .spawn((
+            Text::new(""),
+            TextFont::from_font_size(13.0),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(28),
+                top: px(150),
+                ..default()
+            },
+        ))
+        .with_children(|panel| {
+            for line in 0..Slot::ALL.len() + SURGE_LINES {
+                panel.spawn((
+                    RigLine(line),
+                    TextSpan::new(""),
+                    TextFont::from_font_size(13.0),
+                    TextColor(MUTED),
+                ));
+            }
+        });
     commands.spawn((
         Legend,
         Text::new(""),
@@ -90,8 +143,65 @@ pub fn setup(mut commands: Commands) {
 
 type LegendOnly = (With<Legend>, Without<Hud>, Without<Overlay>);
 
+fn rarity_color(rarity: Rarity) -> Color {
+    let [r, g, b] = rarity.color();
+    Color::srgb(r, g, b)
+}
+
+/// How the ship's power compares with what the quadrant's fauna asks of it.
+fn standing(power: f32, threat: f32) -> &'static str {
+    let ratio = power / threat.powf(0.8);
+    if ratio < 0.6 {
+        "OUTCLASSED - turn back"
+    } else if ratio < 0.85 {
+        "UNDERPOWERED"
+    } else if ratio < 1.3 {
+        "EVEN"
+    } else {
+        "STRONG"
+    }
+}
+
+/// Text for the ship panel lines: slot contents, then running surges.
+fn rig_lines(game: &Game) -> Vec<(String, Color)> {
+    let mut lines = Vec::new();
+    for slot in Slot::ALL {
+        let parts: Vec<_> = game.loadout.in_slot(slot).collect();
+        let best = parts.iter().map(|p| p.rarity).max();
+        let names = if parts.is_empty() {
+            format!("- empty ({} max)", slot.capacity())
+        } else {
+            parts
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        };
+        lines.push((
+            format!("{:<8}{}\n", slot.label().to_uppercase(), names),
+            best.map_or(Color::srgb(0.25, 0.33, 0.42), rarity_color),
+        ));
+    }
+    for index in 0..SURGE_LINES {
+        lines.push(match game.loadout.surges.get(index) {
+            Some(surge) => (
+                format!(
+                    "{:<16}{:>3.0}s\n",
+                    surge.name.to_uppercase(),
+                    surge.remaining
+                ),
+                rarity_color(surge.rarity),
+            ),
+            None => (String::new(), MUTED),
+        });
+    }
+    lines
+}
+
 pub fn update_hud(
     session: Res<Session>,
+    mut feed: Query<(&mut TextSpan, &mut TextColor, &FeedLine), Without<RigLine>>,
+    mut rig: Query<(&mut TextSpan, &mut TextColor, &RigLine), Without<FeedLine>>,
     mut hud: Single<&mut Text, (With<Hud>, Without<Overlay>)>,
     mut overlay: Single<&mut Text, (With<Overlay>, Without<Hud>)>,
     mut legend: Single<&mut Text, LegendOnly>,
@@ -122,12 +232,9 @@ pub fn update_hud(
     }
     let quadrant = game.quadrant();
     let params = game.params();
-    let (health, shield) = game.player().map_or((0.0, 0.0), |ship| {
-        (
-            100.0 * ship.health / ship.max_health,
-            100.0 * ship.shield / ship.max_shield,
-        )
-    });
+    let (health, shield) = game
+        .player()
+        .map_or((0.0, 0.0), |ship| (ship.health, ship.shield));
     let flags = [
         game.tethered()
             .then_some("   /   TETHERED - shoot the cord or break away"),
@@ -136,8 +243,9 @@ pub fn update_hud(
     .into_iter()
     .flatten()
     .collect::<String>();
+    let (power, threat) = (game.power(), game.threat());
     let status = format!(
-        "QUADRANT ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}\nHULL {:3.0}%   SHIELD {:3.0}%   LIVES {}{}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
+        "QUADRANT ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
         quadrant.x,
         quadrant.y,
         game.active_enemies(),
@@ -146,6 +254,9 @@ pub fn update_hud(
         shield,
         game.lives,
         flags,
+        power,
+        threat,
+        standing(power, threat),
         100.0 * params.danger,
         100.0 * params.aggression,
         100.0 * params.density,
@@ -155,6 +266,36 @@ pub fn update_hud(
     );
     if hud.0 != status {
         hud.0 = status;
+    }
+    let now = rig_lines(game);
+    for (mut span, mut color, line) in &mut rig {
+        if let Some((text, tint)) = now.get(line.0) {
+            if span.0 != *text {
+                span.0 = text.clone();
+            }
+            color.0 = *tint;
+        }
+    }
+    let count = game.notices.len();
+    for (mut span, mut color, line) in &mut feed {
+        // Newest at the bottom; older lines sit above and fade as they expire.
+        let shown = (line.0 + count)
+            .checked_sub(FEED_LINES)
+            .and_then(|i| game.notices.get(i));
+        match shown {
+            Some(notice) => {
+                let text = format!("{}\n", notice.text);
+                if span.0 != text {
+                    span.0 = text;
+                }
+                color.0 = rarity_color(notice.rarity).with_alpha(notice.remaining.min(1.0));
+            }
+            None => {
+                if !span.0.is_empty() {
+                    span.0.clear();
+                }
+            }
+        }
     }
     let message = if game.game_over {
         format!(
@@ -168,6 +309,166 @@ pub fn update_hud(
     };
     if overlay.0 != message {
         overlay.0 = message;
+    }
+}
+
+fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
+    let (p, r) = (body.position, body.radius);
+    let Some(base) = &body.base else { return };
+    let stock = (base.stock / GUARDIAN_COST).clamp(0.0, 1.0);
+    match base.kind {
+        BaseKind::Hive => {
+            // A living cluster, with six brood chambers around a soft central hull.
+            gizmos.circle_2d(p, r * 0.58, color).resolution(18);
+            for k in 0..6 {
+                let d = Vec2::from_angle(k as f32 * std::f32::consts::TAU / 6.0);
+                let pod = p + d * r * 0.66;
+                let pulse = 1.0 + 0.05 * (time * 2.0 + k as f32).sin();
+                gizmos
+                    .circle_2d(pod, r * 0.32 * pulse, color)
+                    .resolution(14);
+                gizmos
+                    .circle_2d(pod, r * 0.12, color.with_alpha(0.5))
+                    .resolution(8);
+            }
+        }
+        BaseKind::Foundry => {
+            // A square furnace and long forked intake arms.
+            gizmos.rect_2d(p, Vec2::splat(r * 1.15), color);
+            gizmos.rect_2d(p, Vec2::splat(r * 0.78), color.with_alpha(0.5));
+            for k in 0..4 {
+                let d = Vec2::from_angle(k as f32 * std::f32::consts::FRAC_PI_2);
+                let s = Vec2::new(-d.y, d.x);
+                for sign in [-1.0, 1.0] {
+                    gizmos.linestrip_2d(
+                        [
+                            p + d * r * 0.5 + s * sign * r * 0.22,
+                            p + d * r * 0.97 + s * sign * r * 0.22,
+                            p + d * r * 0.97 + s * sign * r * 0.4,
+                        ],
+                        color,
+                    );
+                }
+            }
+        }
+        BaseKind::Bastion => {
+            // Armored octagon; barrels use the same fixed mounts as the simulation.
+            gizmos.lineloop_2d(
+                (0..8).map(|k| p + Vec2::from_angle(k as f32 * std::f32::consts::TAU / 8.0) * r),
+                color,
+            );
+            gizmos.rect_2d(p, Vec2::splat(r * 0.9), color);
+            for angle in ssc::simulation::TURRET_ANGLES {
+                let mount = p + Vec2::from_angle(angle) * r * 0.95;
+                let aim = Vec2::from_angle(body.angle);
+                gizmos.circle_2d(mount, r * 0.16, color).resolution(8);
+                gizmos.line_2d(mount, mount + aim * r * 0.4, color);
+            }
+        }
+        BaseKind::Depot => {
+            // A radial magazine of mine canisters and a slowly turning ring emitter.
+            gizmos.circle_2d(p, r * 0.65, color).resolution(24);
+            for k in 0..8 {
+                let d = Vec2::from_angle(k as f32 * std::f32::consts::TAU / 8.0);
+                let canister = p + d * r * 0.85;
+                gizmos.line_2d(p + d * r * 0.45, canister, color);
+                gizmos.rect_2d(canister, Vec2::splat(r * 0.25), color);
+            }
+            gizmos.lineloop_2d(
+                (0..3).map(|k| {
+                    p + Vec2::from_angle(time * 0.5 + k as f32 * std::f32::consts::TAU / 3.0)
+                        * r
+                        * 0.45
+                }),
+                color,
+            );
+        }
+    }
+    gizmos
+        .circle_2d(p, r * (0.1 + 0.15 * stock), Color::srgb(1.0, 0.7, 0.3))
+        .resolution(16);
+    // A stable hull bar makes damage and the station's eventual destruction legible.
+    let left = p + Vec2::new(-r, r * 1.35);
+    gizmos.line_2d(left, left + Vec2::X * r * 2.0, color.with_alpha(0.2));
+    gizmos.line_2d(
+        left,
+        left + Vec2::X * r * 2.0 * (body.health / body.max_health).clamp(0.0, 1.0),
+        color,
+    );
+}
+
+fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
+    let (p, r) = (body.position, body.radius);
+    let tint = match body.rock {
+        RockKind::Plain => color,
+        RockKind::Ice => Color::srgb(0.5, 0.85, 1.0),
+        RockKind::Ore => Color::srgb(0.8, 0.58, 0.3),
+        RockKind::Crystal => Color::srgb(0.8, 0.4, 1.0),
+        RockKind::Husk => Color::srgb(0.55, 0.85, 0.45),
+    };
+    let sides = match body.rock {
+        RockKind::Crystal => 6,
+        RockKind::Ice => 7,
+        _ => 8 + (body.id % 5) as u32,
+    };
+    let corner = |k: u32| {
+        let angle = body.angle + k as f32 * std::f32::consts::TAU / sides as f32;
+        let uneven = 0.75 + ((body.id + k as u64 * 13) % 9) as f32 * 0.028;
+        p + Vec2::from_angle(angle) * r * uneven
+    };
+    gizmos.lineloop_2d((0..sides).map(corner), tint);
+    match body.rock {
+        RockKind::Plain => {
+            let d = Vec2::from_angle(body.angle);
+            gizmos
+                .circle_2d(p + d * r * 0.3, r * 0.18, tint.with_alpha(0.35))
+                .resolution(7);
+            gizmos.line_2d(
+                p - d * r * 0.5,
+                p + Vec2::new(-d.y, d.x) * r * 0.35,
+                tint.with_alpha(0.3),
+            );
+        }
+        RockKind::Ice | RockKind::Crystal => {
+            let glow = if body.rock == RockKind::Crystal {
+                0.5 + 0.2 * (time * 3.0).sin()
+            } else {
+                0.35
+            };
+            for k in 0..sides {
+                gizmos.line_2d(p, corner(k), tint.with_alpha(glow));
+            }
+            gizmos.lineloop_2d((0..sides).map(|k| p + (corner(k) - p) * 0.45), tint);
+        }
+        RockKind::Ore => {
+            for k in 0..3 {
+                let d = Vec2::from_angle(body.angle + k as f32 * 2.1);
+                gizmos.linestrip_2d(
+                    [
+                        p + d * r * 0.75,
+                        p + d * r * 0.22,
+                        p + Vec2::new(-d.y, d.x) * r * 0.4,
+                    ],
+                    tint.with_alpha(0.7),
+                );
+            }
+        }
+        RockKind::Husk => {
+            // A dark hollow mouth and twitching feelers advertise the inhabitants.
+            gizmos.circle_2d(p, r * 0.48, tint).resolution(9);
+            for k in 0..3 {
+                let d = Vec2::from_angle(body.angle + k as f32 * 2.1);
+                let s = Vec2::new(-d.y, d.x);
+                gizmos.linestrip_2d(
+                    [
+                        p + d * r * 0.25,
+                        p + d * r * 0.55,
+                        p + d * r * 0.8 + s * r * 0.12 * (time * 4.0 + k as f32).sin(),
+                    ],
+                    tint,
+                );
+            }
+        }
     }
 }
 
@@ -209,6 +510,7 @@ pub fn draw(
                 let left = p - direction * r + side * r;
                 let right = p - direction * r - side * r;
                 gizmos.linestrip_2d([tip, left, p - direction * r * 0.45, right, tip], color);
+                draw_rig(&mut gizmos, game, body, session.input.thrust > 0.0);
                 if session.input.thrust > 0.0 && !session.paused && !game.game_over {
                     let flicker = 15.0 + (game.time * 45.0).sin() * 6.0;
                     gizmos.linestrip_2d(
@@ -222,50 +524,8 @@ pub fn draw(
                 }
             }
             BodyKind::Creature => draw_creature(&mut gizmos, game.time, body, color),
-            BodyKind::Base => {
-                let stock = body
-                    .base
-                    .as_ref()
-                    .map_or(0.0, |base| (base.stock / GUARDIAN_COST).clamp(0.0, 1.0));
-                let corner = |radius: f32, turn: f32, i: u32| {
-                    p + Vec2::from_angle(turn + i as f32 * std::f32::consts::TAU / 6.0) * radius
-                };
-                let spin = game.time * 0.25;
-                gizmos.lineloop_2d((0..6).map(|i| corner(r, spin, i)), color);
-                gizmos.lineloop_2d((0..6).map(|i| corner(r * 0.58, spin, i)), color);
-                for i in 0..6 {
-                    gizmos.line_2d(corner(r * 0.58, spin, i), corner(r, spin, i), color);
-                }
-                // The core swells with harvested stock until it can build a Fatso.
-                gizmos
-                    .circle_2d(
-                        p,
-                        r * (0.14 + 0.22 * stock),
-                        Color::srgba(1.0, 0.7, 0.3, 0.9),
-                    )
-                    .resolution(16);
-                let health = body.health / body.max_health;
-                gizmos
-                    .circle_2d(
-                        p,
-                        r * 1.3,
-                        Color::srgba(0.95, 0.32, 0.7, 0.15 + 0.45 * health),
-                    )
-                    .resolution(32);
-            }
-            BodyKind::Asteroid => {
-                let points = (0..9).map(|i| {
-                    let angle = body.angle + i as f32 * std::f32::consts::TAU / 9.0;
-                    let uneven = 0.78 + ((body.id + i as u64 * 13) % 7) as f32 * 0.04;
-                    p + Vec2::from_angle(angle) * r * uneven
-                });
-                gizmos.lineloop_2d(points, color);
-                gizmos.line_2d(
-                    p - direction * r * 0.4,
-                    p + side * r * 0.5,
-                    Color::srgb(0.22, 0.26, 0.32),
-                );
-            }
+            BodyKind::Base => draw_station(&mut gizmos, game.time, body, color),
+            BodyKind::Asteroid => draw_rock(&mut gizmos, game.time, body, color),
             BodyKind::BlackHole => {
                 for ring in 0..4 {
                     let radius = r + ring as f32 * 10.0;
@@ -297,6 +557,14 @@ pub fn draw(
                 )
                 .resolution(24);
         }
+    }
+    for pickup in game.pickups.iter().filter(|p| {
+        (p.position - camera)
+            .abs()
+            .cmplt(half + Vec2::splat(40.0))
+            .all()
+    }) {
+        draw_pickup(&mut gizmos, pickup);
     }
     for chain in game.chains.values() {
         for part in &chain.parts {
@@ -336,16 +604,81 @@ pub fn draw(
         }
     }
     for bullet in &game.bullets {
+        // Fitted shots wear their modification: bursting, piercing or seeking.
         let color = if bullet.friendly {
-            CYAN
+            if bullet.blast > 0 {
+                Color::srgb(1.0, 0.62, 0.2)
+            } else if bullet.pierce > 0 {
+                Color::srgb(0.95, 0.98, 1.0)
+            } else if bullet.homing > 0 {
+                Color::srgb(0.75, 1.0, 0.35)
+            } else {
+                CYAN
+            }
         } else {
             Color::srgb(1.0, 0.3, 0.37)
         };
-        let tail = bullet.velocity.normalize_or_zero() * 11.0;
-        gizmos.line_2d(bullet.position - tail, bullet.position, color);
-        gizmos
-            .circle_2d(bullet.position, bullet.radius, color)
-            .resolution(6);
+        let direction = bullet.velocity.normalize_or_zero();
+        let side = Vec2::new(-direction.y, direction.x);
+        let p = bullet.position;
+        match bullet.shape {
+            Shape::Pellet => {
+                gizmos.line_2d(p - direction * 11.0, p, color);
+                gizmos.circle_2d(p, bullet.radius, color).resolution(6);
+            }
+            Shape::Needle => {
+                gizmos.line_2d(p - direction * 20.0, p + direction * 3.0, color);
+            }
+            Shape::Missile => {
+                gizmos.lineloop_2d(
+                    [
+                        p + direction * 10.0,
+                        p - direction * 6.0 + side * 5.0,
+                        p - direction * 3.0,
+                        p - direction * 6.0 - side * 5.0,
+                    ],
+                    color,
+                );
+                gizmos.line_2d(
+                    p - direction * 6.0,
+                    p - direction * 22.0,
+                    Color::srgb(1.0, 0.7, 0.2),
+                );
+            }
+            Shape::Orb => {
+                gizmos.circle_2d(p, bullet.radius, color).resolution(12);
+                gizmos
+                    .circle_2d(p, bullet.radius + 3.0, color.with_alpha(0.25))
+                    .resolution(12);
+            }
+        }
+    }
+    for mine in game.mines.iter().filter(|m| {
+        (m.position - camera)
+            .abs()
+            .cmplt(half + Vec2::splat(150.0))
+            .all()
+    }) {
+        let p = mine.position;
+        let color = if mine.friendly {
+            CYAN
+        } else {
+            Color::srgb(1.0, 0.55, 0.18)
+        };
+        gizmos.circle_2d(p, 8.0, color).resolution(8);
+        for k in 0..6 {
+            let d = Vec2::from_angle(k as f32 * std::f32::consts::TAU / 6.0 + mine.age * 0.3);
+            gizmos.line_2d(p + d * 8.0, p + d * 14.0, color);
+        }
+        if let Some(fuse) = mine.fuse {
+            let flash = 0.35 + 0.55 * (game.time * 24.0).sin().abs();
+            gizmos
+                .circle_2d(p, mine.blast, color.with_alpha(flash * 0.4))
+                .resolution(40);
+            gizmos
+                .circle_2d(p, 16.0 + fuse.max(0.0) * 18.0, color.with_alpha(flash))
+                .resolution(20);
+        }
     }
     for effect in &game.effects {
         let fade = (effect.remaining / effect.lifetime).clamp(0.0, 1.0);
@@ -368,6 +701,196 @@ pub fn draw(
             game,
             camera + Vec2::new(half.x, -half.y) + Vec2::new(-1.0, 1.0) * (RADAR_RADIUS + 24.0),
         );
+    }
+}
+
+/// The ship wears what is bolted to it: guns at the front and flanks, nacelles at the
+/// stern, plating along the sides, glowing cores inside and antennae. Each is drawn in
+/// its rarity's color, so a glance at the ship shows how well equipped it is.
+fn draw_rig(gizmos: &mut Gizmos, game: &Game, ship: &Body, thrusting: bool) {
+    let (p, r) = (ship.position, ship.radius);
+    let d = Vec2::from_angle(ship.angle);
+    let s = Vec2::new(-d.y, d.x);
+    let tint = |rarity: Rarity| rarity_color(rarity);
+    for (index, part) in game.loadout.in_slot(Slot::Cannon).enumerate() {
+        let color = tint(part.rarity);
+        if index < 2 {
+            let sign = if index == 0 { 1.0 } else { -1.0 };
+            let base = p + s * sign * r * 0.95 - d * r * 0.25;
+            gizmos.line_2d(base, p + s * sign * r * 0.45, color);
+            gizmos.line_2d(base, base + d * r * 1.25, color);
+            gizmos.line_2d(
+                base + s * sign * r * 0.2,
+                base + s * sign * r * 0.2 + d * r * 1.05,
+                color,
+            );
+        } else {
+            gizmos.line_2d(p + d * r * 1.5, p + d * r * 2.15, color);
+            gizmos.circle_2d(p + d * r * 2.15, 1.8, color).resolution(6);
+        }
+    }
+    for (index, part) in game.loadout.in_slot(Slot::Engine).enumerate() {
+        let color = tint(part.rarity);
+        let sign = if index == 0 { 1.0 } else { -1.0 };
+        let front = p - d * r * 0.55 + s * sign * r * 0.62;
+        let back = front - d * r * 0.95;
+        gizmos.line_2d(front, back, color);
+        gizmos.line_2d(
+            front + s * sign * r * 0.28,
+            back + s * sign * r * 0.28,
+            color,
+        );
+        gizmos.line_2d(back, back + s * sign * r * 0.28, color);
+        if thrusting && !game.game_over {
+            let flicker = 8.0 + (game.time * 50.0 + index as f32 * 2.0).sin() * 3.0;
+            gizmos.line_2d(
+                back + s * sign * r * 0.14,
+                back + s * sign * r * 0.14 - d * flicker,
+                Color::srgb(1.0, 0.7, 0.3),
+            );
+        }
+    }
+    for (index, part) in game.loadout.in_slot(Slot::Plating).enumerate() {
+        let color = tint(part.rarity);
+        let sign = if index == 0 { 1.0 } else { -1.0 };
+        let near = p + d * r * 0.5 + s * sign * r * 1.15;
+        let far = p - d * r * 0.7 + s * sign * r * 1.5;
+        gizmos.line_2d(near, far, color);
+        gizmos.line_2d(near + s * sign * r * 0.22, far + s * sign * r * 0.22, color);
+        gizmos.line_2d(near, near + s * sign * r * 0.22, color);
+        gizmos.line_2d(far, far + s * sign * r * 0.22, color);
+    }
+    for (index, part) in game.loadout.in_slot(Slot::Core).enumerate() {
+        let pulse = 1.0 + 0.08 * (game.time * 4.0 + index as f32 * 1.7).sin();
+        gizmos
+            .circle_2d(
+                p,
+                r * (0.3 + 0.22 * index as f32) * pulse,
+                tint(part.rarity),
+            )
+            .resolution(14);
+    }
+    for (index, part) in game.loadout.in_slot(Slot::Aux).enumerate() {
+        let color = tint(part.rarity);
+        let sign = if index == 0 { 1.0 } else { -1.0 };
+        let root = p - d * r * 0.2 + s * sign * r * 0.25;
+        let tip = p - d * r * 1.0 + s * sign * r * 1.05;
+        gizmos.line_2d(root, tip, color);
+        gizmos.circle_2d(tip, 2.4, color).resolution(8);
+    }
+    if ship.rig.aura > 0 {
+        let pulse = 2.2 + 0.2 * (game.time * 6.0).sin();
+        gizmos
+            .circle_2d(
+                p,
+                r * pulse * (0.8 + 0.2 * f32::from(ship.rig.aura)),
+                Color::srgba(0.5, 1.0, 0.9, 0.4),
+            )
+            .resolution(24);
+    }
+    if ship.rig.ballast {
+        gizmos
+            .circle_2d(p, r * 1.35, Color::srgba(0.3, 0.95, 0.55, 0.35))
+            .resolution(24);
+    }
+}
+
+/// A drop: its shape says what kind it is, its color how good, and it blinks when it
+/// is about to fade away.
+fn draw_pickup(gizmos: &mut Gizmos, pickup: &Pickup) {
+    if pickup.remaining < 6.0 && ((pickup.remaining * 6.0) as u32).is_multiple_of(2) {
+        return;
+    }
+    let p = pickup.position;
+    let pulse = 1.0 + 0.12 * (pickup.age * 6.0).sin();
+    let spin = pickup.age * 1.5;
+    let ring = |gizmos: &mut Gizmos, sides: u32, radius: f32, turn: f32, color: Color| {
+        gizmos.lineloop_2d(
+            (0..sides).map(|i| {
+                p + Vec2::from_angle(turn + i as f32 * std::f32::consts::TAU / sides as f32)
+                    * radius
+            }),
+            color,
+        );
+    };
+    let [r, g, b] = pickup.item.rarity().color();
+    let rarity = Color::srgb(r, g, b);
+    match &pickup.item {
+        Item::Repair(_) => {
+            let green = Color::srgb(0.3, 1.0, 0.5);
+            gizmos.line_2d(p - Vec2::X * 7.0 * pulse, p + Vec2::X * 7.0 * pulse, green);
+            gizmos.line_2d(p - Vec2::Y * 7.0 * pulse, p + Vec2::Y * 7.0 * pulse, green);
+            gizmos
+                .circle_2d(p, 10.0 * pulse, green.with_alpha(0.5))
+                .resolution(12);
+        }
+        Item::Recharge(_) => {
+            let blue = Color::srgb(0.3, 0.75, 1.0);
+            gizmos.circle_2d(p, 8.0 * pulse, blue).resolution(14);
+            gizmos.circle_2d(p, 3.5, blue).resolution(8);
+        }
+        Item::Life => {
+            let gold = Color::srgb(1.0, 0.85, 0.3);
+            ring(gizmos, 4, 12.0 * pulse, std::f32::consts::FRAC_PI_4, gold);
+            ring(gizmos, 4, 7.0 * pulse, std::f32::consts::FRAC_PI_4, gold);
+            gizmos
+                .circle_2d(p, 16.0 * pulse, gold.with_alpha(0.4))
+                .resolution(18);
+        }
+        Item::Scrap(_) => {
+            ring(gizmos, 4, 5.0, spin, Color::srgb(0.8, 0.75, 0.5));
+        }
+        Item::Part(part) => {
+            ring(gizmos, 6, 11.0 * pulse, spin * 0.3, rarity);
+            ring(gizmos, 6, 6.5, spin * 0.3, rarity);
+            slot_glyph(gizmos, p, part.slot, rarity);
+            if part.rarity >= Rarity::Rare {
+                gizmos
+                    .circle_2d(p, 17.0 * pulse, rarity.with_alpha(0.35))
+                    .resolution(20);
+            }
+        }
+        Item::Surge(surge) => {
+            ring(gizmos, 4, 11.0 * pulse, spin, rarity);
+            slot_glyph(gizmos, p, surge.slot, rarity);
+            gizmos
+                .circle_2d(p, 15.0 * pulse, rarity.with_alpha(0.3))
+                .resolution(18);
+        }
+    }
+}
+
+/// A tiny mark inside a part or surge that says which slot it belongs to.
+fn slot_glyph(gizmos: &mut Gizmos, p: Vec2, slot: Slot, color: Color) {
+    match slot {
+        Slot::Cannon => {
+            gizmos.line_2d(p - Vec2::Y * 3.5, p + Vec2::Y * 3.5, color);
+            gizmos.line_2d(
+                p - Vec2::Y * 3.5 + Vec2::X * 2.0,
+                p + Vec2::Y * 3.5 + Vec2::X * 2.0,
+                color,
+            );
+        }
+        Slot::Engine => {
+            gizmos.linestrip_2d(
+                [
+                    p + Vec2::new(-3.0, 3.0),
+                    p + Vec2::new(3.5, 0.0),
+                    p + Vec2::new(-3.0, -3.0),
+                ],
+                color,
+            );
+        }
+        Slot::Plating => {
+            gizmos.rect_2d(p, Vec2::splat(5.0), color);
+        }
+        Slot::Core => {
+            gizmos.circle_2d(p, 2.4, color).resolution(8);
+        }
+        Slot::Aux => {
+            gizmos.line_2d(p - Vec2::X * 3.0, p + Vec2::X * 3.0, color);
+            gizmos.line_2d(p - Vec2::Y * 3.0, p + Vec2::Y * 3.0, color);
+        }
     }
 }
 
@@ -571,6 +1094,32 @@ fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
                         p + direction * a * 1.7 * throb,
                         color,
                     );
+                }
+            }
+            Weapon::Needles => {
+                for sign in [-1.0, 1.0] {
+                    gizmos.line_2d(
+                        p + direction * a * 0.4 + side * sign * 3.0,
+                        p + direction * a * 1.9 + side * sign * 3.0,
+                        color,
+                    );
+                }
+            }
+            Weapon::Missile => {
+                for sign in [-1.0, 1.0] {
+                    gizmos.rect_2d(p + side * sign * r * 0.85, Vec2::new(8.0, 12.0), color);
+                }
+            }
+            Weapon::Mine => {
+                gizmos
+                    .circle_2d(p - direction * a, r * 0.4, Color::srgb(1.0, 0.6, 0.2))
+                    .resolution(6);
+            }
+            Weapon::Nova | Weapon::Spiral => {
+                gizmos.circle_2d(p, r * 0.65, color).resolution(12);
+                for k in 0..3 {
+                    let d = Vec2::from_angle(time + k as f32 * std::f32::consts::TAU / 3.0);
+                    gizmos.line_2d(p + d * r * 0.65, p + d * r * 1.2, color);
                 }
             }
             Weapon::None => {}

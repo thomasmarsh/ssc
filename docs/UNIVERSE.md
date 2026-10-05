@@ -15,7 +15,7 @@ A top-down space shooter with a deterministic, endless universe. Everyone can fo
   - Near the origin, parameters ease to `QuadrantParams::HOME`.
 - A generation policy (`world::compose`) turns a parameter vector into spawns. It reads only the parameters, so any vector, whether sampled, hand-authored or interpolated, yields a coherent population.
 - **Quadrant (0, 0) is HOME.** At HOME every parameter is neutral (0.5, danger 0), and the policy produces exactly the original population. A golden test pins this: counts and a position checksum for three seeds, recorded before the generator was parameterized. The hand-tuned enemies are one point in the space, not special-case code.
-- The HUD shows the current quadrant's parameters so the gradient can be felt while flying.
+- The HUD shows the current quadrant's parameters so the gradient can be felt while flying. `depth` (quadrants from home, unbounded) drives `world::threat`, which toughens and sharpens fauna (see [ROADMAP.md](ROADMAP.md)).
 
 ## Gene pools and species (built)
 
@@ -27,13 +27,13 @@ This section was written as the plan and then built as described (`rust/genome.r
 - Locomotion and sensing: hunt speed, cruise speed, prediction lead, flocking weight, sight and lose ranges, mass affinity, standoff distance, strafe.
 - Social structure: solitary, school, pack, brood-tending, dweller (keeps to a home), plus a bond gene (chance to be corded to a sibling).
 - Temperament: trigger (sight, proximity or harm), rage threshold, alarm radius.
-- Weapons: none, projectile or tether; fire period, shot speed and range; hardpoint spacing (which parts carry guns); contact fling strength and chaos (continuous, so any creature can be a flinger); ram damage; reel speed.
+- Weapons: none, projectile, tether, mines, homing missiles, needle bursts, nova rings or rotating spirals; a volley gene sizes each pattern; fire period, shot speed and range; hardpoint spacing (which parts carry guns); contact fling strength and chaos (continuous, so any creature can be a flinger); ram damage; reel speed.
 - Ecology: diet (none, rocks, siphon, dust), fear (none, player, bullets, wells), nest (none, rocks, base).
 - Identity: bounty, three name-syllable genes, three pigment genes.
 
 **Species** is a lineage id, a generation and a genome. A lineage is a stable identity (master seed plus the lattice node and slot that founded it) that recurs across quadrants with mutation.
 
-**Gene pools.** Founder lineages live on a coarse lattice (one node every 4 quadrants). Each node owns a few founders sampled from a seeded distribution over the genome whose bias comes from that node's latent parameters (tech favors chains, guns and keen senses; distortion favors negative mass, waves and odd stiffness; swarm favors schooling; aggression favors rage and flinging; danger favors hull and damage). A quadrant's pool is the founders of the four surrounding nodes, each weighted by bilinear distance, so abundances change smoothly. Each founder is expressed in the quadrant by mutating it with a smooth noise field whose amplitude grows with distance from the founding node, so neighbors hold close relatives of the same lineage and drift is gradual. Categorical genes flip along smooth contours. Sampling uses its own salted stream; the original generation stream is untouched. The existing phenotype stays as the environment's expression layer (quadrant parameters scale flocking, acuity, aggression and mass affinity at runtime).
+**Gene pools.** Founder lineages live on a coarse lattice (one node every 8 quadrants (`genome::LINEAGE_CELL`, doubled from 4 so new lineages take twice the travel; the biome noise frequency was halved too)). Each node owns a few founders sampled from a seeded distribution over the genome whose bias comes from that node's latent parameters (tech favors chains, guns and keen senses; distortion favors negative mass, waves and odd stiffness; swarm favors schooling; aggression favors rage and flinging; danger favors hull and damage). A quadrant's pool is the founders of the four surrounding nodes, each weighted by bilinear distance, so abundances change smoothly. Each founder is expressed in the quadrant by mutating it with a smooth noise field whose amplitude grows with distance from the founding node, so neighbors hold close relatives of the same lineage and drift is gradual. Categorical genes flip along smooth contours. Sampling uses its own salted stream; the original generation stream is untouched. The existing phenotype stays as the environment's expression layer (quadrant parameters scale flocking, acuity, aggression and mass affinity at runtime).
 
 **How compose uses a pool.** The old slots (school, flingers, hunters, heavies, tether loners and pairs, nests, bases) become niches. Each niche is classified from genes alone (tether weapon, then fling, then heavy mass, then passive schooling, else hunter). A slot picks a pool member of its niche, weighted by abundance; if the pool has none it takes any member, so odd casts appear naturally. The serpent slot disappears: a chain body plan with a wave gene slithers wherever a pool happens to carry one, and an exotic slot spawns random pool members where tech, distortion or danger are high. Counts, spreads and draw order on the original stream do not change.
 
@@ -66,12 +66,29 @@ Every spawn has a stable index within its quadrant (its position in the generato
 ## Asteroid structure (built)
 
 - No rock grows past `ASTEROID_MAX_RADIUS` (60), so no single stone can wall off the player. A test checks every generated rock across the explored universe.
-- A destroyed rock shatters into two or three pieces, each about 0.62 of its radius, flying apart; pieces under 13 units simply vanish, so shattering always terminates. Rocks also take damage when flung by a Lunatic or when two rocks collide fast.
-- **Nests** are rings of nine pinned stones with one stone missing. The opening is wide enough for a ship and the rest of the ring is not, so the hollow is a refuge. A few bogeys graze inside. Stones are ordinary rocks that never move, so shooting or flinging stones into the ring opens new gaps. Nests are more common where swarm is high.
+- A destroyed rock shatters into two or three pieces (ice adds another), each about 0.62 of its radius, flying apart; pieces under 13 units simply vanish, so shattering always terminates. Rocks also take damage when flung by a Lunatic or when two rocks collide fast.
+- **Nests** are rings of nine pinned stones with one stone missing. The opening is wide enough for a ship and the rest of the ring is not, so the hollow is a refuge. A few bogeys graze inside. Stones are ordinary rocks that never move, so shooting or flinging stones into the ring opens new gaps. Nests are more common away from HOME, especially where swarm is high.
+- Free rocks vary in outline and material: ice is brittle and yields shield charge; ore is dense and tough with richer salvage; purple crystal bursts on destruction, hurting nearby ships and fauna, and often yields a surge. HOME rocks remain ordinary.
+- Inhabited husks have a hollow mouth and moving feelers. They release two to four creatures when approached or shot, including on a lethal hit. Shells and sheltered nests are seeded more frequently away from HOME.
 
 ## Ecosystem bases (built)
 
-Bases appear where danger, aggression, tech or swarm are high, and never at HOME. Each breeds a species from its quadrant's pool (preferring species whose nest gene says base): a schooler where swarm leads, a flinger where aggression leads, a hunter where tech leads. A base births a creature every ten seconds (faster for aggressive quadrants) up to a local cap, and its offspring keep within a leash of home. It tractors in small free rocks and grinds them, plus a trickle of dust, into stock; a full stock builds one heavy guardian from the pool, up to three per base. Destroying a base (450 hull, immovable) scores 500 and sends every creature within 2200 units scattering erratically for ten seconds, unable to fire.
+Bases appear where danger, aggression, tech or swarm are high, and never at HOME. Their kind and armament come from a separate seeded stream:
+
+- **Hive:** six organic brood chambers; 450 hull; breeds the local species and harvests small rocks into guardians.
+- **Foundry:** square furnace with intake arms; 650 hull; reaches farther for rocks, earns more stock and supports more guardians, with a slower brood.
+- **Bastion:** armored octagon with four turret mounts; 800 hull; no brood, aimed volleys, missiles, needles, rings or spirals.
+- **Depot:** radial mine magazines and ring emitter; 550 hull; seeds mines, pulses nova rings and breeds slowly.
+
+All stations can be destroyed by ship weapons. Depth toughens their hull more gently than creatures (square root of threat). A hull bar shows progress. Destruction scores 500, guarantees a part with two additional loot rolls, sends nearby creatures into disarray for ten seconds and persists across unload and reload.
+
+## Weapon patterns (built)
+
+Stock pellets and tethers remain. Creatures and station turrets express their weapon and volley genes through the same pattern code. Missiles track the ship, burst on impact or expiry and can be shot down. Rail-style needle bursts contain 48 to 128 fast, weak particles (up to 160 through mutation); nova rings expand in every direction; spirals rotate between rapid discharges. Global projectile and mine caps bound these patterns.
+
+Mines do no contact damage. Proximity arms a visible countdown with a blast-radius warning; leaving before detonation avoids damage. Shooting a hostile mine sets it off early. Friendly mines target enemies and spare the ship.
+
+Ship parts and timed surges offer missile pods, needle cannons, mine layers and nova emitters through the existing composable effects. Rotating spiral emitters and tether launchers remain enemy-only. Projectiles and creature hardpoints have distinct visual cues for their weapons.
 
 ## Tethers (built)
 

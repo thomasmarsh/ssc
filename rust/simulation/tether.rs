@@ -334,13 +334,11 @@ mod tests {
             .fire_cooldown = 1e6;
         attach(&mut game, id, 380.0);
         for y in [200.0, 150.0] {
-            game.bullets.push(Bullet {
-                position: Vec2::new(-50.0, y),
-                velocity: Vec2::new(4000.0, 0.0),
-                radius: 3.0,
-                friendly: true,
-                remaining: 1.0,
-            });
+            game.bullets.push(Bullet::friendly(
+                Vec2::new(-50.0, y),
+                Vec2::new(4000.0, 0.0),
+                1.0,
+            ));
         }
         game.step(DT, Input::default());
         game.step(DT, Input::default());
@@ -452,13 +450,11 @@ mod tests {
         let mut game = empty_game();
         let (a, _) = pair(&mut game);
         for y in [1970.0, 1975.0, 1980.0] {
-            game.bullets.push(Bullet {
-                position: Vec2::new(150.0, y),
-                velocity: Vec2::new(0.0, 4000.0),
-                radius: 3.0,
-                friendly: true,
-                remaining: 1.0,
-            });
+            game.bullets.push(Bullet::friendly(
+                Vec2::new(150.0, y),
+                Vec2::new(0.0, 4000.0),
+                1.0,
+            ));
         }
         game.step(DT, Input::default());
         game.step(DT, Input::default());

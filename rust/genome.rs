@@ -18,7 +18,7 @@ use bevy::prelude::Vec2;
 /// Separates gene sampling from every other stream.
 const GENE_SALT: u64 = 0x6E4E_5EED_0000_0042;
 /// Founder lineages live on a lattice with one node every this many quadrants.
-pub const LINEAGE_CELL: i32 = 4;
+pub const LINEAGE_CELL: i32 = 8;
 /// Founders sampled at each ordinary lattice node.
 const FOUNDERS_PER_NODE: u64 = 3;
 /// No creature has more bodies than this, however its genes combine.
@@ -65,8 +65,10 @@ categorical! {
     Trigger { Sight, Proximity, Harm }
 }
 categorical! {
-    /// Ranged attack, if any. Contact fling is the continuous `fling` gene.
-    Weapon { None, Projectile, Tether }
+    /// Ranged attack, if any. Contact fling is the continuous `fling` gene. The `volley`
+    /// gene sizes each pattern: shots per fan, mines per drop, missiles per salvo, needles
+    /// per burst, bullets per ring, arms of a spiral.
+    Weapon { None, Projectile, Tether, Mine, Missile, Needles, Nova, Spiral }
 }
 categorical! {
     /// What it eats or harvests.
@@ -163,6 +165,7 @@ genome! {
         voice0: 0, 23, 0;
         voice1: 0, 11, 0;
         voice2: 0, 19, 0;
+        volley: 1, 160, 1;
     }
     cat {
         social: Social = Social::Solitary;
@@ -200,6 +203,19 @@ const VOICE_LAST: [&str; 20] = [
     "gey", "tic", "ty", "so", "ch", "pent", "thra", "lisk", "dron", "mite", "ling", "ax", "oid",
     "gor", "bat", "wyrm", "fly", "ox", "ine", "urk",
 ];
+
+/// How big a pattern the weapon gene fires: shots per fan, mines per drop, missiles per
+/// salvo, needles per burst, bullets per ring, arms of a spiral.
+pub fn volley_for(weapon: Weapon, rng: &mut Rng) -> u8 {
+    let count = match weapon {
+        Weapon::Projectile if rng.chance(0.25) => rng.int(2, 4),
+        Weapon::Mine | Weapon::Missile | Weapon::Spiral => rng.int(1, 3),
+        Weapon::Needles => rng.int(48, 128),
+        Weapon::Nova => rng.int(8, 18),
+        _ => 1,
+    };
+    count as u8
+}
 
 impl Genome {
     /// Bodies in the creature: the spine plus every limb joint.
@@ -452,8 +468,17 @@ impl Genome {
                 (Weapon::None, 1.2 - tech),
                 (Weapon::Projectile, 0.6 + tech),
                 (Weapon::Tether, 0.2 + 0.5 * tech),
+                (Weapon::Mine, 0.25 + 0.6 * above(distortion) + 0.2 * danger),
+                (Weapon::Missile, 0.15 + 0.7 * above(tech) + 0.3 * danger),
+                (Weapon::Needles, 0.1 + 0.6 * above(tech) * (0.4 + danger)),
+                (Weapon::Nova, 0.15 + 0.6 * above(aggression)),
+                (
+                    Weapon::Spiral,
+                    0.1 + 0.6 * above(aggression) * (0.3 + danger),
+                ),
             ],
         );
+        g.volley = volley_for(g.weapon, rng);
         g.fire_period = rng.range(1.2, 5.5);
         g.shot_speed = rng.range(200.0, 520.0);
         g.weapon_range = if g.weapon == Weapon::Tether {
@@ -1011,6 +1036,7 @@ mod tests {
         let mut names = std::collections::HashSet::new();
         for i in 0..2000 {
             let params = QuadrantParams {
+                depth: 0.0,
                 danger: rng.f32(),
                 aggression: rng.f32(),
                 density: rng.f32(),
@@ -1179,10 +1205,12 @@ mod tests {
                 .sum::<f32>()
                 / total
         };
-        let shares: Vec<f32> = (0..=4).map(|x| classic(QuadrantId { x, y: 0 })).collect();
+        let shares: Vec<f32> = (0..=LINEAGE_CELL)
+            .map(|x| classic(QuadrantId { x, y: 0 }))
+            .collect();
         assert_eq!(shares[0], 1.0);
         assert!(shares.windows(2).all(|w| w[1] < w[0]), "{shares:?}");
-        assert_eq!(shares[4], 0.0);
+        assert_eq!(shares[LINEAGE_CELL as usize], 0.0);
     }
 
     #[test]

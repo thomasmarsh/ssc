@@ -11,7 +11,9 @@ use bevy::{
     },
     window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode},
 };
+use ssc::simulation::upgrades::{self, Item, Source};
 use ssc::simulation::{Game, Input};
+use ssc::world::Rng;
 
 #[derive(Resource)]
 pub struct Session {
@@ -197,6 +199,15 @@ fn smoke_run(
         session.game.teleport(Vec2::new(x, y));
         session.game.player_invulnerability = 1e9;
     }
+    // SSC_ARM=<threat>: kit the ship out and scatter samples of every kind of drop, so the
+    // equipment art and pickups can be checked without playing for them.
+    if run.frames == 0
+        && let Some(grade) = std::env::var("SSC_ARM")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+    {
+        arm_for_smoke(&mut session.game, grade);
+    }
     run.frames += 1;
     if run.frames < limit || run.requested {
         return;
@@ -213,5 +224,32 @@ fn smoke_run(
             );
     } else {
         exit.write(AppExit::Success);
+    }
+}
+
+fn arm_for_smoke(game: &mut Game, grade: f32) {
+    let mut rng = Rng::new(0xA2D);
+    let mut source = Source::plain(grade, game.params());
+    source.bias = 1.0;
+    for _ in 0..60 {
+        game.collect(Item::Part(upgrades::roll_part(&mut rng, &source)));
+    }
+    for _ in 0..3 {
+        game.collect(Item::Surge(upgrades::roll_surge(&mut rng, &source)));
+    }
+    let center = game.player().map_or(Vec2::ZERO, |ship| ship.position);
+    let items = [
+        Item::Repair(30.0),
+        Item::Recharge(30.0),
+        Item::Life,
+        Item::Scrap(50),
+        Item::Part(upgrades::roll_part(&mut rng, &source)),
+        Item::Part(upgrades::roll_part(&mut rng, &source)),
+        Item::Surge(upgrades::roll_surge(&mut rng, &source)),
+        Item::Surge(upgrades::roll_surge(&mut rng, &source)),
+    ];
+    for (i, item) in items.into_iter().enumerate() {
+        let spot = center + Vec2::from_angle(i as f32 * 0.8) * 240.0;
+        game.drop_item(spot, Vec2::ZERO, item);
     }
 }
