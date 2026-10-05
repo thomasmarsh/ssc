@@ -1,140 +1,57 @@
-Welcome to SSC.
+# SSC
 
-This is an early release (let's say "technology demo"). The game is not fine
-tuned and there is only a simple change when progressing from level to level,
-so please set expectations accordingly.
+SSC is an arena shooter being rebuilt from its C++ prototype in Rust with Bevy 0.19.1 and WGPU. The Rust version is a basis for further iteration: it keeps the prototype's top-down ship combat and flocking enemies, now in an unbounded, panning universe divided into quadrants, while simplifying the physics and presentation.
 
+## Build and run
 
-REQUIREMENTS
-==
+The desktop build targets native Apple Silicon Macs, including an M1 MacBook Air. Install Rust 1.95 or newer and Apple's Xcode Command Line Tools, then run:
 
-Before you can compile and play SSC there are a few requirements. You must have
-hardware graphics acceleration, or else the game will be painfully slow. As far
-as libraries are concerned, you should have GLU, and GL (usually present).
-You will need SDL and SDL_mixer (for sound) as well. pthread is included in my
-link list, but you may not have or need it. You can modify the Makefile in this
-case. You will also need FreeType2 for TrueType font support.
+```sh
+cargo run
+```
 
+For an optimized build:
 
-USER INFORMATION
-==
+```sh
+cargo run --release
+```
 
-If you are looking for a quick five minutes of blast-em-up action, you'll have
-to get this thing compiled first. The basic steps are:
+Desktop support is enabled by default and uses Bevy's WGPU renderer. On macOS, WGPU selects Metal. Cargo.lock pins the dependency graph for reproducible builds.
 
-	cd src
-	make
+The first build compiles Bevy and WGPU and can take several minutes. Development builds optimize dependencies but omit debug symbols and incremental artifacts to keep their disk footprint smaller. Use `CARGO_PROFILE_DEV_DEBUG=1 cargo run` when you need debug symbols.
 
-And this should produce an executable 'ssc' which can be run directly. The game
-is completely self-contained.
+The simulation library can be built and its tests run without desktop rendering dependencies:
 
-To play, you can use the arrow keys to move and the key 'A' to fire, as such:
+```sh
+cargo test --no-default-features
+```
 
-	a	fire
-	s	toggle slow-motion
-	c	cycle camera position
-	r	toggle radar
+## Controls
 
-	[up]	accelerate
-	[down]	decelerate (quickly)
-	[left]	rotate left
-	[right] rotate right
+- **Up**: thrust
+- **Down**: brake
+- **Left / Right**: rotate
+- **Space / A**: fire
+- **Mouse**: aim at the cursor while holding the left button to fire
+- **P / Pause**: pause
+- **S**: toggle slow motion
+- **R**: toggle radar
+- **Enter**: restart
+- **F1**: toggle fullscreen
+- **Esc**: quit
 
-	[pause]	toggle game pause
-	[F1]	toggle full-screen
-	[ESC]	exit game
+## Project layout
 
-There is some code for mouse control, but it isn't an optimal configuration:
+- `rust/` contains the new Rust simulation and Bevy desktop app.
+- `src/` contains the original C++ prototype for reference.
+- [docs/UNIVERSE.md](docs/UNIVERSE.md) describes the procedural universe design and what is built.
+- `docs/MIGRATION.md` records the reimplementation choices and current limits.
+- [docs/LEGACY_README.md](docs/LEGACY_README.md) preserves the original instructions and credits.
 
-	Button	Action
-	------	------
-	[left]	fire
-	[middle] decelerate
-	[right]	accelerate
+The current presentation uses procedural shapes and UI. It has no audio yet.
 
-Whenever I play with the mouse, I usually use the keyboard to accelerate and
-the mouse to aim and fire.
+For a bounded renderer check, set `SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=/tmp/ssc.png`, and optionally `SSC_TELEPORT="x,y"` to start somewhere else, invulnerable. Quadrants away from the origin hold nests, bases, Leeches and Serpents; the first quadrants to try are around (2, 0), (1, 1) and (-3, 0).
 
+## License
 
-General tips:
-
-	- Bogeys (blue) move in flocks. Try to single them out for quick kills
-	  as they are more dangerous when they are near death
-
-	- Lunatics (white) have a negative mass, and can cling on to you,
-	  causing massive damage. Try to kill them before they touch you,
-	  otherwise, try accelerating/rotating/firing near walls.
-
-	- Fatso's (beige?) don't really do anything, but are very massive. You
-	  may be able to use them to your advantage if you can get bogey's to
-	  collide with them. Beware of Lunatics clinging on to Fatsos!
-
-	- Blackholes (green - go figure) suck you in and cause massive damage.
-	  They also affect Bogeys to a small degree, so you can orbit a
-	  Blackhole and try to lure Bogeys to their deaths.
-
-	- Smarties (grey) learn to fly as the game progresses - actually, they
-	  usually fly pretty well within the first ten seconds.. Smarties are
-	  not too dangerous, but mostly annoying; they constantly bash into you
-	  and can make you an easy target for bogies.
-
-
-DEVELOPER INFORMATION
-==
-
-I am looking for input into the project. Goals are:
-
-	- maintain and improve the clarity of the current code base (maybe
-	  with a few more comments too)
-
-	- rely as little as possible on external data packs
-
-	- add more flashy graphics (how about a camera sweep introduction?)
-
-	- come up with level ideas and goals
-
-	- design new types of enemies
-
-	- support multiplayer and network
-
-	- add some more support platforms
-
-
-General game idea goals are a physics based game (not necessarily entirely
-composed of circles, but probably 2D) which features interesting enemies,
-intense gameplay, and AI/a-life themes.
-
-I am open to suggestions!
-
-
-CREDITS
-==
-
-AUTHORS:
-
-This game is written by Thomas D. Marsh <thomas.marsh@seznam.cz>
-
-
-BORROWINGS:
-
-The physics engine is ODE (Open Dynamics Engine) by Russell Smith.
-You can download it at http://opende.sourceforge.net/
-
-The fonts come from Divide By Zero (http://fonts.tom7.com/).
-
-The asteroid code has been adapted by the instructive game "A Steroid"
-by Paolo Cignoni. He can be reached at cignoni@iei.pi.cnr.it, and the
-game at http://vcg.iei.pi.cnr.it/~cignoni/a_steroid/index.html.
-
-TrueType support is achieved with a massively stripped down OGLFT which
-can be found at http://oglft.sourceforge.net/.
-
-The PNG opengl texture loading routines are from Ben Wyatt's glpng.[ch].
-He can be reached at ben@wyatt100.freeserve.co.uk.
-
-The simple three-layer backprop neural nets are from Daniel Franklin's
-libneural; email: d.franklin@computer.org
-http://ieee.uow.edu.au/~daniel/software/libneural/.
-
-The audio code was used from Chromium BSU and is Copyright (c) 2000 Mark B.
-Allan. Check it out at http://www.reptilelabour.com/software/chromium/.
+SSC is distributed under GPL-2.0-only. See [LICENSE](LICENSE).

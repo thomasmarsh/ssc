@@ -1,0 +1,2019 @@
+//! Deterministic, headless gameplay. Coordinates are world units, time is seconds,
+//! and angles point along (cos(angle), sin(angle)). Rendering owns no game rules.
+//!
+//! The world is an unbounded grid of quadrants (see `world`). Quadrants touched by the
+//! player's active region are generated on demand and simulated; bodies elsewhere are
+//! frozen, and quadrants far from the player are dropped and regenerated on return.
+
+mod chain;
+mod ecology;
+mod tether;
+
+pub use chain::Chain;
+pub use ecology::{BaseState, FATSO_COST};
+pub use tether::{Tether, TetherKind};
+
+use crate::world::{self, Genome, Phenotype, QuadrantId, QuadrantParams, Rng};
+use bevy::prelude::Vec2;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::f32::consts::{FRAC_PI_2, TAU};
+
+const MAX_BULLETS: usize = 512;
+const MAX_EFFECTS: usize = 128;
+/// Hard ceiling on loaded bodies; shattering and breeding stop short of it.
+const MAX_BODIES: usize = 1500;
+/// A destroyed rock splits into pieces this much smaller, unless they would be tiny.
+const SHARD_FACTOR: f32 = 0.62;
+const MIN_SHARD_RADIUS: f32 = 13.0;
+/// Rocks colliding faster than this (closing speed) take damage from the impact.
+const ROCK_SHATTER_SPEED: f32 = 300.0;
+/// Creatures bred by a base wander no farther than this from it before turning back.
+const HOME_LEASH: f32 = 800.0;
+/// Enemies this close to a destroyed base lose their bearings for a while.
+const ECOSYSTEM_RADIUS: f32 = 2200.0;
+const PLAYER_SPEED: f32 = 460.0;
+/// A body touched by a Lunatic is thrown at least this fast (and at most the cap).
+const FLING_SPEED: f32 = 520.0;
+const FLING_MAX_SPEED: f32 = 1000.0;
+/// Half-extent of the region around the player whose quadrants are simulated. It must
+/// exceed the largest visible half-extent so loading and freezing happen off screen.
+pub const ACTIVE_HALF: Vec2 = Vec2::new(2200.0, 1500.0);
+/// Quadrants farther than this (in quadrants) from the player are unloaded.
+const UNLOAD_DISTANCE: u32 = 2;
+/// Enemies notice the player inside `SIGHT_RANGE` and give up beyond `LOSE_RANGE`.
+const SIGHT_RANGE: f32 = 1000.0;
+const LOSE_RANGE: f32 = 1500.0;
+/// Bogeys school peacefully: only a close approach agitates them, and they settle again
+/// once the player is well clear. Hurting one agitates it; near death it goes berserk.
+const BOGEY_AGITATE_RANGE: f32 = 320.0;
+const BOGEY_CALM_RANGE: f32 = 650.0;
+const BOGEY_ALARM_RANGE: f32 = 220.0;
+const BOGEY_ENRAGE_HEALTH: f32 = 0.4;
+/// How far an enemy with a mass affinity notices rocks and gravity wells.
+const HEAVY_RANGE: f32 = 600.0;
+/// How far an enemy notices same-kind neighbors, how close it tolerates them, and how
+/// far it may stray from the crowd's center before drifting back.
+const PERCEPTION: f32 = 380.0;
+const PERSONAL_SPACE: f32 = 110.0;
+const LOOSE_RADIUS: f32 = 220.0;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Input {
+    pub thrust: f32,
+    pub turn: f32,
+    pub brake: bool,
+    pub fire: bool,
+    /// Optional heading vector, allowing pointer/controller aiming without input APIs.
+    pub aim_direction: Option<Vec2>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnemyKind {
+    Bogey,
+    Lunatic,
+    Smarty,
+    Fatso,
+    /// Fires an umbilical cord that latches onto the ship; also found in linked pairs.
+    Leech,
+    /// One segment of a jointed, slithering creature.
+    Serpent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BodyKind {
+    Player,
+    Enemy(EnemyKind),
+    Asteroid,
+    BlackHole,
+    /// An ecosystem base: immovable, breeds creatures and harvests debris.
+    Base,
+}
+
+#[derive(Clone, Debug)]
+pub struct Body {
+    pub id: u64,
+    pub kind: BodyKind,
+    pub position: Vec2,
+    pub velocity: Vec2,
+    pub angle: f32,
+    pub radius: f32,
+    pub health: f32,
+    pub max_health: f32,
+    pub shield: f32,
+    pub max_shield: f32,
+    pub mass: f32,
+    /// Which quadrant spawn this body came from, if any; used to remember kills.
+    pub origin: Option<(QuadrantId, u32)>,
+    /// Fixed in place regardless of impacts (the stones of a nest).
+    pub pinned: bool,
+    /// Segmented creatures: the chain this body belongs to, and whether it trails a head.
+    pub chain: Option<u32>,
+    pub follower: bool,
+    /// Bases only.
+    pub base: Option<BaseState>,
+    /// Where a base-bred creature considers home.
+    pub home: Option<Vec2>,
+    /// Seconds of disarray left after a base fell, and where the disaster was.
+    pub panic: f32,
+    pub panic_from: Vec2,
+    /// True while this enemy is hunting the player rather than going about its business.
+    pub alert: bool,
+    /// Heritable behavior weights from the quadrant that spawned this body.
+    pub genes: Phenotype,
+    /// Bogeys only: badly hurt and attacking with abandon.
+    pub enraged: bool,
+    /// False when the body sits in a quadrant outside the active region.
+    pub active: bool,
+    wander: f32,
+    fire_cooldown: f32,
+    contact_cooldown: f32,
+    since_hit: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct Bullet {
+    pub position: Vec2,
+    pub velocity: Vec2,
+    pub radius: f32,
+    pub friendly: bool,
+    pub remaining: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectKind {
+    Impact,
+    Explosion,
+    Respawn,
+}
+
+#[derive(Clone, Debug)]
+pub struct Effect {
+    pub position: Vec2,
+    pub radius: f32,
+    pub remaining: f32,
+    pub lifetime: f32,
+    pub kind: EffectKind,
+}
+
+pub struct Game {
+    pub bodies: Vec<Body>,
+    pub bullets: Vec<Bullet>,
+    pub effects: Vec<Effect>,
+    pub tethers: Vec<Tether>,
+    pub chains: BTreeMap<u32, Chain>,
+    pub score: u64,
+    pub lives: u32,
+    pub game_over: bool,
+    pub time: f32,
+    pub player_invulnerability: f32,
+    /// Last known player position; anchors the active region while the player is dead.
+    pub focus: Vec2,
+    seed: u64,
+    rng: Rng,
+    next_id: u64,
+    next_chain: u32,
+    /// Spawns destroyed so far, per quadrant, so a quadrant reloads as it was left.
+    fallen: HashMap<QuadrantId, HashSet<u32>>,
+    loaded: HashSet<QuadrantId>,
+    active: Vec<QuadrantId>,
+}
+
+impl Game {
+    pub fn new(seed: u64) -> Self {
+        let mut game = Self {
+            bodies: Vec::new(),
+            bullets: Vec::with_capacity(MAX_BULLETS),
+            effects: Vec::with_capacity(MAX_EFFECTS),
+            tethers: Vec::new(),
+            chains: BTreeMap::new(),
+            score: 0,
+            lives: 3,
+            game_over: false,
+            time: 0.0,
+            player_invulnerability: 2.0,
+            focus: Vec2::ZERO,
+            seed,
+            rng: Rng::new(seed),
+            next_id: 1,
+            next_chain: 1,
+            fallen: HashMap::new(),
+            loaded: HashSet::new(),
+            active: Vec::new(),
+        };
+        game.stream_quadrants();
+        game.spawn_player(Vec2::ZERO);
+        game
+    }
+
+    /// Replays the initial seed so a restart is useful for comparing tuning changes.
+    pub fn reset(&mut self) {
+        *self = Self::new(self.seed);
+    }
+
+    pub fn player(&self) -> Option<&Body> {
+        self.bodies
+            .iter()
+            .find(|body| body.kind == BodyKind::Player)
+    }
+
+    pub fn quadrant(&self) -> QuadrantId {
+        QuadrantId::containing(self.focus)
+    }
+
+    pub fn body(&self, id: u64) -> Option<&Body> {
+        self.bodies.iter().find(|body| body.id == id)
+    }
+
+    /// Moves the player instantly. Used by smoke runs and tests to visit distant places.
+    pub fn teleport(&mut self, position: Vec2) {
+        if let Some(player) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
+            player.position = position;
+            player.velocity = Vec2::ZERO;
+        }
+        self.focus = position;
+    }
+
+    /// Latent parameters of the quadrant the player is in.
+    pub fn params(&self) -> QuadrantParams {
+        world::latent(self.seed, self.quadrant())
+    }
+
+    /// Enemies currently being simulated.
+    pub fn active_enemies(&self) -> usize {
+        self.bodies
+            .iter()
+            .filter(|body| body.active && matches!(body.kind, BodyKind::Enemy(_)))
+            .count()
+    }
+
+    /// Intended for a fixed 1/60-second caller. Rejects invalid durations and caps
+    /// a single step at 50 ms, preventing a resumed window from causing huge jumps.
+    pub fn step(&mut self, dt: f32, input: Input) {
+        if self.game_over || !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+        let dt = dt.min(0.05);
+        self.time += dt;
+        self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
+        for effect in &mut self.effects {
+            effect.remaining -= dt;
+        }
+        self.effects.retain(|effect| effect.remaining > 0.0);
+        self.stream_quadrants();
+        for body in self.bodies.iter_mut().filter(|b| b.active) {
+            body.fire_cooldown = (body.fire_cooldown - dt).max(0.0);
+            body.contact_cooldown = (body.contact_cooldown - dt).max(0.0);
+            body.panic = (body.panic - dt).max(0.0);
+            body.since_hit += dt;
+            if body.since_hit > 2.0 {
+                body.shield = (body.shield + dt * 6.0).min(body.max_shield);
+            }
+        }
+        self.control_player(dt, input);
+        self.steer_enemies(dt);
+        self.update_bases(dt);
+        self.update_tethers(dt);
+        self.update_chains(dt);
+        self.apply_gravity(dt);
+        for body in self.bodies.iter_mut().filter(|b| b.active) {
+            if !is_fixed(body) {
+                body.position += body.velocity * dt;
+            }
+            if body.kind == BodyKind::Asteroid && !body.pinned {
+                // Flung rocks slowly lose their excess speed rather than ricocheting forever.
+                let speed = body.velocity.length();
+                if speed > 120.0 {
+                    body.velocity *= (120.0 + (speed - 120.0) * (-0.5 * dt).exp()) / speed;
+                }
+                body.angle += dt * 0.3;
+            }
+        }
+        self.resolve_contacts();
+        // After contacts, so an impact cannot leave a joint stretched past its limit.
+        self.constrain_chains();
+        self.move_bullets(dt);
+        self.remove_destroyed();
+    }
+
+    /// Loads quadrants the player can reach, unloads distant ones, and flags which
+    /// bodies take part in this tick.
+    fn stream_quadrants(&mut self) {
+        if let Some(player) = self.player() {
+            self.focus = player.position;
+        }
+        let home = self.quadrant();
+        self.active = QuadrantId::overlapping(self.focus, ACTIVE_HALF);
+        for id in self.active.clone() {
+            if self.loaded.insert(id) {
+                self.populate(id);
+            }
+        }
+        self.loaded
+            .retain(|id| id.chebyshev_distance(home) <= UNLOAD_DISTANCE);
+        let loaded = &self.loaded;
+        self.bodies.retain(|body| {
+            body.kind == BodyKind::Player
+                || QuadrantId::containing(body.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
+                || loaded.contains(&QuadrantId::containing(body.position))
+        });
+        for body in &mut self.bodies {
+            body.active = body.kind == BodyKind::Player
+                || self.active.contains(&QuadrantId::containing(body.position));
+        }
+    }
+
+    fn populate(&mut self, id: QuadrantId) {
+        let fallen = self.fallen.get(&id).cloned().unwrap_or_default();
+        // A spawn whose creature wandered off but is still loaded must not be duplicated.
+        let present: HashSet<u32> = self
+            .bodies
+            .iter()
+            .filter_map(|b| b.origin.filter(|(q, _)| *q == id).map(|(_, i)| i))
+            .collect();
+        let mut made: HashMap<u32, u64> = HashMap::new();
+        for spawn in world::generate(self.seed, id) {
+            if fallen.contains(&spawn.index) || present.contains(&spawn.index) {
+                continue;
+            }
+            let mut body = self.make_body(spawn.kind, spawn.position);
+            if let Some(radius) = spawn.radius {
+                body.radius = radius;
+                body.mass = radius * 0.6;
+                body.health = radius * 1.6;
+                body.max_health = body.health;
+            }
+            body.velocity = spawn.velocity;
+            body.genes = spawn.phenotype;
+            body.pinned = spawn.pinned;
+            body.origin = Some((id, spawn.index));
+            body.angle = self.rng.f32() * TAU;
+            body.wander = body.angle;
+            body.fire_cooldown = 1.0 + self.rng.f32() * 2.0;
+            if let Some(brood) = spawn.brood {
+                let timer = 2.0 + self.rng.f32() * 4.0;
+                body.base = Some(BaseState::new(brood, timer));
+            }
+            if let Some(genome) = spawn.genome {
+                self.spawn_chain(body, genome);
+                continue;
+            }
+            made.insert(spawn.index, body.id);
+            if let Some(&partner) = spawn.link.and_then(|i| made.get(&i)) {
+                self.tethers.push(Tether::link(partner, body.id));
+            }
+            self.bodies.push(body);
+        }
+    }
+
+    /// Remembers that a spawn was destroyed. A chain counts only once every segment is gone.
+    fn record_fallen(&mut self, body: &Body) {
+        let Some((quadrant, index)) = body.origin else {
+            return;
+        };
+        if body
+            .chain
+            .is_some_and(|c| self.bodies.iter().any(|b| b.chain == Some(c)))
+        {
+            return;
+        }
+        self.fallen.entry(quadrant).or_default().insert(index);
+    }
+
+    /// Breaks a destroyed rock into smaller free-flying pieces.
+    fn shatter(&mut self, rock: &Body) {
+        let radius = rock.radius * SHARD_FACTOR;
+        if radius < MIN_SHARD_RADIUS || self.bodies.len() >= MAX_BODIES {
+            return;
+        }
+        let pieces = if rock.radius >= 45.0 { 3 } else { 2 };
+        let start = self.rng.range(0.0, TAU);
+        for piece in 0..pieces {
+            let angle = start + piece as f32 * TAU / pieces as f32 + self.rng.range(-0.3, 0.3);
+            let direction = Vec2::from_angle(angle);
+            let mut shard = self.make_body(
+                BodyKind::Asteroid,
+                rock.position + direction * rock.radius * 0.5,
+            );
+            shard.radius = radius;
+            shard.mass = radius * 0.6;
+            shard.health = radius * 1.6 * 0.8;
+            shard.max_health = shard.health;
+            shard.velocity = rock.velocity + direction * self.rng.range(70.0, 150.0);
+            shard.angle = self.rng.range(0.0, TAU);
+            self.bodies.push(shard);
+        }
+    }
+
+    fn control_player(&mut self, dt: f32, input: Input) {
+        let Some(player) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
+            return;
+        };
+        if let Some(aim) = input
+            .aim_direction
+            .filter(|aim| aim.is_finite() && aim.length_squared() > 0.001)
+        {
+            player.angle = aim.y.atan2(aim.x);
+        } else if input.turn.is_finite() {
+            player.angle += input.turn.clamp(-1.0, 1.0) * 3.8 * dt;
+        }
+        player.angle = player.angle.rem_euclid(TAU);
+        let direction = Vec2::new(player.angle.cos(), player.angle.sin());
+        let thrust = if input.thrust.is_finite() {
+            input.thrust.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        player.velocity += direction * thrust * 430.0 * dt;
+        player.velocity *= (-dt * if input.brake { 5.0 } else { 0.07 }).exp();
+        // Thrust cannot exceed top speed, but a fling is allowed to carry the ship past it
+        // and bleeds off smoothly instead of snapping back.
+        let speed = player.velocity.length();
+        if speed > PLAYER_SPEED {
+            let kept = PLAYER_SPEED + (speed - PLAYER_SPEED) * (-2.0 * dt).exp();
+            player.velocity *= kept / speed;
+        }
+        if input.fire && player.fire_cooldown <= 0.0 && self.bullets.len() < MAX_BULLETS {
+            self.bullets.push(Bullet {
+                position: player.position + direction * (player.radius + 5.0),
+                velocity: player.velocity + direction * 720.0,
+                radius: 3.0,
+                friendly: true,
+                remaining: 1.7,
+            });
+            player.fire_cooldown = 0.16;
+        }
+    }
+
+    /// Enemies have no group membership. Each reacts only to same-kind neighbors within
+    /// `PERCEPTION`, so nearby bands merge into one drifting crowd and split apart again
+    /// as individual restlessness pulls them in different directions.
+    fn steer_enemies(&mut self, dt: f32) {
+        struct Neighbor {
+            id: u64,
+            kind: BodyKind,
+            position: Vec2,
+            radius: f32,
+            heading: Vec2,
+            chain: Option<u32>,
+            raising_alarm: bool,
+            alarm_range: f32,
+        }
+        let player = self.player().map(|p| (p.position, p.velocity));
+        // A compact snapshot makes steering independent of body iteration order.
+        let neighbors: Vec<_> = self
+            .bodies
+            .iter()
+            .filter(|b| b.active && b.kind != BodyKind::Player)
+            .map(|b| Neighbor {
+                id: b.id,
+                kind: b.kind,
+                position: b.position,
+                radius: b.radius,
+                heading: Vec2::from_angle(b.wander),
+                chain: b.chain,
+                raising_alarm: if b.kind == BodyKind::Enemy(EnemyKind::Bogey) {
+                    // A hurt bogey panics its schoolmates; merely seeing the player does not.
+                    b.enraged || is_hurt(b)
+                } else {
+                    player.is_some_and(|(p, _)| p.distance(b.position) < SIGHT_RANGE)
+                },
+                alarm_range: if b.kind == BodyKind::Enemy(EnemyKind::Bogey) {
+                    BOGEY_ALARM_RANGE
+                } else {
+                    PERCEPTION
+                },
+            })
+            .collect();
+        for body in self.bodies.iter_mut().filter(|b| b.active) {
+            let BodyKind::Enemy(kind) = body.kind else {
+                continue;
+            };
+            // Trailing segments are dragged along by their joints.
+            if body.follower {
+                continue;
+            }
+            let (speed, lead, cruise) = match kind {
+                EnemyKind::Bogey => (160.0, 0.15, 75.0),
+                EnemyKind::Lunatic => (230.0, 0.0, 95.0),
+                EnemyKind::Smarty => (285.0, 0.55, 110.0),
+                EnemyKind::Fatso => (60.0, 0.0, 25.0),
+                EnemyKind::Leech => (190.0, 0.2, 80.0),
+                EnemyKind::Serpent => (210.0, 0.3, 90.0),
+            };
+            // Individuals differ a little in pace and in how restless they are.
+            let temperament = (body.id % 5) as f32 / 4.0;
+            let cruise = cruise * (0.85 + 0.3 * temperament);
+            let genes = body.genes;
+            let lead = lead * genes.sensor_acuity;
+            let perception = PERCEPTION * genes.flocking;
+            // Aggression moves pace only a little; it mostly shows in rage and fire rate.
+            let speed = speed * (1.0 + (genes.aggression - 1.0) * 0.4);
+
+            let mut separation = Vec2::ZERO;
+            let mut heading = Vec2::ZERO;
+            let mut center = Vec2::ZERO;
+            let mut crowd = 0.0;
+            let mut warned = false;
+            let mut crowding = Vec2::ZERO;
+            let mut heavy: Option<(f32, Vec2)> = None;
+            for other in neighbors
+                .iter()
+                .filter(|n| n.id != body.id && (body.chain.is_none() || n.chain != body.chain))
+            {
+                let offset = body.position - other.position;
+                let distance_squared = offset.length_squared();
+                let range = body.radius + other.radius + 35.0;
+                if distance_squared < range * range && distance_squared > 0.1 {
+                    crowding += offset / distance_squared * 6500.0;
+                }
+                if matches!(other.kind, BodyKind::Asteroid | BodyKind::BlackHole)
+                    && distance_squared < HEAVY_RANGE * HEAVY_RANGE
+                    && heavy.is_none_or(|(best, _)| distance_squared < best)
+                {
+                    heavy = Some((distance_squared, -offset));
+                }
+                if other.kind != body.kind || distance_squared > perception * perception {
+                    continue;
+                }
+                let distance = distance_squared.sqrt().max(0.1);
+                if distance < PERSONAL_SPACE {
+                    separation += offset / distance * (1.0 - distance / PERSONAL_SPACE);
+                }
+                heading += other.heading;
+                center += other.position;
+                crowd += 1.0;
+                warned |= other.raising_alarm && distance < other.alarm_range;
+            }
+
+            let is_bogey = kind == EnemyKind::Bogey;
+            let (sight, lose) = if is_bogey {
+                (BOGEY_AGITATE_RANGE, BOGEY_CALM_RANGE)
+            } else {
+                (SIGHT_RANGE, LOSE_RANGE)
+            };
+            let (sight, lose) = (sight * genes.sensor_acuity, lose * genes.sensor_acuity);
+            let player_distance = player.map_or(f32::INFINITY, |(p, _)| p.distance(body.position));
+            body.enraged =
+                is_bogey && body.health < body.max_health * BOGEY_ENRAGE_HEALTH * genes.aggression;
+            let provoked = is_hurt(body) || (body.enraged && player_distance < LOSE_RANGE);
+            body.alert = player_distance < if body.alert { lose } else { sight }
+                || warned
+                || (is_bogey && provoked);
+            if body.panic > 0.0 {
+                body.alert = false;
+            }
+            let enraged = body.enraged;
+            let ranged = matches!(kind, EnemyKind::Bogey | EnemyKind::Leech);
+            let keep_off = if kind == EnemyKind::Leech {
+                300.0
+            } else {
+                220.0
+            };
+            let speed = match (is_bogey, enraged) {
+                (true, true) => speed * 1.35,
+                (true, false) => speed * 0.85,
+                _ => speed,
+            };
+            let to_player = player.map(|(p, v)| p + v * lead - body.position);
+
+            // The wander heading doubles as the shared heading that neighbors align to.
+            if crowd > 0.0 {
+                let blend = (dt * 1.2 * genes.flocking).min(1.0);
+                let own = Vec2::from_angle(body.wander);
+                let merged = own + (heading / crowd - own) * blend;
+                body.wander = merged.y.atan2(merged.x);
+            }
+            body.wander += (self.rng.f32() - 0.5) * (1.5 + 2.0 * temperament) * dt;
+
+            if let (Some(home), false) = (body.home, body.alert || body.panic > 0.0) {
+                let back = home - body.position;
+                if back.length_squared() > HOME_LEASH * HOME_LEASH {
+                    let own = Vec2::from_angle(body.wander);
+                    let merged = own + (back.normalize() - own) * (dt * 1.5).min(1.0);
+                    body.wander = merged.y.atan2(merged.x);
+                }
+            }
+            let mut desired = match (body.alert, to_player) {
+                _ if body.panic > 0.0 => {
+                    // Scatter from the ruined base, veering erratically as they go.
+                    let away = (body.position - body.panic_from).normalize_or_zero();
+                    let swerve = (self.time * 7.0 + body.id as f32).sin() * 1.1;
+                    body.wander = away.y.atan2(away.x) + swerve;
+                    Vec2::from_angle(body.wander) * speed
+                }
+                (true, Some(difference)) => {
+                    let mut desired = difference.normalize_or_zero() * speed;
+                    let distance = difference.length();
+                    if ranged && !enraged && distance < keep_off {
+                        desired = -desired * 0.65;
+                    }
+                    if ranged && distance < 520.0 {
+                        // Strafe, each bogey committing to its own side.
+                        let side = Vec2::new(-difference.y, difference.x).normalize_or_zero();
+                        desired += side * speed * 0.45 * if body.id % 2 == 0 { 1.0 } else { -1.0 };
+                    }
+                    body.wander = body.velocity.y.atan2(body.velocity.x);
+                    desired
+                }
+                _ => Vec2::from_angle(body.wander) * cruise,
+            };
+            if crowd > 0.0 {
+                // Loose cohesion: only stragglers drift back, so the crowd stays spread out.
+                let to_center = center / crowd - body.position;
+                let gap = to_center.length();
+                if gap > LOOSE_RADIUS {
+                    desired += to_center / gap
+                        * cruise
+                        * ((gap - LOOSE_RADIUS) / 200.0).min(1.0)
+                        * genes.flocking;
+                }
+                desired += separation * speed * 1.4 * genes.flocking;
+            }
+            desired += crowding;
+            if let Some((_, toward)) = heavy {
+                // Some creatures hug rocks and wells; others give them a wide berth.
+                desired += toward.normalize_or_zero() * cruise * genes.mass_affinity;
+            }
+            let top_speed = if body.alert { speed } else { cruise * 1.4 };
+            // A chain's head steers with the muscle to tow the body it drags behind.
+            let tow = body
+                .chain
+                .and_then(|c| self.chains.get(&c))
+                .map_or(1.0, |c| (c.members.len() as f32 * 0.6).max(1.0));
+            body.velocity +=
+                (desired.clamp_length_max(top_speed) - body.velocity) * (dt * 2.2 * tow).min(1.0);
+            body.angle = match to_player {
+                Some(difference) if body.alert => difference.y.atan2(difference.x),
+                _ if body.velocity.length_squared() > 25.0 => {
+                    body.velocity.y.atan2(body.velocity.x)
+                }
+                _ => body.angle,
+            };
+            if let (Some((player_position, _)), true) = (player, body.alert)
+                && kind == EnemyKind::Leech
+                && body.fire_cooldown <= 0.0
+                && (140.0..650.0).contains(&body.position.distance(player_position))
+                && self.tethers.len() < tether::MAX_TETHERS
+                && !self
+                    .tethers
+                    .iter()
+                    .any(|t| t.owner == body.id && t.kind == TetherKind::Latch)
+            {
+                let direction = (player_position - body.position).normalize_or_zero();
+                self.tethers
+                    .push(Tether::latch(body.id, body.position, direction));
+                body.fire_cooldown = 5.0;
+            }
+            if let (Some((player_position, _)), true) = (player, body.alert)
+                && kind == EnemyKind::Bogey
+                && body.fire_cooldown <= 0.0
+                && body.position.distance(player_position) < if enraged { 950.0 } else { 800.0 }
+                && self.bullets.len() < MAX_BULLETS
+            {
+                let direction = (player_position - body.position).normalize_or_zero();
+                self.bullets.push(Bullet {
+                    position: body.position + direction * (body.radius + 5.0),
+                    velocity: direction * 300.0 + body.velocity * 0.3,
+                    radius: 4.0,
+                    friendly: false,
+                    remaining: 4.0,
+                });
+                let pace = (if enraged { 0.4 } else { 1.15 }) / genes.aggression;
+                body.fire_cooldown = (2.4 + (body.id % 7) as f32 * 0.13) * pace;
+            }
+        }
+    }
+
+    fn apply_gravity(&mut self, dt: f32) {
+        let holes: Vec<_> = self
+            .bodies
+            .iter()
+            .filter(|b| b.active && b.kind == BodyKind::BlackHole)
+            .map(|b| b.position)
+            .collect();
+        let invulnerability = self.player_invulnerability;
+        for body in self.bodies.iter_mut().filter(|b| b.active) {
+            if is_fixed(body) {
+                continue;
+            }
+            for &position in &holes {
+                let offset = position - body.position;
+                let distance_squared = offset.length_squared();
+                if distance_squared < 550.0 * 550.0 {
+                    let pull = offset * (7_000_000.0 / (distance_squared + 2500.0).powf(1.5));
+                    body.velocity += pull.clamp_length_max(350.0) * dt;
+                    body.velocity = body.velocity.clamp_length_max(650.0);
+                    if distance_squared < (body.radius + 28.0).powi(2) {
+                        damage(body, 35.0 * dt, invulnerability);
+                    }
+                }
+            }
+        }
+    }
+
+    fn resolve_contacts(&mut self) {
+        let invulnerability = self.player_invulnerability;
+        let mut flings = Vec::new();
+        for i in 0..self.bodies.len() {
+            let (before, after) = self.bodies.split_at_mut(i + 1);
+            let a = &mut before[i];
+            if !a.active {
+                continue;
+            }
+            for b in after.iter_mut().filter(|b| b.active) {
+                let offset = b.position - a.position;
+                let radius = a.radius + b.radius;
+                let distance_squared = offset.length_squared();
+                if distance_squared >= radius * radius {
+                    continue;
+                }
+                let distance = distance_squared.sqrt();
+                let normal = if distance > 0.001 {
+                    offset / distance
+                } else {
+                    Vec2::X
+                };
+                // Segments of one creature are joined, not colliding.
+                if a.chain.is_some() && a.chain == b.chain {
+                    continue;
+                }
+                let inverse_a = inverse_mass(a);
+                let inverse_b = inverse_mass(b);
+                let inverse_sum = inverse_a + inverse_b;
+                if inverse_sum <= 0.0 {
+                    continue;
+                }
+                let separation = normal * (radius - distance + 0.01) / inverse_sum;
+                a.position -= separation * inverse_a;
+                b.position += separation * inverse_b;
+                let lunatic = |body: &Body| body.kind == BodyKind::Enemy(EnemyKind::Lunatic);
+                let flinger = match (lunatic(a), lunatic(b)) {
+                    (true, false) if !is_fixed(b) => Some(true),
+                    (false, true) if !is_fixed(a) => Some(false),
+                    _ => None,
+                };
+                let closing_speed = (b.velocity - a.velocity).dot(normal);
+                if let Some(a_flings) = flinger {
+                    // Lunatics have negative mass: whatever touches them is thrown away
+                    // along a wild vector, and they recoil. Cooldown stops repeat flings.
+                    let (crazy, victim, normal) = if a_flings {
+                        (&mut *a, &mut *b, normal)
+                    } else {
+                        (&mut *b, &mut *a, -normal)
+                    };
+                    if crazy.contact_cooldown <= 0.0 {
+                        let relative = (victim.velocity - crazy.velocity).length();
+                        let angle = self.rng.range(-1.0, 1.0);
+                        let direction = Vec2::from_angle(angle).rotate(normal);
+                        let speed = (FLING_SPEED + relative * 0.8).min(FLING_MAX_SPEED);
+                        victim.velocity = direction * speed;
+                        if victim.kind == BodyKind::Asteroid {
+                            damage(victim, 40.0, 0.0);
+                        }
+                        crazy.velocity = -direction * speed * 0.4;
+                        crazy.contact_cooldown = 0.4;
+                        flings.push(victim.position);
+                    }
+                } else if closing_speed < 0.0 {
+                    let impulse = normal * (-1.7 * closing_speed / inverse_sum);
+                    a.velocity -= impulse * inverse_a;
+                    b.velocity += impulse * inverse_b;
+                    if a.kind == BodyKind::Asteroid && b.kind == BodyKind::Asteroid {
+                        let hit = (-closing_speed - ROCK_SHATTER_SPEED).max(0.0) * 0.35;
+                        damage(a, hit, 0.0);
+                        damage(b, hit, 0.0);
+                    }
+                }
+                if a.kind == BodyKind::Player && a.contact_cooldown <= 0.0 {
+                    damage(a, contact_damage(b.kind), invulnerability);
+                    a.contact_cooldown = 0.65;
+                }
+                if b.kind == BodyKind::Player && b.contact_cooldown <= 0.0 {
+                    damage(b, contact_damage(a.kind), invulnerability);
+                    b.contact_cooldown = 0.65;
+                }
+            }
+        }
+        for position in flings {
+            self.effect(position, 30.0, 0.3, EffectKind::Impact);
+        }
+    }
+
+    fn move_bullets(&mut self, dt: f32) {
+        let mut impacts = Vec::new();
+        let cords = self.cord_segments();
+        for bullet in &mut self.bullets {
+            let previous = bullet.position;
+            bullet.position += bullet.velocity * dt;
+            bullet.remaining -= dt;
+            let mut hit: Option<(usize, f32)> = None;
+            for (index, body) in self.bodies.iter().enumerate().filter(|(_, b)| b.active) {
+                let target = if bullet.friendly {
+                    body.kind != BodyKind::Player
+                } else {
+                    matches!(
+                        body.kind,
+                        BodyKind::Player | BodyKind::Asteroid | BodyKind::BlackHole
+                    )
+                };
+                if !target || body.health <= 0.0 {
+                    continue;
+                }
+                if let Some(fraction) = segment_circle(
+                    previous,
+                    bullet.position,
+                    body.position,
+                    body.radius + bullet.radius,
+                ) && hit.is_none_or(|(_, best)| fraction < best)
+                {
+                    hit = Some((index, fraction));
+                }
+            }
+            if hit.is_none() && bullet.friendly {
+                for &(index, from, to) in &cords {
+                    if tether::segment_distance(previous, bullet.position, from, to)
+                        < bullet.radius + 3.0
+                    {
+                        self.tethers[index].health -= tether::CORD_BULLET_DAMAGE;
+                        bullet.remaining = 0.0;
+                        impacts.push(bullet.position);
+                        break;
+                    }
+                }
+            }
+            if let Some((index, fraction)) = hit {
+                let body = &mut self.bodies[index];
+                damage(
+                    body,
+                    if bullet.friendly { 26.0 } else { 18.0 },
+                    self.player_invulnerability,
+                );
+                if !is_fixed(body) {
+                    body.velocity += bullet.velocity.normalize_or_zero() * (180.0 / body.mass);
+                }
+                bullet.remaining = 0.0;
+                impacts.push(previous.lerp(bullet.position, fraction));
+            }
+        }
+        self.bullets.retain(|b| b.remaining > 0.0);
+        for position in impacts {
+            self.effect(position, 16.0, 0.22, EffectKind::Impact);
+        }
+    }
+
+    fn remove_destroyed(&mut self) {
+        let destroyed: Vec<Body> = self
+            .bodies
+            .iter()
+            .filter(|b| b.health <= 0.0)
+            .cloned()
+            .collect();
+        if destroyed.is_empty() {
+            return;
+        }
+        self.bodies.retain(|body| body.health > 0.0);
+        let mut lost_player = None;
+        for body in &destroyed {
+            let (kind, position, radius) = (body.kind, body.position, body.radius);
+            self.effect(position, radius * 2.5, 0.65, EffectKind::Explosion);
+            self.score = self.score.saturating_add(match kind {
+                BodyKind::Enemy(EnemyKind::Bogey) => 100,
+                BodyKind::Enemy(EnemyKind::Lunatic) => 125,
+                BodyKind::Enemy(EnemyKind::Smarty) => 200,
+                BodyKind::Enemy(EnemyKind::Fatso) => 250,
+                BodyKind::Enemy(EnemyKind::Leech) => 150,
+                BodyKind::Enemy(EnemyKind::Serpent) => 60,
+                BodyKind::Asteroid => 25,
+                BodyKind::Base => 500,
+                _ => 0,
+            });
+            match kind {
+                BodyKind::Player => lost_player = Some(position),
+                BodyKind::Asteroid => self.shatter(body),
+                BodyKind::Base => self.base_destroyed(position),
+                _ => {}
+            }
+            self.record_fallen(body);
+        }
+        if let Some(position) = lost_player {
+            self.lives = self.lives.saturating_sub(1);
+            self.bullets.retain(|bullet| bullet.friendly);
+            self.tethers.retain(|t| t.kind != TetherKind::Latch);
+            if self.lives == 0 {
+                self.game_over = true;
+            } else {
+                self.spawn_player(position);
+            }
+        }
+    }
+
+    /// Respawns near `origin`, preferring the least crowded of a few nearby candidates;
+    /// shield time covers the escape.
+    fn spawn_player(&mut self, origin: Vec2) {
+        let offsets = [
+            Vec2::ZERO,
+            Vec2::new(-350.0, -220.0),
+            Vec2::new(350.0, 220.0),
+            Vec2::new(-350.0, 220.0),
+            Vec2::new(350.0, -220.0),
+        ];
+        let clearance = |p: Vec2| {
+            self.bodies
+                .iter()
+                .map(|body| p.distance(body.position) - body.radius)
+                .fold(f32::INFINITY, f32::min)
+        };
+        let position = offsets
+            .into_iter()
+            .map(|offset| origin + offset)
+            .max_by(|a, b| clearance(*a).total_cmp(&clearance(*b)))
+            .unwrap_or(origin);
+        let mut player = self.make_body(BodyKind::Player, position);
+        player.angle = FRAC_PI_2;
+        self.bodies.push(player);
+        self.focus = position;
+        self.player_invulnerability = 2.5;
+        self.effect(position, 50.0, 1.0, EffectKind::Respawn);
+    }
+
+    fn make_body(&mut self, kind: BodyKind, position: Vec2) -> Body {
+        let (radius, health, shield, mass) = match kind {
+            BodyKind::Player => (14.0, 100.0, 60.0, 10.0),
+            BodyKind::Enemy(EnemyKind::Bogey) => (15.0, 35.0, 18.0, 8.0),
+            BodyKind::Enemy(EnemyKind::Lunatic) => (18.0, 45.0, 0.0, 6.0),
+            BodyKind::Enemy(EnemyKind::Smarty) => (18.0, 70.0, 0.0, 12.0),
+            BodyKind::Enemy(EnemyKind::Fatso) => (48.0, 180.0, 0.0, 200.0),
+            BodyKind::Asteroid => (35.0, 80.0, 0.0, 25.0),
+            BodyKind::Enemy(EnemyKind::Leech) => (16.0, 40.0, 20.0, 7.0),
+            BodyKind::Enemy(EnemyKind::Serpent) => (11.0, 28.0, 0.0, 5.0),
+            BodyKind::BlackHole => (20.0, f32::INFINITY, 0.0, f32::INFINITY),
+            BodyKind::Base => (55.0, 450.0, 0.0, f32::INFINITY),
+        };
+        let id = self.next_id;
+        self.next_id += 1;
+        Body {
+            id,
+            kind,
+            position,
+            velocity: Vec2::ZERO,
+            angle: 0.0,
+            radius,
+            health,
+            max_health: health,
+            shield,
+            max_shield: shield,
+            mass,
+            origin: None,
+            pinned: false,
+            chain: None,
+            follower: false,
+            base: None,
+            home: None,
+            panic: 0.0,
+            panic_from: Vec2::ZERO,
+            alert: false,
+            enraged: false,
+            genes: Phenotype::default(),
+            active: true,
+            wander: 0.0,
+            fire_cooldown: 0.0,
+            contact_cooldown: 0.0,
+            since_hit: 0.0,
+        }
+    }
+
+    fn effect(&mut self, position: Vec2, radius: f32, lifetime: f32, kind: EffectKind) {
+        if self.effects.len() < MAX_EFFECTS {
+            self.effects.push(Effect {
+                position,
+                radius,
+                remaining: lifetime,
+                lifetime,
+                kind,
+            });
+        }
+    }
+}
+
+/// Bodies that never move: gravity wells, bases and the stones of a nest.
+fn is_fixed(body: &Body) -> bool {
+    body.pinned || matches!(body.kind, BodyKind::BlackHole | BodyKind::Base)
+}
+
+fn inverse_mass(body: &Body) -> f32 {
+    if is_fixed(body) { 0.0 } else { 1.0 / body.mass }
+}
+
+/// Mutable access to two distinct elements at once.
+fn pair_mut<T>(items: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
+    assert_ne!(a, b);
+    if a < b {
+        let (left, right) = items.split_at_mut(b);
+        (&mut left[a], &mut right[0])
+    } else {
+        let (left, right) = items.split_at_mut(a);
+        (&mut right[0], &mut left[b])
+    }
+}
+
+/// Recently damaged, with shield or hull still not fully recovered.
+fn is_hurt(body: &Body) -> bool {
+    body.since_hit < 4.0 && (body.health < body.max_health || body.shield < body.max_shield)
+}
+
+fn contact_damage(kind: BodyKind) -> f32 {
+    match kind {
+        BodyKind::Enemy(EnemyKind::Lunatic) => 18.0,
+        BodyKind::Enemy(EnemyKind::Fatso) => 20.0,
+        BodyKind::BlackHole => 22.0,
+        BodyKind::Base => 15.0,
+        BodyKind::Asteroid => 12.0,
+        BodyKind::Enemy(_) => 6.0,
+        BodyKind::Player => 0.0,
+    }
+}
+
+fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) {
+    if body.kind == BodyKind::BlackHole
+        || (body.kind == BodyKind::Player && player_invulnerability > 0.0)
+    {
+        return;
+    }
+    let absorbed = body.shield.min(amount);
+    body.shield -= absorbed;
+    body.health -= amount - absorbed;
+    body.since_hit = 0.0;
+}
+
+/// First intersection along a swept projectile, avoiding tunneling at high speeds.
+fn segment_circle(start: Vec2, end: Vec2, center: Vec2, radius: f32) -> Option<f32> {
+    let relative = start - center;
+    let c = relative.length_squared() - radius * radius;
+    if c <= 0.0 {
+        return Some(0.0);
+    }
+    let movement = end - start;
+    let a = movement.length_squared();
+    if a < 0.000001 {
+        return None;
+    }
+    let b = relative.dot(movement);
+    let discriminant = b * b - a * c;
+    if discriminant < 0.0 {
+        return None;
+    }
+    let fraction = (-b - discriminant.sqrt()) / a;
+    (0.0..=1.0).contains(&fraction).then_some(fraction)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    pub(super) const DT: f32 = 1.0 / 60.0;
+
+    /// Only the player remains, so tests control exactly what exists.
+    pub(super) fn empty_game() -> Game {
+        let mut game = Game::new(42);
+        game.bodies.retain(|b| b.kind == BodyKind::Player);
+        game.bullets.clear();
+        game.effects.clear();
+        game.tethers.clear();
+        game.chains.clear();
+        game.bodies[0].position = Vec2::ZERO;
+        game.player_invulnerability = 0.0;
+        game
+    }
+
+    pub(super) fn add(game: &mut Game, kind: BodyKind, position: Vec2) -> u64 {
+        let body = game.make_body(kind, position);
+        let id = body.id;
+        game.bodies.push(body);
+        id
+    }
+
+    pub(super) fn body(game: &Game, id: u64) -> &Body {
+        game.bodies.iter().find(|b| b.id == id).unwrap()
+    }
+
+    pub(super) fn set_player(game: &mut Game, position: Vec2, velocity: Vec2) {
+        let player = game
+            .bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap();
+        player.position = position;
+        player.velocity = velocity;
+    }
+
+    #[test]
+    fn thrust_and_brake() {
+        let mut game = empty_game();
+        for _ in 0..60 {
+            game.step(
+                DT,
+                Input {
+                    thrust: 1.0,
+                    ..Default::default()
+                },
+            );
+        }
+        let speed = game.player().unwrap().velocity.length();
+        assert!(speed > 300.0 && speed <= PLAYER_SPEED);
+        for _ in 0..30 {
+            game.step(
+                DT,
+                Input {
+                    brake: true,
+                    ..Default::default()
+                },
+            );
+        }
+        assert!(game.player().unwrap().velocity.length() < speed * 0.15);
+    }
+
+    #[test]
+    fn flying_across_quadrant_edges_loads_neighbors_and_unloads_the_far_ones() {
+        let mut game = Game::new(5);
+        assert_eq!(game.quadrant(), QuadrantId::ORIGIN);
+        game.player_invulnerability = 1e9;
+        set_player(
+            &mut game,
+            Vec2::new(world::QUADRANT_SIZE / 2.0 - 100.0, 0.0),
+            Vec2::new(PLAYER_SPEED, 0.0),
+        );
+        game.step(DT, Input::default());
+        assert!(game.loaded.contains(&QuadrantId { x: 1, y: 0 }));
+        for _ in 0..60 * 30 {
+            game.step(DT, Input::default());
+            game.player_invulnerability = 1e9;
+            let position = game.player().unwrap().position;
+            set_player(&mut game, position, Vec2::new(PLAYER_SPEED, 0.0));
+        }
+        assert!(game.quadrant().x >= 3);
+        // Quadrant 0 is more than UNLOAD_DISTANCE behind the player and has been dropped.
+        assert!(!game.loaded.contains(&QuadrantId::ORIGIN));
+        let home = game.quadrant();
+        assert!(game.bodies.iter().all(|b| {
+            QuadrantId::containing(b.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
+        }));
+    }
+
+    #[test]
+    fn revisiting_a_quadrant_regenerates_the_same_population() {
+        let mut game = Game::new(8);
+        let count = |game: &Game| {
+            game.bodies
+                .iter()
+                .filter(|b| b.kind == BodyKind::Asteroid)
+                .count()
+        };
+        let at_start = world::generate(8, QuadrantId::ORIGIN)
+            .iter()
+            .filter(|s| s.kind == BodyKind::Asteroid)
+            .count();
+        assert!(count(&game) >= at_start);
+        set_player(
+            &mut game,
+            Vec2::new(5.0 * world::QUADRANT_SIZE, 0.0),
+            Vec2::ZERO,
+        );
+        game.step(DT, Input::default());
+        assert!(!game.loaded.contains(&QuadrantId::ORIGIN));
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        game.step(DT, Input::default());
+        assert!(game.loaded.contains(&QuadrantId::ORIGIN));
+        assert!(count(&game) >= at_start);
+    }
+
+    #[test]
+    fn bodies_outside_the_active_region_are_frozen() {
+        let mut game = empty_game();
+        let far = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Lunatic),
+            Vec2::new(2.0 * world::QUADRANT_SIZE, 0.0),
+        );
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == far)
+            .unwrap()
+            .velocity = Vec2::X * 100.0;
+        let before = body(&game, far).position;
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert_eq!(body(&game, far).position, before);
+        assert!(!body(&game, far).active);
+    }
+
+    #[test]
+    fn a_chaser_follows_the_player_across_a_quadrant_border() {
+        let mut game = empty_game();
+        let edge = world::QUADRANT_SIZE / 2.0;
+        let chaser = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Lunatic),
+            Vec2::new(edge - 400.0, 0.0),
+        );
+        set_player(&mut game, Vec2::new(edge + 300.0, 0.0), Vec2::ZERO);
+        game.player_invulnerability = 1e9;
+        for _ in 0..600 {
+            game.step(DT, Input::default());
+        }
+        let chaser = body(&game, chaser);
+        assert!(chaser.alert && chaser.active);
+        assert!(
+            chaser.position.x > edge,
+            "chaser stayed in its home quadrant"
+        );
+    }
+
+    fn bogeys(game: &mut Game, center: Vec2, count: usize) -> Vec<u64> {
+        (0..count)
+            .map(|i| {
+                let angle = i as f32 * 2.4;
+                let spot = center + Vec2::from_angle(angle) * (30.0 + 12.0 * i as f32);
+                add(game, BodyKind::Enemy(EnemyKind::Bogey), spot)
+            })
+            .collect()
+    }
+
+    fn positions(game: &Game, ids: &[u64]) -> Vec<Vec2> {
+        ids.iter().map(|&id| body(game, id).position).collect()
+    }
+
+    pub(super) fn mean(points: &[Vec2]) -> Vec2 {
+        points.iter().sum::<Vec2>() / points.len() as f32
+    }
+
+    #[test]
+    fn a_crowd_travels_loosely_instead_of_as_a_tight_unit() {
+        let mut game = empty_game();
+        let ids = bogeys(&mut game, Vec2::new(0.0, 2000.0), 8);
+        let start = mean(&positions(&game, &ids));
+        for _ in 0..1800 {
+            game.step(DT, Input::default());
+        }
+        let spots = positions(&game, &ids);
+        assert!(
+            mean(&spots).distance(start) > 300.0,
+            "crowd never travelled"
+        );
+        let nearest = |i: usize| {
+            (0..spots.len())
+                .filter(|&j| j != i)
+                .map(|j| spots[i].distance(spots[j]))
+                .fold(f32::INFINITY, f32::min)
+        };
+        let spacing = (0..spots.len()).map(nearest).sum::<f32>() / spots.len() as f32;
+        assert!(spacing > 50.0, "crowd is packed too tightly: {spacing}");
+        assert!(
+            spots.iter().all(|p| p.distance(mean(&spots)) < 1200.0),
+            "crowd scattered"
+        );
+    }
+
+    #[test]
+    fn nearby_bands_merge_while_distant_ones_stay_independent() {
+        let mut game = empty_game();
+        let left = bogeys(&mut game, Vec2::new(-200.0, 2200.0), 5);
+        let right = bogeys(&mut game, Vec2::new(200.0, 2200.0), 5);
+        let remote = bogeys(&mut game, Vec2::new(0.0, -2900.0), 5);
+        for _ in 0..900 {
+            game.step(DT, Input::default());
+        }
+        let heading = |game: &Game, ids: &[u64]| {
+            ids.iter()
+                .map(|&id| body(game, id).velocity.normalize_or_zero())
+                .sum::<Vec2>()
+                / ids.len() as f32
+        };
+        let near: Vec<u64> = left.iter().chain(&right).copied().collect();
+        // Neighboring bands behave as one: strongly aligned and still mixed together.
+        assert!(
+            heading(&game, &near).length() > 0.8,
+            "nearby bands did not align"
+        );
+        let a = mean(&positions(&game, &left));
+        let b = mean(&positions(&game, &right));
+        assert!(a.distance(b) < 600.0, "nearby bands drifted apart");
+        // Nothing ties the remote band to them, and the sim stayed finite.
+        assert!(mean(&positions(&game, &remote)).distance(mean(&positions(&game, &near))) > 2000.0);
+    }
+
+    #[test]
+    fn touching_a_lunatic_flings_the_victim_chaotically_and_it_recoils() {
+        let mut flings = Vec::new();
+        for seed in 0..12 {
+            let mut game = empty_game();
+            game.rng = Rng::new(seed);
+            game.player_invulnerability = 1e9;
+            let lunatic = add(
+                &mut game,
+                BodyKind::Enemy(EnemyKind::Lunatic),
+                Vec2::new(30.0, 0.0),
+            );
+            game.step(DT, Input::default());
+            let player = game.player().unwrap();
+            assert!(
+                player.velocity.length() >= FLING_SPEED * 0.95,
+                "not flung hard"
+            );
+            assert!(
+                body(&game, lunatic).velocity.dot(player.velocity) < 0.0,
+                "no recoil"
+            );
+            flings.push(player.velocity.normalize());
+        }
+        // Directions vary around the contact normal rather than being identical.
+        let spread = flings
+            .iter()
+            .map(|d| d.dot(Vec2::NEG_X))
+            .fold((1.0_f32, -1.0_f32), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        assert!(spread.1 - spread.0 > 0.1);
+        assert!(flings.iter().all(|d| d.dot(Vec2::NEG_X) > 0.3));
+    }
+
+    #[test]
+    fn a_fling_is_not_snapped_back_to_top_speed_and_does_not_repeat_every_tick() {
+        let mut game = empty_game();
+        game.player_invulnerability = 1e9;
+        add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Lunatic),
+            Vec2::new(30.0, 0.0),
+        );
+        game.step(DT, Input::default());
+        let flung = game.player().unwrap().velocity.length();
+        assert!(flung > PLAYER_SPEED);
+        game.step(DT, Input::default());
+        let later = game.player().unwrap().velocity.length();
+        assert!(later < flung && later > PLAYER_SPEED);
+        for _ in 0..180 {
+            game.step(DT, Input::default());
+        }
+        assert!(game.player().unwrap().velocity.length() <= PLAYER_SPEED * 1.01);
+    }
+
+    #[test]
+    fn phenotype_weights_change_behavior_and_neutral_genes_do_not() {
+        // A keener sensor agitates a bogey at a distance the default would ignore.
+        let agitated_at = |sensor: f32| {
+            let mut game = empty_game();
+            let id = add(
+                &mut game,
+                BodyKind::Enemy(EnemyKind::Bogey),
+                Vec2::new(0.0, 450.0),
+            );
+            game.bodies
+                .iter_mut()
+                .find(|b| b.id == id)
+                .unwrap()
+                .genes
+                .sensor_acuity = sensor;
+            game.player_invulnerability = 1e9;
+            game.step(DT, Input::default());
+            body(&game, id).alert
+        };
+        assert!(!agitated_at(1.0));
+        assert!(agitated_at(1.6));
+        // Mass affinity draws a creature toward a rock, or pushes it away.
+        let drift = |affinity: f32| {
+            let mut game = empty_game();
+            let id = add(
+                &mut game,
+                BodyKind::Enemy(EnemyKind::Lunatic),
+                Vec2::new(0.0, 2000.0),
+            );
+            add(&mut game, BodyKind::Asteroid, Vec2::new(400.0, 2000.0));
+            game.bodies
+                .iter_mut()
+                .find(|b| b.id == id)
+                .unwrap()
+                .genes
+                .mass_affinity = affinity;
+            for b in &mut game.bodies {
+                b.velocity = Vec2::ZERO;
+                b.wander = 0.0;
+            }
+            for _ in 0..60 {
+                game.step(DT, Input::default());
+            }
+            body(&game, id).position.distance(Vec2::new(400.0, 2000.0))
+        };
+        assert!(drift(1.0) < drift(0.0) && drift(0.0) < drift(-1.0));
+    }
+
+    #[test]
+    fn calm_bogeys_ignore_a_passing_player_until_it_gets_close_or_hurts_them() {
+        let mut game = empty_game();
+        let id = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Bogey),
+            Vec2::new(0.0, 500.0),
+        );
+        game.player_invulnerability = 1e9;
+        for _ in 0..300 {
+            game.step(DT, Input::default());
+        }
+        assert!(!body(&game, id).alert);
+        assert!(game.bullets.iter().all(|b| b.friendly));
+        // Getting too near agitates it.
+        let near = body(&game, id).position - Vec2::new(0.0, 250.0);
+        set_player(&mut game, near, Vec2::ZERO);
+        game.step(DT, Input::default());
+        assert!(body(&game, id).alert && !body(&game, id).enraged);
+        // Moving well clear lets it settle again.
+        set_player(&mut game, near - Vec2::new(0.0, 1500.0), Vec2::ZERO);
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert!(!body(&game, id).alert);
+        // A shot from afar agitates it, and a second leaves it near death and berserk.
+        let target = body(&game, id).position;
+        set_player(&mut game, target - Vec2::new(0.0, 700.0), Vec2::ZERO);
+        let shot = |at: Vec2| Bullet {
+            position: at,
+            velocity: Vec2::ZERO,
+            radius: 3.0,
+            friendly: true,
+            remaining: 1.0,
+        };
+        game.bullets.push(shot(body(&game, id).position));
+        game.step(DT, Input::default());
+        game.step(DT, Input::default());
+        assert!(body(&game, id).alert && !body(&game, id).enraged);
+        game.bullets.push(shot(body(&game, id).position));
+        game.step(DT, Input::default());
+        game.step(DT, Input::default());
+        assert!(body(&game, id).enraged);
+    }
+
+    #[test]
+    fn hurt_bogeys_panic_their_close_schoolmates() {
+        let mut game = empty_game();
+        let hurt = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Bogey),
+            Vec2::new(0.0, 1500.0),
+        );
+        let near = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Bogey),
+            Vec2::new(0.0, 1650.0),
+        );
+        let far = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Bogey),
+            Vec2::new(0.0, 1900.0),
+        );
+        game.player_invulnerability = 1e9;
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == hurt)
+            .unwrap()
+            .shield = 0.0;
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == hurt)
+            .unwrap()
+            .since_hit = 0.0;
+        game.step(DT, Input::default());
+        assert!(body(&game, hurt).alert && body(&game, near).alert);
+        assert!(!body(&game, far).alert);
+    }
+
+    #[test]
+    fn alarms_spread_to_neighbors_in_earshot_but_not_beyond() {
+        let mut game = empty_game();
+        let watcher = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Lunatic),
+            Vec2::new(0.0, 900.0),
+        );
+        let neighbor = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Lunatic),
+            Vec2::new(0.0, 1250.0),
+        );
+        let distant = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Lunatic),
+            Vec2::new(0.0, 1900.0),
+        );
+        game.player_invulnerability = 1e9;
+        game.step(DT, Input::default());
+        assert!(body(&game, watcher).alert);
+        assert!(body(&game, neighbor).alert);
+        assert!(!body(&game, distant).alert);
+    }
+
+    #[test]
+    fn shots_hit_along_their_path_and_drain_shields_first() {
+        let mut game = empty_game();
+        let id = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Bogey),
+            Vec2::new(100.0, 0.0),
+        );
+        game.bullets.push(Bullet {
+            position: Vec2::new(50.0, 0.0),
+            velocity: Vec2::new(4000.0, 0.0),
+            radius: 3.0,
+            friendly: true,
+            remaining: 1.0,
+        });
+        game.step(0.05, Input::default());
+        let target = body(&game, id);
+        assert_eq!(target.shield, 0.0);
+        assert_eq!(target.health, 27.0);
+        assert!(game.bullets.iter().all(|b| !b.friendly));
+    }
+
+    #[test]
+    fn shield_regeneration_requires_a_quiet_interval() {
+        let mut game = empty_game();
+        damage(&mut game.bodies[0], 30.0, 0.0);
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert_eq!(game.player().unwrap().shield, 30.0);
+        for _ in 0..90 {
+            game.step(DT, Input::default());
+        }
+        assert!(game.player().unwrap().shield > 30.0);
+    }
+
+    #[test]
+    fn death_consumes_lives_and_restart_restores_seed() {
+        let mut game = empty_game();
+        for expected_lives in [2, 1, 0] {
+            game.bodies
+                .iter_mut()
+                .find(|b| b.kind == BodyKind::Player)
+                .unwrap()
+                .health = 0.0;
+            game.step(DT, Input::default());
+            assert_eq!(game.lives, expected_lives);
+            assert_eq!(game.game_over, expected_lives == 0);
+            if expected_lives > 0 {
+                assert!(game.player_invulnerability > 2.0);
+            }
+        }
+        assert!(game.player().is_none());
+        game.reset();
+        let fresh = Game::new(42);
+        assert_eq!(game.lives, 3);
+        assert_eq!(game.bodies.len(), fresh.bodies.len());
+        assert_eq!(game.bodies[1].position, fresh.bodies[1].position);
+    }
+
+    #[test]
+    fn kills_award_score() {
+        let mut game = empty_game();
+        add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Bogey),
+            Vec2::new(0.0, 2000.0),
+        );
+        add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Lunatic),
+            Vec2::new(0.0, -2000.0),
+        );
+        for body in &mut game.bodies {
+            if matches!(body.kind, BodyKind::Enemy(_)) {
+                body.health = 0.0;
+            }
+        }
+        game.step(DT, Input::default());
+        assert_eq!(game.score, 225);
+    }
+
+    #[test]
+    fn black_holes_pull_bodies_and_ignore_damage() {
+        let mut game = empty_game();
+        let hole = add(&mut game, BodyKind::BlackHole, Vec2::new(200.0, 0.0));
+        game.step(DT, Input::default());
+        assert!(game.player().unwrap().velocity.x > 0.0);
+        let hole = game.bodies.iter_mut().find(|b| b.id == hole).unwrap();
+        damage(hole, 1_000_000.0, 0.0);
+        assert_eq!(hole.position, Vec2::new(200.0, 0.0));
+        assert!(hole.health.is_infinite());
+    }
+
+    #[test]
+    fn coincident_contacts_separate_without_nan() {
+        let mut game = empty_game();
+        let asteroid = add(&mut game, BodyKind::Asteroid, Vec2::ZERO);
+        game.step(DT, Input::default());
+        let player = game.player().unwrap();
+        assert!(
+            player.position.distance(body(&game, asteroid).position)
+                >= player.radius + body(&game, asteroid).radius
+        );
+        assert_eq!(player.shield, 48.0);
+        assert!(
+            game.bodies
+                .iter()
+                .all(|b| b.position.is_finite() && b.velocity.is_finite())
+        );
+    }
+
+    #[test]
+    fn long_flights_with_continuous_fire_stay_bounded_and_deterministic() {
+        let run = || {
+            let mut game = Game::new(123);
+            for tick in 0..12_000 {
+                game.player_invulnerability = 10.0;
+                game.step(
+                    DT,
+                    Input {
+                        fire: true,
+                        turn: if tick % 900 < 450 { 0.4 } else { -0.2 },
+                        thrust: 1.0,
+                        ..Default::default()
+                    },
+                );
+                assert!(game.bullets.len() <= MAX_BULLETS);
+                assert!(game.effects.len() <= MAX_EFFECTS);
+                assert!(
+                    game.bodies
+                        .iter()
+                        .all(|b| b.position.is_finite() && b.velocity.is_finite())
+                );
+            }
+            game
+        };
+        let a = run();
+        let b = run();
+        assert!(a.loaded.len() <= 9 + 16);
+        assert!(a.bodies.len() < 1500);
+        assert_eq!(a.score, b.score);
+        assert_eq!(a.bodies.len(), b.bodies.len());
+        for (left, right) in a.bodies.iter().zip(&b.bodies) {
+            assert_eq!(left.position, right.position);
+            assert_eq!(left.health, right.health);
+        }
+    }
+
+    #[test]
+    fn invalid_time_and_analog_inputs_cannot_poison_state() {
+        let mut game = Game::new(1);
+        game.step(f32::NAN, Input::default());
+        game.step(-1.0, Input::default());
+        assert_eq!(game.time, 0.0);
+        game.step(
+            DT,
+            Input {
+                thrust: f32::NAN,
+                turn: f32::INFINITY,
+                aim_direction: Some(Vec2::splat(f32::NAN)),
+                ..Default::default()
+            },
+        );
+        assert!(game.player().unwrap().position.is_finite());
+        assert!(game.player().unwrap().angle.is_finite());
+    }
+
+    /// First quadrant (scanning outward) whose generated population satisfies `wanted`.
+    pub(super) fn find_quadrant(seed: u64, wanted: impl Fn(&[world::Spawn]) -> bool) -> QuadrantId {
+        for ring in 0..=20_i32 {
+            for x in -ring..=ring {
+                for y in -ring..=ring {
+                    let id = QuadrantId { x, y };
+                    if x.abs().max(y.abs()) == ring && wanted(&world::generate(seed, id)) {
+                        return id;
+                    }
+                }
+            }
+        }
+        panic!("no quadrant matched");
+    }
+
+    #[test]
+    fn destroyed_spawns_stay_destroyed_across_unload_and_reload() {
+        let mut game = Game::new(7);
+        let victim = game
+            .bodies
+            .iter()
+            .find(|b| matches!(b.kind, BodyKind::Enemy(_)) && b.origin.is_some())
+            .unwrap();
+        let (victim_id, origin) = (victim.id, victim.origin.unwrap());
+        let before = game.bodies.iter().filter(|b| b.origin.is_some()).count();
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == victim_id)
+            .unwrap()
+            .health = 0.0;
+        game.player_invulnerability = 1e9;
+        game.step(DT, Input::default());
+        // Leave far enough for the quadrant to unload, then come back.
+        game.teleport(Vec2::new(6.0 * world::QUADRANT_SIZE, 0.0));
+        game.step(DT, Input::default());
+        assert!(
+            game.bodies
+                .iter()
+                .all(|b| b.origin.is_none_or(|(q, _)| q != QuadrantId::ORIGIN))
+        );
+        game.teleport(Vec2::ZERO);
+        game.step(DT, Input::default());
+        assert!(game.bodies.iter().all(|b| b.origin != Some(origin)));
+        let after = game
+            .bodies
+            .iter()
+            .filter(|b| b.origin.is_some_and(|(q, _)| q == QuadrantId::ORIGIN))
+            .count();
+        assert!(
+            after >= before - 1 - 8,
+            "the rest of the quadrant should return"
+        );
+        assert!(after > 0);
+    }
+
+    #[test]
+    fn a_wandering_creature_is_not_duplicated_when_its_home_reloads() {
+        let mut game = Game::new(7);
+        let count = |game: &Game| game.bodies.len();
+        let before = count(&game);
+        game.loaded.remove(&QuadrantId::ORIGIN);
+        game.populate(QuadrantId::ORIGIN);
+        assert_eq!(count(&game), before);
+    }
+
+    #[test]
+    fn destroyed_bases_and_chains_persist() {
+        let seed = 11;
+        let quadrant = find_quadrant(seed, |spawns| {
+            spawns.iter().any(|s| s.kind == BodyKind::Base)
+                && spawns.iter().any(|s| s.genome.is_some())
+        });
+        let mut game = Game::new(seed);
+        game.player_invulnerability = 1e9;
+        game.teleport(quadrant.center());
+        game.step(DT, Input::default());
+        let base = game.bodies.iter().find(|b| b.base.is_some()).unwrap();
+        let base_origin = base.origin;
+        let base_id = base.id;
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == base_id)
+            .unwrap()
+            .health = 0.0;
+        // Destroy a whole chain, one segment at a time.
+        for body in game.bodies.iter_mut().filter(|b| b.chain.is_some()) {
+            body.health = 0.0;
+        }
+        game.step(DT, Input::default());
+        assert!(
+            game.chains.is_empty()
+                || game
+                    .bodies
+                    .iter()
+                    .all(|b| b.chain.is_none() || b.health > 0.0)
+        );
+        game.teleport(quadrant.center() + Vec2::new(7.0 * world::QUADRANT_SIZE, 0.0));
+        game.step(DT, Input::default());
+        game.teleport(quadrant.center());
+        game.step(DT, Input::default());
+        assert!(game.bodies.iter().all(|b| b.origin != base_origin));
+        assert!(game.bodies.iter().any(|b| b.kind == BodyKind::Asteroid));
+    }
+
+    #[test]
+    fn a_destroyed_rock_shatters_into_smaller_pieces_and_tiny_ones_vanish() {
+        let mut game = empty_game();
+        let big = add(&mut game, BodyKind::Asteroid, Vec2::new(0.0, 1500.0));
+        {
+            let rock = game.bodies.iter_mut().find(|b| b.id == big).unwrap();
+            rock.radius = 50.0;
+            rock.mass = 30.0;
+            rock.health = 0.0;
+        }
+        game.step(DT, Input::default());
+        let shards: Vec<&Body> = game
+            .bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Asteroid)
+            .collect();
+        assert_eq!(shards.len(), 3);
+        assert!(
+            shards
+                .iter()
+                .all(|s| (s.radius - 31.0).abs() < 0.01 && !s.pinned && s.origin.is_none())
+        );
+        assert!(
+            shards
+                .iter()
+                .all(|s| s.health > 0.0 && s.velocity.length() > 60.0)
+        );
+        // A pebble leaves nothing behind.
+        let mut game = empty_game();
+        let small = add(&mut game, BodyKind::Asteroid, Vec2::new(0.0, 1500.0));
+        {
+            let rock = game.bodies.iter_mut().find(|b| b.id == small).unwrap();
+            rock.radius = 15.0;
+            rock.health = 0.0;
+        }
+        game.step(DT, Input::default());
+        assert!(game.bodies.iter().all(|b| b.kind != BodyKind::Asteroid));
+    }
+
+    #[test]
+    fn shattering_always_terminates_and_stays_bounded() {
+        let mut game = empty_game();
+        for i in 0..6 {
+            let id = add(
+                &mut game,
+                BodyKind::Asteroid,
+                Vec2::new(i as f32 * 150.0, 1800.0),
+            );
+            let rock = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+            rock.radius = 60.0;
+            rock.mass = 36.0;
+        }
+        game.player_invulnerability = 1e9;
+        for _ in 0..600 {
+            for body in game
+                .bodies
+                .iter_mut()
+                .filter(|b| b.kind == BodyKind::Asteroid)
+            {
+                body.health = 0.0;
+            }
+            game.step(DT, Input::default());
+            assert!(game.bodies.len() < MAX_BODIES);
+        }
+        assert!(game.bodies.iter().all(|b| b.kind != BodyKind::Asteroid));
+    }
+
+    #[test]
+    fn a_flung_rock_takes_damage_and_fast_rock_impacts_hurt_both() {
+        let mut game = empty_game();
+        let lunatic = add(
+            &mut game,
+            BodyKind::Enemy(EnemyKind::Lunatic),
+            Vec2::new(0.0, 1500.0),
+        );
+        let rock = add(&mut game, BodyKind::Asteroid, Vec2::new(40.0, 1500.0));
+        {
+            let rock = game.bodies.iter_mut().find(|b| b.id == rock).unwrap();
+            rock.radius = 30.0;
+            rock.mass = 18.0;
+            rock.health = 38.0;
+        }
+        let _ = lunatic;
+        game.step(DT, Input::default());
+        // 40 damage from the fling destroys it, and it shatters.
+        assert!(game.bodies.iter().all(|b| b.id != rock));
+        assert!(
+            game.bodies
+                .iter()
+                .filter(|b| b.kind == BodyKind::Asteroid)
+                .count()
+                >= 2
+        );
+        // Two rocks meeting hard damage each other; a gentle touch does not.
+        for (speed, hurt) in [(800.0, true), (100.0, false)] {
+            let mut game = empty_game();
+            let a = add(&mut game, BodyKind::Asteroid, Vec2::new(0.0, 1500.0));
+            let b = add(&mut game, BodyKind::Asteroid, Vec2::new(70.0, 1500.0));
+            for (id, v) in [(a, speed), (b, 0.0)] {
+                let rock = game.bodies.iter_mut().find(|r| r.id == id).unwrap();
+                rock.velocity = Vec2::new(v, 0.0);
+                rock.health = 200.0;
+                rock.max_health = 200.0;
+            }
+            game.step(DT, Input::default());
+            assert_eq!(body(&game, a).health < 200.0, hurt);
+            assert_eq!(body(&game, b).health < 200.0, hurt);
+        }
+    }
+
+    /// A ring of pinned stones matching the generator's nests, with the opening facing -y.
+    fn build_nest(game: &mut Game, heart: Vec2) -> Vec<u64> {
+        (0..9)
+            .filter(|n| *n != 0)
+            .map(|n| {
+                let angle = -FRAC_PI_2 + n as f32 * TAU / 9.0;
+                let id = add(
+                    game,
+                    BodyKind::Asteroid,
+                    heart + Vec2::from_angle(angle) * 130.0,
+                );
+                let stone = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+                stone.radius = 40.0;
+                stone.pinned = true;
+                stone.health = 1e6;
+                id
+            })
+            .collect()
+    }
+
+    #[test]
+    fn nest_stones_do_not_move_and_the_ship_enters_only_through_the_opening() {
+        let heart = Vec2::new(0.0, 1500.0);
+        // Through the opening (facing -y): fly straight up into the hollow.
+        let mut game = empty_game();
+        let stones = build_nest(&mut game, heart);
+        let anchors: Vec<Vec2> = stones.iter().map(|&id| body(&game, id).position).collect();
+        game.player_invulnerability = 1e9;
+        set_player(&mut game, heart + Vec2::new(0.0, -420.0), Vec2::ZERO);
+        for _ in 0..240 {
+            game.step(
+                DT,
+                Input {
+                    thrust: 1.0,
+                    ..Default::default()
+                },
+            );
+        }
+        assert!(
+            game.player().unwrap().position.distance(heart) < 100.0,
+            "ship never got inside"
+        );
+        for (&id, &anchor) in stones.iter().zip(&anchors) {
+            assert_eq!(body(&game, id).position, anchor);
+        }
+        // Against the far wall (opposite the opening): it bounces off and stays outside.
+        let mut game = empty_game();
+        build_nest(&mut game, heart);
+        game.player_invulnerability = 1e9;
+        set_player(&mut game, heart + Vec2::new(0.0, 420.0), Vec2::ZERO);
+        game.bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap()
+            .angle = -FRAC_PI_2;
+        for _ in 0..240 {
+            game.step(
+                DT,
+                Input {
+                    thrust: 1.0,
+                    ..Default::default()
+                },
+            );
+            assert!(game.player().unwrap().position.distance(heart) > 60.0);
+        }
+    }
+
+    #[test]
+    fn shooting_a_nest_stone_opens_the_wall() {
+        let heart = Vec2::new(0.0, 1500.0);
+        let mut game = empty_game();
+        let stones = build_nest(&mut game, heart);
+        let target = stones[3];
+        {
+            let stone = game.bodies.iter_mut().find(|b| b.id == target).unwrap();
+            stone.health = 20.0;
+        }
+        let spot = body(&game, target).position;
+        game.bullets.push(Bullet {
+            position: spot - Vec2::new(0.0, 1.0),
+            velocity: Vec2::ZERO,
+            radius: 3.0,
+            friendly: true,
+            remaining: 1.0,
+        });
+        game.step(DT, Input::default());
+        assert!(game.bodies.iter().all(|b| b.id != target));
+        assert!(
+            game.bodies
+                .iter()
+                .any(|b| b.kind == BodyKind::Asteroid && !b.pinned)
+        );
+    }
+
+    #[test]
+    fn explored_space_stays_finite_with_every_new_element_present() {
+        let seed = 5;
+        let quadrant = find_quadrant(seed, |s| {
+            s.iter().any(|x| x.pinned)
+                && s.iter().any(|x| x.kind == BodyKind::Base)
+                && s.iter().any(|x| x.link.is_some() || x.genome.is_some())
+        });
+        let mut game = Game::new(seed);
+        game.player_invulnerability = 1e9;
+        game.teleport(quadrant.center());
+        for tick in 0..3600 {
+            game.step(
+                DT,
+                Input {
+                    thrust: 0.5,
+                    turn: if tick % 600 < 300 { 0.4 } else { -0.4 },
+                    fire: true,
+                    ..Default::default()
+                },
+            );
+            assert!(game.bodies.len() <= MAX_BODIES);
+            assert!(game.tethers.len() <= tether::MAX_TETHERS);
+            assert!(game.bullets.len() <= MAX_BULLETS);
+            assert!(
+                game.bodies
+                    .iter()
+                    .all(|b| b.position.is_finite() && b.velocity.is_finite())
+            );
+        }
+    }
+}
