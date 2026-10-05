@@ -1,7 +1,10 @@
 //! The universe is an unbounded grid of quadrants. Each quadrant's contents are a pure
 //! function of (world seed, quadrant id), so they can be regenerated at will.
 
-use crate::simulation::{BodyKind, EnemyKind};
+#[cfg(test)]
+use crate::genome::Weapon;
+use crate::genome::{GenePool, Niche, Species};
+use crate::simulation::BodyKind;
 use bevy::prelude::Vec2;
 use std::f32::consts::TAU;
 
@@ -165,7 +168,7 @@ impl QuadrantParams {
 }
 
 /// Smooth value noise over the integer lattice; continuous, so neighbors stay related.
-fn value_noise(seed: u64, channel: u64, p: Vec2) -> f32 {
+pub(crate) fn value_noise(seed: u64, channel: u64, p: Vec2) -> f32 {
     let cell = p.floor();
     let t = p - cell;
     let t = t * t * (Vec2::splat(3.0) - 2.0 * t);
@@ -231,20 +234,6 @@ pub fn latent(seed: u64, id: QuadrantId) -> QuadrantParams {
     wild.lerp(QuadrantParams::HOME, home)
 }
 
-/// Genome of a segmented creature: how long, how stiff, how it moves, where it shoots.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Genome {
-    pub segments: u8,
-    /// Joint stiffness; low is floppy, high is nearly rigid.
-    pub stiffness: f32,
-    /// Strength of the travelling lateral wave that drives slithering.
-    pub wave: f32,
-    /// Speed of that wave in radians per second.
-    pub rhythm: f32,
-    /// Every n-th segment carries a gun; 0 means unarmed.
-    pub hardpoint_every: u8,
-}
-
 /// An entity to be placed when a quadrant is first loaded.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spawn {
@@ -258,12 +247,13 @@ pub struct Spawn {
     pub index: u32,
     /// Fixed in place (the stones of a nest).
     pub pinned: bool,
-    /// Bases only: what they breed.
-    pub brood: Option<EnemyKind>,
+    /// Creatures only: the species, whose genome decides everything about the body.
+    pub species: Option<Species>,
+    /// Bases only: what they breed, and the heavy guardian their stock builds.
+    pub brood: Option<Species>,
+    pub guardian: Option<Species>,
     /// Joins this spawn to an earlier spawn (by index) with a tether.
     pub link: Option<u32>,
-    /// Expands this spawn into a chain of segments.
-    pub genome: Option<Genome>,
 }
 
 impl Spawn {
@@ -276,9 +266,17 @@ impl Spawn {
             phenotype: Phenotype::default(),
             index: 0,
             pinned: false,
+            species: None,
             brood: None,
+            guardian: None,
             link: None,
-            genome: None,
+        }
+    }
+
+    pub fn creature(species: Species, position: Vec2) -> Self {
+        Self {
+            species: Some(species),
+            ..Self::at(BodyKind::Creature, position)
         }
     }
 }
@@ -291,7 +289,7 @@ const NEST_RING_RADIUS: f32 = 130.0;
 
 /// Radius around the world origin kept empty so a new game starts calmly.
 const SAFE_RADIUS: f32 = 900.0;
-/// Separates the stream for structures and exotic fauna from the original one.
+/// Separates the stream for structures, species choice and exotic fauna from the original one.
 const WILD_SALT: u64 = 0xA11C_E5ED_0000_0001;
 
 /// A quadrant's contents: a pure function of the world seed and its coordinates.
@@ -303,7 +301,33 @@ pub fn generate(seed: u64, id: QuadrantId) -> Vec<Spawn> {
 /// so any parameter vector, hand-authored or sampled, yields a coherent population. At
 /// `QuadrantParams::HOME` it reproduces the original hand-tuned one.
 pub fn compose(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Spawn> {
+    compose_with(seed, id, params, &GenePool::for_quadrant(seed, id))
+}
+
+/// Most bodies one cluster of creatures may add; jointed species form smaller clusters.
+const MAX_CLUSTER_PARTS: u32 = 24;
+/// Most creature bodies one quadrant generates, however its pool is composed.
+const QUADRANT_BODY_BUDGET: u32 = 220;
+
+fn bodies_used(out: &[Spawn]) -> u32 {
+    out.iter()
+        .filter_map(|s| s.species)
+        .map(|sp| sp.genome.parts())
+        .sum()
+}
+
+/// The policy proper: parameters decide how much of each niche to place and where, and
+/// the gene pool decides which species fills each niche.
+pub fn compose_with(
+    seed: u64,
+    id: QuadrantId,
+    params: &QuadrantParams,
+    pool: &GenePool,
+) -> Vec<Spawn> {
     let mut rng = Rng::new(hash2(seed, id.x, id.y));
+    // Species choices and bonds draw from their own stream, so the original one is
+    // untouched whichever species the pool offers.
+    let mut wild = Rng::new(hash2(seed ^ WILD_SALT, id.x, id.y));
     let center = id.center();
     let extent = QUADRANT_SIZE / 2.0 - 250.0;
     let QuadrantParams {
@@ -357,18 +381,29 @@ pub fn compose(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Spawn>
         out.push(Spawn::at(BodyKind::BlackHole, place(&mut rng)));
     }
 
+    // A cluster of one species around an anchor. Bonded species link neighbors with cords.
     let cluster = |rng: &mut Rng,
+                   wild: &mut Rng,
                    out: &mut Vec<Spawn>,
                    anchor: Vec2,
-                   kind: EnemyKind,
+                   species: Species,
                    size: u32,
                    spread: f32| {
-        for _ in 0..size {
+        let genome = species.genome;
+        let room = QUADRANT_BODY_BUDGET.saturating_sub(bodies_used(out)) / genome.parts();
+        let size = size
+            .min((MAX_CLUSTER_PARTS / genome.parts()).max(1))
+            .min(room);
+        for member in 0..size {
             let position = anchor + rng.direction() * rng.range(0.0, spread);
-            out.push(Spawn {
+            let mut spawn = Spawn {
                 phenotype: genes,
-                ..Spawn::at(BodyKind::Enemy(kind), position)
-            });
+                ..Spawn::creature(species, position)
+            };
+            if member > 0 && genome.bond > 0.0 && wild.chance(genome.bond) {
+                spawn.link = Some(out.len() as u32 - 1);
+            }
+            out.push(spawn);
         }
     };
 
@@ -383,30 +418,33 @@ pub fn compose(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Spawn>
             place(&mut rng)
         };
         let size = rng.int(count(4.0 * swarm * 2.0).clamp(1, 4), largest.max(4));
-        cluster(&mut rng, &mut out, anchor, EnemyKind::Bogey, size, 140.0);
+        let species = pool.fill(Niche::School, &mut wild);
+        cluster(&mut rng, &mut wild, &mut out, anchor, species, size, 140.0);
     }
     let (low, high) = range(1.0, 3.0, aggression);
     for _ in 0..rng.int(low, high.max(low)) {
         let anchor = place(&mut rng);
         let size = rng.int(1, 3);
-        cluster(&mut rng, &mut out, anchor, EnemyKind::Lunatic, size, 90.0);
+        let species = pool.fill(Niche::Fling, &mut wild);
+        cluster(&mut rng, &mut wild, &mut out, anchor, species, size, 90.0);
     }
     for _ in 0..rng.int(0, count(2.0 * tech) + extra) {
         let anchor = place(&mut rng);
         let size = rng.int(1, 2);
-        cluster(&mut rng, &mut out, anchor, EnemyKind::Smarty, size, 80.0);
+        let species = pool.fill(Niche::Hunter, &mut wild);
+        cluster(&mut rng, &mut wild, &mut out, anchor, species, size, 80.0);
     }
     if rng.chance((0.7 * tech + 0.4 * danger).min(1.0)) {
         let anchor = place(&mut rng);
-        cluster(&mut rng, &mut out, anchor, EnemyKind::Fatso, 1, 0.0);
+        let species = pool.fill(Niche::Heavy, &mut wild);
+        cluster(&mut rng, &mut wild, &mut out, anchor, species, 1, 0.0);
     }
 
-    // Structures and exotic fauna draw from their own stream and are gated on parameters
-    // that are all zero at HOME, so they never perturb the original population.
-    let mut wild = Rng::new(hash2(seed ^ WILD_SALT, id.x, id.y));
+    // Structures and exotic fauna are gated on parameters that are all zero at HOME, so
+    // they never perturb the original population.
     let above = |p: f32| (p - 0.5).max(0.0);
 
-    // Nests: ring-shaped rock shelters with a few grazing bogeys inside.
+    // Nests: ring-shaped rock shelters with a few grazing creatures of a nesting species.
     let nest_chance = (0.7 * above(swarm) + 0.3 * danger).min(0.8);
     for _ in 0..(wild.chance(nest_chance) as u32 + wild.chance(nest_chance * 0.4) as u32) {
         let heart = place(&mut wild);
@@ -423,82 +461,82 @@ pub fn compose(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Spawn>
                 )
             });
         }
-        for _ in 0..wild.int(3, 6) {
+        let species = pool.nesting(&mut wild);
+        let room = QUADRANT_BODY_BUDGET.saturating_sub(bodies_used(&out)) / species.genome.parts();
+        let dwellers = wild
+            .int(3, 6)
+            .min((MAX_CLUSTER_PARTS / species.genome.parts()).max(1))
+            .min(room);
+        for _ in 0..dwellers {
             out.push(Spawn {
                 phenotype: Phenotype {
                     mass_affinity: 0.5,
                     ..genes
                 },
-                ..Spawn::at(
-                    BodyKind::Enemy(EnemyKind::Bogey),
-                    heart + wild.direction() * wild.range(0.0, 55.0),
-                )
+                ..Spawn::creature(species, heart + wild.direction() * wild.range(0.0, 55.0))
             });
         }
     }
 
-    // Bases breed whichever lineage the quadrant favors.
+    // Bases breed whichever niche the quadrant favors, and build a heavy guardian.
     let base_chance =
         (0.6 * danger + above(aggression) + 0.6 * above(tech) + 0.6 * above(swarm)).min(0.85);
     if wild.chance(base_chance) {
-        let brood = if swarm >= aggression && swarm >= tech {
-            EnemyKind::Bogey
+        let niche = if swarm >= aggression && swarm >= tech {
+            Niche::School
         } else if aggression >= tech {
-            EnemyKind::Lunatic
+            Niche::Fling
         } else {
-            EnemyKind::Smarty
+            Niche::Hunter
         };
+        let brood = pool.bred(niche, &mut wild);
+        let guardian = pool.bred(Niche::Heavy, &mut wild);
         out.push(Spawn {
             phenotype: genes,
             brood: Some(brood),
+            guardian: Some(guardian),
             ..Spawn::at(BodyKind::Base, place(&mut wild))
         });
     }
 
-    // Leeches: loners that latch on, and pairs joined by a cord that forms a barrier.
-    let leech_weight = 1.2 * above(tech) + 0.8 * danger;
-    if wild.chance(leech_weight.min(0.9)) {
-        let groups = 1 + wild.chance(leech_weight * 0.4) as u32;
+    // Cord-throwers: loners that latch on, and bonded pairs joined by a cord that forms a
+    // barrier.
+    let tether_weight = 1.2 * above(tech) + 0.8 * danger;
+    if wild.chance(tether_weight.min(0.9)) {
+        let groups = 1 + wild.chance(tether_weight * 0.4) as u32;
         for _ in 0..groups {
             let anchor = place(&mut wild);
-            let leech = |position| Spawn {
+            let species = pool.fill(Niche::Tether, &mut wild);
+            let make = |position| Spawn {
                 phenotype: genes,
-                ..Spawn::at(BodyKind::Enemy(EnemyKind::Leech), position)
+                ..Spawn::creature(species, position)
             };
-            if wild.chance(0.6) {
+            if wild.chance(species.genome.bond) {
                 let first = out.len() as u32;
-                out.push(leech(anchor));
+                out.push(make(anchor));
                 out.push(Spawn {
                     link: Some(first),
-                    ..leech(anchor + wild.direction() * 280.0)
+                    ..make(anchor + wild.direction() * 280.0)
                 });
             } else {
-                out.push(leech(anchor));
+                out.push(make(anchor));
             }
         }
     }
 
-    // Serpents: segmented creatures whose genome is read from the parameters.
-    let serpent_chance = (0.9 * above(tech) + 0.9 * above(distortion) + 0.25 * danger).min(0.8);
-    for _ in 0..(wild.chance(serpent_chance) as u32 + wild.chance(serpent_chance * 0.3) as u32) {
-        let genome = Genome {
-            segments: (5.0 + 8.0 * tech).round().clamp(5.0, 13.0) as u8,
-            stiffness: 80.0 + 280.0 * distortion,
-            wave: 0.5 + distortion,
-            rhythm: 2.0 + 2.0 * aggression,
-            hardpoint_every: if tech > 0.65 {
-                3
-            } else if tech > 0.5 {
-                5
-            } else {
-                0
-            },
-        };
-        out.push(Spawn {
-            phenotype: genes,
-            genome: Some(genome),
-            ..Spawn::at(BodyKind::Enemy(EnemyKind::Serpent), place(&mut wild))
-        });
+    // Exotic fauna: any species of the pool, wherever tech, distortion or danger run high.
+    // A chain body plan with a wave gene slithers when it turns up here or in any slot above.
+    let exotic = (0.9 * above(tech) + 0.9 * above(distortion) + 0.35 * danger).min(0.85);
+    for _ in 0..(wild.chance(exotic) as u32 + wild.chance(exotic * 0.3) as u32) {
+        let anchor = place(&mut wild);
+        let species = pool.any(&mut wild);
+        let size = wild.int(1, 2);
+        for _ in 0..size.min((MAX_CLUSTER_PARTS / species.genome.parts()).max(1)) {
+            out.push(Spawn {
+                phenotype: genes,
+                ..Spawn::creature(species, anchor + wild.direction() * wild.range(0.0, 110.0))
+            });
+        }
     }
 
     for (index, spawn) in out.iter_mut().enumerate() {
@@ -563,21 +601,29 @@ mod tests {
         for seed in 0..20 {
             let spawns = generate(seed, QuadrantId::ORIGIN);
             assert!(spawns.iter().all(|s| s.position.length() > 800.0));
-            assert!(spawns.iter().any(|s| {
-                s.kind == BodyKind::Enemy(EnemyKind::Bogey) && s.position.length() < 2200.0
-            }));
+            assert!(
+                spawns.iter().any(|s| {
+                    s.species == Some(Species::bogey()) && s.position.length() < 2200.0
+                })
+            );
         }
     }
 
     fn census(spawns: &[Spawn]) -> [usize; 6] {
         let count = |kind: BodyKind| spawns.iter().filter(|s| s.kind == kind).count();
+        let species = |wanted: Species| {
+            spawns
+                .iter()
+                .filter(|s| s.species.is_some_and(|sp| sp.lineage == wanted.lineage))
+                .count()
+        };
         [
             spawns.len(),
             count(BodyKind::Asteroid),
             count(BodyKind::BlackHole),
-            count(BodyKind::Enemy(EnemyKind::Bogey)),
-            count(BodyKind::Enemy(EnemyKind::Lunatic)),
-            count(BodyKind::Enemy(EnemyKind::Smarty)) + count(BodyKind::Enemy(EnemyKind::Fatso)),
+            species(Species::bogey()),
+            species(Species::lunatic()),
+            species(Species::smarty()) + species(Species::fatso()),
         ]
     }
 
@@ -598,9 +644,11 @@ mod tests {
                 .map(|s| f64::from(s.position.x) + 3.0 * f64::from(s.position.y))
                 .sum();
             assert!((sum - checksum).abs() < 0.05, "seed {seed}: {sum}");
-            assert!(spawns.iter().all(
-                |s| s.phenotype == Phenotype::default() || matches!(s.kind, BodyKind::Enemy(_))
-            ));
+            assert!(
+                spawns
+                    .iter()
+                    .all(|s| s.phenotype == Phenotype::default() || s.kind == BodyKind::Creature)
+            );
             assert!(spawns.iter().all(|s| s.phenotype == Phenotype::default()));
         }
     }
@@ -665,7 +713,7 @@ mod tests {
         let genes = |spawns: &[Spawn]| {
             spawns
                 .iter()
-                .find(|s| matches!(s.kind, BodyKind::Enemy(_)))
+                .find(|s| s.kind == BodyKind::Creature)
                 .map(|s| s.phenotype)
         };
         let (loud, quiet) = (genes(&loud).unwrap(), genes(&quiet).unwrap());
@@ -689,8 +737,8 @@ mod tests {
             s.pinned
                 || s.brood.is_some()
                 || s.link.is_some()
-                || s.genome.is_some()
-                || matches!(s.kind, BodyKind::Base | BodyKind::Enemy(EnemyKind::Leech))
+                || s.kind == BodyKind::Base
+                || s.species.is_some_and(|sp| sp.genome.is_jointed())
         };
         for seed in 0..40 {
             assert!(
@@ -705,8 +753,11 @@ mod tests {
                 seen[0] |= s.pinned;
                 seen[1] |= s.brood.is_some();
                 seen[2] |= s.link.is_some();
-                seen[3] |= s.genome.is_some();
-                seen[4] |= s.kind == BodyKind::Enemy(EnemyKind::Leech) && s.link.is_none();
+                seen[3] |= s.species.is_some_and(|sp| sp.genome.is_jointed());
+                seen[4] |= s
+                    .species
+                    .is_some_and(|sp| sp.genome.weapon == Weapon::Tether)
+                    && s.link.is_none();
             }
         }
         assert!(seen.iter().all(|&x| x), "{seen:?}");
@@ -768,5 +819,24 @@ mod tests {
             }
         }
         assert!(checked > 5);
+    }
+
+    #[test]
+    fn slithering_creatures_arise_from_genes_in_generated_quadrants() {
+        // No code places a serpent: a long spine plus a wave gene turns up on its own, in
+        // quadrants well away from home, and never at HOME.
+        let mut slitherers = 0;
+        for x in -10..=10 {
+            for y in -10..=10 {
+                for s in generate(0x535343, QuadrantId { x, y }) {
+                    if let Some(sp) = s.species {
+                        let slithers = sp.genome.segments >= 4 && sp.genome.wave >= 0.8;
+                        assert!(!(slithers && x == 0 && y == 0));
+                        slitherers += slithers as u32;
+                    }
+                }
+            }
+        }
+        assert!(slitherers > 20, "{slitherers}");
     }
 }

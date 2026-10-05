@@ -1,0 +1,1194 @@
+//! Creature genomes, species and gene pools.
+//!
+//! A `Genome` is a flat bundle of bounded genes (continuous, integer or categorical) that
+//! fully describes a creature: body plan, size, senses, social life, temperament,
+//! weapons and ecology. The simulation reads genes and never asks what "kind" of
+//! creature something is. A `Species` is a lineage (a stable identity that recurs across
+//! quadrants with mutation) plus its genome. A `GenePool` is the set of species alive in
+//! one quadrant, built from founders on a coarse lattice so neighboring quadrants share
+//! ancestry and drift gradually, the way the latent parameters do.
+//!
+//! Everything here is a pure function of the master seed and quadrant coordinates, and it
+//! draws from its own salted streams, never from the stream that places the original
+//! population.
+
+use crate::world::{QuadrantId, QuadrantParams, Rng, hash2, latent, value_noise};
+use bevy::prelude::Vec2;
+
+/// Separates gene sampling from every other stream.
+const GENE_SALT: u64 = 0x6E4E_5EED_0000_0042;
+/// Founder lineages live on a lattice with one node every this many quadrants.
+pub const LINEAGE_CELL: i32 = 4;
+/// Founders sampled at each ordinary lattice node.
+const FOUNDERS_PER_NODE: u64 = 3;
+/// No creature has more bodies than this, however its genes combine.
+pub const MAX_PARTS: u32 = 28;
+/// Extra fling strength a negative-mass body has on top of its fling gene.
+pub const NEGATIVE_MASS_FLING: f32 = 0.6;
+
+pub enum Gene<'a> {
+    Real { v: &'a mut f32, lo: f32, hi: f32 },
+    Int { v: &'a mut u8, lo: u8, hi: u8 },
+    Cat { v: &'a mut dyn Categorical },
+}
+
+pub trait Categorical {
+    fn count(&self) -> u8;
+    fn get(&self) -> u8;
+    fn set(&mut self, index: u8);
+}
+
+macro_rules! categorical {
+    ($(#[$m:meta])* $name:ident { $($variant:ident),+ $(,)? }) => {
+        $(#[$m])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum $name { $($variant),+ }
+        impl $name {
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+        }
+        impl Categorical for $name {
+            fn count(&self) -> u8 { Self::ALL.len() as u8 }
+            fn get(&self) -> u8 { Self::ALL.iter().position(|v| v == self).unwrap_or(0) as u8 }
+            fn set(&mut self, index: u8) {
+                *self = Self::ALL[usize::from(index) % Self::ALL.len()];
+            }
+        }
+    };
+}
+
+categorical! {
+    /// How a creature lives among its own kind.
+    Social { Solitary, School, Pack, Brood, Dweller }
+}
+categorical! {
+    /// What first sets a creature off.
+    Trigger { Sight, Proximity, Harm }
+}
+categorical! {
+    /// Ranged attack, if any. Contact fling is the continuous `fling` gene.
+    Weapon { None, Projectile, Tether }
+}
+categorical! {
+    /// What it eats or harvests.
+    Diet { None, Rocks, Siphon, Dust }
+}
+categorical! {
+    /// What it flees from.
+    Fear { None, Player, Bullets, Wells }
+}
+categorical! {
+    /// Where it makes its home.
+    Nest { None, Rocks, Base }
+}
+
+macro_rules! genome {
+    (
+        real { $($rf:ident: $lo:expr, $hi:expr, $rd:expr;)* }
+        int { $($if_:ident: $ilo:expr, $ihi:expr, $id:expr;)* }
+        cat { $($cf:ident: $ct:ident = $cd:ident::$cv:ident;)* }
+    ) => {
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub struct Genome {
+            $(pub $rf: f32,)*
+            $(pub $if_: u8,)*
+            $(pub $cf: $ct,)*
+        }
+        impl Default for Genome {
+            /// An inert drifter; every authored or sampled genome starts from here.
+            fn default() -> Self {
+                Self { $($rf: $rd,)* $($if_: $id,)* $($cf: $cd::$cv,)* }
+            }
+        }
+        impl Genome {
+            /// Every gene with its bounds, in a fixed order.
+            pub fn genes(&mut self) -> Vec<Gene<'_>> {
+                vec![
+                    $(Gene::Real { v: &mut self.$rf, lo: $lo, hi: $hi },)*
+                    $(Gene::Int { v: &mut self.$if_, lo: $ilo, hi: $ihi },)*
+                    $(Gene::Cat { v: &mut self.$cf },)*
+                ]
+            }
+        }
+    };
+}
+
+genome! {
+    real {
+        // Body plan.
+        stiffness: 30.0, 900.0, 200.0;
+        wave: 0.0, 2.5, 0.0;
+        rhythm: 0.5, 7.0, 3.0;
+        lag: 0.2, 1.8, 0.9;
+        taper: 0.4, 1.2, 1.0;
+        aspect: 0.6, 1.8, 1.0;
+        // Size and mass. Mass may be negative.
+        radius: 6.0, 70.0, 14.0;
+        mass: -60.0, 300.0, 8.0;
+        hull: 10.0, 400.0, 30.0;
+        shield: 0.0, 60.0, 0.0;
+        // Locomotion and sensing.
+        speed: 30.0, 450.0, 120.0;
+        cruise: 10.0, 200.0, 50.0;
+        lead: 0.0, 1.2, 0.0;
+        flocking: 0.0, 2.0, 1.0;
+        sight: 150.0, 2200.0, 1000.0;
+        lose: 150.0, 2400.0, 1500.0;
+        mass_affinity: -1.0, 1.0, 0.0;
+        standoff: 0.0, 500.0, 0.0;
+        strafe: 0.0, 1.0, 0.0;
+        // Social and temperament.
+        bond: 0.0, 1.0, 0.0;
+        rage: 0.0, 0.8, 0.0;
+        alarm: 0.0, 700.0, 300.0;
+        // Weapons.
+        fire_period: 0.8, 8.0, 3.0;
+        shot_speed: 150.0, 700.0, 300.0;
+        weapon_range: 200.0, 1000.0, 600.0;
+        fling: 0.0, 2.0, 0.0;
+        fling_chaos: 0.0, 1.5, 1.0;
+        contact_damage: 0.0, 40.0, 6.0;
+        reel: 10.0, 150.0, 55.0;
+        // Identity.
+        bounty: 20.0, 400.0, 100.0;
+        hue: 0.0, 1.0, 0.5;
+        pale: 0.0, 0.95, 0.3;
+        bright: 0.5, 1.0, 0.9;
+    }
+    int {
+        segments: 1, 16, 1;
+        limbs: 0, 6, 0;
+        limb_len: 1, 3, 1;
+        sides: 0, 8, 0;
+        hardpoint_every: 0, 6, 0;
+        voice0: 0, 23, 0;
+        voice1: 0, 11, 0;
+        voice2: 0, 19, 0;
+    }
+    cat {
+        social: Social = Social::Solitary;
+        trigger: Trigger = Trigger::Sight;
+        weapon: Weapon = Weapon::None;
+        diet: Diet = Diet::None;
+        fear: Fear = Fear::None;
+        nest: Nest = Nest::None;
+    }
+}
+
+/// The role a creature plays in a quadrant's population, read from its genes alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Niche {
+    /// Passive schoolers that only react to a close approach or an injury.
+    School,
+    /// Contact flingers.
+    Fling,
+    /// Hunters that notice the player from afar.
+    Hunter,
+    /// Slow heavies.
+    Heavy,
+    /// Creatures that fire cords.
+    Tether,
+}
+
+const VOICE_FIRST: [&str; 24] = [
+    "Bo", "Lu", "Smar", "Fat", "Lee", "Ser", "Vyr", "Sli", "Nax", "Kra", "Spi", "Zor", "Mog",
+    "Dar", "Thu", "Quil", "Ish", "Gra", "Wex", "Pyr", "Osk", "Jun", "Eld", "Tor",
+];
+const VOICE_MIDDLE: [&str; 12] = [
+    "", "na", "ra", "mo", "li", "ke", "zu", "ba", "phi", "do", "ve", "sa",
+];
+const VOICE_LAST: [&str; 20] = [
+    "gey", "tic", "ty", "so", "ch", "pent", "thra", "lisk", "dron", "mite", "ling", "ax", "oid",
+    "gor", "bat", "wyrm", "fly", "ox", "ine", "urk",
+];
+
+impl Genome {
+    /// Bodies in the creature: the spine plus every limb joint.
+    pub fn parts(&self) -> u32 {
+        u32::from(self.segments) + u32::from(self.limbs) * u32::from(self.limb_len)
+    }
+
+    pub fn is_jointed(&self) -> bool {
+        self.parts() > 1
+    }
+
+    /// Contact fling strength: the gene, plus a push for being negative mass.
+    pub fn fling_strength(&self) -> f32 {
+        self.fling
+            + if self.mass < 0.0 {
+                NEGATIVE_MASS_FLING
+            } else {
+                0.0
+            }
+    }
+
+    /// Physical mass: always positive; the sign is expressed through repulsion.
+    pub fn body_mass(&self) -> f32 {
+        self.mass.abs().max(2.0)
+    }
+
+    /// True when body part `part` (0 is the head) carries a gun or cord launcher.
+    pub fn armed(&self, part: u8) -> bool {
+        if self.weapon == Weapon::None {
+            return false;
+        }
+        if !self.is_jointed() || self.hardpoint_every == 0 {
+            return part == 0;
+        }
+        part % self.hardpoint_every == self.hardpoint_every - 1
+    }
+
+    pub fn niche(&self) -> Niche {
+        if self.weapon == Weapon::Tether {
+            Niche::Tether
+        } else if self.fling_strength() >= 0.5 {
+            Niche::Fling
+        } else if self.mass.abs() >= 80.0 {
+            Niche::Heavy
+        } else if matches!(self.social, Social::School | Social::Pack)
+            && self.trigger != Trigger::Sight
+        {
+            Niche::School
+        } else {
+            Niche::Hunter
+        }
+    }
+
+    /// Display name, spelled by the three syllable genes.
+    pub fn name(&self) -> String {
+        let first = VOICE_FIRST[usize::from(self.voice0) % VOICE_FIRST.len()];
+        let middle = VOICE_MIDDLE[usize::from(self.voice1) % VOICE_MIDDLE.len()];
+        let last = VOICE_LAST[usize::from(self.voice2) % VOICE_LAST.len()];
+        format!("{first}{middle}{last}")
+    }
+
+    /// Body color from the pigment genes, as sRGB in [0, 1].
+    pub fn color(&self) -> [f32; 3] {
+        let (h, s, v) = (
+            self.hue.rem_euclid(1.0) * 6.0,
+            (1.0 - self.pale).clamp(0.0, 1.0),
+            self.bright.clamp(0.0, 1.0),
+        );
+        let channel = |offset: f32| {
+            let k = (offset + h).rem_euclid(6.0);
+            v - v * s * k.min(4.0 - k).clamp(0.0, 1.0)
+        };
+        [channel(5.0), channel(3.0), channel(1.0)]
+    }
+
+    /// Forces every gene into its range and the body count under the cap.
+    pub fn limited(mut self) -> Self {
+        for gene in self.genes() {
+            match gene {
+                Gene::Real { v, lo, hi } => *v = if v.is_finite() { v.clamp(lo, hi) } else { lo },
+                Gene::Int { v, lo, hi } => *v = (*v).clamp(lo, hi),
+                Gene::Cat { .. } => {}
+            }
+        }
+        while self.parts() > MAX_PARTS && self.limbs > 0 {
+            self.limbs -= 1;
+        }
+        while self.parts() > MAX_PARTS && self.segments > 1 {
+            self.segments -= 1;
+        }
+        self
+    }
+
+    /// Every gene scaled to [0, 1] (categoricals by index), for measuring distance.
+    pub fn normalized(&self) -> Vec<f32> {
+        let mut copy = *self;
+        copy.genes()
+            .into_iter()
+            .map(|gene| match gene {
+                Gene::Real { v, lo, hi } => (*v - lo) / (hi - lo),
+                Gene::Int { v, lo, hi } => f32::from(*v - lo) / f32::from(hi - lo).max(1.0),
+                Gene::Cat { v } => f32::from(v.get()) / f32::from(v.count() - 1).max(1.0),
+            })
+            .collect()
+    }
+
+    /// Mean absolute difference between two genomes in normalized gene space.
+    pub fn distance(&self, other: &Self) -> f32 {
+        let (a, b) = (self.normalized(), other.normalized());
+        a.iter().zip(&b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32
+    }
+
+    /// The same lineage as expressed in quadrant `id`: every gene nudged by a smooth
+    /// noise field, so neighboring quadrants hold close relatives. `amplitude` is zero at
+    /// the founding node (the unmutated type specimen) and grows with distance.
+    fn expressed(mut self, seed: u64, lineage: u64, id: QuadrantId, amplitude: f32) -> Self {
+        if amplitude <= 0.0 {
+            return self;
+        }
+        let at = Vec2::new(id.x as f32, id.y as f32) * 0.25;
+        for (index, gene) in self.genes().into_iter().enumerate() {
+            let signed = (value_noise(seed ^ lineage, 300 + index as u64, at) - 0.5) * 2.0;
+            match gene {
+                Gene::Real { v, lo, hi } => {
+                    *v = (*v + signed * amplitude * 0.3 * (hi - lo)).clamp(lo, hi);
+                }
+                Gene::Int { v, lo, hi } => {
+                    let shifted = f32::from(*v) + signed * amplitude * 0.3 * f32::from(hi - lo);
+                    *v = shifted.round().clamp(f32::from(lo), f32::from(hi)) as u8;
+                }
+                Gene::Cat { v } => {
+                    let count = v.count();
+                    if count > 1 && signed.abs() > 1.0 - amplitude * 0.6 {
+                        let step =
+                            1 + (hash2(lineage, index as i32, 7) % u64::from(count - 1)) as u8;
+                        v.set((v.get() + step) % count);
+                    }
+                }
+            }
+        }
+        self.limited()
+    }
+
+    /// Draws a fresh genome from a distribution biased by quadrant parameters: tech
+    /// favors chains, guns and keen senses; distortion negative mass and waves; swarm
+    /// schooling; aggression rage and flinging; danger toughness.
+    pub fn sample(rng: &mut Rng, params: &QuadrantParams) -> Self {
+        let above = |p: f32| (p - 0.5).max(0.0) * 2.0;
+        let (tech, distortion, swarm, aggression, danger) = (
+            params.tech,
+            params.distortion,
+            params.swarm,
+            params.aggression,
+            params.danger,
+        );
+        let mut g = Genome::default();
+
+        // Body plan: chains are rare but favored by tech and distortion; waves are
+        // independent of length, so only some chains slither.
+        let chain_chance = (0.12 + 0.4 * above(distortion) + 0.3 * above(tech)).min(0.75);
+        if rng.chance(chain_chance) {
+            g.segments = rng.int(3, (5.0 + 9.0 * tech) as u32) as u8;
+            g.wave = rng.range(0.2, 2.2);
+        } else {
+            g.wave = rng.range(0.0, 0.8);
+        }
+        g.rhythm = rng.range(1.5, 6.5);
+        g.lag = rng.range(0.4, 1.4);
+        g.stiffness = (rng.range(40.0_f32.ln(), 800.0_f32.ln())).exp() * (0.7 + 0.6 * distortion);
+        g.taper = rng.range(0.55, 1.1);
+        if rng.chance(0.25) {
+            g.limbs = rng.int(2, 6) as u8;
+            g.limb_len = rng.int(1, 3) as u8;
+        }
+        g.sides = if rng.chance(0.3) {
+            0
+        } else {
+            rng.int(3, 8) as u8
+        };
+        g.aspect = rng.range(0.7, 1.5);
+
+        // Size, mass and toughness.
+        let size = rng.f32().powf(1.6);
+        g.radius = 8.0 + 52.0 * size;
+        if g.segments > 1 || g.limbs > 0 {
+            g.radius = g.radius.min(28.0);
+        }
+        let negative = rng.chance(0.08 + 0.35 * above(distortion));
+        let magnitude = (g.radius * g.radius * rng.range(0.03, 0.09)).max(2.0);
+        g.mass = if negative { -magnitude } else { magnitude };
+        g.hull = g.radius * rng.range(1.5, 4.5) * (1.0 + 0.5 * danger);
+        g.shield = if rng.chance(0.35) {
+            rng.range(8.0, 40.0)
+        } else {
+            0.0
+        };
+
+        // Locomotion and sensing.
+        g.speed = rng.range(50.0, 280.0) * (0.8 + 0.5 * tech) * (1.0 - 0.5 * size);
+        g.cruise = g.speed * rng.range(0.3, 0.5);
+        g.lead = if rng.chance(0.4 + 0.4 * tech) {
+            tech * rng.range(0.2, 1.0)
+        } else {
+            0.0
+        };
+        g.flocking = (rng.range(0.0, 1.0) + 0.5 * swarm).min(1.8);
+        g.sight = rng.range(300.0, 1300.0) * (0.6 + 0.8 * tech);
+        g.lose = g.sight * rng.range(1.3, 2.2);
+        g.mass_affinity = rng.range(-1.0, 1.0) * 0.7;
+        if rng.chance(0.4) {
+            g.standoff = rng.range(150.0, 420.0);
+            g.strafe = rng.range(0.0, 0.7);
+        }
+
+        // Social structure and temperament.
+        g.social = pick(
+            rng,
+            &[
+                (Social::Solitary, 1.0),
+                (Social::School, 1.0 + 2.0 * swarm),
+                (Social::Pack, 0.6 + aggression),
+                (Social::Brood, 0.5),
+                (Social::Dweller, 0.5 + danger),
+            ],
+        );
+        g.bond = if rng.chance(0.25) {
+            rng.range(0.3, 1.0)
+        } else {
+            0.0
+        };
+        g.trigger = pick(
+            rng,
+            &[
+                (Trigger::Sight, 0.5 + 0.5 * aggression),
+                (Trigger::Proximity, 0.35),
+                (Trigger::Harm, 0.15),
+            ],
+        );
+        g.rage = if rng.chance(0.4 + 0.3 * aggression) {
+            rng.range(0.2, 0.6)
+        } else {
+            0.0
+        };
+        g.alarm = rng.range(100.0, 600.0) * (0.7 + 0.6 * swarm);
+
+        // Weapons.
+        g.weapon = pick(
+            rng,
+            &[
+                (Weapon::None, 1.2 - tech),
+                (Weapon::Projectile, 0.6 + tech),
+                (Weapon::Tether, 0.2 + 0.5 * tech),
+            ],
+        );
+        g.fire_period = rng.range(1.2, 5.5);
+        g.shot_speed = rng.range(200.0, 520.0);
+        g.weapon_range = if g.weapon == Weapon::Tether {
+            rng.range(400.0, 700.0)
+        } else {
+            rng.range(350.0, 950.0)
+        };
+        if g.is_jointed() && rng.chance(0.6) {
+            g.hardpoint_every = rng.int(2, 5) as u8;
+        }
+        if rng.chance(0.2 + 0.4 * above(aggression)) {
+            g.fling = rng.range(0.4, 1.5);
+        }
+        g.fling_chaos = rng.range(0.2, 1.4);
+        g.contact_damage = rng.range(4.0, 24.0) * (0.7 + 0.6 * danger) + 8.0 * g.fling;
+        g.reel = rng.range(30.0, 100.0);
+
+        // Ecology.
+        g.diet = pick(
+            rng,
+            &[
+                (Diet::None, 1.5),
+                (Diet::Rocks, 0.8),
+                (
+                    Diet::Siphon,
+                    if g.weapon == Weapon::Tether { 1.5 } else { 0.3 },
+                ),
+                (Diet::Dust, 0.5),
+            ],
+        );
+        g.fear = pick(
+            rng,
+            &[
+                (Fear::None, 1.6),
+                (Fear::Player, 0.6 * (1.0 - aggression) + 0.2),
+                (Fear::Bullets, 0.5),
+                (Fear::Wells, 0.4),
+            ],
+        );
+        g.nest = pick(
+            rng,
+            &[
+                (Nest::None, 1.5),
+                (Nest::Rocks, 0.6),
+                (Nest::Base, 0.5 + danger),
+            ],
+        );
+
+        // Identity: the bounty tracks power; the name and pigment follow the body.
+        let power = 30.0
+            + g.hull * 0.6
+            + g.shield
+            + g.speed * 0.2
+            + g.fling_strength() * 30.0
+            + if g.weapon == Weapon::None { 0.0 } else { 30.0 }
+            + 4.0 * g.parts() as f32;
+        g.bounty = (power / 5.0).round() * 5.0;
+        let theme: &[u8] = if g.segments >= 4 {
+            &[5, 6, 7, 8]
+        } else if g.limbs > 0 {
+            &[9, 10, 11]
+        } else if g.weapon == Weapon::Tether {
+            &[4, 14, 15]
+        } else if g.fling_strength() >= 0.5 {
+            &[1, 12, 22]
+        } else if g.mass.abs() >= 80.0 {
+            &[3, 12, 13]
+        } else {
+            &[0, 2, 16, 17, 18, 19, 20, 21, 23]
+        };
+        g.voice0 = theme[rng.int(0, theme.len() as u32 - 1) as usize];
+        g.voice1 = rng.int(0, 11) as u8;
+        g.voice2 = rng.int(0, 19) as u8;
+        g.hue = rng.f32();
+        g.pale = rng.range(0.0, 0.7);
+        g.bright = rng.range(0.65, 1.0);
+        g.limited()
+    }
+
+    // The hand-authored HOME genomes. Each reproduces one of the original enemy kinds.
+
+    pub fn bogey() -> Self {
+        Self {
+            radius: 15.0,
+            hull: 35.0,
+            shield: 18.0,
+            mass: 8.0,
+            speed: 160.0,
+            cruise: 75.0,
+            lead: 0.15,
+            sight: 320.0,
+            lose: 650.0,
+            standoff: 220.0,
+            strafe: 0.45,
+            rage: 0.4,
+            alarm: 220.0,
+            fire_period: 2.4,
+            shot_speed: 300.0,
+            weapon_range: 800.0,
+            contact_damage: 6.0,
+            bounty: 100.0,
+            sides: 0,
+            hue: 0.604,
+            pale: 0.28,
+            bright: 1.0,
+            voice0: 0,
+            voice1: 0,
+            voice2: 0,
+            social: Social::School,
+            trigger: Trigger::Proximity,
+            weapon: Weapon::Projectile,
+            nest: Nest::Rocks,
+            ..Self::default()
+        }
+    }
+
+    pub fn lunatic() -> Self {
+        Self {
+            radius: 18.0,
+            hull: 45.0,
+            mass: 6.0,
+            speed: 230.0,
+            cruise: 95.0,
+            alarm: 380.0,
+            fling: 1.0,
+            contact_damage: 18.0,
+            bounty: 125.0,
+            sides: 4,
+            aspect: 1.25,
+            hue: 0.667,
+            pale: 0.94,
+            bright: 1.0,
+            voice0: 1,
+            voice1: 1,
+            voice2: 1,
+            social: Social::School,
+            ..Self::default()
+        }
+    }
+
+    pub fn smarty() -> Self {
+        Self {
+            radius: 18.0,
+            hull: 70.0,
+            mass: 12.0,
+            speed: 285.0,
+            cruise: 110.0,
+            lead: 0.55,
+            alarm: 380.0,
+            contact_damage: 6.0,
+            bounty: 200.0,
+            sides: 3,
+            hue: 0.595,
+            pale: 0.816,
+            bright: 0.76,
+            voice0: 2,
+            voice1: 0,
+            voice2: 2,
+            social: Social::School,
+            ..Self::default()
+        }
+    }
+
+    pub fn fatso() -> Self {
+        Self {
+            radius: 48.0,
+            hull: 180.0,
+            mass: 200.0,
+            speed: 60.0,
+            cruise: 25.0,
+            alarm: 380.0,
+            contact_damage: 20.0,
+            bounty: 250.0,
+            sides: 0,
+            hue: 0.096,
+            pale: 0.386,
+            bright: 0.88,
+            voice0: 3,
+            voice1: 0,
+            voice2: 3,
+            social: Social::School,
+            ..Self::default()
+        }
+    }
+
+    pub fn leech() -> Self {
+        Self {
+            radius: 16.0,
+            hull: 40.0,
+            shield: 20.0,
+            mass: 7.0,
+            speed: 190.0,
+            cruise: 80.0,
+            lead: 0.2,
+            standoff: 300.0,
+            strafe: 0.45,
+            bond: 0.6,
+            alarm: 380.0,
+            fire_period: 5.0,
+            weapon_range: 650.0,
+            contact_damage: 6.0,
+            reel: 55.0,
+            bounty: 150.0,
+            sides: 0,
+            hue: 0.758,
+            pale: 0.45,
+            bright: 1.0,
+            voice0: 4,
+            voice1: 0,
+            voice2: 4,
+            social: Social::School,
+            weapon: Weapon::Tether,
+            diet: Diet::Siphon,
+            ..Self::default()
+        }
+    }
+
+    /// What a brooding parent leaves behind: a small, unarmed, short-bodied relative.
+    pub fn juvenile(&self) -> Self {
+        Self {
+            radius: (self.radius * 0.55).max(6.0),
+            hull: (self.hull * 0.5).max(10.0),
+            shield: 0.0,
+            mass: self.mass * 0.3,
+            speed: self.speed * 1.1,
+            fling: self.fling * 0.5,
+            bounty: (self.bounty * 0.3).max(20.0),
+            segments: self.segments.min(3),
+            limbs: 0,
+            weapon: Weapon::None,
+            social: Social::School,
+            bond: 0.0,
+            ..*self
+        }
+        .limited()
+    }
+
+    /// The serpent of the previous design, as a point in genome space.
+    pub fn serpent() -> Self {
+        Self {
+            segments: 8,
+            stiffness: 200.0,
+            wave: 1.0,
+            rhythm: 3.0,
+            lag: 0.9,
+            radius: 11.0,
+            hull: 28.0,
+            mass: 5.0,
+            speed: 210.0,
+            cruise: 90.0,
+            lead: 0.3,
+            alarm: 380.0,
+            hardpoint_every: 3,
+            weapon: Weapon::Projectile,
+            fire_period: 3.0,
+            shot_speed: 270.0,
+            weapon_range: 650.0,
+            contact_damage: 6.0,
+            bounty: 60.0,
+            hue: 0.23,
+            pale: 0.67,
+            bright: 0.92,
+            voice0: 5,
+            voice1: 0,
+            voice2: 5,
+            social: Social::School,
+            ..Self::default()
+        }
+    }
+}
+
+fn pick<T: Copy>(rng: &mut Rng, options: &[(T, f32)]) -> T {
+    let total: f32 = options.iter().map(|(_, w)| w.max(0.0)).sum();
+    let mut roll = rng.f32() * total;
+    for &(value, weight) in options {
+        roll -= weight.max(0.0);
+        if roll < 0.0 {
+            return value;
+        }
+    }
+    options[0].0
+}
+
+/// A lineage and its genome. The lineage is the stable identity; the genome is how that
+/// lineage looks in the place it was drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Species {
+    pub lineage: u64,
+    /// How many quadrants the lineage has drifted from its founding node.
+    pub generation: u16,
+    pub genome: Genome,
+}
+
+/// Lineage ids of the five hand-authored HOME species.
+const HOME_LINEAGES: [u64; 5] = [
+    0x484F_4D45_0000_0001,
+    0x484F_4D45_0000_0003,
+    0x484F_4D45_0000_0005,
+    0x484F_4D45_0000_0007,
+    0x484F_4D45_0000_0009,
+];
+
+impl Species {
+    pub fn name(&self) -> String {
+        self.genome.name()
+    }
+
+    pub fn bogey() -> Self {
+        Self::home(0, Genome::bogey())
+    }
+    pub fn lunatic() -> Self {
+        Self::home(1, Genome::lunatic())
+    }
+    pub fn smarty() -> Self {
+        Self::home(2, Genome::smarty())
+    }
+    pub fn fatso() -> Self {
+        Self::home(3, Genome::fatso())
+    }
+    pub fn leech() -> Self {
+        Self::home(4, Genome::leech())
+    }
+
+    fn home(slot: usize, genome: Genome) -> Self {
+        Self {
+            lineage: HOME_LINEAGES[slot],
+            generation: 0,
+            genome,
+        }
+    }
+
+    /// A serpent as a one-off species, for tests and experiments.
+    pub fn serpent() -> Self {
+        Self {
+            lineage: 0x484F_4D45_0000_000B,
+            generation: 0,
+            genome: Genome::serpent(),
+        }
+    }
+
+    /// Wraps a bare genome as a one-off species with a lineage derived from its genes.
+    pub fn of(genome: Genome) -> Self {
+        let bits = genome.normalized().iter().fold(0x9E37_79B9_u64, |h, x| {
+            h.wrapping_mul(0x100_0000_01B3) ^ u64::from(x.to_bits())
+        });
+        Self {
+            lineage: bits | 1,
+            generation: 0,
+            genome,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PoolEntry {
+    pub species: Species,
+    /// Relative abundance in this quadrant.
+    pub weight: f32,
+}
+
+/// The species alive in one quadrant.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GenePool {
+    pub entries: Vec<PoolEntry>,
+}
+
+fn smooth(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
+
+impl GenePool {
+    /// The hand-authored pool of the starting quadrant.
+    pub fn home() -> Self {
+        Self {
+            entries: [
+                Species::bogey(),
+                Species::lunatic(),
+                Species::smarty(),
+                Species::fatso(),
+                Species::leech(),
+            ]
+            .into_iter()
+            .map(|species| PoolEntry {
+                species,
+                weight: 1.0,
+            })
+            .collect(),
+        }
+    }
+
+    /// The pool of quadrant `id`: founders of the four surrounding lattice nodes, weighted
+    /// by closeness and mutated by their distance from home.
+    pub fn for_quadrant(seed: u64, id: QuadrantId) -> Self {
+        let cell = LINEAGE_CELL;
+        let (ix, iy) = (id.x.div_euclid(cell), id.y.div_euclid(cell));
+        let sx = smooth(id.x.rem_euclid(cell) as f32 / cell as f32);
+        let sy = smooth(id.y.rem_euclid(cell) as f32 / cell as f32);
+        let mut entries = Vec::new();
+        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let wx = if dx == 0 { 1.0 - sx } else { sx };
+            let wy = if dy == 0 { 1.0 - sy } else { sy };
+            let node_weight = wx * wy;
+            if node_weight <= 1e-4 {
+                continue;
+            }
+            let node = QuadrantId {
+                x: (ix + dx) * cell,
+                y: (iy + dy) * cell,
+            };
+            let reach = Vec2::new((id.x - node.x) as f32, (id.y - node.y) as f32).length();
+            let amplitude = smooth((reach / cell as f32).clamp(0.0, 1.0));
+            for (lineage, genome, abundance) in founders(seed, node) {
+                entries.push(PoolEntry {
+                    species: Species {
+                        lineage,
+                        generation: reach.round() as u16,
+                        genome: genome.expressed(seed, lineage, id, amplitude),
+                    },
+                    weight: node_weight * abundance,
+                });
+            }
+        }
+        Self { entries }
+    }
+
+    /// A weighted draw among the species of one niche; when the pool has none, among all.
+    pub fn fill(&self, niche: Niche, rng: &mut Rng) -> Species {
+        let of_niche: Vec<&PoolEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.species.genome.niche() == niche)
+            .collect();
+        if of_niche.is_empty() {
+            self.any(rng)
+        } else {
+            Self::weighted(&of_niche, rng)
+        }
+    }
+
+    pub fn any(&self, rng: &mut Rng) -> Species {
+        let all: Vec<&PoolEntry> = self.entries.iter().collect();
+        Self::weighted(&all, rng)
+    }
+
+    /// A species that makes its home in rock nests, else a passive schooler.
+    pub fn nesting(&self, rng: &mut Rng) -> Species {
+        let nesters: Vec<&PoolEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.species.genome.nest == Nest::Rocks)
+            .collect();
+        if nesters.is_empty() {
+            self.fill(Niche::School, rng)
+        } else {
+            Self::weighted(&nesters, rng)
+        }
+    }
+
+    /// A species that is bred by bases, else the best-fitting niche.
+    pub fn bred(&self, niche: Niche, rng: &mut Rng) -> Species {
+        let of_niche: Vec<&PoolEntry> = self
+            .entries
+            .iter()
+            .filter(|e| e.species.genome.niche() == niche && e.species.genome.nest == Nest::Base)
+            .collect();
+        if of_niche.is_empty() {
+            self.fill(niche, rng)
+        } else {
+            Self::weighted(&of_niche, rng)
+        }
+    }
+
+    fn weighted(entries: &[&PoolEntry], rng: &mut Rng) -> Species {
+        let total: f32 = entries.iter().map(|e| e.weight).sum();
+        let mut roll = rng.f32() * total;
+        for entry in entries {
+            roll -= entry.weight;
+            if roll < 0.0 {
+                return entry.species;
+            }
+        }
+        entries[entries.len() - 1].species
+    }
+}
+
+/// The unmutated founders of a lattice node: (lineage, genome, abundance). The node at
+/// the origin holds the hand-authored HOME species; every other node samples its own from
+/// the node's latent parameters, on a salted stream.
+fn founders(seed: u64, node: QuadrantId) -> Vec<(u64, Genome, f32)> {
+    if node == QuadrantId::ORIGIN {
+        return GenePool::home()
+            .entries
+            .into_iter()
+            .map(|e| (e.species.lineage, e.species.genome, 1.0))
+            .collect();
+    }
+    let params = latent(seed, node);
+    (0..FOUNDERS_PER_NODE)
+        .map(|k| {
+            let mut rng = Rng::new(hash2(
+                seed ^ GENE_SALT ^ ((k + 1) * 0x9E37_79B9),
+                node.x,
+                node.y,
+            ));
+            let lineage = rng.next_u64() | 1;
+            let abundance = rng.range(0.5, 1.5);
+            (lineage, Genome::sample(&mut rng, &params), abundance)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn home_species_are_named_and_colored_from_their_genes() {
+        let names: Vec<String> = GenePool::home()
+            .entries
+            .iter()
+            .map(|e| e.species.name())
+            .collect();
+        assert_eq!(names, ["Bogey", "Lunatic", "Smarty", "Fatso", "Leech"]);
+        assert_eq!(Species::serpent().name(), "Serpent");
+        let [r, g, b] = Genome::bogey().color();
+        assert!((r - 0.28).abs() < 0.01 && (g - 0.55).abs() < 0.01 && (b - 1.0).abs() < 0.01);
+        let [r, g, b] = Genome::fatso().color();
+        assert!((r - 0.88).abs() < 0.01 && (g - 0.65).abs() < 0.01 && (b - 0.34).abs() < 0.01);
+    }
+
+    #[test]
+    fn home_species_occupy_their_original_niches() {
+        let niche = |g: Genome| g.niche();
+        assert_eq!(niche(Genome::bogey()), Niche::School);
+        assert_eq!(niche(Genome::lunatic()), Niche::Fling);
+        assert_eq!(niche(Genome::smarty()), Niche::Hunter);
+        assert_eq!(niche(Genome::fatso()), Niche::Heavy);
+        assert_eq!(niche(Genome::leech()), Niche::Tether);
+    }
+
+    #[test]
+    fn the_home_pool_is_exactly_the_five_classics() {
+        for seed in [0, 7, 0x535343] {
+            let pool = GenePool::for_quadrant(seed, QuadrantId::ORIGIN);
+            assert_eq!(pool, GenePool::home());
+        }
+    }
+
+    #[test]
+    fn sampled_genomes_are_valid_and_diverse_across_the_parameter_space() {
+        let mut rng = Rng::new(5);
+        let mut chains = 0;
+        let mut negative = 0;
+        let mut slithering = 0;
+        let mut names = std::collections::HashSet::new();
+        for i in 0..2000 {
+            let params = QuadrantParams {
+                danger: rng.f32(),
+                aggression: rng.f32(),
+                density: rng.f32(),
+                distortion: rng.f32(),
+                tech: rng.f32(),
+                swarm: rng.f32(),
+            };
+            let mut g = Genome::sample(&mut rng, &params);
+            assert!(g.parts() <= MAX_PARTS, "{i}");
+            assert_eq!(g, g.limited());
+            assert!(g.normalized().iter().all(|x| (0.0..=1.0).contains(x)));
+            chains += (g.segments >= 3) as u32;
+            negative += (g.mass < 0.0) as u32;
+            slithering += (g.segments >= 3 && g.wave > 0.8) as u32;
+            names.insert(g.name());
+            // Every gene stays inside its bounds.
+            for gene in g.genes() {
+                if let Gene::Real { v, lo, hi } = gene {
+                    assert!(v.is_finite() && *v >= lo && *v <= hi);
+                }
+            }
+        }
+        assert!(chains > 100 && negative > 80 && slithering > 40);
+        assert!(names.len() > 300);
+    }
+
+    #[test]
+    fn tech_and_distortion_bias_the_distribution() {
+        let share = |tech: f32, distortion: f32| {
+            let params = QuadrantParams {
+                tech,
+                distortion,
+                ..QuadrantParams::HOME
+            };
+            let mut rng = Rng::new(9);
+            (0..1500)
+                .filter(|_| {
+                    let g = Genome::sample(&mut rng, &params);
+                    g.segments >= 3 && g.wave > 0.6
+                })
+                .count()
+        };
+        assert!(share(0.95, 0.95) > share(0.05, 0.05) * 2);
+    }
+
+    /// Mean normalized distance between genomes of the lineages two pools share.
+    fn drift(a: &GenePool, b: &GenePool) -> (usize, f32, f32) {
+        let mut shared = 0;
+        let mut total = 0.0;
+        let mut worst = 0.0_f32;
+        for x in &a.entries {
+            for y in &b.entries {
+                if x.species.lineage == y.species.lineage {
+                    let d = x.species.genome.distance(&y.species.genome);
+                    shared += 1;
+                    total += d;
+                    worst = worst.max(d);
+                }
+            }
+        }
+        (shared, total / shared.max(1) as f32, worst)
+    }
+
+    #[test]
+    fn pools_vary_smoothly_between_neighbors() {
+        let seed = 31;
+        let mut checked = 0;
+        let mut biggest_weight_step = 0.0_f32;
+        for x in -10..=10 {
+            for y in -10..=10 {
+                let here = QuadrantId { x, y };
+                let pool = GenePool::for_quadrant(seed, here);
+                assert!(!pool.entries.is_empty());
+                let total: f32 = pool.entries.iter().map(|e| e.weight).sum();
+                for (dx, dy) in [(1, 0), (0, 1)] {
+                    let next = GenePool::for_quadrant(
+                        seed,
+                        QuadrantId {
+                            x: x + dx,
+                            y: y + dy,
+                        },
+                    );
+                    let (shared, mean, worst) = drift(&pool, &next);
+                    // Neighbors share ancestry: most of the pool is the same lineages.
+                    assert!(shared >= 3, "{here:?} shares only {shared}");
+                    assert!(mean < 0.12, "{here:?} mean drift {mean}");
+                    assert!(worst < 0.4, "{here:?} worst drift {worst}");
+                    // Abundances change gradually: compare weights lineage by lineage.
+                    let next_total: f32 = next.entries.iter().map(|e| e.weight).sum();
+                    let mut change = 0.0;
+                    for e in &pool.entries {
+                        let other = next
+                            .entries
+                            .iter()
+                            .find(|o| o.species.lineage == e.species.lineage)
+                            .map_or(0.0, |o| o.weight / next_total);
+                        change += (e.weight / total - other).abs();
+                    }
+                    biggest_weight_step = biggest_weight_step.max(change);
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 800);
+        assert!(
+            biggest_weight_step < 1.0,
+            "abrupt turnover {biggest_weight_step}"
+        );
+    }
+
+    #[test]
+    fn species_recur_across_quadrants_with_mutation() {
+        let seed = 12;
+        // Walk away from a founding node: the same lineage persists but its genome drifts.
+        let near = GenePool::for_quadrant(seed, QuadrantId { x: 9, y: 8 });
+        let far = GenePool::for_quadrant(seed, QuadrantId { x: 11, y: 9 });
+        let mut recurred = 0;
+        for a in &near.entries {
+            if let Some(b) = far
+                .entries
+                .iter()
+                .find(|b| b.species.lineage == a.species.lineage)
+            {
+                recurred += 1;
+                let d = a.species.genome.distance(&b.species.genome);
+                assert!(d > 0.0, "an identical copy is not a mutation");
+                assert!(d < 0.4, "too far to be the same lineage: {d}");
+            }
+        }
+        assert!(recurred >= 2);
+        // Across a wider walk the same lineage keeps showing up, never as an exact copy.
+        let lineage = near.entries[0].species.lineage;
+        let mut variants = std::collections::HashSet::new();
+        for x in 6..=12 {
+            for y in 6..=12 {
+                for e in GenePool::for_quadrant(seed, QuadrantId { x, y }).entries {
+                    if e.species.lineage == lineage {
+                        variants.insert(
+                            e.species
+                                .genome
+                                .normalized()
+                                .iter()
+                                .map(|v| v.to_bits())
+                                .fold(0u64, |h, b| h.wrapping_mul(31) ^ u64::from(b)),
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            variants.len() > 5,
+            "lineage never varied: {}",
+            variants.len()
+        );
+    }
+
+    #[test]
+    fn classics_fade_into_wild_species_moving_away_from_home() {
+        let classic = |id: QuadrantId| {
+            let pool = GenePool::for_quadrant(1, id);
+            let total: f32 = pool.entries.iter().map(|e| e.weight).sum();
+            pool.entries
+                .iter()
+                .filter(|e| HOME_LINEAGES.contains(&e.species.lineage))
+                .map(|e| e.weight)
+                .sum::<f32>()
+                / total
+        };
+        let shares: Vec<f32> = (0..=4).map(|x| classic(QuadrantId { x, y: 0 })).collect();
+        assert_eq!(shares[0], 1.0);
+        assert!(shares.windows(2).all(|w| w[1] < w[0]), "{shares:?}");
+        assert_eq!(shares[4], 0.0);
+    }
+
+    #[test]
+    fn pools_are_pure_functions_of_seed_and_quadrant() {
+        let id = QuadrantId { x: -7, y: 5 };
+        assert_eq!(GenePool::for_quadrant(3, id), GenePool::for_quadrant(3, id));
+        assert_ne!(GenePool::for_quadrant(3, id), GenePool::for_quadrant(4, id));
+    }
+}

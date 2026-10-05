@@ -6,14 +6,16 @@
 //! frozen, and quadrants far from the player are dropped and regenerated on return.
 
 mod chain;
+mod creature;
 mod ecology;
 mod tether;
 
-pub use chain::Chain;
-pub use ecology::{BaseState, FATSO_COST};
+pub use chain::{Chain, Part};
+pub use ecology::{BaseState, GUARDIAN_COST};
 pub use tether::{Tether, TetherKind};
 
-use crate::world::{self, Genome, Phenotype, QuadrantId, QuadrantParams, Rng};
+use crate::genome::{Diet, Genome, Species};
+use crate::world::{self, Phenotype, QuadrantId, QuadrantParams, Rng};
 use bevy::prelude::Vec2;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f32::consts::{FRAC_PI_2, TAU};
@@ -32,31 +34,19 @@ const HOME_LEASH: f32 = 800.0;
 /// Enemies this close to a destroyed base lose their bearings for a while.
 const ECOSYSTEM_RADIUS: f32 = 2200.0;
 const PLAYER_SPEED: f32 = 460.0;
-/// A body touched by a Lunatic is thrown at least this fast (and at most the cap).
+/// Health per second a dust-grazing creature recovers.
+const DUST_HEAL: f32 = 1.5;
+/// A body touched by a flinging creature is thrown at least this fast (scaled by the
+/// fling gene), and never faster than the cap.
 const FLING_SPEED: f32 = 520.0;
 const FLING_MAX_SPEED: f32 = 1000.0;
+/// Whatever the genes say, nothing is thrown faster than this.
+const FLING_HARD_CAP: f32 = 1400.0;
 /// Half-extent of the region around the player whose quadrants are simulated. It must
 /// exceed the largest visible half-extent so loading and freezing happen off screen.
 pub const ACTIVE_HALF: Vec2 = Vec2::new(2200.0, 1500.0);
 /// Quadrants farther than this (in quadrants) from the player are unloaded.
 const UNLOAD_DISTANCE: u32 = 2;
-/// Enemies notice the player inside `SIGHT_RANGE` and give up beyond `LOSE_RANGE`.
-const SIGHT_RANGE: f32 = 1000.0;
-const LOSE_RANGE: f32 = 1500.0;
-/// Bogeys school peacefully: only a close approach agitates them, and they settle again
-/// once the player is well clear. Hurting one agitates it; near death it goes berserk.
-const BOGEY_AGITATE_RANGE: f32 = 320.0;
-const BOGEY_CALM_RANGE: f32 = 650.0;
-const BOGEY_ALARM_RANGE: f32 = 220.0;
-const BOGEY_ENRAGE_HEALTH: f32 = 0.4;
-/// How far an enemy with a mass affinity notices rocks and gravity wells.
-const HEAVY_RANGE: f32 = 600.0;
-/// How far an enemy notices same-kind neighbors, how close it tolerates them, and how
-/// far it may stray from the crowd's center before drifting back.
-const PERCEPTION: f32 = 380.0;
-const PERSONAL_SPACE: f32 = 110.0;
-const LOOSE_RADIUS: f32 = 220.0;
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Input {
     pub thrust: f32,
@@ -68,21 +58,10 @@ pub struct Input {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EnemyKind {
-    Bogey,
-    Lunatic,
-    Smarty,
-    Fatso,
-    /// Fires an umbilical cord that latches onto the ship; also found in linked pairs.
-    Leech,
-    /// One segment of a jointed, slithering creature.
-    Serpent,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BodyKind {
     Player,
-    Enemy(EnemyKind),
+    /// A living thing; its genome decides what it is and does.
+    Creature,
     Asteroid,
     BlackHole,
     /// An ecosystem base: immovable, breeds creatures and harvests debris.
@@ -106,9 +85,11 @@ pub struct Body {
     pub origin: Option<(QuadrantId, u32)>,
     /// Fixed in place regardless of impacts (the stones of a nest).
     pub pinned: bool,
-    /// Segmented creatures: the chain this body belongs to, and whether it trails a head.
+    /// Jointed creatures: the chain this body belongs to, whether it trails a head, and
+    /// its index within the creature (0 is the head), which decides hardpoints.
     pub chain: Option<u32>,
     pub follower: bool,
+    pub part: u8,
     /// Bases only.
     pub base: Option<BaseState>,
     /// Where a base-bred creature considers home.
@@ -118,9 +99,15 @@ pub struct Body {
     pub panic_from: Vec2,
     /// True while this enemy is hunting the player rather than going about its business.
     pub alert: bool,
-    /// Heritable behavior weights from the quadrant that spawned this body.
+    /// The environment's expression of the genome: weights from the quadrant that spawned it.
     pub genes: Phenotype,
-    /// Bogeys only: badly hurt and attacking with abandon.
+    /// Creatures: the heritable description of everything the body is and does.
+    pub genome: Genome,
+    /// Creatures: lineage id of its species (schooling is with the same lineage).
+    pub species: u64,
+    /// A juvenile's tending parent.
+    pub parent: Option<u64>,
+    /// Badly hurt and attacking with abandon (creatures with a rage gene).
     pub enraged: bool,
     /// False when the body sits in a quadrant outside the active region.
     pub active: bool,
@@ -128,6 +115,7 @@ pub struct Body {
     fire_cooldown: f32,
     contact_cooldown: f32,
     since_hit: f32,
+    brood_timer: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -242,7 +230,7 @@ impl Game {
     pub fn active_enemies(&self) -> usize {
         self.bodies
             .iter()
-            .filter(|body| body.active && matches!(body.kind, BodyKind::Enemy(_)))
+            .filter(|body| body.active && body.kind == BodyKind::Creature)
             .count()
     }
 
@@ -268,12 +256,18 @@ impl Game {
             if body.since_hit > 2.0 {
                 body.shield = (body.shield + dt * 6.0).min(body.max_shield);
             }
+            if body.kind == BodyKind::Creature && body.genome.diet == Diet::Dust {
+                body.health = (body.health + dt * DUST_HEAL).min(body.max_health);
+            }
         }
         self.control_player(dt, input);
-        self.steer_enemies(dt);
+        self.steer_creatures(dt);
         self.update_bases(dt);
+        self.tend_broods(dt);
+        self.graze();
         self.update_tethers(dt);
         self.update_chains(dt);
+        self.fire_weapons();
         self.apply_gravity(dt);
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if !is_fixed(body) {
@@ -335,7 +329,10 @@ impl Game {
             if fallen.contains(&spawn.index) || present.contains(&spawn.index) {
                 continue;
             }
-            let mut body = self.make_body(spawn.kind, spawn.position);
+            let mut body = match &spawn.species {
+                Some(species) => self.make_creature(species, spawn.position),
+                None => self.make_body(spawn.kind, spawn.position),
+            };
             if let Some(radius) = spawn.radius {
                 body.radius = radius;
                 body.mass = radius * 0.6;
@@ -349,19 +346,21 @@ impl Game {
             body.angle = self.rng.f32() * TAU;
             body.wander = body.angle;
             body.fire_cooldown = 1.0 + self.rng.f32() * 2.0;
-            if let Some(brood) = spawn.brood {
+            if let (Some(brood), Some(guardian)) = (spawn.brood, spawn.guardian) {
                 let timer = 2.0 + self.rng.f32() * 4.0;
-                body.base = Some(BaseState::new(brood, timer));
+                body.base = Some(BaseState::new(brood, guardian, timer));
             }
-            if let Some(genome) = spawn.genome {
-                self.spawn_chain(body, genome);
-                continue;
+            if body.kind == BodyKind::Creature
+                && (body.genome.social == crate::genome::Social::Dweller
+                    || body.genome.nest == crate::genome::Nest::Base)
+            {
+                body.home = Some(spawn.position);
             }
-            made.insert(spawn.index, body.id);
+            let head = self.add_body(body);
+            made.insert(spawn.index, head);
             if let Some(&partner) = spawn.link.and_then(|i| made.get(&i)) {
-                self.tethers.push(Tether::link(partner, body.id));
+                self.tethers.push(Tether::link(partner, head));
             }
-            self.bodies.push(body);
         }
     }
 
@@ -444,246 +443,6 @@ impl Game {
         }
     }
 
-    /// Enemies have no group membership. Each reacts only to same-kind neighbors within
-    /// `PERCEPTION`, so nearby bands merge into one drifting crowd and split apart again
-    /// as individual restlessness pulls them in different directions.
-    fn steer_enemies(&mut self, dt: f32) {
-        struct Neighbor {
-            id: u64,
-            kind: BodyKind,
-            position: Vec2,
-            radius: f32,
-            heading: Vec2,
-            chain: Option<u32>,
-            raising_alarm: bool,
-            alarm_range: f32,
-        }
-        let player = self.player().map(|p| (p.position, p.velocity));
-        // A compact snapshot makes steering independent of body iteration order.
-        let neighbors: Vec<_> = self
-            .bodies
-            .iter()
-            .filter(|b| b.active && b.kind != BodyKind::Player)
-            .map(|b| Neighbor {
-                id: b.id,
-                kind: b.kind,
-                position: b.position,
-                radius: b.radius,
-                heading: Vec2::from_angle(b.wander),
-                chain: b.chain,
-                raising_alarm: if b.kind == BodyKind::Enemy(EnemyKind::Bogey) {
-                    // A hurt bogey panics its schoolmates; merely seeing the player does not.
-                    b.enraged || is_hurt(b)
-                } else {
-                    player.is_some_and(|(p, _)| p.distance(b.position) < SIGHT_RANGE)
-                },
-                alarm_range: if b.kind == BodyKind::Enemy(EnemyKind::Bogey) {
-                    BOGEY_ALARM_RANGE
-                } else {
-                    PERCEPTION
-                },
-            })
-            .collect();
-        for body in self.bodies.iter_mut().filter(|b| b.active) {
-            let BodyKind::Enemy(kind) = body.kind else {
-                continue;
-            };
-            // Trailing segments are dragged along by their joints.
-            if body.follower {
-                continue;
-            }
-            let (speed, lead, cruise) = match kind {
-                EnemyKind::Bogey => (160.0, 0.15, 75.0),
-                EnemyKind::Lunatic => (230.0, 0.0, 95.0),
-                EnemyKind::Smarty => (285.0, 0.55, 110.0),
-                EnemyKind::Fatso => (60.0, 0.0, 25.0),
-                EnemyKind::Leech => (190.0, 0.2, 80.0),
-                EnemyKind::Serpent => (210.0, 0.3, 90.0),
-            };
-            // Individuals differ a little in pace and in how restless they are.
-            let temperament = (body.id % 5) as f32 / 4.0;
-            let cruise = cruise * (0.85 + 0.3 * temperament);
-            let genes = body.genes;
-            let lead = lead * genes.sensor_acuity;
-            let perception = PERCEPTION * genes.flocking;
-            // Aggression moves pace only a little; it mostly shows in rage and fire rate.
-            let speed = speed * (1.0 + (genes.aggression - 1.0) * 0.4);
-
-            let mut separation = Vec2::ZERO;
-            let mut heading = Vec2::ZERO;
-            let mut center = Vec2::ZERO;
-            let mut crowd = 0.0;
-            let mut warned = false;
-            let mut crowding = Vec2::ZERO;
-            let mut heavy: Option<(f32, Vec2)> = None;
-            for other in neighbors
-                .iter()
-                .filter(|n| n.id != body.id && (body.chain.is_none() || n.chain != body.chain))
-            {
-                let offset = body.position - other.position;
-                let distance_squared = offset.length_squared();
-                let range = body.radius + other.radius + 35.0;
-                if distance_squared < range * range && distance_squared > 0.1 {
-                    crowding += offset / distance_squared * 6500.0;
-                }
-                if matches!(other.kind, BodyKind::Asteroid | BodyKind::BlackHole)
-                    && distance_squared < HEAVY_RANGE * HEAVY_RANGE
-                    && heavy.is_none_or(|(best, _)| distance_squared < best)
-                {
-                    heavy = Some((distance_squared, -offset));
-                }
-                if other.kind != body.kind || distance_squared > perception * perception {
-                    continue;
-                }
-                let distance = distance_squared.sqrt().max(0.1);
-                if distance < PERSONAL_SPACE {
-                    separation += offset / distance * (1.0 - distance / PERSONAL_SPACE);
-                }
-                heading += other.heading;
-                center += other.position;
-                crowd += 1.0;
-                warned |= other.raising_alarm && distance < other.alarm_range;
-            }
-
-            let is_bogey = kind == EnemyKind::Bogey;
-            let (sight, lose) = if is_bogey {
-                (BOGEY_AGITATE_RANGE, BOGEY_CALM_RANGE)
-            } else {
-                (SIGHT_RANGE, LOSE_RANGE)
-            };
-            let (sight, lose) = (sight * genes.sensor_acuity, lose * genes.sensor_acuity);
-            let player_distance = player.map_or(f32::INFINITY, |(p, _)| p.distance(body.position));
-            body.enraged =
-                is_bogey && body.health < body.max_health * BOGEY_ENRAGE_HEALTH * genes.aggression;
-            let provoked = is_hurt(body) || (body.enraged && player_distance < LOSE_RANGE);
-            body.alert = player_distance < if body.alert { lose } else { sight }
-                || warned
-                || (is_bogey && provoked);
-            if body.panic > 0.0 {
-                body.alert = false;
-            }
-            let enraged = body.enraged;
-            let ranged = matches!(kind, EnemyKind::Bogey | EnemyKind::Leech);
-            let keep_off = if kind == EnemyKind::Leech {
-                300.0
-            } else {
-                220.0
-            };
-            let speed = match (is_bogey, enraged) {
-                (true, true) => speed * 1.35,
-                (true, false) => speed * 0.85,
-                _ => speed,
-            };
-            let to_player = player.map(|(p, v)| p + v * lead - body.position);
-
-            // The wander heading doubles as the shared heading that neighbors align to.
-            if crowd > 0.0 {
-                let blend = (dt * 1.2 * genes.flocking).min(1.0);
-                let own = Vec2::from_angle(body.wander);
-                let merged = own + (heading / crowd - own) * blend;
-                body.wander = merged.y.atan2(merged.x);
-            }
-            body.wander += (self.rng.f32() - 0.5) * (1.5 + 2.0 * temperament) * dt;
-
-            if let (Some(home), false) = (body.home, body.alert || body.panic > 0.0) {
-                let back = home - body.position;
-                if back.length_squared() > HOME_LEASH * HOME_LEASH {
-                    let own = Vec2::from_angle(body.wander);
-                    let merged = own + (back.normalize() - own) * (dt * 1.5).min(1.0);
-                    body.wander = merged.y.atan2(merged.x);
-                }
-            }
-            let mut desired = match (body.alert, to_player) {
-                _ if body.panic > 0.0 => {
-                    // Scatter from the ruined base, veering erratically as they go.
-                    let away = (body.position - body.panic_from).normalize_or_zero();
-                    let swerve = (self.time * 7.0 + body.id as f32).sin() * 1.1;
-                    body.wander = away.y.atan2(away.x) + swerve;
-                    Vec2::from_angle(body.wander) * speed
-                }
-                (true, Some(difference)) => {
-                    let mut desired = difference.normalize_or_zero() * speed;
-                    let distance = difference.length();
-                    if ranged && !enraged && distance < keep_off {
-                        desired = -desired * 0.65;
-                    }
-                    if ranged && distance < 520.0 {
-                        // Strafe, each bogey committing to its own side.
-                        let side = Vec2::new(-difference.y, difference.x).normalize_or_zero();
-                        desired += side * speed * 0.45 * if body.id % 2 == 0 { 1.0 } else { -1.0 };
-                    }
-                    body.wander = body.velocity.y.atan2(body.velocity.x);
-                    desired
-                }
-                _ => Vec2::from_angle(body.wander) * cruise,
-            };
-            if crowd > 0.0 {
-                // Loose cohesion: only stragglers drift back, so the crowd stays spread out.
-                let to_center = center / crowd - body.position;
-                let gap = to_center.length();
-                if gap > LOOSE_RADIUS {
-                    desired += to_center / gap
-                        * cruise
-                        * ((gap - LOOSE_RADIUS) / 200.0).min(1.0)
-                        * genes.flocking;
-                }
-                desired += separation * speed * 1.4 * genes.flocking;
-            }
-            desired += crowding;
-            if let Some((_, toward)) = heavy {
-                // Some creatures hug rocks and wells; others give them a wide berth.
-                desired += toward.normalize_or_zero() * cruise * genes.mass_affinity;
-            }
-            let top_speed = if body.alert { speed } else { cruise * 1.4 };
-            // A chain's head steers with the muscle to tow the body it drags behind.
-            let tow = body
-                .chain
-                .and_then(|c| self.chains.get(&c))
-                .map_or(1.0, |c| (c.members.len() as f32 * 0.6).max(1.0));
-            body.velocity +=
-                (desired.clamp_length_max(top_speed) - body.velocity) * (dt * 2.2 * tow).min(1.0);
-            body.angle = match to_player {
-                Some(difference) if body.alert => difference.y.atan2(difference.x),
-                _ if body.velocity.length_squared() > 25.0 => {
-                    body.velocity.y.atan2(body.velocity.x)
-                }
-                _ => body.angle,
-            };
-            if let (Some((player_position, _)), true) = (player, body.alert)
-                && kind == EnemyKind::Leech
-                && body.fire_cooldown <= 0.0
-                && (140.0..650.0).contains(&body.position.distance(player_position))
-                && self.tethers.len() < tether::MAX_TETHERS
-                && !self
-                    .tethers
-                    .iter()
-                    .any(|t| t.owner == body.id && t.kind == TetherKind::Latch)
-            {
-                let direction = (player_position - body.position).normalize_or_zero();
-                self.tethers
-                    .push(Tether::latch(body.id, body.position, direction));
-                body.fire_cooldown = 5.0;
-            }
-            if let (Some((player_position, _)), true) = (player, body.alert)
-                && kind == EnemyKind::Bogey
-                && body.fire_cooldown <= 0.0
-                && body.position.distance(player_position) < if enraged { 950.0 } else { 800.0 }
-                && self.bullets.len() < MAX_BULLETS
-            {
-                let direction = (player_position - body.position).normalize_or_zero();
-                self.bullets.push(Bullet {
-                    position: body.position + direction * (body.radius + 5.0),
-                    velocity: direction * 300.0 + body.velocity * 0.3,
-                    radius: 4.0,
-                    friendly: false,
-                    remaining: 4.0,
-                });
-                let pace = (if enraged { 0.4 } else { 1.15 }) / genes.aggression;
-                body.fire_cooldown = (2.4 + (body.id % 7) as f32 * 0.13) * pace;
-            }
-        }
-    }
-
     fn apply_gravity(&mut self, dt: f32) {
         let holes: Vec<_> = self
             .bodies
@@ -701,7 +460,8 @@ impl Game {
                 let distance_squared = offset.length_squared();
                 if distance_squared < 550.0 * 550.0 {
                     let pull = offset * (7_000_000.0 / (distance_squared + 2500.0).powf(1.5));
-                    body.velocity += pull.clamp_length_max(350.0) * dt;
+                    // Negative mass is repelled by gravity.
+                    body.velocity += pull.clamp_length_max(350.0) * dt * mass_sign(body);
                     body.velocity = body.velocity.clamp_length_max(650.0);
                     if distance_squared < (body.radius + 28.0).powi(2) {
                         damage(body, 35.0 * dt, invulnerability);
@@ -746,29 +506,36 @@ impl Game {
                 let separation = normal * (radius - distance + 0.01) / inverse_sum;
                 a.position -= separation * inverse_a;
                 b.position += separation * inverse_b;
-                let lunatic = |body: &Body| body.kind == BodyKind::Enemy(EnemyKind::Lunatic);
-                let flinger = match (lunatic(a), lunatic(b)) {
-                    (true, false) if !is_fixed(b) => Some(true),
-                    (false, true) if !is_fixed(a) => Some(false),
-                    _ => None,
+                // Contact fling is a continuous trait: whichever body flings harder throws the
+                // other (equals bounce), and negative mass adds to it.
+                let (fling_a, fling_b) = (fling_strength(a), fling_strength(b));
+                let flinger = if fling_a > fling_b && !is_fixed(b) {
+                    Some(true)
+                } else if fling_b > fling_a && !is_fixed(a) {
+                    Some(false)
+                } else {
+                    None
                 };
                 let closing_speed = (b.velocity - a.velocity).dot(normal);
                 if let Some(a_flings) = flinger {
-                    // Lunatics have negative mass: whatever touches them is thrown away
-                    // along a wild vector, and they recoil. Cooldown stops repeat flings.
+                    // The flinger throws whatever touches it along a wild vector and
+                    // recoils. A cooldown stops repeat flings.
                     let (crazy, victim, normal) = if a_flings {
                         (&mut *a, &mut *b, normal)
                     } else {
                         (&mut *b, &mut *a, -normal)
                     };
                     if crazy.contact_cooldown <= 0.0 {
+                        let strength = fling_strength(crazy);
                         let relative = (victim.velocity - crazy.velocity).length();
-                        let angle = self.rng.range(-1.0, 1.0);
+                        let angle = self.rng.range(-1.0, 1.0) * crazy.genome.fling_chaos;
                         let direction = Vec2::from_angle(angle).rotate(normal);
-                        let speed = (FLING_SPEED + relative * 0.8).min(FLING_MAX_SPEED);
+                        let speed = ((FLING_SPEED + relative * 0.8).min(FLING_MAX_SPEED)
+                            * strength)
+                            .min(FLING_HARD_CAP);
                         victim.velocity = direction * speed;
                         if victim.kind == BodyKind::Asteroid {
-                            damage(victim, 40.0, 0.0);
+                            damage(victim, 40.0 * strength, 0.0);
                         }
                         crazy.velocity = -direction * speed * 0.4;
                         crazy.contact_cooldown = 0.4;
@@ -785,11 +552,11 @@ impl Game {
                     }
                 }
                 if a.kind == BodyKind::Player && a.contact_cooldown <= 0.0 {
-                    damage(a, contact_damage(b.kind), invulnerability);
+                    damage(a, contact_damage(b), invulnerability);
                     a.contact_cooldown = 0.65;
                 }
                 if b.kind == BodyKind::Player && b.contact_cooldown <= 0.0 {
-                    damage(b, contact_damage(a.kind), invulnerability);
+                    damage(b, contact_damage(a), invulnerability);
                     b.contact_cooldown = 0.65;
                 }
             }
@@ -849,7 +616,8 @@ impl Game {
                     self.player_invulnerability,
                 );
                 if !is_fixed(body) {
-                    body.velocity += bullet.velocity.normalize_or_zero() * (180.0 / body.mass);
+                    body.velocity +=
+                        bullet.velocity.normalize_or_zero() * (180.0 / body.mass) * mass_sign(body);
                 }
                 bullet.remaining = 0.0;
                 impacts.push(previous.lerp(bullet.position, fraction));
@@ -877,12 +645,7 @@ impl Game {
             let (kind, position, radius) = (body.kind, body.position, body.radius);
             self.effect(position, radius * 2.5, 0.65, EffectKind::Explosion);
             self.score = self.score.saturating_add(match kind {
-                BodyKind::Enemy(EnemyKind::Bogey) => 100,
-                BodyKind::Enemy(EnemyKind::Lunatic) => 125,
-                BodyKind::Enemy(EnemyKind::Smarty) => 200,
-                BodyKind::Enemy(EnemyKind::Fatso) => 250,
-                BodyKind::Enemy(EnemyKind::Leech) => 150,
-                BodyKind::Enemy(EnemyKind::Serpent) => 60,
+                BodyKind::Creature => body.genome.bounty as u64,
                 BodyKind::Asteroid => 25,
                 BodyKind::Base => 500,
                 _ => 0,
@@ -939,13 +702,9 @@ impl Game {
     fn make_body(&mut self, kind: BodyKind, position: Vec2) -> Body {
         let (radius, health, shield, mass) = match kind {
             BodyKind::Player => (14.0, 100.0, 60.0, 10.0),
-            BodyKind::Enemy(EnemyKind::Bogey) => (15.0, 35.0, 18.0, 8.0),
-            BodyKind::Enemy(EnemyKind::Lunatic) => (18.0, 45.0, 0.0, 6.0),
-            BodyKind::Enemy(EnemyKind::Smarty) => (18.0, 70.0, 0.0, 12.0),
-            BodyKind::Enemy(EnemyKind::Fatso) => (48.0, 180.0, 0.0, 200.0),
+            // Creatures are reshaped from their genome by `make_creature`.
+            BodyKind::Creature => (14.0, 30.0, 0.0, 8.0),
             BodyKind::Asteroid => (35.0, 80.0, 0.0, 25.0),
-            BodyKind::Enemy(EnemyKind::Leech) => (16.0, 40.0, 20.0, 7.0),
-            BodyKind::Enemy(EnemyKind::Serpent) => (11.0, 28.0, 0.0, 5.0),
             BodyKind::BlackHole => (20.0, f32::INFINITY, 0.0, f32::INFINITY),
             BodyKind::Base => (55.0, 450.0, 0.0, f32::INFINITY),
         };
@@ -967,6 +726,7 @@ impl Game {
             pinned: false,
             chain: None,
             follower: false,
+            part: 0,
             base: None,
             home: None,
             panic: 0.0,
@@ -974,11 +734,15 @@ impl Game {
             alert: false,
             enraged: false,
             genes: Phenotype::default(),
+            genome: Genome::default(),
+            species: 0,
+            parent: None,
             active: true,
             wander: 0.0,
             fire_cooldown: 0.0,
             contact_cooldown: 0.0,
             since_hit: 0.0,
+            brood_timer: 0.0,
         }
     }
 
@@ -1021,15 +785,31 @@ fn is_hurt(body: &Body) -> bool {
     body.since_hit < 4.0 && (body.health < body.max_health || body.shield < body.max_shield)
 }
 
-fn contact_damage(kind: BodyKind) -> f32 {
-    match kind {
-        BodyKind::Enemy(EnemyKind::Lunatic) => 18.0,
-        BodyKind::Enemy(EnemyKind::Fatso) => 20.0,
+fn contact_damage(body: &Body) -> f32 {
+    match body.kind {
+        BodyKind::Creature => body.genome.contact_damage,
         BodyKind::BlackHole => 22.0,
         BodyKind::Base => 15.0,
         BodyKind::Asteroid => 12.0,
-        BodyKind::Enemy(_) => 6.0,
         BodyKind::Player => 0.0,
+    }
+}
+
+/// How hard a body throws what touches it: the fling gene plus a push for negative mass.
+fn fling_strength(body: &Body) -> f32 {
+    if body.kind == BodyKind::Creature {
+        body.genome.fling_strength()
+    } else {
+        0.0
+    }
+}
+
+/// -1 for negative-mass creatures, which gravity repels and shots pull.
+fn mass_sign(body: &Body) -> f32 {
+    if body.kind == BodyKind::Creature && body.genome.mass < 0.0 {
+        -1.0
+    } else {
+        1.0
     }
 }
 
@@ -1090,6 +870,12 @@ mod tests {
         let id = body.id;
         game.bodies.push(body);
         id
+    }
+
+    /// Adds a creature of the given species, with its whole body if it has one.
+    pub(super) fn spawn(game: &mut Game, species: &Species, position: Vec2) -> u64 {
+        let body = game.make_creature(species, position);
+        game.add_body(body)
     }
 
     pub(super) fn body(game: &Game, id: u64) -> &Body {
@@ -1189,9 +975,9 @@ mod tests {
     #[test]
     fn bodies_outside_the_active_region_are_frozen() {
         let mut game = empty_game();
-        let far = add(
+        let far = spawn(
             &mut game,
-            BodyKind::Enemy(EnemyKind::Lunatic),
+            &Species::lunatic(),
             Vec2::new(2.0 * world::QUADRANT_SIZE, 0.0),
         );
         game.bodies
@@ -1211,14 +997,12 @@ mod tests {
     fn a_chaser_follows_the_player_across_a_quadrant_border() {
         let mut game = empty_game();
         let edge = world::QUADRANT_SIZE / 2.0;
-        let chaser = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Lunatic),
-            Vec2::new(edge - 400.0, 0.0),
-        );
-        set_player(&mut game, Vec2::new(edge + 300.0, 0.0), Vec2::ZERO);
+        let chaser = spawn(&mut game, &Species::lunatic(), Vec2::new(edge - 400.0, 0.0));
+        let anchor = Vec2::new(edge + 300.0, 0.0);
         game.player_invulnerability = 1e9;
         for _ in 0..600 {
+            // Hold the ship still so the outcome does not depend on where it is flung.
+            set_player(&mut game, anchor, Vec2::ZERO);
             game.step(DT, Input::default());
         }
         let chaser = body(&game, chaser);
@@ -1234,7 +1018,7 @@ mod tests {
             .map(|i| {
                 let angle = i as f32 * 2.4;
                 let spot = center + Vec2::from_angle(angle) * (30.0 + 12.0 * i as f32);
-                add(game, BodyKind::Enemy(EnemyKind::Bogey), spot)
+                spawn(game, &Species::bogey(), spot)
             })
             .collect()
     }
@@ -1309,11 +1093,7 @@ mod tests {
             let mut game = empty_game();
             game.rng = Rng::new(seed);
             game.player_invulnerability = 1e9;
-            let lunatic = add(
-                &mut game,
-                BodyKind::Enemy(EnemyKind::Lunatic),
-                Vec2::new(30.0, 0.0),
-            );
+            let lunatic = spawn(&mut game, &Species::lunatic(), Vec2::new(30.0, 0.0));
             game.step(DT, Input::default());
             let player = game.player().unwrap();
             assert!(
@@ -1339,11 +1119,7 @@ mod tests {
     fn a_fling_is_not_snapped_back_to_top_speed_and_does_not_repeat_every_tick() {
         let mut game = empty_game();
         game.player_invulnerability = 1e9;
-        add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Lunatic),
-            Vec2::new(30.0, 0.0),
-        );
+        spawn(&mut game, &Species::lunatic(), Vec2::new(30.0, 0.0));
         game.step(DT, Input::default());
         let flung = game.player().unwrap().velocity.length();
         assert!(flung > PLAYER_SPEED);
@@ -1361,11 +1137,7 @@ mod tests {
         // A keener sensor agitates a bogey at a distance the default would ignore.
         let agitated_at = |sensor: f32| {
             let mut game = empty_game();
-            let id = add(
-                &mut game,
-                BodyKind::Enemy(EnemyKind::Bogey),
-                Vec2::new(0.0, 450.0),
-            );
+            let id = spawn(&mut game, &Species::bogey(), Vec2::new(0.0, 450.0));
             game.bodies
                 .iter_mut()
                 .find(|b| b.id == id)
@@ -1381,11 +1153,7 @@ mod tests {
         // Mass affinity draws a creature toward a rock, or pushes it away.
         let drift = |affinity: f32| {
             let mut game = empty_game();
-            let id = add(
-                &mut game,
-                BodyKind::Enemy(EnemyKind::Lunatic),
-                Vec2::new(0.0, 2000.0),
-            );
+            let id = spawn(&mut game, &Species::lunatic(), Vec2::new(0.0, 2000.0));
             add(&mut game, BodyKind::Asteroid, Vec2::new(400.0, 2000.0));
             game.bodies
                 .iter_mut()
@@ -1408,11 +1176,7 @@ mod tests {
     #[test]
     fn calm_bogeys_ignore_a_passing_player_until_it_gets_close_or_hurts_them() {
         let mut game = empty_game();
-        let id = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Bogey),
-            Vec2::new(0.0, 500.0),
-        );
+        let id = spawn(&mut game, &Species::bogey(), Vec2::new(0.0, 500.0));
         game.player_invulnerability = 1e9;
         for _ in 0..300 {
             game.step(DT, Input::default());
@@ -1453,21 +1217,9 @@ mod tests {
     #[test]
     fn hurt_bogeys_panic_their_close_schoolmates() {
         let mut game = empty_game();
-        let hurt = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Bogey),
-            Vec2::new(0.0, 1500.0),
-        );
-        let near = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Bogey),
-            Vec2::new(0.0, 1650.0),
-        );
-        let far = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Bogey),
-            Vec2::new(0.0, 1900.0),
-        );
+        let hurt = spawn(&mut game, &Species::bogey(), Vec2::new(0.0, 1500.0));
+        let near = spawn(&mut game, &Species::bogey(), Vec2::new(0.0, 1650.0));
+        let far = spawn(&mut game, &Species::bogey(), Vec2::new(0.0, 1900.0));
         game.player_invulnerability = 1e9;
         game.bodies
             .iter_mut()
@@ -1487,21 +1239,9 @@ mod tests {
     #[test]
     fn alarms_spread_to_neighbors_in_earshot_but_not_beyond() {
         let mut game = empty_game();
-        let watcher = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Lunatic),
-            Vec2::new(0.0, 900.0),
-        );
-        let neighbor = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Lunatic),
-            Vec2::new(0.0, 1250.0),
-        );
-        let distant = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Lunatic),
-            Vec2::new(0.0, 1900.0),
-        );
+        let watcher = spawn(&mut game, &Species::lunatic(), Vec2::new(0.0, 900.0));
+        let neighbor = spawn(&mut game, &Species::lunatic(), Vec2::new(0.0, 1250.0));
+        let distant = spawn(&mut game, &Species::lunatic(), Vec2::new(0.0, 1900.0));
         game.player_invulnerability = 1e9;
         game.step(DT, Input::default());
         assert!(body(&game, watcher).alert);
@@ -1512,11 +1252,7 @@ mod tests {
     #[test]
     fn shots_hit_along_their_path_and_drain_shields_first() {
         let mut game = empty_game();
-        let id = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Bogey),
-            Vec2::new(100.0, 0.0),
-        );
+        let id = spawn(&mut game, &Species::bogey(), Vec2::new(100.0, 0.0));
         game.bullets.push(Bullet {
             position: Vec2::new(50.0, 0.0),
             velocity: Vec2::new(4000.0, 0.0),
@@ -1572,18 +1308,10 @@ mod tests {
     #[test]
     fn kills_award_score() {
         let mut game = empty_game();
-        add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Bogey),
-            Vec2::new(0.0, 2000.0),
-        );
-        add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Lunatic),
-            Vec2::new(0.0, -2000.0),
-        );
+        spawn(&mut game, &Species::bogey(), Vec2::new(0.0, 2000.0));
+        spawn(&mut game, &Species::lunatic(), Vec2::new(0.0, -2000.0));
         for body in &mut game.bodies {
-            if matches!(body.kind, BodyKind::Enemy(_)) {
+            if body.kind == BodyKind::Creature {
                 body.health = 0.0;
             }
         }
@@ -1698,7 +1426,7 @@ mod tests {
         let victim = game
             .bodies
             .iter()
-            .find(|b| matches!(b.kind, BodyKind::Enemy(_)) && b.origin.is_some())
+            .find(|b| b.kind == BodyKind::Creature && b.origin.is_some())
             .unwrap();
         let (victim_id, origin) = (victim.id, victim.origin.unwrap());
         let before = game.bodies.iter().filter(|b| b.origin.is_some()).count();
@@ -1747,7 +1475,9 @@ mod tests {
         let seed = 11;
         let quadrant = find_quadrant(seed, |spawns| {
             spawns.iter().any(|s| s.kind == BodyKind::Base)
-                && spawns.iter().any(|s| s.genome.is_some())
+                && spawns
+                    .iter()
+                    .any(|s| s.species.is_some_and(|sp| sp.genome.is_jointed()))
         });
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
@@ -1851,11 +1581,7 @@ mod tests {
     #[test]
     fn a_flung_rock_takes_damage_and_fast_rock_impacts_hurt_both() {
         let mut game = empty_game();
-        let lunatic = add(
-            &mut game,
-            BodyKind::Enemy(EnemyKind::Lunatic),
-            Vec2::new(0.0, 1500.0),
-        );
+        let lunatic = spawn(&mut game, &Species::lunatic(), Vec2::new(0.0, 1500.0));
         let rock = add(&mut game, BodyKind::Asteroid, Vec2::new(40.0, 1500.0));
         {
             let rock = game.bodies.iter_mut().find(|b| b.id == rock).unwrap();
@@ -1991,7 +1717,8 @@ mod tests {
         let quadrant = find_quadrant(seed, |s| {
             s.iter().any(|x| x.pinned)
                 && s.iter().any(|x| x.kind == BodyKind::Base)
-                && s.iter().any(|x| x.link.is_some() || x.genome.is_some())
+                && s.iter()
+                    .any(|x| x.link.is_some() || x.species.is_some_and(|sp| sp.genome.is_jointed()))
         });
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
@@ -2015,5 +1742,275 @@ mod tests {
                     .all(|b| b.position.is_finite() && b.velocity.is_finite())
             );
         }
+    }
+
+    #[test]
+    fn home_species_keep_their_original_stats() {
+        let mut game = empty_game();
+        let mut stats = |species: Species| {
+            let b = game.make_creature(&species, Vec2::ZERO);
+            (b.radius, b.max_health, b.max_shield, b.mass)
+        };
+        assert_eq!(stats(Species::bogey()), (15.0, 35.0, 18.0, 8.0));
+        assert_eq!(stats(Species::lunatic()), (18.0, 45.0, 0.0, 6.0));
+        assert_eq!(stats(Species::smarty()), (18.0, 70.0, 0.0, 12.0));
+        assert_eq!(stats(Species::fatso()), (48.0, 180.0, 0.0, 200.0));
+        assert_eq!(stats(Species::leech()), (16.0, 40.0, 20.0, 7.0));
+        // And they hunt at the original paces: smarties outrun fatsos.
+        let pace = |species: Species| {
+            let mut game = empty_game();
+            game.player_invulnerability = 1e9;
+            let id = spawn(&mut game, &species, Vec2::new(0.0, 900.0));
+            for _ in 0..90 {
+                game.step(DT, Input::default());
+            }
+            body(&game, id).velocity.length()
+        };
+        assert!(pace(Species::smarty()) > pace(Species::fatso()) * 2.0);
+    }
+
+    #[test]
+    fn fling_is_a_continuous_trait_and_negative_mass_flings_by_itself() {
+        let thrown = |genome: Genome| {
+            let mut game = empty_game();
+            game.player_invulnerability = 1e9;
+            spawn(&mut game, &Species::of(genome), Vec2::new(30.0, 0.0));
+            game.step(DT, Input::default());
+            game.player().unwrap().velocity.length()
+        };
+        let calm = Genome {
+            fling: 0.0,
+            ..Genome::lunatic()
+        };
+        let weak = Genome { fling: 0.5, ..calm };
+        let strong = Genome { fling: 1.5, ..calm };
+        let negative = Genome {
+            mass: -20.0,
+            ..calm
+        };
+        assert!(thrown(calm) < FLING_SPEED * 0.5, "no fling gene, no fling");
+        assert!(thrown(weak) < thrown(Genome::lunatic()));
+        assert!(thrown(Genome::lunatic()) < thrown(strong));
+        assert!(thrown(negative) > FLING_SPEED * 0.5, "negative mass flings");
+        assert!(thrown(strong) <= FLING_HARD_CAP + 1.0);
+    }
+
+    #[test]
+    fn negative_mass_is_repelled_by_gravity_wells() {
+        let along = |mass: f32| {
+            let mut game = empty_game();
+            game.player_invulnerability = 1e9;
+            add(&mut game, BodyKind::BlackHole, Vec2::new(300.0, 2000.0));
+            let id = spawn(
+                &mut game,
+                &Species::of(Genome {
+                    mass,
+                    fling: 0.0,
+                    speed: 30.0,
+                    cruise: 10.0,
+                    ..Genome::smarty()
+                }),
+                Vec2::new(0.0, 2000.0),
+            );
+            for _ in 0..30 {
+                game.step(DT, Input::default());
+            }
+            body(&game, id).velocity.x
+        };
+        assert!(along(10.0) > 20.0);
+        assert!(along(-10.0) < along(10.0) - 40.0);
+    }
+
+    #[test]
+    fn any_species_can_carry_any_weapon() {
+        // A smarty given a gun shoots; given a cord launcher it latches on.
+        let mut game = empty_game();
+        let armed = Genome {
+            weapon: crate::genome::Weapon::Projectile,
+            ..Genome::smarty()
+        };
+        spawn(&mut game, &Species::of(armed), Vec2::new(0.0, 500.0));
+        game.step(DT, Input::default());
+        assert!(game.bullets.iter().any(|b| !b.friendly));
+        let mut game = empty_game();
+        let hook = Genome {
+            weapon: crate::genome::Weapon::Tether,
+            ..Genome::fatso()
+        };
+        spawn(&mut game, &Species::of(hook), Vec2::new(0.0, 400.0));
+        game.step(DT, Input::default());
+        assert_eq!(game.tethers.len(), 1);
+        // Without a siphoning diet the cord drags but does not feed.
+        for _ in 0..200 {
+            game.step(DT, Input::default());
+        }
+        assert_eq!(game.player().unwrap().shield, 60.0);
+    }
+
+    #[test]
+    fn fear_diet_and_brood_are_genes_too() {
+        // Fear: a frightened creature backs away from the player instead of closing.
+        let mut game = empty_game();
+        game.player_invulnerability = 1e9;
+        let coward = Genome {
+            fear: crate::genome::Fear::Player,
+            ..Genome::smarty()
+        };
+        let id = spawn(&mut game, &Species::of(coward), Vec2::new(0.0, 600.0));
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert!(body(&game, id).position.y > 650.0);
+        // Diet: a grazer eats a small rock it touches and ignores a big one.
+        let mut game = empty_game();
+        let grazer = Genome {
+            diet: Diet::Rocks,
+            ..Genome::fatso()
+        };
+        let eater = spawn(&mut game, &Species::of(grazer), Vec2::new(0.0, 2000.0));
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == eater)
+            .unwrap()
+            .health = 50.0;
+        let small = add(&mut game, BodyKind::Asteroid, Vec2::new(70.0, 2000.0));
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == small)
+            .unwrap()
+            .radius = 20.0;
+        let big = add(&mut game, BodyKind::Asteroid, Vec2::new(-90.0, 2000.0));
+        game.bodies.iter_mut().find(|b| b.id == big).unwrap().radius = 45.0;
+        for _ in 0..30 {
+            game.step(DT, Input::default());
+        }
+        assert!(game.bodies.iter().all(|b| b.id != small));
+        assert!(game.bodies.iter().any(|b| b.id == big));
+        assert!(body(&game, eater).health > 50.0);
+        // Brood: a tending parent bears a bounded number of small relatives that stay close.
+        let mut game = empty_game();
+        game.player_invulnerability = 1e9;
+        let parent = Genome {
+            social: crate::genome::Social::Brood,
+            ..Genome::smarty()
+        };
+        let species = Species::of(parent);
+        let id = spawn(&mut game, &species, Vec2::new(0.0, 2400.0));
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == id)
+            .unwrap()
+            .brood_timer = 0.1;
+        for _ in 0..60 * 120 {
+            game.step(DT, Input::default());
+            let kids = game.bodies.iter().filter(|b| b.parent == Some(id)).count();
+            assert!(kids <= 3);
+        }
+        let kids: Vec<&Body> = game
+            .bodies
+            .iter()
+            .filter(|b| b.parent == Some(id))
+            .collect();
+        assert!(!kids.is_empty(), "nothing was born");
+        assert!(kids.iter().all(|k| k.radius < body(&game, id).radius));
+    }
+
+    #[test]
+    fn creatures_stay_finite_and_bounded_at_gene_extremes() {
+        use crate::genome::Weapon;
+        for stiffness in [30.0, 900.0] {
+            for mass in [-60.0, 2.0, 300.0] {
+                for speed in [30.0, 450.0] {
+                    for (segments, limbs) in [(1, 0), (16, 0), (8, 6)] {
+                        let mut game = empty_game();
+                        game.player_invulnerability = 1e9;
+                        add(&mut game, BodyKind::BlackHole, Vec2::new(500.0, 1500.0));
+                        let genome = Genome {
+                            stiffness,
+                            mass,
+                            speed,
+                            cruise: speed * 0.4,
+                            segments,
+                            limbs,
+                            limb_len: 3,
+                            wave: 2.5,
+                            rhythm: 7.0,
+                            fling: 2.0,
+                            weapon: Weapon::Projectile,
+                            hardpoint_every: 2,
+                            ..Genome::smarty()
+                        }
+                        .limited();
+                        for i in 0..3 {
+                            spawn(
+                                &mut game,
+                                &Species::of(genome),
+                                Vec2::new(i as f32 * 90.0, 700.0),
+                            );
+                        }
+                        for tick in 0..600 {
+                            game.step(
+                                DT,
+                                Input {
+                                    fire: true,
+                                    thrust: 0.5,
+                                    turn: 0.2,
+                                    ..Default::default()
+                                },
+                            );
+                            assert!(game.bodies.len() <= MAX_BODIES);
+                            for b in &game.bodies {
+                                assert!(
+                                    b.position.is_finite()
+                                        && b.velocity.is_finite()
+                                        && (b.health.is_finite() || b.kind == BodyKind::BlackHole)
+                                        && b.position.length() < 60_000.0
+                                        && b.velocity.length() < 5_000.0,
+                                    "stiffness {stiffness} mass {mass} speed {speed} \
+                                     {segments}/{limbs} tick {tick}: {:?} {:?}",
+                                    b.position,
+                                    b.velocity
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn far_quadrants_hold_novel_species_that_survive_a_long_flight() {
+        let seed = 0x535343;
+        let mut names = std::collections::HashSet::new();
+        for (x, y) in [(14, 14), (-12, -9), (0, 9), (20, -5)] {
+            let id = QuadrantId { x, y };
+            let mut game = Game::new(seed);
+            game.player_invulnerability = 1e9;
+            game.teleport(id.center());
+            for tick in 0..900 {
+                game.step(
+                    DT,
+                    Input {
+                        thrust: 0.6,
+                        turn: if tick % 300 < 150 { 0.5 } else { -0.5 },
+                        fire: true,
+                        ..Default::default()
+                    },
+                );
+                assert!(game.bodies.len() <= MAX_BODIES);
+                assert!(
+                    game.bodies
+                        .iter()
+                        .all(|b| b.position.is_finite() && b.velocity.is_finite())
+                );
+            }
+            for b in game.bodies.iter().filter(|b| b.kind == BodyKind::Creature) {
+                names.insert(b.genome.name());
+            }
+        }
+        // Nothing here is a classic, and the casts are varied.
+        assert!(names.len() > 8, "{names:?}");
+        assert!(!names.contains("Bogey"));
     }
 }

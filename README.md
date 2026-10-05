@@ -50,7 +50,7 @@ cargo test --no-default-features
 
 The current presentation uses procedural shapes and UI. It has no audio yet.
 
-For a bounded renderer check, set `SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=/tmp/ssc.png`, and optionally `SSC_TELEPORT="x,y"` to start somewhere else, invulnerable. Quadrants away from the origin hold nests, bases, Leeches and Serpents; the first quadrants to try are around (2, 0), (1, 1) and (-3, 0).
+For a bounded renderer check, set `SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=/tmp/ssc.png`, and optionally `SSC_TELEPORT="x,y"` to start somewhere else, invulnerable. Quadrants away from the origin hold nests, bases and procedurally generated species (jointed, limbed, slithering and stranger); the first quadrants to try are around (2, 0), (1, 1) and (-3, 0).
 
 ## License
 

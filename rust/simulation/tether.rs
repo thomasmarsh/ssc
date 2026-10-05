@@ -1,7 +1,7 @@
-//! Tethers. A Leech fires a cord that latches onto the ship, reels it in, drags it
-//! about and siphons its shield; the cord can be shot through, or snapped by pulling
-//! away hard enough. Linked pairs of Leeches hold a cord between them that hurts
-//! anything crossing it, a moving barrier.
+//! Tethers. Any creature with a tether weapon fires a cord that latches onto the ship,
+//! reels it in and drags it about, and, if its diet is siphoning, feeds on its shield;
+//! the cord can be shot through, or snapped by pulling away hard enough. Bonded creatures
+//! can hold a cord between them that hurts anything crossing it, a moving barrier.
 
 use super::*;
 
@@ -13,8 +13,7 @@ const LINK_HEALTH: f32 = 48.0;
 const TIP_SPEED: f32 = 650.0;
 /// A fired tip that has not found the ship by now is reeled back in.
 const TIP_LIFETIME: f32 = 1.3;
-/// Reeling shortens the cord this fast, down to `MIN_REST`.
-const REEL_SPEED: f32 = 55.0;
+/// Reeling shortens the cord (at the owner's reel gene) down to `MIN_REST`.
 const MIN_REST: f32 = 150.0;
 /// The cord snaps when stretched this far beyond its rest length.
 const SNAP_STRETCH: f32 = 200.0;
@@ -27,7 +26,7 @@ const LINK_DAMAGE: f32 = 14.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TetherKind {
-    /// Fired by a Leech at the player.
+    /// Fired by a creature with a tether weapon at the player.
     Latch,
     /// Permanent cord between two creatures.
     Link,
@@ -44,11 +43,13 @@ pub struct Tether {
     tip_velocity: Vec2,
     pub rest: f32,
     pub health: f32,
+    /// How fast a latched cord shortens, from the owner's genome.
+    reel: f32,
     age: f32,
 }
 
 impl Tether {
-    pub fn latch(owner: u64, from: Vec2, direction: Vec2) -> Self {
+    pub fn latch(owner: u64, from: Vec2, direction: Vec2, reel: f32) -> Self {
         Self {
             kind: TetherKind::Latch,
             owner,
@@ -57,6 +58,7 @@ impl Tether {
             tip_velocity: direction * TIP_SPEED,
             rest: 0.0,
             health: LATCH_HEALTH,
+            reel,
             age: 0.0,
         }
     }
@@ -70,6 +72,7 @@ impl Tether {
             tip_velocity: Vec2::ZERO,
             rest: LINK_REST,
             health: LINK_HEALTH,
+            reel: 0.0,
             age: 0.0,
         }
     }
@@ -91,7 +94,7 @@ impl Game {
         Some((from, to))
     }
 
-    /// True while a Leech's cord is attached to the ship.
+    /// True while a cord is attached to the ship.
     pub fn tethered(&self) -> bool {
         self.tethers
             .iter()
@@ -161,7 +164,7 @@ impl Game {
                 let offset = leech.position - ship.position;
                 let distance = offset.length();
                 let direction = offset / distance.max(0.001);
-                tether.rest = (tether.rest - REEL_SPEED * dt).max(MIN_REST);
+                tether.rest = (tether.rest - tether.reel * dt).max(MIN_REST);
                 let stretch = distance - tether.rest;
                 if stretch > SNAP_STRETCH {
                     severed.push(ship.position + offset * 0.5);
@@ -173,7 +176,7 @@ impl Game {
                     ship.velocity += direction * pull * dt;
                     leech.velocity -= direction * pull * dt * (ship.mass / leech.mass) * 0.3;
                 }
-                if !invulnerable {
+                if !invulnerable && leech.genome.diet == Diet::Siphon {
                     let taken = (SIPHON_RATE * dt).min(ship.shield);
                     if taken > 0.0 {
                         ship.shield -= taken;
@@ -261,17 +264,17 @@ pub(super) fn segment_distance(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::tests::{DT, add, body, empty_game, set_player};
+    use crate::simulation::tests::{DT, body, empty_game, set_player, spawn};
 
     fn leech(game: &mut Game, position: Vec2) -> u64 {
-        let id = add(game, BodyKind::Enemy(EnemyKind::Leech), position);
+        let id = spawn(game, &Species::leech(), position);
         game.bodies.iter_mut().find(|b| b.id == id).unwrap().shield = 0.0;
         id
     }
 
     fn attach(game: &mut Game, owner: u64, rest: f32) {
         let from = body(game, owner).position;
-        let mut tether = Tether::latch(owner, from, Vec2::Y);
+        let mut tether = Tether::latch(owner, from, Vec2::Y, 55.0);
         tether.tip = None;
         tether.rest = rest;
         game.tethers.push(tether);
@@ -307,7 +310,7 @@ mod tests {
         let mut game = empty_game();
         let id = leech(&mut game, Vec2::new(0.0, 400.0));
         game.tethers
-            .push(Tether::latch(id, Vec2::new(0.0, 400.0), Vec2::X));
+            .push(Tether::latch(id, Vec2::new(0.0, 400.0), Vec2::X, 55.0));
         for _ in 0..120 {
             game.step(DT, Input::default());
         }

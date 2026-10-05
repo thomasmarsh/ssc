@@ -1,7 +1,8 @@
 //! Procedural vector art and HUD. Nothing here changes gameplay state.
 use crate::Session;
 use bevy::{camera::ScalingMode, prelude::*};
-use ssc::simulation::{BodyKind, EnemyKind, FATSO_COST, TetherKind};
+use ssc::genome::{Trigger, Weapon};
+use ssc::simulation::{Body, BodyKind, GUARDIAN_COST, TetherKind};
 use ssc::world::{QUADRANT_SIZE, hash2};
 
 /// World units visible top to bottom. Width follows the window's aspect ratio.
@@ -16,6 +17,8 @@ const MUTED: Color = Color::srgb(0.36, 0.49, 0.62);
 pub struct Hud;
 #[derive(Component)]
 pub struct Overlay;
+#[derive(Component)]
+pub struct Legend;
 
 pub fn setup(mut commands: Commands) {
     commands.spawn((
@@ -71,9 +74,8 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new(
-            "BOGEY / blue   LUNATIC / white   SMARTY / grey   FATSO / amber\nLEECH / violet   SERPENT / lime   BASE / magenta   GRAVITY WELL / green",
-        ),
+        Legend,
+        Text::new(""),
         TextFont::from_font_size(12.0),
         TextColor(MUTED),
         TextLayout::justify(Justify::Right),
@@ -86,12 +88,38 @@ pub fn setup(mut commands: Commands) {
     ));
 }
 
+type LegendOnly = (With<Legend>, Without<Hud>, Without<Overlay>);
+
 pub fn update_hud(
     session: Res<Session>,
     mut hud: Single<&mut Text, (With<Hud>, Without<Overlay>)>,
     mut overlay: Single<&mut Text, (With<Overlay>, Without<Hud>)>,
+    mut legend: Single<&mut Text, LegendOnly>,
 ) {
     let game = &session.game;
+    // Species have no fixed names: list the most common ones nearby, as their genes spell them.
+    let mut census: Vec<(u64, String, usize)> = Vec::new();
+    for body in game
+        .bodies
+        .iter()
+        .filter(|b| b.active && b.kind == BodyKind::Creature && !b.follower)
+    {
+        match census.iter_mut().find(|c| c.0 == body.species) {
+            Some(entry) => entry.2 += 1,
+            None => census.push((body.species, body.genome.name().to_uppercase(), 1)),
+        }
+    }
+    census.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+    let listing = census
+        .iter()
+        .take(6)
+        .map(|(_, name, n)| format!("{name} x{n}"))
+        .collect::<Vec<_>>()
+        .join("   ");
+    let listing = format!("{listing}\nBASE / magenta   GRAVITY WELL / green");
+    if legend.0 != listing {
+        legend.0 = listing;
+    }
     let quadrant = game.quadrant();
     let params = game.params();
     let (health, shield) = game.player().map_or((0.0, 0.0), |ship| {
@@ -165,12 +193,10 @@ pub fn draw(
         let r = body.radius;
         let direction = Vec2::from_angle(body.angle);
         let side = Vec2::new(-direction.y, direction.x);
-        let color = match body.kind {
-            // Temper shows in color: calm blue, agitated pale, berserk red.
-            BodyKind::Enemy(EnemyKind::Bogey) if body.enraged => Color::srgb(1.0, 0.3, 0.28),
-            BodyKind::Enemy(EnemyKind::Bogey) if body.alert => Color::srgb(0.7, 0.85, 1.0),
-            BodyKind::Asteroid if body.pinned => Color::srgb(0.62, 0.5, 0.38),
-            kind => body_color(kind),
+        let color = if body.kind == BodyKind::Asteroid && body.pinned {
+            Color::srgb(0.62, 0.5, 0.38)
+        } else {
+            body_color(body)
         };
         match body.kind {
             BodyKind::Player => {
@@ -195,94 +221,12 @@ pub fn draw(
                     );
                 }
             }
-            BodyKind::Enemy(EnemyKind::Bogey) => {
-                gizmos.circle_2d(p, r * 0.8, color).resolution(16);
-                gizmos.line_2d(p - side * r * 1.3, p + side * r * 1.3, color);
-                gizmos.linestrip_2d([p + side * r, p + direction * r * 1.3, p - side * r], color);
-            }
-            BodyKind::Enemy(EnemyKind::Lunatic) => {
-                gizmos.lineloop_2d(
-                    [
-                        p + direction * r,
-                        p + side * r * 0.8,
-                        p - direction * r,
-                        p - side * r * 0.8,
-                    ],
-                    color,
-                );
-                gizmos
-                    .circle_2d(
-                        p,
-                        r * (1.3 + 0.15 * (game.time * 5.0).sin()),
-                        Color::srgba(0.8, 0.85, 1.0, 0.3),
-                    )
-                    .resolution(16);
-            }
-            BodyKind::Enemy(EnemyKind::Smarty) => {
-                gizmos.lineloop_2d(
-                    [
-                        p + direction * r,
-                        p - direction * r + side * r,
-                        p - direction * r - side * r,
-                    ],
-                    color,
-                );
-                gizmos.line_2d(p, p + direction * r * 1.5, color);
-            }
-            BodyKind::Enemy(EnemyKind::Fatso) => {
-                gizmos.circle_2d(p, r, color).resolution(24);
-                gizmos
-                    .circle_2d(p, r * 0.65, Color::srgba(0.85, 0.65, 0.35, 0.4))
-                    .resolution(16);
-                gizmos.line_2d(p - side * r * 0.5, p + side * r * 0.5, color);
-            }
-            BodyKind::Enemy(EnemyKind::Leech) => {
-                // A bulb with a barbed proboscis and a trailing tail.
-                let throb = 1.0 + 0.12 * (game.time * 6.0 + body.id as f32).sin();
-                gizmos.circle_2d(p, r * 0.75 * throb, color).resolution(14);
-                gizmos.linestrip_2d([p + direction * r * 0.7, p + direction * r * 1.6], color);
-                gizmos.line_2d(
-                    p + direction * r * 1.3 + side * r * 0.4,
-                    p + direction * r * 1.6,
-                    color,
-                );
-                gizmos.line_2d(
-                    p + direction * r * 1.3 - side * r * 0.4,
-                    p + direction * r * 1.6,
-                    color,
-                );
-                gizmos.linestrip_2d(
-                    [
-                        p - direction * r * 0.7,
-                        p - direction * r * 1.4 + side * r * 0.5,
-                        p - direction * r * 2.1,
-                    ],
-                    color,
-                );
-            }
-            BodyKind::Enemy(EnemyKind::Serpent) => {
-                gizmos.circle_2d(p, r, color).resolution(12);
-                if !body.follower {
-                    // The head: eyes and a pair of fangs.
-                    gizmos.circle_2d(p + direction * r * 0.3 + side * r * 0.45, 2.0, color);
-                    gizmos.circle_2d(p + direction * r * 0.3 - side * r * 0.45, 2.0, color);
-                    gizmos.line_2d(
-                        p + direction * r,
-                        p + direction * r * 1.7 + side * r * 0.4,
-                        color,
-                    );
-                    gizmos.line_2d(
-                        p + direction * r,
-                        p + direction * r * 1.7 - side * r * 0.4,
-                        color,
-                    );
-                }
-            }
+            BodyKind::Creature => draw_creature(&mut gizmos, game.time, body, color),
             BodyKind::Base => {
                 let stock = body
                     .base
                     .as_ref()
-                    .map_or(0.0, |base| (base.stock / FATSO_COST).clamp(0.0, 1.0));
+                    .map_or(0.0, |base| (base.stock / GUARDIAN_COST).clamp(0.0, 1.0));
                 let corner = |radius: f32, turn: f32, i: u32| {
                     p + Vec2::from_angle(turn + i as f32 * std::f32::consts::TAU / 6.0) * radius
                 };
@@ -343,7 +287,7 @@ pub fn draw(
                 }
             }
         }
-        if body.shield > 0.0 && body.max_shield > 0.0 {
+        if body.shield > 0.0 && body.max_shield > 0.0 && !body.follower {
             let fraction = body.shield / body.max_shield;
             gizmos
                 .circle_2d(
@@ -354,22 +298,15 @@ pub fn draw(
                 .resolution(24);
         }
     }
-    for (from, to) in game.chain_links() {
-        gizmos.line_2d(from, to, Color::srgba(0.65, 0.92, 0.3, 0.6));
-    }
     for chain in game.chains.values() {
-        let every = usize::from(chain.genome.hardpoint_every);
-        if every == 0 {
-            continue;
-        }
-        for (n, &id) in chain.members.iter().enumerate() {
-            if n % every == every - 1
-                && let Some(segment) = game.body(id)
+        for part in &chain.parts {
+            if let (Some(child), Some(parent)) =
+                (game.body(part.id), part.parent.and_then(|id| game.body(id)))
             {
-                gizmos.rect_2d(
-                    segment.position,
-                    Vec2::splat(8.0),
-                    Color::srgb(1.0, 0.4, 0.3),
+                gizmos.line_2d(
+                    child.position,
+                    parent.position,
+                    body_color(child).with_alpha(0.6),
                 );
             }
         }
@@ -531,24 +468,132 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2) {
                 _ => 2.5,
             };
             gizmos
-                .circle_2d(center + offset, size, body_color(body.kind))
+                .circle_2d(center + offset, size, body_color(body))
                 .resolution(6);
         }
     }
     gizmos.circle_2d(center, 2.5, CYAN).resolution(6);
 }
 
-fn body_color(kind: BodyKind) -> Color {
-    match kind {
+/// Creatures take their color from the pigment genes; temper shows as a shift toward
+/// pale (agitated) or red (berserk).
+fn body_color(body: &Body) -> Color {
+    match body.kind {
         BodyKind::Player => CYAN,
-        BodyKind::Enemy(EnemyKind::Bogey) => Color::srgb(0.28, 0.55, 1.0),
-        BodyKind::Enemy(EnemyKind::Lunatic) => Color::srgb(0.94, 0.94, 1.0),
-        BodyKind::Enemy(EnemyKind::Smarty) => Color::srgb(0.62, 0.68, 0.76),
-        BodyKind::Enemy(EnemyKind::Fatso) => Color::srgb(0.88, 0.65, 0.34),
+        BodyKind::Creature => {
+            let [r, g, b] = body.genome.color();
+            if body.enraged {
+                Color::srgb(1.0, 0.3, 0.28)
+            } else if body.alert && body.genome.trigger != Trigger::Sight {
+                let mix = |c: f32| c + (1.0 - c) * 0.6;
+                Color::srgb(mix(r), mix(g), mix(b))
+            } else {
+                Color::srgb(r, g, b)
+            }
+        }
         BodyKind::BlackHole => Color::srgb(0.3, 0.95, 0.55),
-        BodyKind::Enemy(EnemyKind::Leech) => Color::srgb(0.75, 0.45, 1.0),
-        BodyKind::Enemy(EnemyKind::Serpent) => Color::srgb(0.65, 0.92, 0.3),
         BodyKind::Base => Color::srgb(0.95, 0.32, 0.7),
         BodyKind::Asteroid => Color::srgb(0.43, 0.49, 0.57),
+    }
+}
+
+/// Draws a creature from its body plan alone: an outline of `sides` corners stretched by
+/// `aspect`, fins for speed, an antenna for foresight, a barrel or barbed proboscis where
+/// a hardpoint sits, a halo for fling, and joints (drawn separately) between parts.
+fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
+    let g = &body.genome;
+    let (p, r) = (body.position, body.radius);
+    let direction = Vec2::from_angle(body.angle);
+    let side = Vec2::new(-direction.y, direction.x);
+    let stretch = g.aspect.sqrt();
+    let (a, b) = (r * stretch, r / stretch);
+    let corners = if g.sides >= 3 { u32::from(g.sides) } else { 14 };
+    let outline = (0..corners).map(|i| {
+        let angle = i as f32 * std::f32::consts::TAU / corners as f32;
+        p + direction * angle.cos() * a + side * angle.sin() * b
+    });
+    gizmos.lineloop_2d(outline, color);
+    let head = !body.follower;
+    if head {
+        if g.lead > 0.25 {
+            gizmos.line_2d(
+                p + direction * a,
+                p + direction * (a + r * (0.4 + g.lead)),
+                color,
+            );
+        }
+        if g.speed > 200.0 {
+            let tail = r * (0.8 + g.speed / 500.0);
+            for sign in [-1.0, 1.0] {
+                gizmos.line_2d(
+                    p - direction * a * 0.5 + side * sign * b * 0.8,
+                    p - direction * (a * 0.5 + tail) + side * sign * b * 1.2,
+                    color,
+                );
+            }
+        }
+        if g.is_jointed() {
+            for sign in [-1.0, 1.0] {
+                gizmos.circle_2d(
+                    p + direction * r * 0.35 + side * sign * r * 0.45,
+                    1.8,
+                    color,
+                );
+            }
+        }
+    }
+    if g.armed(body.part) {
+        match g.weapon {
+            Weapon::Projectile => {
+                if g.is_jointed() && body.part > 0 {
+                    gizmos.rect_2d(p, Vec2::splat(r * 1.1), Color::srgb(1.0, 0.4, 0.3));
+                } else {
+                    let barrel = 5.0 + g.shot_speed / 60.0;
+                    gizmos.line_2d(p + direction * a * 0.7, p + direction * (a + barrel), color);
+                    gizmos.line_2d(
+                        p + direction * a * 0.7 + side * 3.0,
+                        p + direction * (a + barrel) + side * 3.0,
+                        color,
+                    );
+                }
+            }
+            Weapon::Tether => {
+                // A barbed proboscis that throbs.
+                let throb = 1.0 + 0.12 * (time * 6.0 + body.id as f32).sin();
+                gizmos.line_2d(
+                    p + direction * a * 0.7,
+                    p + direction * a * 1.7 * throb,
+                    color,
+                );
+                for sign in [-1.0, 1.0] {
+                    gizmos.line_2d(
+                        p + direction * a * 1.35 + side * sign * r * 0.4,
+                        p + direction * a * 1.7 * throb,
+                        color,
+                    );
+                }
+            }
+            Weapon::None => {}
+        }
+    }
+    let fling = g.fling_strength();
+    if fling > 0.3 {
+        let pulse = 1.3 + 0.15 * (time * 5.0).sin();
+        let tint = if g.mass < 0.0 {
+            Color::srgba(0.5, 1.0, 0.9, 0.35)
+        } else {
+            Color::srgba(0.8, 0.85, 1.0, 0.3)
+        };
+        gizmos
+            .circle_2d(p, r * pulse * (0.8 + 0.2 * fling.min(2.0)), tint)
+            .resolution(16);
+    }
+    if g.mass.abs() >= 80.0 {
+        gizmos
+            .circle_2d(p, r * 0.62, Color::srgba(0.85, 0.65, 0.35, 0.4))
+            .resolution(16);
+    }
+    if g.social == ssc::genome::Social::Brood && head {
+        gizmos.circle_2d(p, r * 0.3, color).resolution(8);
     }
 }
