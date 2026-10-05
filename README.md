@@ -36,6 +36,7 @@ cargo test --no-default-features
 - **P / Pause**: pause
 - **S**: toggle slow motion
 - **R**: toggle radar
+- **C**: cycle camera: close (original), wide (2×), far (4×), whole quadrant, then close again. Whole-quadrant view centers on the current quadrant; the other views follow the ship. The view preference survives a restart.
 - **Enter**: restart
 - **F1**: toggle fullscreen
 - **Esc**: quit
@@ -51,6 +52,8 @@ cargo test --no-default-features
 The current presentation uses procedural shapes and UI. It has no audio yet.
 
 For a bounded renderer check, set `SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=/tmp/ssc.png`, and optionally `SSC_TELEPORT="x,y"` to start somewhere else, invulnerable. Quadrants away from the origin hold nests, bases and procedurally generated species (jointed, limbed, slithering and stranger); the first quadrants to try are around (2, 0), (1, 1) and (-3, 0).
+
+Set `SSC_CAMERA=wide`, `far`, or `quadrant` during a smoke run to check camera framing. Camera changes do not expand the simulation's active region: the current quadrant is always simulated, while distant neighboring quadrants visible in wider views may be unloaded or frozen.
 
 ## License
 

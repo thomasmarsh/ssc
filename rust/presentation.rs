@@ -65,7 +65,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire\nP  pause    S  slow motion    R  radar    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire\nC  camera    P  pause    S  slow motion    R  radar    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -245,11 +245,12 @@ pub fn update_hud(
     .collect::<String>();
     let (power, threat) = (game.power(), game.threat());
     let status = format!(
-        "QUADRANT ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
+        "QUADRANT ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
         quadrant.x,
         quadrant.y,
         game.active_enemies(),
         game.score,
+        session.camera_view.label(),
         health,
         shield,
         game.lives,
@@ -696,10 +697,15 @@ pub fn draw(
         }
     }
     if session.radar {
+        // The scope keeps its on-screen size as the world view zooms out.
+        let ui_scale = half.y * 2.0 / VIEW_HEIGHT;
         draw_radar(
             &mut gizmos,
             game,
-            camera + Vec2::new(half.x, -half.y) + Vec2::new(-1.0, 1.0) * (RADAR_RADIUS + 24.0),
+            camera
+                + Vec2::new(half.x, -half.y)
+                + Vec2::new(-1.0, 1.0) * (RADAR_RADIUS + 24.0) * ui_scale,
+            ui_scale,
         );
     }
 }
@@ -968,34 +974,31 @@ fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2) {
 }
 
 /// North-up scope centered on the ship, covering the simulated neighborhood.
-fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2) {
+fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, ui_scale: f32) {
     let origin = game.focus;
-    let scale = RADAR_RADIUS / RADAR_RANGE;
-    gizmos.circle_2d(center, RADAR_RADIUS, MUTED).resolution(48);
+    let radius = RADAR_RADIUS * ui_scale;
+    let scale = radius / RADAR_RANGE;
+    gizmos.circle_2d(center, radius, MUTED).resolution(48);
     gizmos
-        .circle_2d(
-            center,
-            RADAR_RADIUS * 0.5,
-            Color::srgba(0.36, 0.49, 0.62, 0.3),
-        )
+        .circle_2d(center, radius * 0.5, Color::srgba(0.36, 0.49, 0.62, 0.3))
         .resolution(32);
     for body in &game.bodies {
         if matches!(body.kind, BodyKind::Asteroid | BodyKind::Player) || body.follower {
             continue;
         }
         let offset = (body.position - origin) * scale;
-        if offset.length() < RADAR_RADIUS - 2.0 {
+        if offset.length() < radius - 2.0 * ui_scale {
             let size = match (body.kind, body.alert) {
                 (BodyKind::Base, _) => 5.0,
                 (_, true) => 3.5,
                 _ => 2.5,
             };
             gizmos
-                .circle_2d(center + offset, size, body_color(body))
+                .circle_2d(center + offset, size * ui_scale, body_color(body))
                 .resolution(6);
         }
     }
-    gizmos.circle_2d(center, 2.5, CYAN).resolution(6);
+    gizmos.circle_2d(center, 2.5 * ui_scale, CYAN).resolution(6);
 }
 
 /// Creatures take their color from the pigment genes; temper shows as a shift toward

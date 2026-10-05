@@ -13,7 +13,55 @@ use bevy::{
 };
 use ssc::simulation::upgrades::{self, Item, Source};
 use ssc::simulation::{Game, Input};
-use ssc::world::Rng;
+use ssc::world::{QUADRANT_SIZE, Rng};
+
+/// Camera preferences belong to the desktop adapter, independent of simulation rules.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum CameraView {
+    #[default]
+    Close,
+    Wide,
+    Far,
+    Quadrant,
+}
+
+impl CameraView {
+    fn next(self) -> Self {
+        match self {
+            Self::Close => Self::Wide,
+            Self::Wide => Self::Far,
+            Self::Far => Self::Quadrant,
+            Self::Quadrant => Self::Close,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Close => "CLOSE",
+            Self::Wide => "WIDE",
+            Self::Far => "FAR",
+            Self::Quadrant => "QUADRANT",
+        }
+    }
+
+    fn scaling_mode(self) -> ScalingMode {
+        match self {
+            Self::Close | Self::Wide | Self::Far => ScalingMode::FixedVertical {
+                viewport_height: presentation::VIEW_HEIGHT
+                    * match self {
+                        Self::Wide => 1.2,
+                        Self::Far => 4.0,
+                        _ => 1.0,
+                    },
+            },
+            // Fit the entire square even in portrait windows, with a border margin.
+            Self::Quadrant => ScalingMode::AutoMin {
+                min_width: QUADRANT_SIZE * 1.1,
+                min_height: QUADRANT_SIZE * 1.1,
+            },
+        }
+    }
+}
 
 #[derive(Resource)]
 pub struct Session {
@@ -22,6 +70,7 @@ pub struct Session {
     pub paused: bool,
     pub slow: bool,
     pub radar: bool,
+    pub camera_view: CameraView,
 }
 
 impl Default for Session {
@@ -32,6 +81,7 @@ impl Default for Session {
             paused: false,
             slow: false,
             radar: true,
+            camera_view: CameraView::default(),
         }
     }
 }
@@ -110,6 +160,9 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyR) {
         session.radar = !session.radar;
     }
+    if keys.just_pressed(KeyCode::KeyC) {
+        session.camera_view = session.camera_view.next();
+    }
     if keys.just_pressed(KeyCode::Enter) {
         session.game.reset();
         session.paused = false;
@@ -154,20 +207,30 @@ fn camera(
     session: Res<Session>,
     time: Res<Time>,
     mut view: Single<(&mut Transform, &mut Projection), With<Camera2d>>,
+    mut previous_view: Local<CameraView>,
 ) {
     let game = &session.game;
-    let target = game
-        .player()
-        .map_or(game.focus, |ship| ship.position + ship.velocity * 0.3);
+    let target = if session.camera_view == CameraView::Quadrant {
+        game.quadrant().center()
+    } else {
+        game.player()
+            .map_or(game.focus, |ship| ship.position + ship.velocity * 0.3)
+    };
     let smoothing = 1.0 - (-6.0 * time.delta_secs()).exp();
     let (transform, projection) = &mut *view;
     let current = transform.translation.truncate();
-    transform.translation = current.lerp(target, smoothing).extend(0.0);
+    // Snap quadrant framing and the return to close view, keeping the ship visible.
+    transform.translation =
+        if session.camera_view == CameraView::Quadrant || *previous_view == CameraView::Quadrant {
+            target
+        } else {
+            current.lerp(target, smoothing)
+        }
+        .extend(0.0);
     if let Projection::Orthographic(projection) = &mut **projection {
-        projection.scaling_mode = ScalingMode::FixedVertical {
-            viewport_height: presentation::VIEW_HEIGHT,
-        };
+        projection.scaling_mode = session.camera_view.scaling_mode();
     }
+    *previous_view = session.camera_view;
 }
 
 /// Optional bounded renderer smoke run; no effect in regular play.
@@ -189,6 +252,15 @@ fn smoke_run(
     else {
         return;
     };
+    // Exercise camera views in bounded runs without synthetic keyboard input.
+    if run.frames == 0 {
+        session.camera_view = match std::env::var("SSC_CAMERA").as_deref() {
+            Ok("wide") => CameraView::Wide,
+            Ok("far") => CameraView::Far,
+            Ok("quadrant") => CameraView::Quadrant,
+            _ => session.camera_view,
+        };
+    }
     // Smoke runs can start somewhere interesting: SSC_TELEPORT="x,y" (invulnerable).
     if run.frames == 0
         && let Some((x, y)) = std::env::var("SSC_TELEPORT")

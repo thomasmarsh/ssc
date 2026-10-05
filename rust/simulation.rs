@@ -68,7 +68,8 @@ const FLING_MAX_SPEED: f32 = 1000.0;
 /// Whatever the genes say, nothing is thrown faster than this.
 const FLING_HARD_CAP: f32 = 1400.0;
 /// Half-extent of the region around the player whose quadrants are simulated. It must
-/// exceed the largest visible half-extent so loading and freezing happen off screen.
+/// exceed the close combat view so loading and freezing happen off screen there.
+/// Wider overview cameras do not expand this region or change simulation rules.
 pub const ACTIVE_HALF: Vec2 = Vec2::new(2200.0, 1500.0);
 /// Quadrants farther than this (in quadrants) from the player are unloaded.
 const UNLOAD_DISTANCE: u32 = 2;
