@@ -102,6 +102,7 @@ impl Game {
     /// Takes an item aboard: restoratives act at once, parts are bolted on, surges start.
     pub fn collect(&mut self, item: Item) {
         let rarity = item.rarity();
+        self.cue(Cue::Pickup { rarity });
         match item {
             Item::Repair(amount) => {
                 if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {

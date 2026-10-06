@@ -7,6 +7,7 @@
 
 mod chain;
 mod creature;
+mod cues;
 mod ecology;
 mod loot;
 mod tether;
@@ -14,6 +15,7 @@ pub mod upgrades;
 mod weapons;
 
 pub use chain::{Chain, Part};
+pub use cues::Cue;
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
 pub use loot::{Notice, Pickup};
 pub use tether::{Tether, TetherKind};
@@ -248,6 +250,8 @@ pub struct Game {
     pub bodies: Vec<Body>,
     pub bullets: Vec<Bullet>,
     pub effects: Vec<Effect>,
+    /// Sound-worthy events since the adapter last called `drain_cues`.
+    pub cues: Vec<Cue>,
     pub tethers: Vec<Tether>,
     pub chains: BTreeMap<u32, Chain>,
     /// Drops waiting to be collected.
@@ -285,6 +289,7 @@ impl Game {
             bodies: Vec::new(),
             bullets: Vec::with_capacity(MAX_BULLETS),
             effects: Vec::with_capacity(MAX_EFFECTS),
+            cues: Vec::new(),
             tethers: Vec::new(),
             chains: BTreeMap::new(),
             pickups: Vec::new(),
@@ -361,6 +366,8 @@ impl Game {
             return;
         }
         let dt = dt.min(0.05);
+        let in_flight = self.bullets.len();
+        let ship_before = self.player().map(|p| (p.shield, p.health));
         self.time += dt;
         self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
         for effect in &mut self.effects {
@@ -406,6 +413,7 @@ impl Game {
         self.update_tethers(dt);
         self.update_chains(dt);
         self.fire_weapons();
+        self.cue_new_shots(in_flight);
         self.apply_gravity(dt);
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if !is_fixed(body) {
@@ -429,6 +437,7 @@ impl Game {
         self.update_husks();
         self.update_pickups(dt);
         self.remove_destroyed();
+        self.cue_player_damage(ship_before);
     }
 
     /// Loads quadrants the player can reach, unloads distant ones, and flags which
@@ -1144,6 +1153,14 @@ impl Game {
     }
 
     fn effect(&mut self, position: Vec2, radius: f32, lifetime: f32, kind: EffectKind) {
+        self.cue(match kind {
+            EffectKind::Impact => Cue::Impact { at: position },
+            EffectKind::Explosion => Cue::Explosion {
+                at: position,
+                radius,
+            },
+            EffectKind::Respawn => Cue::Respawn { at: position },
+        });
         if self.effects.len() < MAX_EFFECTS {
             self.effects.push(Effect {
                 position,

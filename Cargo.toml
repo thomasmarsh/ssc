@@ -22,7 +22,7 @@ default = ["desktop"]
 desktop = [
     "bevy/default_app", "bevy/bevy_winit", "bevy/multi_threaded",
     "bevy/2d_bevy_render", "bevy/ui_bevy_render", "bevy/default_font",
-    "bevy/keyboard", "bevy/mouse", "bevy/x11", "bevy/wayland",
+    "bevy/keyboard", "bevy/mouse", "bevy/bevy_audio", "bevy/wav", "bevy/x11", "bevy/wayland",
 ]
 
 [profile.dev]

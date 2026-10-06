@@ -1,3 +1,4 @@
+mod audio;
 mod presentation;
 
 use bevy::{
@@ -156,6 +157,7 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .init_resource::<Session>()
         .init_resource::<SmokeRun>()
+        .init_resource::<audio::Audio>()
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -172,7 +174,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_systems(Startup, presentation::setup)
+        .add_systems(Startup, (presentation::setup, audio::setup))
         .add_systems(FixedUpdate, simulate)
         .add_systems(
             Update,
@@ -180,6 +182,8 @@ fn main() {
                 controls,
                 camera,
                 apply_style,
+                audio::apply_mute,
+                audio::play_cues,
                 presentation::draw,
                 presentation::update_hud,
                 smoke_run,
@@ -204,6 +208,7 @@ fn controls(
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     view: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
     mut session: ResMut<Session>,
+    mut audio: ResMut<audio::Audio>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if keys.just_pressed(KeyCode::Escape) {
@@ -220,6 +225,9 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::KeyC) {
         session.camera_view = session.camera_view.next();
+    }
+    if keys.just_pressed(KeyCode::KeyM) {
+        audio.muted = !audio.muted;
     }
     if keys.just_pressed(KeyCode::KeyV) {
         session.style = session.style.next();
