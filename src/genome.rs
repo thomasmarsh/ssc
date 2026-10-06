@@ -4,20 +4,20 @@
 //! fully describes a creature: body plan, size, senses, social life, temperament,
 //! weapons and ecology. The simulation reads genes and never asks what "kind" of
 //! creature something is. A `Species` is a lineage (a stable identity that recurs across
-//! quadrants with mutation) plus its genome. A `GenePool` is the set of species alive in
-//! one quadrant, built from founders on a coarse lattice so neighboring quadrants share
+//! sectors with mutation) plus its genome. A `GenePool` is the set of species alive in
+//! one sector, built from founders on a coarse lattice so neighboring sectors share
 //! ancestry and drift gradually, the way the latent parameters do.
 //!
-//! Everything here is a pure function of the master seed and quadrant coordinates, and it
+//! Everything here is a pure function of the master seed and sector coordinates, and it
 //! draws from its own salted streams, never from the stream that places the original
 //! population.
 
-use crate::world::{QuadrantId, QuadrantParams, Rng, hash2, latent, value_noise};
+use crate::world::{Rng, SectorId, SectorParams, hash2, latent, value_noise};
 use bevy::prelude::Vec2;
 
 /// Separates gene sampling from every other stream.
 const GENE_SALT: u64 = 0x6E4E_5EED_0000_0042;
-/// Founder lineages live on a lattice with one node every this many quadrants.
+/// Founder lineages live on a lattice with one node every this many sectors.
 pub const LINEAGE_CELL: i32 = 8;
 /// Founders sampled at each ordinary lattice node.
 const FOUNDERS_PER_NODE: u64 = 3;
@@ -251,7 +251,7 @@ pub enum Habit {
     Life,
 }
 
-/// The role a creature plays in a quadrant's population, read from its genes alone.
+/// The role a creature plays in a sector's population, read from its genes alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Niche {
     /// Passive schoolers that only react to a close approach or an injury.
@@ -439,10 +439,10 @@ impl Genome {
         a.iter().zip(&b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32
     }
 
-    /// The same lineage as expressed in quadrant `id`: every gene nudged by a smooth
-    /// noise field, so neighboring quadrants hold close relatives. `amplitude` is zero at
+    /// The same lineage as expressed in sector `id`: every gene nudged by a smooth
+    /// noise field, so neighboring sectors hold close relatives. `amplitude` is zero at
     /// the founding node (the unmutated type specimen) and grows with distance.
-    fn expressed(mut self, seed: u64, lineage: u64, id: QuadrantId, amplitude: f32) -> Self {
+    fn expressed(mut self, seed: u64, lineage: u64, id: SectorId, amplitude: f32) -> Self {
         if amplitude <= 0.0 {
             return self;
         }
@@ -695,10 +695,10 @@ impl Genome {
         child.limited().mutate(rng)
     }
 
-    /// Draws a fresh genome from a distribution biased by quadrant parameters: tech
+    /// Draws a fresh genome from a distribution biased by sector parameters: tech
     /// favors chains, guns and keen senses; distortion negative mass and waves; swarm
     /// schooling; aggression rage and flinging; danger toughness.
-    pub fn sample(rng: &mut Rng, params: &QuadrantParams) -> Self {
+    pub fn sample(rng: &mut Rng, params: &SectorParams) -> Self {
         let above = |p: f32| (p - 0.5).max(0.0) * 2.0;
         let (tech, distortion, swarm, aggression, danger) = (
             params.tech,
@@ -1207,7 +1207,7 @@ fn pick<T: Copy>(rng: &mut Rng, options: &[(T, f32)]) -> T {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Species {
     pub lineage: u64,
-    /// How many quadrants the lineage has drifted from its founding node.
+    /// How many sectors the lineage has drifted from its founding node.
     pub generation: u16,
     pub genome: Genome,
 }
@@ -1328,11 +1328,11 @@ impl Species {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PoolEntry {
     pub species: Species,
-    /// Relative abundance in this quadrant.
+    /// Relative abundance in this sector.
     pub weight: f32,
 }
 
-/// The species alive in one quadrant.
+/// The species alive in one sector.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GenePool {
     pub entries: Vec<PoolEntry>,
@@ -1343,7 +1343,7 @@ fn smooth(t: f32) -> f32 {
 }
 
 impl GenePool {
-    /// The hand-authored pool of the starting quadrant.
+    /// The hand-authored pool of the starting sector.
     pub fn home() -> Self {
         Self {
             entries: [
@@ -1362,9 +1362,9 @@ impl GenePool {
         }
     }
 
-    /// The pool of quadrant `id`: founders of the four surrounding lattice nodes, weighted
+    /// The pool of sector `id`: founders of the four surrounding lattice nodes, weighted
     /// by closeness and mutated by their distance from home.
-    pub fn for_quadrant(seed: u64, id: QuadrantId) -> Self {
+    pub fn for_sector(seed: u64, id: SectorId) -> Self {
         let cell = LINEAGE_CELL;
         let (ix, iy) = (id.x.div_euclid(cell), id.y.div_euclid(cell));
         let sx = smooth(id.x.rem_euclid(cell) as f32 / cell as f32);
@@ -1377,7 +1377,7 @@ impl GenePool {
             if node_weight <= 1e-4 {
                 continue;
             }
-            let node = QuadrantId {
+            let node = SectorId {
                 x: (ix + dx) * cell,
                 y: (iy + dy) * cell,
             };
@@ -1460,8 +1460,8 @@ impl GenePool {
 /// The unmutated founders of a lattice node: (lineage, genome, abundance). The node at
 /// the origin holds the hand-authored HOME species; every other node samples its own from
 /// the node's latent parameters, on a salted stream.
-fn founders(seed: u64, node: QuadrantId) -> Vec<(u64, Genome, f32)> {
-    if node == QuadrantId::ORIGIN {
+fn founders(seed: u64, node: SectorId) -> Vec<(u64, Genome, f32)> {
+    if node == SectorId::ORIGIN {
         return GenePool::home()
             .entries
             .into_iter()
@@ -1576,7 +1576,7 @@ mod tests {
         let mut rng = Rng::new(21);
         for i in 0..4000 {
             let (mut a, mut b) = parents(i, &mut rng);
-            let sp = QuadrantParams {
+            let sp = SectorParams {
                 depth: 0.0,
                 danger: rng.f32(),
                 aggression: rng.f32(),
@@ -1722,7 +1722,7 @@ mod tests {
     #[test]
     fn the_home_pool_is_exactly_the_five_classics() {
         for seed in [0, 7, 0x535343] {
-            let pool = GenePool::for_quadrant(seed, QuadrantId::ORIGIN);
+            let pool = GenePool::for_sector(seed, SectorId::ORIGIN);
             assert_eq!(pool, GenePool::home());
         }
     }
@@ -1735,7 +1735,7 @@ mod tests {
         let mut slithering = 0;
         let mut names = std::collections::HashSet::new();
         for i in 0..2000 {
-            let params = QuadrantParams {
+            let params = SectorParams {
                 depth: 0.0,
                 danger: rng.f32(),
                 aggression: rng.f32(),
@@ -1766,10 +1766,10 @@ mod tests {
     #[test]
     fn tech_and_distortion_bias_the_distribution() {
         let share = |tech: f32, distortion: f32| {
-            let params = QuadrantParams {
+            let params = SectorParams {
                 tech,
                 distortion,
-                ..QuadrantParams::HOME
+                ..SectorParams::HOME
             };
             let mut rng = Rng::new(9);
             (0..1500)
@@ -1807,14 +1807,14 @@ mod tests {
         let mut biggest_weight_step = 0.0_f32;
         for x in -10..=10 {
             for y in -10..=10 {
-                let here = QuadrantId { x, y };
-                let pool = GenePool::for_quadrant(seed, here);
+                let here = SectorId { x, y };
+                let pool = GenePool::for_sector(seed, here);
                 assert!(!pool.entries.is_empty());
                 let total: f32 = pool.entries.iter().map(|e| e.weight).sum();
                 for (dx, dy) in [(1, 0), (0, 1)] {
-                    let next = GenePool::for_quadrant(
+                    let next = GenePool::for_sector(
                         seed,
-                        QuadrantId {
+                        SectorId {
                             x: x + dx,
                             y: y + dy,
                         },
@@ -1848,11 +1848,11 @@ mod tests {
     }
 
     #[test]
-    fn species_recur_across_quadrants_with_mutation() {
+    fn species_recur_across_sectors_with_mutation() {
         let seed = 12;
         // Walk away from a founding node: the same lineage persists but its genome drifts.
-        let near = GenePool::for_quadrant(seed, QuadrantId { x: 9, y: 8 });
-        let far = GenePool::for_quadrant(seed, QuadrantId { x: 11, y: 9 });
+        let near = GenePool::for_sector(seed, SectorId { x: 9, y: 8 });
+        let far = GenePool::for_sector(seed, SectorId { x: 11, y: 9 });
         let mut recurred = 0;
         for a in &near.entries {
             if let Some(b) = far
@@ -1872,7 +1872,7 @@ mod tests {
         let mut variants = std::collections::HashSet::new();
         for x in 6..=12 {
             for y in 6..=12 {
-                for e in GenePool::for_quadrant(seed, QuadrantId { x, y }).entries {
+                for e in GenePool::for_sector(seed, SectorId { x, y }).entries {
                     if e.species.lineage == lineage {
                         variants.insert(
                             e.species
@@ -1895,8 +1895,8 @@ mod tests {
 
     #[test]
     fn classics_fade_into_wild_species_moving_away_from_home() {
-        let classic = |id: QuadrantId| {
-            let pool = GenePool::for_quadrant(1, id);
+        let classic = |id: SectorId| {
+            let pool = GenePool::for_sector(1, id);
             let total: f32 = pool.entries.iter().map(|e| e.weight).sum();
             pool.entries
                 .iter()
@@ -1906,7 +1906,7 @@ mod tests {
                 / total
         };
         let shares: Vec<f32> = (0..=LINEAGE_CELL)
-            .map(|x| classic(QuadrantId { x, y: 0 }))
+            .map(|x| classic(SectorId { x, y: 0 }))
             .collect();
         assert_eq!(shares[0], 1.0);
         assert!(shares.windows(2).all(|w| w[1] < w[0]), "{shares:?}");
@@ -1914,10 +1914,10 @@ mod tests {
     }
 
     #[test]
-    fn pools_are_pure_functions_of_seed_and_quadrant() {
-        let id = QuadrantId { x: -7, y: 5 };
-        assert_eq!(GenePool::for_quadrant(3, id), GenePool::for_quadrant(3, id));
-        assert_ne!(GenePool::for_quadrant(3, id), GenePool::for_quadrant(4, id));
+    fn pools_are_pure_functions_of_seed_and_sector() {
+        let id = SectorId { x: -7, y: 5 };
+        assert_eq!(GenePool::for_sector(3, id), GenePool::for_sector(3, id));
+        assert_ne!(GenePool::for_sector(3, id), GenePool::for_sector(4, id));
     }
 
     #[test]
@@ -1930,10 +1930,10 @@ mod tests {
         assert_eq!(Genome::bogey().diet, Diet::Graze);
         assert!(Genome::bogey().forages() && !Genome::lunatic().forages());
         let (mut graze, mut hunt, mut other) = (0, 0, 0);
-        let params = QuadrantParams {
+        let params = SectorParams {
             aggression: 0.8,
             swarm: 0.6,
-            ..QuadrantParams::HOME
+            ..SectorParams::HOME
         };
         let mut rng = Rng::new(77);
         for _ in 0..3000 {
@@ -1955,10 +1955,10 @@ mod tests {
 
     #[test]
     fn cord_genes_are_mostly_weak_a_minority_strong_a_few_gripping_and_valid() {
-        let params = QuadrantParams {
+        let params = SectorParams {
             tech: 0.7,
             danger: 0.6,
-            ..QuadrantParams::HOME
+            ..SectorParams::HOME
         };
         let mut rng = Rng::new(5);
         let (mut tethers, mut weak, mut strong, mut grip) = (0, 0, 0, 0);
@@ -2020,24 +2020,21 @@ mod tests {
         let mut diets = std::collections::HashSet::new();
         for x in -16..=16 {
             for y in -16..=16 {
-                for e in GenePool::for_quadrant(5, QuadrantId { x, y }).entries {
+                for e in GenePool::for_sector(5, SectorId { x, y }).entries {
                     diets.insert(e.species.genome.diet.get());
                 }
             }
         }
         assert!(diets.contains(&(Diet::Graze.get())) && diets.contains(&(Diet::Hunt.get())));
-        assert_eq!(
-            GenePool::for_quadrant(5, QuadrantId::ORIGIN),
-            GenePool::home()
-        );
+        assert_eq!(GenePool::for_sector(5, SectorId::ORIGIN), GenePool::home());
     }
 
     #[test]
     fn learners_are_rare_in_the_wild_keen_where_tech_is_high_and_valid() {
         let count = |tech: f32| {
-            let params = QuadrantParams {
+            let params = SectorParams {
                 tech,
-                ..QuadrantParams::HOME
+                ..SectorParams::HOME
             };
             let mut rng = Rng::new(31);
             let mut learners = 0;

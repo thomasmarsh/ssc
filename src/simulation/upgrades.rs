@@ -15,7 +15,7 @@ use super::Material;
 pub use super::arsenal::Gain;
 use super::arsenal::{Arsenal, Boost, BoostGain, Need, Profile};
 use crate::genome::{Diet, Genome, Weapon};
-use crate::world::{QuadrantParams, Rng};
+use crate::world::{Rng, SectorParams};
 
 /// Scalable ship statistics. An effect's amount is a fraction of the base value
 /// (+0.25 is 25 percent more).
@@ -339,7 +339,7 @@ impl Rarity {
 }
 
 /// What problem a blueprint is a good answer to: it drops more often where the matching
-/// quadrant parameter runs high.
+/// sector parameter runs high.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Answers {
     Anything,
@@ -1088,7 +1088,7 @@ impl Stats {
 
     /// Power with the volley rating given (so an arsenal can be counted as a whole). It is
     /// the geometric mean of firepower and staying power, nudged by agility, so it can be
-    /// set against a quadrant's threat.
+    /// set against a sector's threat.
     pub fn power_with_volley(&self, volley: f32) -> f32 {
         let base = Self::BASE;
         let offense = self.firepower() * volley;
@@ -1115,13 +1115,13 @@ pub struct Source {
     pub affinity: [f32; Slot::ALL.len()],
     /// What the source shoots: gear that echoes it is likelier.
     pub weapon: Weapon,
-    pub params: QuadrantParams,
+    pub params: SectorParams,
     /// Items rolled from this source are at least this rare (bosses).
     pub min_rarity: Rarity,
 }
 
 impl Source {
-    pub fn plain(grade: f32, params: QuadrantParams) -> Self {
+    pub fn plain(grade: f32, params: SectorParams) -> Self {
         Self {
             grade: grade.max(1.0),
             bias: 0.0,
@@ -1135,7 +1135,7 @@ impl Source {
     /// Creatures drop according to what they are: gunners shed weapons, heavies plating,
     /// fast things engines, shielded ones cores, and odd ones (cord throwers, flingers,
     /// negative mass) auxiliaries.
-    pub fn of_creature(genome: &Genome, grade: f32, params: QuadrantParams) -> Self {
+    pub fn of_creature(genome: &Genome, grade: f32, params: SectorParams) -> Self {
         let mut source = Self::plain(grade, params);
         source.weapon = genome.weapon;
         let a = &mut source.affinity;
@@ -1503,7 +1503,7 @@ mod tests {
     use super::*;
 
     fn source(grade: f32) -> Source {
-        Source::plain(grade, QuadrantParams::HOME)
+        Source::plain(grade, SectorParams::HOME)
     }
 
     #[test]
@@ -1577,7 +1577,7 @@ mod tests {
 
     #[test]
     fn counters_drop_where_the_problem_is() {
-        let count = |params: QuadrantParams, wanted: Trait| {
+        let count = |params: SectorParams, wanted: Trait| {
             let mut rng = Rng::new(3);
             let src = Source::plain(1.0, params);
             (0..3000)
@@ -1589,19 +1589,19 @@ mod tests {
                 })
                 .count()
         };
-        let calm = QuadrantParams::HOME;
-        let warped = QuadrantParams {
+        let calm = SectorParams::HOME;
+        let warped = SectorParams {
             distortion: 1.0,
             ..calm
         };
-        let wired = QuadrantParams { tech: 1.0, ..calm };
+        let wired = SectorParams { tech: 1.0, ..calm };
         assert!(count(warped, Trait::Ballast) > 2 * count(calm, Trait::Ballast));
         assert!(count(wired, Trait::Shears) > 2 * count(calm, Trait::Shears));
     }
 
     #[test]
     fn creatures_drop_what_they_are() {
-        let params = QuadrantParams::HOME;
+        let params = SectorParams::HOME;
         let gunner = Source::of_creature(&Genome::bogey(), 1.0, params);
         let heavy = Source::of_creature(&Genome::fatso(), 1.0, params);
         let leech = Source::of_creature(&Genome::leech(), 1.0, params);

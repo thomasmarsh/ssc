@@ -28,7 +28,7 @@ pub const MAX_LEAD: f32 = 420.0;
 const POSITION_SCALE: f32 = 1000.0;
 const SPEED_SCALE: f32 = 460.0;
 const ACCEL_SCALE: f32 = 1000.0;
-/// A displacement larger than this is a teleport (a respawn or quadrant hop), not movement.
+/// A displacement larger than this is a teleport (a respawn or sector hop), not movement.
 const TELEPORT: f32 = 3000.0;
 /// Weight noise a child receives, and the spread of a founder's output layer.
 const INHERIT_NOISE: f32 = 0.01;

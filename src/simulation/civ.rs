@@ -2,7 +2,7 @@
 //! The world side (where territories are and what they field) is `crate::territory`; this is
 //! what the simulation does with it. Nothing here is rendering.
 //!
-//! - **Territory.** The ship's quadrant decides which territory (if any) it is inside; entering
+//! - **Territory.** The ship's sector decides which territory (if any) it is inside; entering
 //!   and leaving post a notice. Members are alerted by their comrades while the ship is in
 //!   their territory (`COORD_RANGE`) and see it from further off (`DOMAIN_SIGHT`).
 //! - **Raids.** While the ship lingers in a living territory a clock runs: patrol until
@@ -11,7 +11,7 @@
 //! - **Doctrine.** Every member's brain is blended into a per-territory table and the table is
 //!   blended back, so what one learns of the ship's movement spreads. Newcomers (raiders,
 //!   reloaded garrisons) are born with the table's weights. The table lives as long as the
-//!   `Game` does: it survives quadrants unloading, not a restart.
+//!   `Game` does: it survives sectors unloading, not a restart.
 //! - **Falls.** Destroying the capital base and killing the elder are recorded for good per
 //!   territory (`Game::civ_fall`), beside the destroyed-spawn memory.
 
@@ -289,7 +289,7 @@ impl Game {
         }
     }
 
-    /// Registers a generated civil spawn when its quadrant loads, and dresses the body:
+    /// Registers a generated civil spawn when its sector loads, and dresses the body:
     /// a leash to where it was placed, the doctrine's brain, and an elder's extra hull.
     pub(super) fn civ_dress(&mut self, body: &mut Body, tag: CivTag, species: Option<&Species>) {
         if let Some(species) = species {
@@ -313,10 +313,10 @@ impl Game {
 
     /// Per tick: which territory the ship is in, the raid clock, and (now and then) doctrine.
     pub(super) fn update_civilizations(&mut self, dt: f32) {
-        let quadrant = self.quadrant();
-        if self.territory_quadrant != Some(quadrant) {
-            self.territory_quadrant = Some(quadrant);
-            let now = world::territory(self.seed, quadrant);
+        let sector = self.sector();
+        if self.territory_sector != Some(sector) {
+            self.territory_sector = Some(sector);
+            let now = world::territory(self.seed, sector);
             if now.map(|t| t.id) != self.territory.map(|t| t.id) {
                 if self.territory.is_some() {
                     let text = format!("LEAVING  {}", self.territory_name);
@@ -428,19 +428,19 @@ impl Game {
                 member
             };
             let at = mark + heading + self.civ_rng.direction() * self.civ_rng.range(0.0, 260.0);
-            let quadrant = QuadrantId::containing(at);
+            let sector = SectorId::containing(at);
             // A party aimed at a pad must still arrive inside the simulated region.
-            if at_pad && !self.active.contains(&quadrant) {
+            if at_pad && !self.active.contains(&sector) {
                 continue;
             }
             let crowded = self
                 .bodies
                 .iter()
                 .filter(|b| {
-                    b.kind == BodyKind::Creature && QuadrantId::containing(b.position) == quadrant
+                    b.kind == BodyKind::Creature && SectorId::containing(b.position) == sector
                 })
                 .count()
-                >= world::QUADRANT_BODY_BUDGET as usize;
+                >= world::SECTOR_BODY_BUDGET as usize;
             if crowded || self.bodies.len() + self.food.len() + self.eggs.len() + 1 >= MAX_BODIES {
                 break;
             }
@@ -448,7 +448,7 @@ impl Game {
             let mut body = self.make_creature(&species, at);
             body.energy = body.max_energy;
             body.genes = civ_phenotype(
-                &world::phenotype_of(&world::latent(self.seed, quadrant)),
+                &world::phenotype_of(&world::latent(self.seed, sector)),
                 t.strength,
             );
             body.alert = true;
@@ -590,13 +590,13 @@ mod tests {
 
     const SEED: u64 = 0x535343;
 
-    /// A territory of the wanted shape and the quadrant of its capital.
+    /// A territory of the wanted shape and the sector of its capital.
     fn find(seed: u64, shape: CivShape) -> Territory {
         for x in -40..=40 {
             for y in -40..=40 {
-                if let Some(t) = world::territory(seed, QuadrantId { x, y })
+                if let Some(t) = world::territory(seed, SectorId { x, y })
                     && t.shape == shape
-                    && t.capital == (QuadrantId { x, y })
+                    && t.capital == (SectorId { x, y })
                 {
                     return t;
                 }
@@ -630,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn a_capital_quadrant_holds_its_civilization() {
+    fn a_capital_sector_holds_its_civilization() {
         for shape in [CivShape::Horde, CivShape::Elder, CivShape::Both] {
             let t = find(SEED, shape);
             let spawns = world::generate(SEED, t.capital);
@@ -650,7 +650,7 @@ mod tests {
                 .filter_map(|s| s.species)
                 .map(|s| s.genome.parts())
                 .sum();
-            assert!(bodies <= world::QUADRANT_BODY_BUDGET);
+            assert!(bodies <= world::SECTOR_BODY_BUDGET);
             // Deterministic.
             assert_eq!(spawns, world::generate(SEED, t.capital));
         }
@@ -661,7 +661,7 @@ mod tests {
         for seed in [1, 42, SEED] {
             for x in -3..=3 {
                 for y in -3..=3 {
-                    let spawns = world::generate(seed, QuadrantId { x, y });
+                    let spawns = world::generate(seed, SectorId { x, y });
                     if Vec2::new(x as f32, y as f32).length() < 4.0 {
                         assert!(spawns.iter().all(|s| s.civ.is_none()));
                     }
@@ -699,7 +699,7 @@ mod tests {
             game.player_invulnerability = 1e9;
             game.civ_territories.insert(t.id, t);
             game.civ_lineages.insert(t.id, (t.id, CivRole::Member));
-            game.territory_quadrant = Some(QuadrantId::ORIGIN);
+            game.territory_sector = Some(SectorId::ORIGIN);
             game.territory = inside.then_some(t);
             let near = spawn(&mut game, &species, Vec2::new(0.0, 900.0));
             let far = spawn(&mut game, &species, Vec2::new(0.0, 1500.0));
@@ -775,7 +775,7 @@ mod tests {
             .iter()
             .find(|b| game.is_elder(b))
             .map(|b| b.id)
-            .expect("the capital quadrant has an elder");
+            .expect("the capital sector has an elder");
         let elder = game.body(elder_id).unwrap().clone();
         assert!(elder.max_health >= elder.genome.hull * ELDER_HULL - 1.0);
         assert!(elder.brain.is_some() && elder.genome.learner == 1.0);
@@ -980,16 +980,17 @@ mod tests {
                     .bodies
                     .iter()
                     .filter(|b| {
-                        b.kind == BodyKind::Creature && QuadrantId::containing(b.position) == *q
+                        b.kind == BodyKind::Creature && SectorId::containing(b.position) == *q
                     })
                     .count();
                 assert!(
-                    creatures <= 2 * world::QUADRANT_BODY_BUDGET as usize,
+                    creatures <= 2 * world::SECTOR_BODY_BUDGET as usize,
                     "{q:?} holds {creatures}, {} civil, generated {}",
                     game.bodies
                         .iter()
-                        .filter(|b| QuadrantId::containing(b.position) == *q
-                            && game.civ_of(b).is_some())
+                        .filter(
+                            |b| SectorId::containing(b.position) == *q && game.civ_of(b).is_some()
+                        )
                         .count(),
                     world::generate(SEED, *q)
                         .iter()

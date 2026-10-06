@@ -1,5 +1,5 @@
 //! Ecology: bases that breed species and harvest debris, brooding parents, and grazers.
-//! A base breeds the species its quadrant favors, tractors small rocks in and grinds them
+//! A base breeds the species its sector favors, tractors small rocks in and grinds them
 //! into stock for a heavy guardian, and when destroyed leaves the fauna around it
 //! scattering in disarray. Grazing and brood-tending are genes any species can carry.
 
@@ -606,11 +606,11 @@ mod tests {
     fn every_station_can_be_shot_down_and_stays_destroyed_on_return() {
         for kind in BaseKind::ALL {
             let seed = 0x535343;
-            let quadrant = crate::simulation::tests::find_quadrant(seed, |spawns| {
+            let sector = crate::simulation::tests::find_sector(seed, |spawns| {
                 spawns.iter().any(|s| s.base_kind == Some(kind))
             });
             let mut game = Game::new(seed);
-            game.teleport(quadrant.center());
+            game.teleport(sector.center());
             game.step(DT, Input::default());
             let station = game
                 .bodies
@@ -632,7 +632,7 @@ mod tests {
             game.step(DT, Input::default());
             assert!(game.body(id).is_none(), "{kind:?} survived");
             assert!(game.pickups.iter().any(|p| matches!(p.item, Item::Part(_))));
-            game.teleport(at + Vec2::X * 7.0 * world::QUADRANT_SIZE);
+            game.teleport(at + Vec2::X * 7.0 * world::SECTOR_SIZE);
             game.step(DT, Input::default());
             game.teleport(at);
             game.step(DT, Input::default());
@@ -735,7 +735,7 @@ mod tests {
     #[test]
     fn a_fallen_base_sends_nearby_creatures_scattering_erratically() {
         let (mut game, base) = base_game(Species::bogey(), 1e6);
-        // Stand where both neighboring quadrants are simulated, so the scatter is seen through.
+        // Stand where both neighboring sectors are simulated, so the scatter is seen through.
         game.teleport(Vec2::new(0.0, 3000.0));
         let center = Vec2::new(0.0, 2000.0);
         let close: Vec<u64> = (0..4)

@@ -1,5 +1,5 @@
-//! The universe is an unbounded grid of quadrants. Each quadrant's contents are a pure
-//! function of (world seed, quadrant id), so they can be regenerated at will.
+//! The universe is an unbounded grid of sectors. Each sector's contents are a pure
+//! function of (world seed, sector id), so they can be regenerated at will.
 
 use crate::genome::{GenePool, Habit, INDIVIDUAL_SALT, Niche, Species, Weapon};
 use crate::simulation::BodyKind;
@@ -7,20 +7,20 @@ pub use crate::territory::{CivRole, CivShape, CivTag, Fall, Standing, Territory,
 use bevy::prelude::Vec2;
 use std::f32::consts::TAU;
 
-/// Side length of one quadrant in world units. Quadrant (0, 0) is centered on the origin.
-pub const QUADRANT_SIZE: f32 = 6000.0;
+/// Side length of one sector in world units. Sector (0, 0) is centered on the origin.
+pub const SECTOR_SIZE: f32 = 6000.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct QuadrantId {
+pub struct SectorId {
     pub x: i32,
     pub y: i32,
 }
 
-impl QuadrantId {
+impl SectorId {
     pub const ORIGIN: Self = Self { x: 0, y: 0 };
 
     pub fn containing(position: Vec2) -> Self {
-        let cell = position / QUADRANT_SIZE + Vec2::splat(0.5);
+        let cell = position / SECTOR_SIZE + Vec2::splat(0.5);
         Self {
             x: cell.x.floor() as i32,
             y: cell.y.floor() as i32,
@@ -28,10 +28,10 @@ impl QuadrantId {
     }
 
     pub fn center(self) -> Vec2 {
-        Vec2::new(self.x as f32, self.y as f32) * QUADRANT_SIZE
+        Vec2::new(self.x as f32, self.y as f32) * SECTOR_SIZE
     }
 
-    /// Every quadrant touched by the rectangle `center +/- half`, in a stable order.
+    /// Every sector touched by the rectangle `center +/- half`, in a stable order.
     pub fn overlapping(center: Vec2, half: Vec2) -> Vec<Self> {
         let min = Self::containing(center - half);
         let max = Self::containing(center + half);
@@ -89,7 +89,7 @@ impl Rng {
     }
 }
 
-/// Stateless hash of a seed and a 2D cell, for things like starfields and quadrant seeds.
+/// Stateless hash of a seed and a 2D cell, for things like starfields and sector seeds.
 pub fn hash2(seed: u64, x: i32, y: i32) -> u64 {
     let mut rng = Rng::new(
         seed ^ (x as u32 as u64).wrapping_mul(0x9E37_79B1_85EB_CA87)
@@ -100,7 +100,7 @@ pub fn hash2(seed: u64, x: i32, y: i32) -> u64 {
 
 /// Heritable behavior weights. Every field is a multiplier (or, for `mass_affinity`, a
 /// signed lean) around a neutral default, so the hand-tuned enemies are simply the
-/// phenotype a quadrant produces when its parameters sit at `QuadrantParams::HOME`.
+/// phenotype a sector produces when its parameters sit at `SectorParams::HOME`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Phenotype {
     /// Strength and reach of schooling with same-kind neighbors.
@@ -123,8 +123,8 @@ impl Phenotype {
     }
 }
 
-/// The phenotype `compose` gives a quadrant's fauna, for creatures born there in play.
-pub fn phenotype_of(params: &QuadrantParams) -> Phenotype {
+/// The phenotype `compose` gives a sector's fauna, for creatures born there in play.
+pub fn phenotype_of(params: &SectorParams) -> Phenotype {
     Phenotype {
         flocking: 0.5 + params.swarm,
         sensor_acuity: 0.5 + params.tech,
@@ -134,13 +134,13 @@ pub fn phenotype_of(params: &QuadrantParams) -> Phenotype {
     }
 }
 
-/// How much tougher and deadlier the fauna is at `depth` quadrants from home. One at HOME.
+/// How much tougher and deadlier the fauna is at `depth` sectors from home. One at HOME.
 pub fn threat(depth: f32) -> f32 {
-    1.0 + THREAT_PER_QUADRANT * depth.max(0.0)
+    1.0 + THREAT_PER_SECTOR * depth.max(0.0)
 }
 
-/// Threat gained per quadrant of depth.
-const THREAT_PER_QUADRANT: f32 = 0.3;
+/// Threat gained per sector of depth.
+const THREAT_PER_SECTOR: f32 = 0.3;
 
 impl Default for Phenotype {
     fn default() -> Self {
@@ -154,12 +154,12 @@ impl Default for Phenotype {
     }
 }
 
-/// The latent description of a quadrant: a point in a continuous parameter space. All
+/// The latent description of a sector: a point in a continuous parameter space. All
 /// fields are in [0, 1] except `depth`. Nothing downstream sees raw coordinates or noise,
 /// only this.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct QuadrantParams {
-    /// Quadrants from home (eased to zero near it). Unbounded; it sets the threat.
+pub struct SectorParams {
+    /// Sectors from home (eased to zero near it). Unbounded; it sets the threat.
     pub depth: f32,
     /// Grows with distance from the origin; the exploration curve.
     pub danger: f32,
@@ -175,8 +175,8 @@ pub struct QuadrantParams {
     pub swarm: f32,
 }
 
-impl QuadrantParams {
-    /// Quadrant (0, 0). Every 0.5 is neutral, so the policy yields the original population.
+impl SectorParams {
+    /// Sector (0, 0). Every 0.5 is neutral, so the policy yields the original population.
     pub const HOME: Self = Self {
         depth: 0.0,
         danger: 0.0,
@@ -240,18 +240,18 @@ fn field(seed: u64, channel: u64, at: Vec2) -> f32 {
     ((n - 0.5) * 1.8 + 0.5).clamp(0.0, 1.0)
 }
 
-/// Spatial frequency of the biome noise, per quadrant. Half of the original 0.14, so
+/// Spatial frequency of the biome noise, per sector. Half of the original 0.14, so
 /// regions are twice as wide and a different place takes twice the travel to reach.
 const NOISE_FREQUENCY: f32 = 0.07;
 
-/// Distance from the origin (in quadrants) over which the home neighborhood fades out.
+/// Distance from the origin (in sectors) over which the home neighborhood fades out.
 const HOME_RADIUS: f32 = 1.5;
 
-/// Maps a quadrant to its latent parameters. Distance from the origin sets danger,
+/// Maps a sector to its latent parameters. Distance from the origin sets danger,
 /// the angle around it tints the flavor (swarms to one side, distortions to another),
 /// and domain-warped noise adds low-frequency variation that changes gradually from
-/// one quadrant to the next. Near the origin everything eases to `HOME`.
-pub fn latent(seed: u64, id: QuadrantId) -> QuadrantParams {
+/// one sector to the next. Near the origin everything eases to `HOME`.
+pub fn latent(seed: u64, id: SectorId) -> SectorParams {
     let q = Vec2::new(id.x as f32, id.y as f32);
     let r = q.length();
     let theta = q.y.atan2(q.x);
@@ -260,7 +260,7 @@ pub fn latent(seed: u64, id: QuadrantId) -> QuadrantParams {
     // How much the angular flavor is felt grows with distance.
     let flavor = 1.0 - (-r / 2.0).exp();
     let tint = |base: f32, bias: f32| (base + (bias - 0.5) * 0.7 * flavor).clamp(0.0, 1.0);
-    let wild = QuadrantParams {
+    let wild = SectorParams {
         depth: r,
         danger,
         aggression: (field(seed, 1, at) * 0.7 + danger * 0.3).clamp(0.0, 1.0),
@@ -270,13 +270,13 @@ pub fn latent(seed: u64, id: QuadrantId) -> QuadrantParams {
         swarm: tint(field(seed, 5, at), 0.5 + 0.5 * theta.cos()),
     };
     let home = (-(r / HOME_RADIUS).powi(2)).exp();
-    wild.lerp(QuadrantParams::HOME, home)
+    wild.lerp(SectorParams::HOME, home)
 }
 
 /// What kind of station a base is. Each does a different job and looks different.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BaseKind {
-    /// Breeds the quadrant's fauna and harvests drifting rock for a guardian: organic pods.
+    /// Breeds the sector's fauna and harvests drifting rock for a guardian: organic pods.
     Hive,
     /// Tractors in rocks by the hundred and builds guardians; breeds little: industrial arms.
     Foundry,
@@ -331,7 +331,7 @@ pub enum RockKind {
     Wall,
 }
 
-/// An entity to be placed when a quadrant is first loaded.
+/// An entity to be placed when a sector is first loaded.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spawn {
     pub kind: BodyKind,
@@ -339,7 +339,7 @@ pub struct Spawn {
     pub radius: Option<f32>,
     pub velocity: Vec2,
     pub phenotype: Phenotype,
-    /// Position within the quadrant's output. Stable for a seed and quadrant, so the
+    /// Position within the sector's output. Stable for a seed and sector, so the
     /// simulation can remember which spawns have been destroyed.
     pub index: u32,
     /// Fixed in place (the stones of a nest).
@@ -366,7 +366,7 @@ pub struct Spawn {
     pub fort: Option<crate::fortress::FortPart>,
 }
 
-/// Where a creature spawns attached: its host's index in the quadrant's output, its angle
+/// Where a creature spawns attached: its host's index in the sector's output, its angle
 /// around the host in the host's own frame, and how grown it is (below one it is a young
 /// one that will let go, one is an adult).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -424,22 +424,22 @@ const STATION_SALT: u64 = 0x57A7_1010_0000_0003;
 const ROCK_SALT: u64 = 0x20C4_0000_0000_0005;
 const HUSK_SALT: u64 = 0x4D5C_0000_0000_0007;
 
-/// A quadrant's contents: a pure function of the world seed and its coordinates.
-pub fn generate(seed: u64, id: QuadrantId) -> Vec<Spawn> {
+/// A sector's contents: a pure function of the world seed and its coordinates.
+pub fn generate(seed: u64, id: SectorId) -> Vec<Spawn> {
     compose(seed, id, &latent(seed, id))
 }
 
 /// The generation policy. It reads only `params` (plus the seeded stream for placement),
 /// so any parameter vector, hand-authored or sampled, yields a coherent population. At
-/// `QuadrantParams::HOME` it reproduces the original hand-tuned one.
-pub fn compose(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Spawn> {
-    compose_with(seed, id, params, &GenePool::for_quadrant(seed, id))
+/// `SectorParams::HOME` it reproduces the original hand-tuned one.
+pub fn compose(seed: u64, id: SectorId, params: &SectorParams) -> Vec<Spawn> {
+    compose_with(seed, id, params, &GenePool::for_sector(seed, id))
 }
 
 /// Most bodies one cluster of creatures may add; jointed species form smaller clusters.
 const MAX_CLUSTER_PARTS: u32 = 24;
-/// Most creature bodies one quadrant generates, however its pool is composed.
-pub const QUADRANT_BODY_BUDGET: u32 = 220;
+/// Most creature bodies one sector generates, however its pool is composed.
+pub const SECTOR_BODY_BUDGET: u32 = 220;
 
 pub(crate) fn bodies_used(out: &[Spawn]) -> u32 {
     out.iter()
@@ -450,19 +450,14 @@ pub(crate) fn bodies_used(out: &[Spawn]) -> u32 {
 
 /// The policy proper: parameters decide how much of each niche to place and where, and
 /// the gene pool decides which species fills each niche.
-pub fn compose_with(
-    seed: u64,
-    id: QuadrantId,
-    params: &QuadrantParams,
-    pool: &GenePool,
-) -> Vec<Spawn> {
+pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GenePool) -> Vec<Spawn> {
     let mut rng = Rng::new(hash2(seed, id.x, id.y));
     // Species choices and bonds draw from their own stream, so the original one is
     // untouched whichever species the pool offers.
     let mut wild = Rng::new(hash2(seed ^ WILD_SALT, id.x, id.y));
     let center = id.center();
-    let extent = QUADRANT_SIZE / 2.0 - 250.0;
-    let QuadrantParams {
+    let extent = SECTOR_SIZE / 2.0 - 250.0;
+    let SectorParams {
         depth,
         danger,
         aggression,
@@ -487,7 +482,7 @@ pub fn compose_with(
     let place = |rng: &mut Rng| -> Vec2 {
         for _ in 0..16 {
             let p = center + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
-            if id != QuadrantId::ORIGIN || p.length() > SAFE_RADIUS {
+            if id != SectorId::ORIGIN || p.length() > SAFE_RADIUS {
                 return p;
             }
         }
@@ -524,7 +519,7 @@ pub fn compose_with(
                    size: u32,
                    spread: f32| {
         let genome = species.genome;
-        let room = QUADRANT_BODY_BUDGET.saturating_sub(bodies_used(out)) / genome.parts();
+        let room = SECTOR_BODY_BUDGET.saturating_sub(bodies_used(out)) / genome.parts();
         let size = size
             .min((MAX_CLUSTER_PARTS / genome.parts()).max(1))
             .min(room);
@@ -545,8 +540,8 @@ pub fn compose_with(
     let (low, high) = range(2.0, 4.0, swarm);
     let (largest, _) = range(10.0, 0.0, swarm);
     for index in 0..rng.int(low, high.max(low)) + extra {
-        // The home quadrant always has a flock within reach of the starting position.
-        let anchor = if id == QuadrantId::ORIGIN && index == 0 {
+        // The home sector always has a flock within reach of the starting position.
+        let anchor = if id == SectorId::ORIGIN && index == 0 {
             rng.direction() * rng.range(1300.0, 1800.0)
         } else {
             place(&mut rng)
@@ -598,7 +593,7 @@ pub fn compose_with(
             });
         }
         let species = pool.nesting(&mut wild);
-        let room = QUADRANT_BODY_BUDGET.saturating_sub(bodies_used(&out)) / species.genome.parts();
+        let room = SECTOR_BODY_BUDGET.saturating_sub(bodies_used(&out)) / species.genome.parts();
         let dwellers = wild
             .int(3, 6)
             .min((MAX_CLUSTER_PARTS / species.genome.parts()).max(1))
@@ -614,7 +609,7 @@ pub fn compose_with(
         }
     }
 
-    // Bases breed whichever niche the quadrant favors, and build a heavy guardian.
+    // Bases breed whichever niche the sector favors, and build a heavy guardian.
     let base_chance =
         (0.6 * danger + above(aggression) + 0.6 * above(tech) + 0.6 * above(swarm)).min(0.85);
     if wild.chance(base_chance) {
@@ -698,7 +693,7 @@ pub fn compose_with(
     }
 
     // Every creature is an individual: its own jitter from a stream keyed by its stable
-    // spawn index, so reloading a quadrant gives the same creature back and nothing on
+    // spawn index, so reloading a sector gives the same creature back and nothing on
     // the original or species streams moves. Bases and husks vary their offspring at birth.
     for (index, spawn) in out.iter_mut().enumerate() {
         if let Some(species) = spawn.species {
@@ -713,7 +708,7 @@ pub fn compose_with(
 
     // A fertile planetoid, last on its own stream so nothing before it moves. HOME has none:
     // its population and golden figures stay exactly as they were.
-    if id != QuadrantId::ORIGIN
+    if id != SectorId::ORIGIN
         && let Some(planetoid) = planetoid(seed, id, params, &out)
     {
         out.push(planetoid);
@@ -736,7 +731,7 @@ pub fn compose_with(
 
     // Rooted residents come last, on their own stream, so nothing before them moves and no
     // original spawn count changes. HOME's rocks stay ordinary.
-    if id != QuadrantId::ORIGIN {
+    if id != SectorId::ORIGIN {
         root_residents(seed, id, params, pool, &genes, &mut out);
         // Civilizations come last of all, on their own stream, and only inside territories.
         crate::territory::civ_spawns(seed, id, params, &genes, &mut out);
@@ -746,8 +741,8 @@ pub fn compose_with(
 
 /// Separates the stream that seeds rooted residents from every other one.
 pub const ROOT_SALT: u64 = 0x600D_5EED_0000_001B;
-/// Most rooted creatures one quadrant seeds, and most on one host.
-const ROOTED_QUADRANT_CAP: u32 = 70;
+/// Most rooted creatures one sector seeds, and most on one host.
+const ROOTED_SECTOR_CAP: u32 = 70;
 const ROOTED_HOST_CAP: u32 = 36;
 /// A rooter fits a planetoid if it is this fraction of its radius or less, and a rock if
 /// it is this fraction (ice and ore are tougher stones).
@@ -756,14 +751,14 @@ const ROCK_FIT: f32 = 0.55;
 /// A planetoid carries one rooter per this much radius, give or take a third.
 const PLANET_PER_RADIUS: f32 = 26.0;
 
-/// Seeds rooted creatures on the quadrant's rocks and planetoids. A planetoid always gets a
+/// Seeds rooted creatures on the sector's rocks and planetoids. A planetoid always gets a
 /// community (native rooters when the pool has them, else sessile cousins of its species);
 /// a plain rock only sometimes, and only of native rooters. Sizes follow the host: only
 /// species that fit are chosen, and a bigger world holds more of them.
 fn root_residents(
     seed: u64,
-    id: QuadrantId,
-    params: &QuadrantParams,
+    id: SectorId,
+    params: &SectorParams,
     pool: &GenePool,
     genes: &Phenotype,
     out: &mut Vec<Spawn>,
@@ -775,9 +770,9 @@ fn root_residents(
         .map(|e| e.species)
         .filter(|s| s.genome.habit() != Habit::Free)
         .collect();
-    let mut room = QUADRANT_BODY_BUDGET
+    let mut room = SECTOR_BODY_BUDGET
         .saturating_sub(bodies_used(out))
-        .min(ROOTED_QUADRANT_CAP);
+        .min(ROOTED_SECTOR_CAP);
     let mut hosts: Vec<(usize, Vec2, f32, RockKind)> = out
         .iter()
         .enumerate()
@@ -891,28 +886,23 @@ fn root_residents(
 
 /// Separates the planetoid stream from every other one.
 pub const PLANETOID_SALT: u64 = 0x91A4_E701_0000_0017;
-/// Planetoid radii: always larger than any rock, still small beside a quadrant.
+/// Planetoid radii: always larger than any rock, still small beside a sector.
 pub const PLANETOID_MIN_RADIUS: f32 = 110.0;
 pub const PLANETOID_MAX_RADIUS: f32 = 700.0;
-/// A planetoid's surface stays this far inside a quadrant's border, so two across a border
+/// A planetoid's surface stays this far inside a sector's border, so two across a border
 /// always leave a channel of at least twice this between them.
 const PLANETOID_MARGIN: f32 = 450.0;
 /// Open space kept between a planetoid and anything else generated.
 const PLANETOID_CLEARANCE: f32 = 220.0;
 
-/// How likely a quadrant is to hold a planetoid: swarming and calm places favor them.
-pub fn planetoid_chance(params: &QuadrantParams) -> f32 {
+/// How likely a sector is to hold a planetoid: swarming and calm places favor them.
+pub fn planetoid_chance(params: &SectorParams) -> f32 {
     (0.05 + 0.4 * params.swarm + 0.2 * (1.0 - params.danger)).clamp(0.05, 0.75)
 }
 
-/// A quadrant's planetoid, if it has one: a fixed, slowly turning world that blooms life
+/// A sector's planetoid, if it has one: a fixed, slowly turning world that blooms life
 /// around it. `others` are the spawns already generated; the planetoid keeps clear of them.
-fn planetoid(
-    seed: u64,
-    id: QuadrantId,
-    params: &QuadrantParams,
-    others: &[Spawn],
-) -> Option<Spawn> {
+fn planetoid(seed: u64, id: SectorId, params: &SectorParams, others: &[Spawn]) -> Option<Spawn> {
     let mut rng = Rng::new(hash2(seed ^ PLANETOID_SALT, id.x, id.y));
     if !rng.chance(planetoid_chance(params)) {
         return None;
@@ -922,11 +912,11 @@ fn planetoid(
         PLANETOID_MIN_RADIUS + (PLANETOID_MAX_RADIUS - PLANETOID_MIN_RADIUS) * rng.f32().powf(2.2);
     let center = id.center();
     for attempt in 0..32 {
-        // A crowded quadrant gets a smaller world rather than none.
+        // A crowded sector gets a smaller world rather than none.
         if attempt > 0 && attempt % 8 == 0 {
             radius = (radius * 0.7).max(PLANETOID_MIN_RADIUS);
         }
-        let extent = QUADRANT_SIZE / 2.0 - radius - PLANETOID_MARGIN;
+        let extent = SECTOR_SIZE / 2.0 - radius - PLANETOID_MARGIN;
         let position = center + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
         let clear = others.iter().all(|s| {
             let size = s.radius.unwrap_or(40.0);
@@ -946,7 +936,7 @@ fn planetoid(
 
 /// Chooses a rock's make-up from a uniform roll. Ice favors calm regions, ore advanced
 /// ones, crystal distorted ones (and never appears at home).
-fn rock_for(roll: f32, params: &QuadrantParams) -> RockKind {
+fn rock_for(roll: f32, params: &SectorParams) -> RockKind {
     let above = |p: f32| (p - 0.5).max(0.0) * 2.0;
     let wildness = (params.depth / 1.5).min(1.0);
     let crystal = 0.04 + 0.2 * above(params.distortion);
@@ -966,9 +956,9 @@ fn rock_for(roll: f32, params: &QuadrantParams) -> RockKind {
 
 /// Separates the plankton stream from every other one.
 pub const FOOD_SALT: u64 = 0xF00D_B10E_0000_0013;
-/// Most plankton a quadrant of richness one can hold.
+/// Most plankton a sector of richness one can hold.
 const FOOD_CAP_BASE: f32 = 90.0;
-/// Fraction of a quadrant's plankton cap present when it is first loaded.
+/// Fraction of a sector's plankton cap present when it is first loaded.
 const FOOD_INITIAL: f32 = 0.6;
 /// Plankton gathers in blooms of about this radius.
 const BLOOM_RADIUS: f32 = 380.0;
@@ -980,29 +970,29 @@ pub struct Plankton {
     pub velocity: Vec2,
 }
 
-/// How lush a place is, in [0.35, 1]: calm, crowded and matter-rich quadrants grow the
+/// How lush a place is, in [0.35, 1]: calm, crowded and matter-rich sectors grow the
 /// most life-food, dangerous bare ones the least.
-pub fn food_richness(params: &QuadrantParams) -> f32 {
+pub fn food_richness(params: &SectorParams) -> f32 {
     let lush = 0.5 * params.swarm + 0.3 * (1.0 - params.danger) + 0.2 * params.density;
     0.35 + 0.65 * lush.clamp(0.0, 1.0)
 }
 
-/// The most plankton one quadrant sustains; regrowth stops here.
-pub fn food_cap(params: &QuadrantParams) -> usize {
+/// The most plankton one sector sustains; regrowth stops here.
+pub fn food_cap(params: &SectorParams) -> usize {
     (FOOD_CAP_BASE * food_richness(params)).round() as usize
 }
 
-/// A quadrant's starting plankton, as a few blooms. It draws only from its own salted
+/// A sector's starting plankton, as a few blooms. It draws only from its own salted
 /// stream and never touches `compose`, so the population (and HOME's golden figures) is
 /// exactly what it was before food existed.
-pub fn plankton(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Plankton> {
+pub fn plankton(seed: u64, id: SectorId, params: &SectorParams) -> Vec<Plankton> {
     let mut rng = Rng::new(hash2(seed ^ FOOD_SALT, id.x, id.y));
     let total = (food_cap(params) as f32 * FOOD_INITIAL).round() as u32;
     if total == 0 {
         return Vec::new();
     }
     let center = id.center();
-    let extent = QUADRANT_SIZE / 2.0 - 150.0;
+    let extent = SECTOR_SIZE / 2.0 - 150.0;
     let blooms = rng.int(3, 6).min(total);
     let mut out = Vec::with_capacity(total as usize);
     for bloom in 0..blooms {
@@ -1022,8 +1012,8 @@ pub fn plankton(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Plank
     out
 }
 
-/// A new station's kind and what it shoots, from the quadrant's character on its own stream.
-fn station(seed: u64, id: QuadrantId, params: &QuadrantParams) -> (BaseKind, Option<(Weapon, u8)>) {
+/// A new station's kind and what it shoots, from the sector's character on its own stream.
+fn station(seed: u64, id: SectorId, params: &SectorParams) -> (BaseKind, Option<(Weapon, u8)>) {
     let mut rng = Rng::new(hash2(seed ^ STATION_SALT, id.x, id.y));
     let above = |p: f32| (p - 0.5).max(0.0) * 2.0;
     let weights = [
@@ -1086,7 +1076,7 @@ mod tests {
         let mut hollows = 0;
         for x in 3..=12 {
             for y in 3..=12 {
-                let id = QuadrantId { x, y };
+                let id = SectorId { x, y };
                 let spawns = generate(0x535343, id);
                 assert_eq!(spawns, generate(0x535343, id));
                 for spawn in spawns.into_iter().filter(|s| s.fort.is_none()) {
@@ -1115,39 +1105,39 @@ mod tests {
             rocks[4] >= 20 && hollows >= 160,
             "inhabited rocks and hollows should be common"
         );
-        for spawn in generate(0x535343, QuadrantId::ORIGIN) {
+        for spawn in generate(0x535343, SectorId::ORIGIN) {
             assert_eq!(spawn.rock, RockKind::Plain);
             assert!(spawn.base_kind.is_none() && spawn.den.is_none());
         }
     }
 
     #[test]
-    fn quadrant_math_handles_negative_coordinates() {
-        let half = QUADRANT_SIZE / 2.0;
-        assert_eq!(QuadrantId::containing(Vec2::ZERO), QuadrantId::ORIGIN);
+    fn sector_math_handles_negative_coordinates() {
+        let half = SECTOR_SIZE / 2.0;
+        assert_eq!(SectorId::containing(Vec2::ZERO), SectorId::ORIGIN);
         assert_eq!(
-            QuadrantId::containing(Vec2::new(half - 1.0, -half + 1.0)),
-            QuadrantId::ORIGIN
+            SectorId::containing(Vec2::new(half - 1.0, -half + 1.0)),
+            SectorId::ORIGIN
         );
         assert_eq!(
-            QuadrantId::containing(Vec2::new(half + 1.0, 0.0)),
-            QuadrantId { x: 1, y: 0 }
+            SectorId::containing(Vec2::new(half + 1.0, 0.0)),
+            SectorId { x: 1, y: 0 }
         );
         assert_eq!(
-            QuadrantId::containing(Vec2::new(-half - 1.0, -half - 1.0)),
-            QuadrantId { x: -1, y: -1 }
+            SectorId::containing(Vec2::new(-half - 1.0, -half - 1.0)),
+            SectorId { x: -1, y: -1 }
         );
-        let q = QuadrantId { x: -3, y: 2 };
-        assert_eq!(QuadrantId::containing(q.center()), q);
+        let q = SectorId { x: -3, y: 2 };
+        assert_eq!(SectorId::containing(q.center()), q);
         assert_eq!(
-            QuadrantId::overlapping(Vec2::new(half - 10.0, 0.0), Vec2::splat(100.0)).len(),
+            SectorId::overlapping(Vec2::new(half - 10.0, 0.0), Vec2::splat(100.0)).len(),
             2
         );
     }
 
     #[test]
-    fn generation_is_pure_and_varies_by_quadrant() {
-        let a = QuadrantId { x: 2, y: -1 };
+    fn generation_is_pure_and_varies_by_sector() {
+        let a = SectorId { x: 2, y: -1 };
         let first = generate(9, a);
         let second = generate(9, a);
         assert_eq!(first.len(), second.len());
@@ -1158,12 +1148,12 @@ mod tests {
                 .all(|(l, r)| l.position == r.position && l.kind == r.kind)
         );
         assert_ne!(
-            generate(9, QuadrantId::ORIGIN).len() + generate(9, a).len(),
+            generate(9, SectorId::ORIGIN).len() + generate(9, a).len(),
             0
         );
         assert_ne!(generate(10, a)[0].position, first[0].position);
         assert_ne!(
-            generate(9, QuadrantId { x: 1, y: 1 })[0].position,
+            generate(9, SectorId { x: 1, y: 1 })[0].position,
             first[0].position
         );
     }
@@ -1171,7 +1161,7 @@ mod tests {
     #[test]
     fn origin_start_is_clear_and_has_a_nearby_flock() {
         for seed in 0..20 {
-            let spawns = generate(seed, QuadrantId::ORIGIN);
+            let spawns = generate(seed, SectorId::ORIGIN);
             assert!(spawns.iter().all(|s| s.position.length() > 800.0));
             assert!(spawns.iter().any(|s| {
                 s.species
@@ -1183,8 +1173,8 @@ mod tests {
 
     #[test]
     fn creatures_are_individuals_with_stable_genomes() {
-        let a = generate(0x535343, QuadrantId::ORIGIN);
-        let b = generate(0x535343, QuadrantId::ORIGIN);
+        let a = generate(0x535343, SectorId::ORIGIN);
+        let b = generate(0x535343, SectorId::ORIGIN);
         let genomes = |v: &[Spawn]| -> Vec<_> { v.iter().filter_map(|s| s.species).collect() };
         assert_eq!(genomes(&a), genomes(&b));
         let bogeys: Vec<_> = genomes(&a)
@@ -1221,14 +1211,14 @@ mod tests {
     /// The original hand-tuned world is exactly what the policy produces at HOME. These
     /// figures were recorded from the generator before it was parameterized.
     #[test]
-    fn quadrant_zero_reproduces_the_original_population() {
-        assert_eq!(latent(7, QuadrantId::ORIGIN), QuadrantParams::HOME);
+    fn sector_zero_reproduces_the_original_population() {
+        assert_eq!(latent(7, SectorId::ORIGIN), SectorParams::HOME);
         for (seed, expected, checksum) in [
             (0x535343, [54, 14, 1, 33, 5, 1], -78201.925),
             (1, [53, 17, 0, 29, 7, 0], 3084.996),
             (42, [51, 14, 1, 30, 4, 2], 53527.571),
         ] {
-            let spawns = generate(seed, QuadrantId::ORIGIN);
+            let spawns = generate(seed, SectorId::ORIGIN);
             assert_eq!(census(&spawns), expected, "seed {seed}");
             let sum: f64 = spawns
                 .iter()
@@ -1247,8 +1237,8 @@ mod tests {
     #[test]
     fn latent_space_is_smooth_bounded_and_grows_more_dangerous_outward() {
         let seed = 31;
-        let params = |x, y| latent(seed, QuadrantId { x, y });
-        let channels = |p: QuadrantParams| {
+        let params = |x, y| latent(seed, SectorId { x, y });
+        let channels = |p: SectorParams| {
             [
                 p.danger,
                 p.aggression,
@@ -1276,19 +1266,19 @@ mod tests {
         assert!(danger(0) < danger(2) && danger(2) < danger(6) && danger(6) < danger(12));
         // Different master seeds chart different universes; same seed, same universe.
         assert_ne!(
-            latent(1, QuadrantId { x: 5, y: 3 }),
-            latent(2, QuadrantId { x: 5, y: 3 })
+            latent(1, SectorId { x: 5, y: 3 }),
+            latent(2, SectorId { x: 5, y: 3 })
         );
         assert_eq!(
-            latent(1, QuadrantId { x: 5, y: 3 }),
-            latent(1, QuadrantId { x: 5, y: 3 })
+            latent(1, SectorId { x: 5, y: 3 }),
+            latent(1, SectorId { x: 5, y: 3 })
         );
     }
 
     #[test]
     fn the_policy_expresses_any_parameter_vector() {
-        let id = QuadrantId { x: 4, y: -3 };
-        let mut hostile = QuadrantParams::HOME;
+        let id = SectorId { x: 4, y: -3 };
+        let mut hostile = SectorParams::HOME;
         hostile.aggression = 1.0;
         hostile.swarm = 1.0;
         hostile.density = 0.1;
@@ -1311,8 +1301,8 @@ mod tests {
         assert!(loud.aggression > quiet.aggression && loud.flocking > quiet.flocking);
     }
 
-    fn wild_params() -> QuadrantParams {
-        QuadrantParams {
+    fn wild_params() -> SectorParams {
+        SectorParams {
             depth: 12.0,
             danger: 0.8,
             aggression: 0.9,
@@ -1324,7 +1314,7 @@ mod tests {
     }
 
     #[test]
-    fn new_elements_are_absent_at_home_and_present_in_wild_quadrants() {
+    fn new_elements_are_absent_at_home_and_present_in_wild_sectors() {
         let exotic = |s: &Spawn| {
             s.pinned
                 || s.brood.is_some()
@@ -1334,14 +1324,14 @@ mod tests {
         };
         for seed in 0..40 {
             assert!(
-                !compose(seed, QuadrantId::ORIGIN, &QuadrantParams::HOME)
+                !compose(seed, SectorId::ORIGIN, &SectorParams::HOME)
                     .iter()
                     .any(exotic)
             );
         }
         let mut seen = [false; 5];
         for seed in 0..40 {
-            for s in compose(seed, QuadrantId { x: 9, y: 9 }, &wild_params()) {
+            for s in compose(seed, SectorId { x: 9, y: 9 }, &wild_params()) {
                 seen[0] |= s.pinned;
                 seen[1] |= s.brood.is_some();
                 seen[2] |= s.link.is_some();
@@ -1358,7 +1348,7 @@ mod tests {
     #[test]
     fn spawn_indices_are_stable_links_point_backward_and_rocks_respect_the_cap() {
         for seed in 0..30 {
-            let id = QuadrantId { x: 6, y: -7 };
+            let id = SectorId { x: 6, y: -7 };
             let spawns = compose(seed, id, &wild_params());
             assert_eq!(
                 spawns,
@@ -1377,7 +1367,7 @@ mod tests {
         // Across the real, smooth universe too.
         for x in -8..=8 {
             for y in -8..=8 {
-                for s in generate(3, QuadrantId { x, y }) {
+                for s in generate(3, SectorId { x, y }) {
                     if s.kind == BodyKind::Asteroid && s.rock != RockKind::Planetoid {
                         assert!(s.radius.unwrap() <= ASTEROID_MAX_RADIUS);
                     }
@@ -1389,10 +1379,10 @@ mod tests {
     #[test]
     fn planetoids_are_large_fixed_sparse_clear_and_never_at_home() {
         let mut found = 0;
-        let mut centers: Vec<(QuadrantId, Vec2, f32)> = Vec::new();
+        let mut centers: Vec<(SectorId, Vec2, f32)> = Vec::new();
         for x in -10..=10 {
             for y in -10..=10 {
-                let id = QuadrantId { x, y };
+                let id = SectorId { x, y };
                 let spawns = generate(5, id);
                 assert_eq!(spawns, generate(5, id), "static from generation");
                 let worlds: Vec<&Spawn> = spawns
@@ -1400,7 +1390,7 @@ mod tests {
                     .filter(|s| s.rock == RockKind::Planetoid)
                     .collect();
                 assert!(worlds.len() <= 1);
-                if id == QuadrantId::ORIGIN {
+                if id == SectorId::ORIGIN {
                     assert!(worlds.is_empty(), "HOME keeps its original population");
                 }
                 for w in worlds {
@@ -1413,7 +1403,7 @@ mod tests {
                     // residents follow it.
                     let originals = spawns.iter().filter(|s| s.rooted.is_none()).count();
                     assert_eq!(w.index as usize, originals - 1);
-                    let half = QUADRANT_SIZE / 2.0 - r - PLANETOID_MARGIN;
+                    let half = SECTOR_SIZE / 2.0 - r - PLANETOID_MARGIN;
                     assert!((w.position - id.center()).abs().max_element() <= half + 0.01);
                     // Open space around it: a ship always fits between it and anything else.
                     for s in spawns
@@ -1439,15 +1429,15 @@ mod tests {
             }
         }
         // Swarming, calm places favor them.
-        let lush = QuadrantParams {
+        let lush = SectorParams {
             swarm: 1.0,
             danger: 0.0,
-            ..QuadrantParams::HOME
+            ..SectorParams::HOME
         };
-        let bare = QuadrantParams {
+        let bare = SectorParams {
             swarm: 0.0,
             danger: 1.0,
-            ..QuadrantParams::HOME
+            ..SectorParams::HOME
         };
         assert!(planetoid_chance(&lush) > 2.0 * planetoid_chance(&bare));
     }
@@ -1456,7 +1446,7 @@ mod tests {
     fn a_nest_is_a_closed_ring_with_exactly_one_opening_wide_enough_for_a_ship() {
         let mut checked = 0;
         for seed in 0..60 {
-            let spawns = compose(seed, QuadrantId { x: 9, y: 9 }, &wild_params());
+            let spawns = compose(seed, SectorId { x: 9, y: 9 }, &wild_params());
             let stones: Vec<&Spawn> = spawns
                 .iter()
                 .filter(|s| s.pinned && s.rock != RockKind::Planetoid)
@@ -1483,13 +1473,13 @@ mod tests {
     }
 
     #[test]
-    fn slithering_creatures_arise_from_genes_in_generated_quadrants() {
+    fn slithering_creatures_arise_from_genes_in_generated_sectors() {
         // No code places a serpent: a long spine plus a wave gene turns up on its own, in
-        // quadrants well away from home, and never at HOME.
+        // sectors well away from home, and never at HOME.
         let mut slitherers = 0;
         for x in -10..=10 {
             for y in -10..=10 {
-                for s in generate(0x535343, QuadrantId { x, y }) {
+                for s in generate(0x535343, SectorId { x, y }) {
                     if let Some(sp) = s.species {
                         let slithers = sp.genome.segments >= 4 && sp.genome.wave >= 0.8;
                         assert!(!(slithers && x == 0 && y == 0));

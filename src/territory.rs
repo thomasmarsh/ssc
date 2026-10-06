@@ -1,35 +1,35 @@
 //! Civilizations: rare, deterministic regions of the universe held by a learner lineage.
 //!
-//! Territories live on their own coarse lattice (`TERRITORY_CELL` quadrants a side, own
-//! salted stream), so nothing on the quadrant generator's streams moves. Each cell may hold
-//! one territory: a capital quadrant and a ragged disc of quadrants around it. A territory
-//! never reaches the start (members are at least `TERRITORY_MIN_DEPTH` quadrants from HOME).
+//! Territories live on their own coarse lattice (`TERRITORY_CELL` sectors a side, own
+//! salted stream), so nothing on the sector generator's streams moves. Each cell may hold
+//! one territory: a capital sector and a ragged disc of sectors around it. A territory
+//! never reaches the start (members are at least `TERRITORY_MIN_DEPTH` sectors from HOME).
 //!
-//! `territory` is a pure function of the seed and a quadrant. A civilization is a horde (many
+//! `territory` is a pure function of the seed and a sector. A civilization is a horde (many
 //! weak learners), an elder (one boss with escorts) or both, anchored on a base in the
-//! capital quadrant with outposts and patrols across the rest of the territory. The species
-//! are derived from a pool species of the capital quadrant, so the lineage keeps a
+//! capital sector with outposts and patrols across the rest of the territory. The species
+//! are derived from a pool species of the capital sector, so the lineage keeps a
 //! recognizable name and color. See `docs/UNIVERSE.md`, "Civilizations".
 
 use crate::fortress::{self, Archetype, FortRole, Layout, PartKind};
 use crate::genome::{Diet, Fear, GenePool, Genome, Nest, Social, Species, Trigger, Weapon};
 use crate::simulation::BodyKind;
 use crate::world::{
-    BaseKind, Phenotype, QUADRANT_BODY_BUDGET, QUADRANT_SIZE, QuadrantId, QuadrantParams, Rng,
-    RockKind, Spawn, hash2, value_noise,
+    BaseKind, Phenotype, Rng, RockKind, SECTOR_BODY_BUDGET, SECTOR_SIZE, SectorId, SectorParams,
+    Spawn, hash2, value_noise,
 };
 use bevy::prelude::Vec2;
 
 /// Separates every territory stream from the rest of generation.
 pub const TERRITORY_SALT: u64 = 0xC1B1_7E55_0000_0021;
-/// Quadrants on a side of one territory cell: at most one territory per cell.
+/// Sectors on a side of one territory cell: at most one territory per cell.
 pub const TERRITORY_CELL: i32 = 10;
-/// Members stay at least this many quadrants from HOME, so the opening is unchanged and a
+/// Members stay at least this many sectors from HOME, so the opening is unchanged and a
 /// territory near the start of the difficulty curve (depth 4 to 6) is still survivable.
 pub const TERRITORY_MIN_DEPTH: f32 = 4.0;
 /// Share of cells that hold a territory.
 pub const TERRITORY_CHANCE: f32 = 0.34;
-/// Radius of a territory, in quadrants, before the noisy edge reshapes it.
+/// Radius of a territory, in sectors, before the noisy edge reshapes it.
 const RADIUS_RANGE: (f32, f32) = (2.0, 3.0);
 /// How far the noise pushes the edge in or out, as a share of the radius.
 const EDGE_NOISE: f32 = 0.7;
@@ -90,29 +90,29 @@ pub struct CivTag {
 pub struct Territory {
     /// Stable identity; also the lineage of its rank-and-file members.
     pub id: u64,
-    pub capital: QuadrantId,
+    pub capital: SectorId,
     /// Roughly 0.7 to 1.4: scales garrisons, raid sizes and the threat verdict.
     pub strength: f32,
     pub shape: CivShape,
-    /// Nominal radius in quadrants.
+    /// Nominal radius in sectors.
     pub radius: f32,
 }
 
-fn cell_of(id: QuadrantId) -> QuadrantId {
-    QuadrantId {
+fn cell_of(id: SectorId) -> SectorId {
+    SectorId {
         x: id.x.div_euclid(TERRITORY_CELL),
         y: id.y.div_euclid(TERRITORY_CELL),
     }
 }
 
 /// The territory a lattice cell holds, if any. The capital sits near the middle of the cell
-/// and the disc is small enough to stay inside it, so a quadrant only asks its own cell.
-fn in_cell(seed: u64, cell: QuadrantId) -> Option<Territory> {
+/// and the disc is small enough to stay inside it, so a sector only asks its own cell.
+fn in_cell(seed: u64, cell: SectorId) -> Option<Territory> {
     let mut rng = Rng::new(hash2(seed ^ TERRITORY_SALT, cell.x, cell.y));
     if !rng.chance(TERRITORY_CHANCE) {
         return None;
     }
-    let capital = QuadrantId {
+    let capital = SectorId {
         x: cell.x * TERRITORY_CELL + rng.int(4, 5) as i32,
         y: cell.y * TERRITORY_CELL + rng.int(4, 5) as i32,
     };
@@ -135,15 +135,15 @@ fn in_cell(seed: u64, cell: QuadrantId) -> Option<Territory> {
     })
 }
 
-/// The territory holding `quadrant`, if any. Pure: the same answer for a seed and quadrant,
+/// The territory holding `sector`, if any. Pure: the same answer for a seed and sector,
 /// whenever it is asked. Sparse, ragged and contiguous-ish, and never within
-/// `TERRITORY_MIN_DEPTH` quadrants of HOME.
-pub fn territory(seed: u64, quadrant: QuadrantId) -> Option<Territory> {
-    let at = Vec2::new(quadrant.x as f32, quadrant.y as f32);
+/// `TERRITORY_MIN_DEPTH` sectors of HOME.
+pub fn territory(seed: u64, sector: SectorId) -> Option<Territory> {
+    let at = Vec2::new(sector.x as f32, sector.y as f32);
     if at.length() < TERRITORY_MIN_DEPTH {
         return None;
     }
-    let t = in_cell(seed, cell_of(quadrant))?;
+    let t = in_cell(seed, cell_of(sector))?;
     let capital = Vec2::new(t.capital.x as f32, t.capital.y as f32);
     let noise = value_noise(seed ^ TERRITORY_SALT, SHAPE_NOISE_CHANNEL, at * 0.45) - 0.5;
     let reach = t.radius * (1.0 + EDGE_NOISE * noise);
@@ -228,10 +228,10 @@ impl Territory {
     }
 
     /// What the fortress turrets fire: the weapon of the people's own genes (the capital
-    /// quadrant's pool species the members come from, or the first armed relative), as a
+    /// sector's pool species the members come from, or the first armed relative), as a
     /// pattern a turret can hold (never a tether or a bare mine layer).
     pub fn turret_arms(&self, seed: u64) -> (Weapon, u8) {
-        let pool = GenePool::for_quadrant(seed, self.capital);
+        let pool = GenePool::for_sector(seed, self.capital);
         let mut rng = Rng::new(hash2(
             seed ^ TERRITORY_SALT ^ 0x51,
             self.capital.x,
@@ -257,10 +257,10 @@ impl Territory {
         }
     }
 
-    /// The rank-and-file species: a pool species of the capital quadrant turned into a
+    /// The rank-and-file species: a pool species of the capital sector turned into a
     /// learning, schooling forager, so its name and color are recognizably its own.
     pub fn member(&self, seed: u64) -> Species {
-        let pool = GenePool::for_quadrant(seed, self.capital);
+        let pool = GenePool::for_sector(seed, self.capital);
         let mut rng = Rng::new(hash2(
             seed ^ TERRITORY_SALT ^ 0x51,
             self.capital.x,
@@ -389,7 +389,7 @@ impl Territory {
     }
 }
 
-/// The phenotype a civilization's creatures wear: the quadrant's, sharpened a little by the
+/// The phenotype a civilization's creatures wear: the sector's, sharpened a little by the
 /// civilization's strength (more alert, a bit quicker to fire).
 pub fn civ_phenotype(genes: &Phenotype, strength: f32) -> Phenotype {
     Phenotype {
@@ -399,13 +399,13 @@ pub fn civ_phenotype(genes: &Phenotype, strength: f32) -> Phenotype {
     }
 }
 
-/// Adds the civilization's spawns for quadrant `id`, if it lies in a territory. Appended after
-/// everything else on the quadrant's output from its own stream, so no earlier index moves.
+/// Adds the civilization's spawns for sector `id`, if it lies in a territory. Appended after
+/// everything else on the sector's output from its own stream, so no earlier index moves.
 /// A territory the player has ended is filtered out by the simulation on load.
 pub fn civ_spawns(
     seed: u64,
-    id: QuadrantId,
-    _params: &QuadrantParams,
+    id: SectorId,
+    _params: &SectorParams,
     genes: &Phenotype,
     out: &mut Vec<Spawn>,
 ) {
@@ -416,14 +416,14 @@ pub fn civ_spawns(
     let (member, warrior, elder) = (t.member(seed), t.warrior(seed), t.elder(seed));
     let wearing = civ_phenotype(genes, t.strength);
     let center = id.center();
-    let extent = QUADRANT_SIZE / 2.0 - 450.0;
+    let extent = SECTOR_SIZE / 2.0 - 450.0;
     let place =
         |rng: &mut Rng| center + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
     let capital = id == t.capital;
     let share = |x: f32| (x * (0.8 + 0.4 * t.strength)).round().max(1.0) as u32;
 
     let add = |out: &mut Vec<Spawn>, species: Species, role: CivRole, at: Vec2| {
-        if QUADRANT_BODY_BUDGET <= crate::world::bodies_used(out) + species.genome.parts() {
+        if SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + species.genome.parts() {
             return;
         }
         let index = out.len() as u32;
@@ -501,7 +501,7 @@ pub fn civ_spawns(
             &fortress::Plan {
                 seed,
                 territory: t.id,
-                quadrant: id,
+                sector: id,
                 archetype: t.fort_archetype(),
                 tier: t.fort_tier(),
                 role: FortRole::Capital,
@@ -573,7 +573,7 @@ pub fn civ_spawns(
                 &fortress::Plan {
                     seed,
                     territory: t.id,
-                    quadrant: id,
+                    sector: id,
                     archetype: t.fort_archetype(),
                     tier: t.fort_tier().min(2),
                     role: FortRole::Outpost,
@@ -589,7 +589,7 @@ pub fn civ_spawns(
 }
 
 /// What a fortress must keep clear of: pinned rocks (planetoids, nest stones), wells, and
-/// other stations already placed in the quadrant, as (center, radius).
+/// other stations already placed in the sector, as (center, radius).
 fn fort_obstacles(out: &[Spawn]) -> Vec<(Vec2, f32)> {
     out.iter()
         .filter(|s| s.pinned || matches!(s.kind, BodyKind::BlackHole | BodyKind::Base))
@@ -649,11 +649,11 @@ mod tests {
 
     const SEED: u64 = 0x535343;
 
-    fn all_territories(seed: u64, reach: i32) -> Vec<(QuadrantId, Territory)> {
+    fn all_territories(seed: u64, reach: i32) -> Vec<(SectorId, Territory)> {
         let mut out = Vec::new();
         for x in -reach..=reach {
             for y in -reach..=reach {
-                let id = QuadrantId { x, y };
+                let id = SectorId { x, y };
                 if let Some(t) = territory(seed, id) {
                     out.push((id, t));
                 }
@@ -671,10 +671,10 @@ mod tests {
                 let depth = Vec2::new(id.x as f32, id.y as f32).length();
                 assert!(depth >= TERRITORY_MIN_DEPTH, "{id:?} too close at {depth}");
             }
-            assert!(territory(seed, QuadrantId::ORIGIN).is_none());
+            assert!(territory(seed, SectorId::ORIGIN).is_none());
             for x in -3..=3 {
                 for y in -3..=3 {
-                    let id = QuadrantId { x, y };
+                    let id = SectorId { x, y };
                     if Vec2::new(x as f32, y as f32).length() < TERRITORY_MIN_DEPTH {
                         assert!(territory(seed, id).is_none());
                     }
@@ -697,7 +697,7 @@ mod tests {
         ids.dedup();
         assert!(ids.len() >= 8, "several distinct civilizations expected");
         for id in ids {
-            let members: Vec<QuadrantId> = found
+            let members: Vec<SectorId> = found
                 .iter()
                 .filter(|(_, t)| t.id == id)
                 .map(|(q, _)| *q)
@@ -721,7 +721,7 @@ mod tests {
             }
             let cut = members.len() - seen.len();
             assert!(cut <= 1, "territory {id:x} is fragmented by {cut}");
-            assert!(members.len() <= 40, "a territory is a few quadrants across");
+            assert!(members.len() <= 40, "a territory is a few sectors across");
         }
     }
 

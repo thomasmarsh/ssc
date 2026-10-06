@@ -3,7 +3,7 @@
 //! the cargo hold, shrinking it as it goes, and the leftover crumbles into a pickup. Mining
 //! never shatters a rock, so it cannot multiply rocks, and a shot rock hands its remaining
 //! ore to its fragments, so shooting never creates ore. Partial depletion persists per spawn
-//! (`Game::mined`), so unloading a quadrant cannot refresh a rock.
+//! (`Game::mined`), so unloading a sector cannot refresh a rock.
 //!
 //! `Cargo` is the reusable hold: `add`, `spend`, `can_afford`, `cap`, `room`. Later systems
 //! (ammo, repair, reforging, landing pads) consume it through those, never the fields.
@@ -279,9 +279,9 @@ impl Body {
             RockKind::Ice | RockKind::Husk => Material::Volatiles,
             RockKind::Crystal => Material::Crystal,
             RockKind::Planetoid => {
-                let (quadrant, index) = self.origin.unwrap_or((QuadrantId { x: 0, y: 0 }, 0));
+                let (sector, index) = self.origin.unwrap_or((SectorId { x: 0, y: 0 }, 0));
                 let key = u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-                match hash2(seed ^ MINE_SALT ^ key, quadrant.x, quadrant.y) % 3 {
+                match hash2(seed ^ MINE_SALT ^ key, sector.x, sector.y) % 3 {
                     0 => Material::Metal,
                     1 => Material::Volatiles,
                     _ => Material::Crystal,
@@ -605,7 +605,7 @@ mod tests {
                 let id = rock(&mut game, RockKind::Planetoid, Vec2::new(400.0, 0.0), 250.0);
                 let planet = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
                 planet.pinned = true;
-                planet.origin = Some((QuadrantId { x: 3, y: -2 }, index));
+                planet.origin = Some((SectorId { x: 3, y: -2 }, index));
                 hold(&mut game, 10.0);
                 assert!((game.cargo.total() - 3.0).abs() < 0.1);
                 Material::ALL
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn mining_shrinks_a_rock_to_the_floor_then_it_crumbles_without_shattering() {
         let mut game = rig();
-        let q = QuadrantId { x: 0, y: 0 };
+        let q = SectorId { x: 0, y: 0 };
         let id = rock(&mut game, RockKind::Ice, Vec2::new(110.0, 0.0), 40.0);
         game.bodies.iter_mut().find(|b| b.id == id).unwrap().origin = Some((q, 777));
         let ore = ore_for(RockKind::Ice, 40.0);
@@ -669,9 +669,9 @@ mod tests {
     }
 
     #[test]
-    fn depletion_survives_unloading_and_reloading_the_quadrant() {
+    fn depletion_survives_unloading_and_reloading_the_sector() {
         let seed = 7;
-        let q = crate::simulation::tests::find_quadrant(seed, |spawns| {
+        let q = crate::simulation::tests::find_sector(seed, |spawns| {
             spawns.iter().any(|s| {
                 s.kind == BodyKind::Asteroid
                     && !s.pinned
@@ -703,8 +703,8 @@ mod tests {
         }
         let (mined, _, lode) = find(&game).unwrap();
         assert!(mined < full - 0.5, "shrunk: {mined} < {full}");
-        // Fly far enough that the quadrant unloads, then come back.
-        game.teleport(spawn.position + Vec2::new(8.0 * world::QUADRANT_SIZE, 0.0));
+        // Fly far enough that the sector unloads, then come back.
+        game.teleport(spawn.position + Vec2::new(8.0 * world::SECTOR_SIZE, 0.0));
         game.step(DT, Input::default());
         assert!(find(&game).is_none(), "unloaded");
         game.teleport(spawn.position - Vec2::new(300.0, 0.0));
@@ -787,7 +787,7 @@ mod tests {
         let id = rock(&mut game, RockKind::Planetoid, Vec2::new(380.0, 0.0), 250.0);
         let planet = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
         planet.pinned = true;
-        planet.origin = Some((QuadrantId { x: 1, y: 1 }, 4));
+        planet.origin = Some((SectorId { x: 1, y: 1 }, 4));
         let mut taken = 0.0;
         for step in 0..60 * 1500 {
             game.step(DT, mine());
@@ -801,7 +801,7 @@ mod tests {
         let planet = body(&game, id);
         assert_eq!(planet.radius, 250.0);
         assert!(game.beam.is_none(), "spent: no beam");
-        assert!(game.mined[&(QuadrantId { x: 1, y: 1 }, 4)] >= PLANETOID_BUDGET - 1.0);
+        assert!(game.mined[&(SectorId { x: 1, y: 1 }, 4)] >= PLANETOID_BUDGET - 1.0);
     }
 
     #[test]
@@ -1061,7 +1061,7 @@ mod tests {
         assert_eq!(game.cargo.metal, metal);
         assert!(metal > 0.0);
         let mut rng = world::Rng::new(5);
-        let source = upgrades::Source::plain(2.0, QuadrantParams::HOME);
+        let source = upgrades::Source::plain(2.0, SectorParams::HOME);
         let items: Vec<Item> = (0..60)
             .map(|_| upgrades::roll_salvage(&mut rng, &source))
             .collect();

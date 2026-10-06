@@ -1,9 +1,9 @@
 //! Deterministic, headless gameplay. Coordinates are world units, time is seconds,
 //! and angles point along (cos(angle), sin(angle)). Rendering owns no game rules.
 //!
-//! The world is an unbounded grid of quadrants (see `world`). Quadrants touched by the
+//! The world is an unbounded grid of sectors (see `world`). Sectors touched by the
 //! player's active region are generated on demand and simulated; bodies elsewhere are
-//! frozen, and quadrants far from the player are dropped and regenerated on return.
+//! frozen, and sectors far from the player are dropped and regenerated on return.
 
 mod arms;
 pub mod arsenal;
@@ -47,7 +47,7 @@ pub use weapons::{Mine, Shape};
 
 use crate::genome::{Diet, Genome, Species};
 use crate::territory::{CivRole, Fall, Territory};
-use crate::world::{self, Phenotype, QuadrantId, QuadrantParams, Rng};
+use crate::world::{self, Phenotype, Rng, SectorId, SectorParams};
 use crate::world::{BaseKind, RockKind};
 use bevy::prelude::Vec2;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -97,11 +97,11 @@ const FLING_SPEED: f32 = 520.0;
 const FLING_MAX_SPEED: f32 = 1000.0;
 /// Whatever the genes say, nothing is thrown faster than this.
 const FLING_HARD_CAP: f32 = 1400.0;
-/// Half-extent of the region around the player whose quadrants are simulated. It must
+/// Half-extent of the region around the player whose sectors are simulated. It must
 /// exceed the close combat view so loading and freezing happen off screen there.
 /// Wider overview cameras do not expand this region or change simulation rules.
 pub const ACTIVE_HALF: Vec2 = Vec2::new(2200.0, 1500.0);
-/// Quadrants farther than this (in quadrants) from the player are unloaded.
+/// Sectors farther than this (in sectors) from the player are unloaded.
 const UNLOAD_DISTANCE: u32 = 2;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Input {
@@ -166,8 +166,8 @@ pub struct Body {
     pub shield: f32,
     pub max_shield: f32,
     pub mass: f32,
-    /// Which quadrant spawn this body came from, if any; used to remember kills.
-    pub origin: Option<(QuadrantId, u32)>,
+    /// Which sector spawn this body came from, if any; used to remember kills.
+    pub origin: Option<(SectorId, u32)>,
     /// Fixed in place regardless of impacts (the stones of a nest).
     pub pinned: bool,
     /// Jointed creatures: the chain this body belongs to, whether it trails a head, and
@@ -184,7 +184,7 @@ pub struct Body {
     pub panic_from: Vec2,
     /// True while this enemy is hunting the player rather than going about its business.
     pub alert: bool,
-    /// The environment's expression of the genome: weights from the quadrant that spawned it.
+    /// The environment's expression of the genome: weights from the sector that spawned it.
     pub genes: Phenotype,
     /// Creatures: the heritable description of everything the body is and does.
     pub genome: Genome,
@@ -194,7 +194,7 @@ pub struct Body {
     pub parent: Option<u64>,
     /// Badly hurt and attacking with abandon (creatures with a rage gene).
     pub enraged: bool,
-    /// False when the body sits in a quadrant outside the active region.
+    /// False when the body sits in a sector outside the active region.
     pub active: bool,
     pub rig: Rig,
     /// Asteroids: what the rock is made of, and what lives in a husk.
@@ -353,19 +353,19 @@ pub struct Game {
     /// Drifting plankton: food for grazers. Not bodies, so it never collides or counts as one.
     pub food: Vec<Food>,
     /// Eggs waiting to hatch. Not bodies: they drift, can be shot, unload with their
-    /// quadrant and count against the body budget.
+    /// sector and count against the body budget.
     pub eggs: Vec<Egg>,
     /// The territory the ship is in, its display name and its raid clock; see `civ`.
     pub territory: Option<Territory>,
     pub territory_name: String,
     pub raid: Option<Raid>,
-    territory_quadrant: Option<QuadrantId>,
+    territory_sector: Option<SectorId>,
     /// Lineage -> (territory, role) of every civilization lineage met, and the capital bases
     /// by spawn, the territories met, their lasting falls and their shared brains.
     civ_lineages: HashMap<u64, (u64, CivRole)>,
-    civ_bases: HashMap<(QuadrantId, u32), (u64, CivRole)>,
+    civ_bases: HashMap<(SectorId, u32), (u64, CivRole)>,
     /// Walls and turrets of fortified cities by spawn: (territory, role).
-    civ_works: HashMap<(QuadrantId, u32), (u64, CivRole)>,
+    civ_works: HashMap<(SectorId, u32), (u64, CivRole)>,
     /// Per-territory mining: miners, the stash at the capital and the ore budget.
     civ_mining: BTreeMap<u64, civmine::Mining>,
     civ_colors: HashMap<u64, [f32; 3]>,
@@ -394,16 +394,16 @@ pub struct Game {
     pub arsenal_flash: f32,
     next_id: u64,
     next_chain: u32,
-    /// Spawns destroyed so far, per quadrant, so a quadrant reloads as it was left.
-    fallen: HashMap<QuadrantId, HashSet<u32>>,
+    /// Spawns destroyed so far, per sector, so a sector reloads as it was left.
+    fallen: HashMap<SectorId, HashSet<u32>>,
     /// Ore taken from rocks (planetoid budget spent), by spawn, quantized; see `mining`.
-    mined: HashMap<(QuadrantId, u32), f32>,
+    mined: HashMap<(SectorId, u32), f32>,
     /// Seconds the beam has held its target, the target, and the throttle on full-hold notes.
     mine_clock: f32,
     mine_target: Option<u64>,
     mine_note: f32,
-    loaded: HashSet<QuadrantId>,
-    active: Vec<QuadrantId>,
+    loaded: HashSet<SectorId>,
+    active: Vec<SectorId>,
 }
 
 impl Game {
@@ -443,7 +443,7 @@ impl Game {
             territory: None,
             territory_name: String::new(),
             raid: None,
-            territory_quadrant: None,
+            territory_sector: None,
             civ_lineages: HashMap::new(),
             civ_bases: HashMap::new(),
             civ_works: HashMap::new(),
@@ -467,7 +467,7 @@ impl Game {
             loaded: HashSet::new(),
             active: Vec::new(),
         };
-        game.stream_quadrants();
+        game.stream_sectors();
         game.spawn_player(Vec2::ZERO);
         game
     }
@@ -483,8 +483,8 @@ impl Game {
             .find(|body| body.kind == BodyKind::Player)
     }
 
-    pub fn quadrant(&self) -> QuadrantId {
-        QuadrantId::containing(self.focus)
+    pub fn sector(&self) -> SectorId {
+        SectorId::containing(self.focus)
     }
 
     pub fn body(&self, id: u64) -> Option<&Body> {
@@ -500,9 +500,9 @@ impl Game {
         self.focus = position;
     }
 
-    /// Latent parameters of the quadrant the player is in.
-    pub fn params(&self) -> QuadrantParams {
-        world::latent(self.seed, self.quadrant())
+    /// Latent parameters of the sector the player is in.
+    pub fn params(&self) -> SectorParams {
+        world::latent(self.seed, self.sector())
     }
 
     /// Enemies currently being simulated.
@@ -533,7 +533,7 @@ impl Game {
             effect.remaining -= dt;
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
-        self.stream_quadrants();
+        self.stream_sectors();
         self.note_sector();
         let start = self.player().map(|p| p.position);
         self.update_civilizations(dt);
@@ -642,14 +642,14 @@ impl Game {
         self.cue_player_damage(ship_before);
     }
 
-    /// Loads quadrants the player can reach, unloads distant ones, and flags which
+    /// Loads sectors the player can reach, unloads distant ones, and flags which
     /// bodies take part in this tick.
-    fn stream_quadrants(&mut self) {
+    fn stream_sectors(&mut self) {
         if let Some(player) = self.player() {
             self.focus = player.position;
         }
-        let home = self.quadrant();
-        self.active = QuadrantId::overlapping(self.focus, ACTIVE_HALF);
+        let home = self.sector();
+        self.active = SectorId::overlapping(self.focus, ACTIVE_HALF);
         for id in self.active.clone() {
             if self.loaded.insert(id) {
                 self.populate(id);
@@ -659,32 +659,32 @@ impl Game {
         self.loaded
             .retain(|id| id.chebyshev_distance(home) <= UNLOAD_DISTANCE);
         self.mines.retain(|m| {
-            QuadrantId::containing(m.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
+            SectorId::containing(m.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
         });
         self.pickups.retain(|p| {
-            QuadrantId::containing(p.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
+            SectorId::containing(p.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
         });
         let loaded = &self.loaded;
         self.food.retain(|f| {
-            let at = QuadrantId::containing(f.position);
+            let at = SectorId::containing(f.position);
             at.chebyshev_distance(home) <= UNLOAD_DISTANCE || loaded.contains(&at)
         });
         self.eggs.retain(|e| {
-            let at = QuadrantId::containing(e.position);
+            let at = SectorId::containing(e.position);
             at.chebyshev_distance(home) <= UNLOAD_DISTANCE || loaded.contains(&at)
         });
         self.bodies.retain(|body| {
             body.kind == BodyKind::Player
-                || QuadrantId::containing(body.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
-                || loaded.contains(&QuadrantId::containing(body.position))
+                || SectorId::containing(body.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
+                || loaded.contains(&SectorId::containing(body.position))
         });
         for body in &mut self.bodies {
             body.active = body.kind == BodyKind::Player
-                || self.active.contains(&QuadrantId::containing(body.position));
+                || self.active.contains(&SectorId::containing(body.position));
         }
     }
 
-    /// Bodies freeze the moment they leave the active quadrants, which used to leave
+    /// Bodies freeze the moment they leave the active sectors, which used to leave
     /// wandering creatures lined up along the border. Turn them back at the edge instead.
     fn contain_in_active_region(&mut self) {
         let Some((min, max)) = self.active_bounds() else {
@@ -713,25 +713,25 @@ impl Game {
         }
     }
 
-    /// Corners of the rectangle the active quadrants cover.
+    /// Corners of the rectangle the active sectors cover.
     fn active_bounds(&self) -> Option<(Vec2, Vec2)> {
         let first = self.active.first()?;
         let (mut low, mut high) = (*first, *first);
         for id in &self.active {
-            low = QuadrantId {
+            low = SectorId {
                 x: low.x.min(id.x),
                 y: low.y.min(id.y),
             };
-            high = QuadrantId {
+            high = SectorId {
                 x: high.x.max(id.x),
                 y: high.y.max(id.y),
             };
         }
-        let margin = Vec2::splat(world::QUADRANT_SIZE / 2.0 - 1.0);
+        let margin = Vec2::splat(world::SECTOR_SIZE / 2.0 - 1.0);
         Some((low.center() - margin, high.center() + margin))
     }
 
-    fn populate(&mut self, id: QuadrantId) {
+    fn populate(&mut self, id: SectorId) {
         let fallen = self.fallen.get(&id).cloned().unwrap_or_default();
         // A spawn whose creature wandered off but is still loaded must not be duplicated.
         let present: HashSet<u32> = self
@@ -865,7 +865,7 @@ impl Game {
 
     /// Remembers that a spawn was destroyed. A chain counts only once every segment is gone.
     fn record_fallen(&mut self, body: &Body) {
-        let Some((quadrant, index)) = body.origin else {
+        let Some((sector, index)) = body.origin else {
             return;
         };
         if body
@@ -874,7 +874,7 @@ impl Game {
         {
             return;
         }
-        self.fallen.entry(quadrant).or_default().insert(index);
+        self.fallen.entry(sector).or_default().insert(index);
     }
 
     /// Breaks a destroyed rock into smaller free-flying pieces.
@@ -1844,7 +1844,7 @@ mod tests {
             for speed in [150.0, 520.0, 1400.0, 4000.0] {
                 for (start, aim) in [(330.0, 0.0), (900.0, 0.4), (1800.0, 2.0), (1200.0, -2.6)] {
                     let mut game = empty_game();
-                    game.stream_quadrants();
+                    game.stream_sectors();
                     set_player(&mut game, Vec2::new(-4000.0, 4000.0), Vec2::ZERO);
                     game.bodies[0].health = 1e9;
                     game.player_invulnerability = 1e9;
@@ -1899,7 +1899,7 @@ mod tests {
     fn planetoids_stop_mines_and_ships_and_creatures_at_any_speed() {
         let radius = 250.0;
         let mut game = empty_game();
-        game.stream_quadrants();
+        game.stream_sectors();
         let id = planetoid_at(&mut game, Vec2::ZERO, radius);
         let at = body(&game, id).position;
         // A mine that starts inside, and one that drifts in fast.
@@ -1982,34 +1982,34 @@ mod tests {
     }
 
     #[test]
-    fn flying_across_quadrant_edges_loads_neighbors_and_unloads_the_far_ones() {
+    fn flying_across_sector_edges_loads_neighbors_and_unloads_the_far_ones() {
         let mut game = Game::new(5);
-        assert_eq!(game.quadrant(), QuadrantId::ORIGIN);
+        assert_eq!(game.sector(), SectorId::ORIGIN);
         game.player_invulnerability = 1e9;
         set_player(
             &mut game,
-            Vec2::new(world::QUADRANT_SIZE / 2.0 - 100.0, 0.0),
+            Vec2::new(world::SECTOR_SIZE / 2.0 - 100.0, 0.0),
             Vec2::new(PLAYER_SPEED, 0.0),
         );
         game.step(DT, Input::default());
-        assert!(game.loaded.contains(&QuadrantId { x: 1, y: 0 }));
+        assert!(game.loaded.contains(&SectorId { x: 1, y: 0 }));
         for _ in 0..60 * 30 {
             game.step(DT, Input::default());
             game.player_invulnerability = 1e9;
             let position = game.player().unwrap().position;
             set_player(&mut game, position, Vec2::new(PLAYER_SPEED, 0.0));
         }
-        assert!(game.quadrant().x >= 3);
-        // Quadrant 0 is more than UNLOAD_DISTANCE behind the player and has been dropped.
-        assert!(!game.loaded.contains(&QuadrantId::ORIGIN));
-        let home = game.quadrant();
+        assert!(game.sector().x >= 3);
+        // Sector 0 is more than UNLOAD_DISTANCE behind the player and has been dropped.
+        assert!(!game.loaded.contains(&SectorId::ORIGIN));
+        let home = game.sector();
         assert!(game.bodies.iter().all(|b| {
-            QuadrantId::containing(b.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
+            SectorId::containing(b.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
         }));
     }
 
     #[test]
-    fn revisiting_a_quadrant_regenerates_the_same_population() {
+    fn revisiting_a_sector_regenerates_the_same_population() {
         let mut game = Game::new(8);
         let count = |game: &Game| {
             game.bodies
@@ -2017,21 +2017,21 @@ mod tests {
                 .filter(|b| b.kind == BodyKind::Asteroid)
                 .count()
         };
-        let at_start = world::generate(8, QuadrantId::ORIGIN)
+        let at_start = world::generate(8, SectorId::ORIGIN)
             .iter()
             .filter(|s| s.kind == BodyKind::Asteroid)
             .count();
         assert!(count(&game) >= at_start);
         set_player(
             &mut game,
-            Vec2::new(5.0 * world::QUADRANT_SIZE, 0.0),
+            Vec2::new(5.0 * world::SECTOR_SIZE, 0.0),
             Vec2::ZERO,
         );
         game.step(DT, Input::default());
-        assert!(!game.loaded.contains(&QuadrantId::ORIGIN));
+        assert!(!game.loaded.contains(&SectorId::ORIGIN));
         set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
         game.step(DT, Input::default());
-        assert!(game.loaded.contains(&QuadrantId::ORIGIN));
+        assert!(game.loaded.contains(&SectorId::ORIGIN));
         assert!(count(&game) >= at_start);
     }
 
@@ -2041,7 +2041,7 @@ mod tests {
         let far = spawn(
             &mut game,
             &Species::lunatic(),
-            Vec2::new(2.0 * world::QUADRANT_SIZE, 0.0),
+            Vec2::new(2.0 * world::SECTOR_SIZE, 0.0),
         );
         game.bodies
             .iter_mut()
@@ -2059,7 +2059,7 @@ mod tests {
     #[test]
     fn wanderers_turn_back_at_the_active_edge_instead_of_freezing() {
         let mut game = empty_game();
-        let edge = world::QUADRANT_SIZE * 0.5;
+        let edge = world::SECTOR_SIZE * 0.5;
         let drifter = spawn(&mut game, &Species::bogey(), Vec2::new(edge - 500.0, 0.0));
         {
             let b = game.bodies.iter_mut().find(|b| b.id == drifter).unwrap();
@@ -2075,9 +2075,9 @@ mod tests {
     }
 
     #[test]
-    fn a_chaser_follows_the_player_across_a_quadrant_border() {
+    fn a_chaser_follows_the_player_across_a_sector_border() {
         let mut game = empty_game();
-        let edge = world::QUADRANT_SIZE / 2.0;
+        let edge = world::SECTOR_SIZE / 2.0;
         let chaser = spawn(&mut game, &Species::lunatic(), Vec2::new(edge - 400.0, 0.0));
         let anchor = Vec2::new(edge + 300.0, 0.0);
         game.player_invulnerability = 1e9;
@@ -2088,10 +2088,7 @@ mod tests {
         }
         let chaser = body(&game, chaser);
         assert!(chaser.alert && chaser.active);
-        assert!(
-            chaser.position.x > edge,
-            "chaser stayed in its home quadrant"
-        );
+        assert!(chaser.position.x > edge, "chaser stayed in its home sector");
     }
 
     fn bogeys(game: &mut Game, center: Vec2, count: usize) -> Vec<u64> {
@@ -2499,19 +2496,19 @@ mod tests {
         assert!(game.player().unwrap().angle.is_finite());
     }
 
-    /// First quadrant (scanning outward) whose generated population satisfies `wanted`.
-    pub(super) fn find_quadrant(seed: u64, wanted: impl Fn(&[world::Spawn]) -> bool) -> QuadrantId {
+    /// First sector (scanning outward) whose generated population satisfies `wanted`.
+    pub(super) fn find_sector(seed: u64, wanted: impl Fn(&[world::Spawn]) -> bool) -> SectorId {
         for ring in 0..=20_i32 {
             for x in -ring..=ring {
                 for y in -ring..=ring {
-                    let id = QuadrantId { x, y };
+                    let id = SectorId { x, y };
                     if x.abs().max(y.abs()) == ring && wanted(&world::generate(seed, id)) {
                         return id;
                     }
                 }
             }
         }
-        panic!("no quadrant matched");
+        panic!("no sector matched");
     }
 
     #[test]
@@ -2531,13 +2528,13 @@ mod tests {
             .health = 0.0;
         game.player_invulnerability = 1e9;
         game.step(DT, Input::default());
-        // Leave far enough for the quadrant to unload, then come back.
-        game.teleport(Vec2::new(6.0 * world::QUADRANT_SIZE, 0.0));
+        // Leave far enough for the sector to unload, then come back.
+        game.teleport(Vec2::new(6.0 * world::SECTOR_SIZE, 0.0));
         game.step(DT, Input::default());
         assert!(
             game.bodies
                 .iter()
-                .all(|b| b.origin.is_none_or(|(q, _)| q != QuadrantId::ORIGIN))
+                .all(|b| b.origin.is_none_or(|(q, _)| q != SectorId::ORIGIN))
         );
         game.teleport(Vec2::ZERO);
         game.step(DT, Input::default());
@@ -2545,11 +2542,11 @@ mod tests {
         let after = game
             .bodies
             .iter()
-            .filter(|b| b.origin.is_some_and(|(q, _)| q == QuadrantId::ORIGIN))
+            .filter(|b| b.origin.is_some_and(|(q, _)| q == SectorId::ORIGIN))
             .count();
         assert!(
             after >= before - 1 - 8,
-            "the rest of the quadrant should return"
+            "the rest of the sector should return"
         );
         assert!(after > 0);
     }
@@ -2559,15 +2556,15 @@ mod tests {
         let mut game = Game::new(7);
         let count = |game: &Game| game.bodies.len();
         let before = count(&game);
-        game.loaded.remove(&QuadrantId::ORIGIN);
-        game.populate(QuadrantId::ORIGIN);
+        game.loaded.remove(&SectorId::ORIGIN);
+        game.populate(SectorId::ORIGIN);
         assert_eq!(count(&game), before);
     }
 
     #[test]
     fn destroyed_bases_and_chains_persist() {
         let seed = 11;
-        let quadrant = find_quadrant(seed, |spawns| {
+        let sector = find_sector(seed, |spawns| {
             spawns.iter().any(|s| s.kind == BodyKind::Base)
                 && spawns
                     .iter()
@@ -2575,7 +2572,7 @@ mod tests {
         });
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
-        game.teleport(quadrant.center());
+        game.teleport(sector.center());
         game.step(DT, Input::default());
         let base = game.bodies.iter().find(|b| b.base.is_some()).unwrap();
         let base_origin = base.origin;
@@ -2597,9 +2594,9 @@ mod tests {
                     .iter()
                     .all(|b| b.chain.is_none() || b.health > 0.0)
         );
-        game.teleport(quadrant.center() + Vec2::new(7.0 * world::QUADRANT_SIZE, 0.0));
+        game.teleport(sector.center() + Vec2::new(7.0 * world::SECTOR_SIZE, 0.0));
         game.step(DT, Input::default());
-        game.teleport(quadrant.center());
+        game.teleport(sector.center());
         game.step(DT, Input::default());
         assert!(game.bodies.iter().all(|b| b.origin != base_origin));
         assert!(game.bodies.iter().any(|b| b.kind == BodyKind::Asteroid));
@@ -2806,7 +2803,7 @@ mod tests {
     #[test]
     fn explored_space_stays_finite_with_every_new_element_present() {
         let seed = 5;
-        let quadrant = find_quadrant(seed, |s| {
+        let sector = find_sector(seed, |s| {
             s.iter().any(|x| x.pinned)
                 && s.iter().any(|x| x.kind == BodyKind::Base)
                 && s.iter()
@@ -2814,7 +2811,7 @@ mod tests {
         });
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
-        game.teleport(quadrant.center());
+        game.teleport(sector.center());
         for tick in 0..3600 {
             game.step(
                 DT,
@@ -3072,11 +3069,11 @@ mod tests {
     }
 
     #[test]
-    fn far_quadrants_hold_novel_species_that_survive_a_long_flight() {
+    fn far_sectors_hold_novel_species_that_survive_a_long_flight() {
         let seed = 0x535343;
         let mut names = std::collections::HashSet::new();
         for (x, y) in [(14, 14), (-12, -9), (0, 9), (20, -5)] {
-            let id = QuadrantId { x, y };
+            let id = SectorId { x, y };
             let mut game = Game::new(seed);
             game.player_invulnerability = 1e9;
             game.teleport(id.center());

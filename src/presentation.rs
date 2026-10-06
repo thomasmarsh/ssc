@@ -14,7 +14,7 @@ use ssc::simulation::{
     MAX_PADS, Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind, fertility,
     price_text,
 };
-use ssc::world::{BaseKind, QUADRANT_SIZE, RockKind, hash2};
+use ssc::world::{BaseKind, RockKind, SECTOR_SIZE, hash2};
 
 /// World units visible top to bottom. Width follows the window's aspect ratio.
 pub const VIEW_HEIGHT: f32 = 900.0;
@@ -301,7 +301,7 @@ fn rarity_color(rarity: Rarity) -> Color {
     Color::srgb(r, g, b)
 }
 
-/// How the ship's power compares with what the quadrant's fauna asks of it.
+/// How the ship's power compares with what the sector's fauna asks of it.
 fn standing(power: f32, threat: f32) -> &'static str {
     ssc::simulation::verdict(power, threat)
 }
@@ -670,7 +670,7 @@ pub fn update_hud(
     if legend.0 != listing {
         legend.0 = listing;
     }
-    let quadrant = game.quadrant();
+    let sector = game.sector();
     let params = game.params();
     let (health, shield) = game
         .player()
@@ -693,8 +693,8 @@ pub fn update_hud(
     let (power, threat) = (game.power(), game.threat());
     let status = format!(
         "SECTOR ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}   STYLE {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}{}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
-        quadrant.x,
-        quadrant.y,
+        sector.x,
+        sector.y,
         game.active_enemies(),
         game.score,
         session.camera_view.label(),
@@ -2222,16 +2222,16 @@ fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2) {
             }
         }
     }
-    // Quadrant borders sit halfway between quadrant centers.
+    // Sector borders sit halfway between sector centers.
     let border = Color::srgb(0.13, 0.39, 0.48);
-    let first = ((camera - reach) / QUADRANT_SIZE + Vec2::splat(0.5))
+    let first = ((camera - reach) / SECTOR_SIZE + Vec2::splat(0.5))
         .floor()
         .as_ivec2();
-    let last = ((camera + reach) / QUADRANT_SIZE + Vec2::splat(0.5))
+    let last = ((camera + reach) / SECTOR_SIZE + Vec2::splat(0.5))
         .ceil()
         .as_ivec2();
     for n in first.x..=last.x {
-        let x = (n as f32 - 0.5) * QUADRANT_SIZE;
+        let x = (n as f32 - 0.5) * SECTOR_SIZE;
         gizmos.line_2d(
             Vec2::new(x, camera.y - reach.y),
             Vec2::new(x, camera.y + reach.y),
@@ -2239,7 +2239,7 @@ fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2) {
         );
     }
     for n in first.y..=last.y {
-        let y = (n as f32 - 0.5) * QUADRANT_SIZE;
+        let y = (n as f32 - 0.5) * SECTOR_SIZE;
         gizmos.line_2d(
             Vec2::new(camera.x - reach.x, y),
             Vec2::new(camera.x + reach.x, y),

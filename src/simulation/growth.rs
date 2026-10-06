@@ -7,7 +7,7 @@
 //! nearby mates: the child is the recombination of both genomes (`Genome::crossover`) and
 //! the two share the energy cost; otherwise it clones its genome with a mild mutation
 //! (`Genome::mutate`). Either way the child is a generation on. Reproduction is suppressed
-//! when a lineage is crowded, a quadrant is full, food is scarce or anything nearby is
+//! when a lineage is crowded, a sector is full, food is scarce or anything nearby is
 //! alert, so populations stay bounded and fights are never also nurseries.
 
 use super::*;
@@ -222,26 +222,24 @@ impl Game {
                 .count()
     }
 
-    /// Room for `parts` more bodies under every cap: the global budget, the quadrant's
+    /// Room for `parts` more bodies under every cap: the global budget, the sector's
     /// creature budget and the lineage's local cap.
     pub(super) fn room_to_breed(&self, parent: &Body, parts: usize) -> bool {
         if self.population() + parts >= MAX_BODIES {
             return false;
         }
-        let quadrant = QuadrantId::containing(parent.position);
+        let sector = SectorId::containing(parent.position);
         let here = self
             .bodies
             .iter()
-            .filter(|b| {
-                b.kind == BodyKind::Creature && QuadrantId::containing(b.position) == quadrant
-            })
+            .filter(|b| b.kind == BodyKind::Creature && SectorId::containing(b.position) == sector)
             .count()
             + self
                 .eggs
                 .iter()
-                .filter(|e| QuadrantId::containing(e.position) == quadrant)
+                .filter(|e| SectorId::containing(e.position) == sector)
                 .count();
-        here + parts < world::QUADRANT_BODY_BUDGET as usize
+        here + parts < world::SECTOR_BODY_BUDGET as usize
             && self.lineage_load(parent.species, parent.position) < LINEAGE_CAP
     }
 
@@ -552,7 +550,7 @@ impl Game {
         while index < self.eggs.len() {
             let active = self
                 .active
-                .contains(&QuadrantId::containing(self.eggs[index].position));
+                .contains(&SectorId::containing(self.eggs[index].position));
             if !active {
                 index += 1;
                 continue;
@@ -572,7 +570,7 @@ impl Game {
                 && !self.agitated_near(egg.position, CALM_RANGE * 0.5)
                 && self.lineage_load(egg.lineage, egg.position) <= LINEAGE_CAP + HATCH_SLACK
                 && self.population() < MAX_BODIES - 1
-                && self.population_here(egg.position) < world::QUADRANT_BODY_BUDGET as usize;
+                && self.population_here(egg.position) < world::SECTOR_BODY_BUDGET as usize;
             if hatchable {
                 self.eggs.remove(index);
                 let direction = self.breeding.direction();
@@ -605,19 +603,17 @@ impl Game {
         }
     }
 
-    /// Creature bodies and eggs in the quadrant containing `at`.
+    /// Creature bodies and eggs in the sector containing `at`.
     fn population_here(&self, at: Vec2) -> usize {
-        let quadrant = QuadrantId::containing(at);
+        let sector = SectorId::containing(at);
         self.bodies
             .iter()
-            .filter(|b| {
-                b.kind == BodyKind::Creature && QuadrantId::containing(b.position) == quadrant
-            })
+            .filter(|b| b.kind == BodyKind::Creature && SectorId::containing(b.position) == sector)
             .count()
             + self
                 .eggs
                 .iter()
-                .filter(|e| QuadrantId::containing(e.position) == quadrant)
+                .filter(|e| SectorId::containing(e.position) == sector)
                 .count()
     }
 
@@ -950,7 +946,7 @@ mod tests {
     }
 
     #[test]
-    fn eggs_unload_with_their_quadrant_and_spoil_when_they_cannot_hatch() {
+    fn eggs_unload_with_their_sector_and_spoil_when_they_cannot_hatch() {
         let mut game = empty_game();
         let species = grazer(Birth::Egg);
         let make = |at: Vec2| Egg {
@@ -1053,26 +1049,26 @@ mod tests {
     }
 
     #[test]
-    fn the_global_and_quadrant_caps_hold() {
+    fn the_global_and_sector_caps_hold() {
         let species = grazer(Birth::Live);
         let mut game = empty_game();
         let parent = spawn(&mut game, &species, ORIGIN);
         let p = body(&game, parent).clone();
         assert!(game.room_to_breed(&p, 1));
-        // Fill the quadrant with other creatures.
+        // Fill the sector with other creatures.
         let other = Species::of(Genome {
             radius: 7.0,
             ..Genome::default()
         });
-        let quadrant_room = world::QUADRANT_BODY_BUDGET as usize - creatures(&game);
-        for k in 0..quadrant_room {
+        let sector_room = world::SECTOR_BODY_BUDGET as usize - creatures(&game);
+        for k in 0..sector_room {
             spawn(
                 &mut game,
                 &other,
                 ORIGIN + Vec2::new(k as f32 * 3.0, -700.0),
             );
         }
-        assert!(!game.room_to_breed(&p, 1), "quadrant is full");
+        assert!(!game.room_to_breed(&p, 1), "sector is full");
         let mut game = empty_game();
         let parent = spawn(&mut game, &species, ORIGIN);
         let p = body(&game, parent).clone();
@@ -1121,7 +1117,7 @@ mod tests {
         };
         assert!(peak > 6, "it did breed: {peak}");
         assert!(grazers(&game, &species) <= LINEAGE_CAP + HATCH_SLACK + 2);
-        assert!(creatures(&game) < world::QUADRANT_BODY_BUDGET as usize);
+        assert!(creatures(&game) < world::SECTOR_BODY_BUDGET as usize);
         assert!(game.bodies.len() + game.eggs.len() < MAX_BODIES);
     }
 
@@ -1321,7 +1317,7 @@ mod tests {
                         low = low.min(game.active_enemies());
                     }
                     assert!(game.bodies.len() + game.food.len() + game.eggs.len() <= MAX_BODIES);
-                    assert!(creatures(&game) < 2 * world::QUADRANT_BODY_BUDGET as usize);
+                    assert!(creatures(&game) < 2 * world::SECTOR_BODY_BUDGET as usize);
                 }
             }
             assert!(start > 20, "HOME opens populated: {start}");
@@ -1343,14 +1339,14 @@ mod tests {
     }
 
     #[test]
-    fn a_planetoid_quadrant_keeps_its_life_under_the_caps() {
-        // Find a wild quadrant with a planetoid and grazers living beside it.
+    fn a_planetoid_sector_keeps_its_life_under_the_caps() {
+        // Find a wild sector with a planetoid and grazers living beside it.
         let seed = 7;
         let mut chosen = None;
         'search: for x in -8..=8i32 {
             for y in -8..=8i32 {
-                let id = QuadrantId { x, y };
-                if id.chebyshev_distance(QuadrantId::ORIGIN) < 3 {
+                let id = SectorId { x, y };
+                if id.chebyshev_distance(SectorId::ORIGIN) < 3 {
                     continue;
                 }
                 let spawns = world::generate(seed, id);
@@ -1364,7 +1360,7 @@ mod tests {
                 }
             }
         }
-        let id = chosen.expect("some wild quadrant has a planetoid and grazers");
+        let id = chosen.expect("some wild sector has a planetoid and grazers");
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
         let spot = id.center() + Vec2::new(0.0, 2400.0);
@@ -1381,7 +1377,7 @@ mod tests {
             if tick % 60 == 0 {
                 assert!(game.bodies.len() + game.food.len() + game.eggs.len() <= MAX_BODIES);
                 assert!(game.food.len() <= food::FOOD_BUDGET);
-                assert!(creatures(&game) < 2 * world::QUADRANT_BODY_BUDGET as usize);
+                assert!(creatures(&game) < 2 * world::SECTOR_BODY_BUDGET as usize);
                 if tick > 60 * 60 * 5 {
                     worst = worst.min(fed(&game).1);
                 }
@@ -1396,7 +1392,7 @@ mod tests {
         let here = game
             .food
             .iter()
-            .filter(|f| QuadrantId::containing(f.position) == id)
+            .filter(|f| SectorId::containing(f.position) == id)
             .count();
         assert!(
             start >= 6 && n * 2 >= start,

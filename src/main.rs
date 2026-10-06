@@ -17,7 +17,7 @@ use bevy::{
 use ssc::simulation::upgrades::{self, Item, Source};
 use ssc::simulation::{BodyKind, Cargo, Game, Input, Material};
 use ssc::world::RockKind;
-use ssc::world::{QUADRANT_SIZE, Rng};
+use ssc::world::{Rng, SECTOR_SIZE};
 
 /// Left stick deadzone for thrust; the right stick aims and fires past a larger push.
 const STICK_DEADZONE: f32 = 0.15;
@@ -42,7 +42,7 @@ pub enum CameraView {
     Close,
     Wide,
     Far,
-    Quadrant,
+    Sector,
 }
 
 impl CameraView {
@@ -50,8 +50,8 @@ impl CameraView {
         match self {
             Self::Close => Self::Wide,
             Self::Wide => Self::Far,
-            Self::Far => Self::Quadrant,
-            Self::Quadrant => Self::Close,
+            Self::Far => Self::Sector,
+            Self::Sector => Self::Close,
         }
     }
 
@@ -60,7 +60,7 @@ impl CameraView {
             Self::Close => "CLOSE",
             Self::Wide => "WIDE",
             Self::Far => "FAR",
-            Self::Quadrant => "SECTOR",
+            Self::Sector => "SECTOR",
         }
     }
 
@@ -75,9 +75,9 @@ impl CameraView {
                     },
             },
             // Fit the entire square even in portrait windows, with a border margin.
-            Self::Quadrant => ScalingMode::AutoMin {
-                min_width: QUADRANT_SIZE * 1.1,
-                min_height: QUADRANT_SIZE * 1.1,
+            Self::Sector => ScalingMode::AutoMin {
+                min_width: SECTOR_SIZE * 1.1,
+                min_height: SECTOR_SIZE * 1.1,
             },
         }
     }
@@ -427,8 +427,8 @@ fn camera(
     mut previous_view: Local<CameraView>,
 ) {
     let game = &session.game;
-    let target = if session.camera_view == CameraView::Quadrant {
-        game.quadrant().center()
+    let target = if session.camera_view == CameraView::Sector {
+        game.sector().center()
     } else {
         game.player()
             .map_or(game.focus, |ship| ship.position + ship.velocity * 0.3)
@@ -436,9 +436,9 @@ fn camera(
     let smoothing = 1.0 - (-6.0 * time.delta_secs()).exp();
     let (transform, projection) = &mut *view;
     let current = transform.translation.truncate();
-    // Snap quadrant framing and the return to close view, keeping the ship visible.
+    // Snap sector framing and the return to close view, keeping the ship visible.
     transform.translation =
-        if session.camera_view == CameraView::Quadrant || *previous_view == CameraView::Quadrant {
+        if session.camera_view == CameraView::Sector || *previous_view == CameraView::Sector {
             target
         } else {
             current.lerp(target, smoothing)
@@ -500,7 +500,7 @@ fn smoke_run(
         session.camera_view = match std::env::var("SSC_CAMERA").as_deref() {
             Ok("wide") => CameraView::Wide,
             Ok("far") => CameraView::Far,
-            Ok("quadrant" | "sector") => CameraView::Quadrant,
+            Ok("sector" | "quadrant") => CameraView::Sector,
             _ => session.camera_view,
         };
     }
@@ -590,7 +590,7 @@ fn smoke_summary(session: &mut Session, mode: &str) {
     let run = &mut game.run;
     for n in 0..17 {
         run.visit(
-            ssc::world::QuadrantId { x: n % 5, y: n / 5 },
+            ssc::world::SectorId { x: n % 5, y: n / 5 },
             (n % 5 + n / 5) as f32,
         );
     }
@@ -616,14 +616,14 @@ fn smoke_summary(session: &mut Session, mode: &str) {
             name: "BOGEY".into(),
             lineage: 1,
             sectors: 7,
-            at: ssc::world::QuadrantId { x: 0, y: 0 },
+            at: ssc::world::SectorId { x: 0, y: 0 },
             depth: 0.0,
         },
         ssc::simulation::run::Extirpation {
             name: "KRAZOX".into(),
             lineage: 2,
             sectors: 2,
-            at: ssc::world::QuadrantId { x: 3, y: 1 },
+            at: ssc::world::SectorId { x: 3, y: 1 },
             depth: 3.0,
         },
     ];

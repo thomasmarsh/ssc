@@ -311,7 +311,7 @@ mod tests {
     use crate::simulation::upgrades::{
         self, Effect, Item, Part, Slot, Source, Stat, Trait, test_surge,
     };
-    use crate::world::QuadrantParams;
+    use crate::world::SectorParams;
 
     fn fire() -> Input {
         Input {
@@ -391,7 +391,7 @@ mod tests {
             let mut firepower = 1.0_f32;
             let mut boosts = 0;
             for round in 0..240 {
-                let source = Source::plain(1.0 + rng.f32() * 6.0, QuadrantParams::HOME);
+                let source = Source::plain(1.0 + rng.f32() * 6.0, SectorParams::HOME);
                 let item = match rng.int(0, 2) {
                     0 => Item::Surge(upgrades::roll_surge(&mut rng, &source)),
                     _ => Item::Part(upgrades::roll_part(&mut rng, &source)),
@@ -605,7 +605,7 @@ mod tests {
             spawn(&mut game, &Species::fatso(), Vec2::new(0.0, 500.0));
             for step in 0..600 {
                 if step % 50 == 0 {
-                    let source = Source::plain(2.0, QuadrantParams::HOME);
+                    let source = Source::plain(2.0, SectorParams::HOME);
                     game.collect(Item::Surge(upgrades::roll_surge(&mut rng, &source)));
                     game.collect(Item::Material(Material::Metal, 30.0));
                 }

@@ -3,9 +3,9 @@
 //! - **Field repair.** A slow, interruptible mend of hull (metal) or shield (volatiles) that
 //!   runs anywhere. Any damage stops it.
 //! - **Pads.** A kit (metal and crystal) is crafted anywhere and deployed on a planetoid the
-//!   ship is close to and slow beside. A pad belongs to one planetoid (keyed by quadrant and
-//!   spawn index, like `Game::fallen`) and survives the quadrant unloading: the pad is
-//!   found again on its planetoid when the quadrant reloads. At most `MAX_PADS` stand at
+//!   ship is close to and slow beside. A pad belongs to one planetoid (keyed by sector and
+//!   spawn index, like `Game::fallen`) and survives the sector unloading: the pad is
+//!   found again on its planetoid when the sector reloads. At most `MAX_PADS` stand at
 //!   once; the oldest is dismantled for a refund when a new one goes down.
 //! - **Landing.** Docks the ship (rooted to the planetoid's frame, so it turns with it).
 //!   While landed and unseen the hull and shield mend quickly, the bench is open and
@@ -19,8 +19,8 @@
 //!   the nearest pad; ten metal keeps the best part instead of dropping it.
 //! - **The counter.** Learners and civilization members that come within sight of a pad
 //!   remember it (per territory for civilizations) and hunt it. Raids go for known pads in
-//!   their territory. A quadrant that is not loaded simulates nothing, so a pad known to the
-//!   enemy suffers one seeded raid roll when its quadrant reloads.
+//!   their territory. A sector that is not loaded simulates nothing, so a pad known to the
+//!   enemy suffers one seeded raid roll when its sector reloads.
 
 use super::arsenal::Profile;
 use super::upgrades::Rarity;
@@ -28,7 +28,7 @@ use super::*;
 use crate::genome::ROOT_ARMED;
 use crate::world::hash2;
 
-pub type PadKey = (QuadrantId, u32);
+pub type PadKey = (SectorId, u32);
 
 /// A pad kit: metal and crystal. At most `KIT_CAP` are carried.
 pub const KIT_PRICE: [(Material, f32); 2] = [(Material::Metal, 40.0), (Material::Crystal, 10.0)];
@@ -87,7 +87,7 @@ pub struct Pad {
     pub key: PadKey,
     /// Angle on the planetoid in its own frame, so it turns with it.
     pub anchor: f32,
-    /// The planetoid's center and radius (both fixed), for a pad whose quadrant is unloaded.
+    /// The planetoid's center and radius (both fixed), for a pad whose sector is unloaded.
     pub center: Vec2,
     pub radius: f32,
     pub hp: f32,
@@ -299,7 +299,7 @@ fn hostile_tenant(body: &Body) -> bool {
 impl Game {
     // ---- queries -------------------------------------------------------------------------
 
-    /// The planetoid a pad stands on, if its quadrant is loaded.
+    /// The planetoid a pad stands on, if its sector is loaded.
     fn pad_host(&self, key: PadKey) -> Option<&Body> {
         self.bodies
             .iter()
@@ -896,7 +896,7 @@ impl Game {
             .values()
             .filter(|p| known.contains(&p.key) && self.pad_host(p.key).is_some())
             .map(|p| self.pad_position(p))
-            .filter(|at| self.active.contains(&QuadrantId::containing(*at)))
+            .filter(|at| self.active.contains(&SectorId::containing(*at)))
             .min_by(|a, b| a.distance(ship).total_cmp(&b.distance(ship)))
     }
 
@@ -994,10 +994,10 @@ impl Game {
         }
     }
 
-    /// A quadrant has just loaded: its pads are on their planetoids again, and a pad the
+    /// A sector has just loaded: its pads are on their planetoids again, and a pad the
     /// enemy knows may have been raided while nothing was simulated. The roll is a pure
     /// function of the seed, the pad and how many times it has reloaded.
-    pub(super) fn reload_pads(&mut self, id: QuadrantId) {
+    pub(super) fn reload_pads(&mut self, id: SectorId) {
         let keys: Vec<PadKey> = self
             .pad
             .pads
@@ -1061,10 +1061,10 @@ impl Game {
             && self.cargo.spend(&[(Material::Metal, INSURANCE)])
     }
 
-    /// The pad a ship that died at `from` returns to: the nearest by quadrant distance, ties
+    /// The pad a ship that died at `from` returns to: the nearest by sector distance, ties
     /// broken by key order.
     pub fn respawn_pad(&self, from: Vec2) -> Option<PadKey> {
-        let here = QuadrantId::containing(from);
+        let here = SectorId::containing(from);
         self.pad
             .pads
             .keys()
@@ -1072,7 +1072,7 @@ impl Game {
             .copied()
     }
 
-    /// Brings the ship back at the nearest pad, streaming its quadrant first. False when
+    /// Brings the ship back at the nearest pad, streaming its sector first. False when
     /// there is none (or it is gone), and the ordinary respawn applies.
     pub(super) fn respawn_at_pad(&mut self, death: Vec2) -> bool {
         self.pad.landed = None;
@@ -1087,7 +1087,7 @@ impl Game {
             return false;
         };
         self.focus = center;
-        self.stream_quadrants();
+        self.stream_sectors();
         // Streaming may have raided the pad away; the next nearest then, or the wreck's place.
         let Some(pad) = self.pad.pads.get(&key) else {
             return self.respawn_at_pad(death);
@@ -1511,7 +1511,7 @@ mod tests {
         rock.radius = 300.0;
         rock.pinned = true;
         rock.mass = 900.0;
-        rock.origin = Some((QuadrantId { x: 0, y: 0 }, index));
+        rock.origin = Some((SectorId { x: 0, y: 0 }, index));
         // Ship below the planetoid, 60 off its surface.
         set_player(game, Vec2::new(0.0, 640.0), Vec2::ZERO);
         game.step(DT, quiet());
@@ -1669,7 +1669,7 @@ mod tests {
         assert_eq!(game.pad.pads.len(), 1);
         assert_eq!(game.pad.kits, 1);
         assert_eq!(game.run.pads, 1);
-        assert_eq!(game.pad.pads[&(QuadrantId { x: 0, y: 0 }, 7)].hp, PAD_HP);
+        assert_eq!(game.pad.pads[&(SectorId { x: 0, y: 0 }, 7)].hp, PAD_HP);
         assert!(game.body(id).is_some());
         // One per planetoid: a second kit is not spent.
         game.pad_action();
@@ -1683,9 +1683,9 @@ mod tests {
         stock(&mut game, 0.0, 0.0, 0.0);
         for index in 0..MAX_PADS as u32 {
             game.pad.pads.insert(
-                (QuadrantId { x: 0, y: 0 }, index + 100),
+                (SectorId { x: 0, y: 0 }, index + 100),
                 Pad {
-                    key: (QuadrantId { x: 0, y: 0 }, index + 100),
+                    key: (SectorId { x: 0, y: 0 }, index + 100),
                     anchor: 0.0,
                     center: Vec2::new(5000.0, 5000.0),
                     radius: 200.0,
@@ -1707,13 +1707,8 @@ mod tests {
         set_player(&mut game, Vec2::new(0.0, 640.0), Vec2::ZERO);
         game.pad_action();
         assert_eq!(game.pad.pads.len(), MAX_PADS, "still six");
-        assert!(
-            !game
-                .pad
-                .pads
-                .contains_key(&(QuadrantId { x: 0, y: 0 }, 100))
-        );
-        assert!(game.pad.pads.contains_key(&(QuadrantId { x: 0, y: 0 }, 7)));
+        assert!(!game.pad.pads.contains_key(&(SectorId { x: 0, y: 0 }, 100)));
+        assert!(game.pad.pads.contains_key(&(SectorId { x: 0, y: 0 }, 7)));
         assert_eq!(game.cargo.metal, 20.0 + 30.0, "half the kit and the stash");
         assert_eq!(game.cargo.crystal, 5.0);
     }
@@ -1940,7 +1935,7 @@ mod tests {
         world(&mut game, 7);
         landed(&mut game);
         game.player_invulnerability = 1e9;
-        game.territory_quadrant = Some(QuadrantId::ORIGIN);
+        game.territory_sector = Some(SectorId::ORIGIN);
         game.territory = Some(t);
         game.raid = Some(Raid {
             territory: t.id,
@@ -2247,9 +2242,9 @@ mod tests {
     }
 
     #[test]
-    fn the_nearest_pad_by_quadrant_wins_and_ties_break_by_key() {
+    fn the_nearest_pad_by_sector_wins_and_ties_break_by_key() {
         let mut game = empty_game();
-        let q = |x, y| QuadrantId { x, y };
+        let q = |x, y| SectorId { x, y };
         fake_pad(&mut game, (q(3, 0), 1), q(3, 0).center());
         fake_pad(&mut game, (q(-2, 0), 5), q(-2, 0).center());
         fake_pad(&mut game, (q(-2, 0), 2), q(-2, 0).center());
@@ -2360,7 +2355,7 @@ mod tests {
     #[test]
     fn pads_survive_unloading_and_find_their_planetoid_again() {
         let seed = 0x535343;
-        let q = crate::simulation::tests::find_quadrant(seed, |spawns| {
+        let q = crate::simulation::tests::find_sector(seed, |spawns| {
             spawns.iter().any(|s| s.rock == RockKind::Planetoid)
         });
         let spawn = world::generate(seed, q)
@@ -2384,7 +2379,7 @@ mod tests {
             (pad.anchor, host.radius, host.origin)
         };
         let before = place(&game);
-        // Far away: the quadrant unloads and the host is gone from the world.
+        // Far away: the sector unloads and the host is gone from the world.
         game.teleport(Vec2::new(60_000.0, 60_000.0));
         for _ in 0..4 {
             game.step(DT, quiet());
@@ -2489,32 +2484,32 @@ mod tests {
     fn the_reload_raid_is_seeded_at_most_once_per_reload_and_only_for_known_pads() {
         let make = || {
             let mut game = empty_game();
-            let q = QuadrantId { x: 0, y: 0 };
+            let q = SectorId { x: 0, y: 0 };
             fake_pad(&mut game, (q, 9), Vec2::new(100.0, 100.0));
             game
         };
         // Unknown pads are never raided, however many reloads.
         let mut game = make();
         for _ in 0..30 {
-            game.reload_pads(QuadrantId { x: 0, y: 0 });
+            game.reload_pads(SectorId { x: 0, y: 0 });
         }
-        assert_eq!(game.pad.pads[&(QuadrantId { x: 0, y: 0 }, 9)].hp, PAD_HP);
+        assert_eq!(game.pad.pads[&(SectorId { x: 0, y: 0 }, 9)].hp, PAD_HP);
         // Known ones suffer a deterministic number of raids.
         let outcome = |n: usize| {
             let mut game = make();
-            game.pad.known_wild.insert((QuadrantId { x: 0, y: 0 }, 9));
+            game.pad.known_wild.insert((SectorId { x: 0, y: 0 }, 9));
             let mut hits = 0;
             for _ in 0..n {
                 let before = game
                     .pad
                     .pads
-                    .get(&(QuadrantId { x: 0, y: 0 }, 9))
+                    .get(&(SectorId { x: 0, y: 0 }, 9))
                     .map(|p| p.hp);
-                game.reload_pads(QuadrantId { x: 0, y: 0 });
+                game.reload_pads(SectorId { x: 0, y: 0 });
                 let after = game
                     .pad
                     .pads
-                    .get(&(QuadrantId { x: 0, y: 0 }, 9))
+                    .get(&(SectorId { x: 0, y: 0 }, 9))
                     .map(|p| p.hp);
                 if after != before {
                     hits += 1;
@@ -2533,12 +2528,12 @@ mod tests {
         );
         // One reload damages at most the table's maximum.
         let mut game = make();
-        game.pad.known_wild.insert((QuadrantId { x: 0, y: 0 }, 9));
-        game.reload_pads(QuadrantId { x: 0, y: 0 });
+        game.pad.known_wild.insert((SectorId { x: 0, y: 0 }, 9));
+        game.reload_pads(SectorId { x: 0, y: 0 });
         let hp = game
             .pad
             .pads
-            .get(&(QuadrantId { x: 0, y: 0 }, 9))
+            .get(&(SectorId { x: 0, y: 0 }, 9))
             .map_or(0.0, |p| p.hp);
         assert!(hp >= PAD_HP - RELOAD_RAID_DAMAGE.1 - 1e-3);
     }
@@ -2547,7 +2542,7 @@ mod tests {
         use crate::territory::{CivRole, CivShape};
         let seed = 0x535343;
         let t = (-40..=40)
-            .flat_map(|x| (-40..=40).map(move |y| QuadrantId { x, y }))
+            .flat_map(|x| (-40..=40).map(move |y| SectorId { x, y }))
             .find_map(|q| world::territory(seed, q).filter(|t| t.shape == CivShape::Horde))
             .expect("a horde territory");
         let mut game = empty_game();
@@ -2712,7 +2707,7 @@ mod tests {
 
     #[test]
     fn reforge_never_downgrades_for_any_rolled_part() {
-        let source = upgrades::Source::plain(2.0, QuadrantParams::HOME);
+        let source = upgrades::Source::plain(2.0, SectorParams::HOME);
         let mut rng = Rng::new(99);
         for round in 0..300 {
             let mut part = upgrades::roll_part(&mut rng, &source);

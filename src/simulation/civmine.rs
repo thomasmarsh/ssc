@@ -362,7 +362,7 @@ impl Game {
             .filter_map(|b| b.origin.map(|(q, i)| (i, q.x, q.y, b.id)))
             .collect();
         candidates.sort_unstable();
-        let mut territory_of: HashMap<QuadrantId, Option<u64>> = HashMap::new();
+        let mut territory_of: HashMap<SectorId, Option<u64>> = HashMap::new();
         for &(_, _, _, member) in candidates.iter().take(12) {
             let Some(at) = self.body(member).map(|b| b.position) else {
                 continue;
@@ -383,7 +383,7 @@ impl Game {
                         && self.clear_shot(at, r.position)
                 })
                 .filter(|r| {
-                    let q = QuadrantId::containing(r.position);
+                    let q = SectorId::containing(r.position);
                     *territory_of
                         .entry(q)
                         .or_insert_with(|| world::territory(seed, q).map(|t| t.id))
@@ -422,8 +422,8 @@ mod tests {
     fn horde() -> crate::territory::Territory {
         for x in -40..=40 {
             for y in -40..=40 {
-                if let Some(t) = world::territory(SEED, QuadrantId { x, y })
-                    && t.capital == (QuadrantId { x, y })
+                if let Some(t) = world::territory(SEED, SectorId { x, y })
+                    && t.capital == (SectorId { x, y })
                     && t.shape == CivShape::Horde
                 {
                     return t;
@@ -475,7 +475,7 @@ mod tests {
                 let rock = game.body(miner.rock).unwrap();
                 let (q, _) = rock.origin.unwrap();
                 assert_eq!(
-                    world::territory(SEED, QuadrantId::containing(rock.position)).map(|x| x.id),
+                    world::territory(SEED, SectorId::containing(rock.position)).map(|x| x.id),
                     Some(t.id)
                 );
                 assert!(q.chebyshev_distance(t.capital) <= 4);
@@ -648,7 +648,7 @@ mod tests {
     #[test]
     fn draining_a_rock_obeys_the_lode_rules_and_a_planetoid_is_shared_with_the_player() {
         let mut game = empty_game();
-        let q = QuadrantId { x: 9, y: 9 };
+        let q = SectorId { x: 9, y: 9 };
         let id = add(&mut game, BodyKind::Asteroid, Vec2::new(0.0, 900.0));
         {
             let b = game.bodies.iter_mut().find(|b| b.id == id).unwrap();

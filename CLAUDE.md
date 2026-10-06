@@ -1,6 +1,6 @@
 # SSC
 
-A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (preserved in git history only). The vision: an endless, procedurally generated, living universe of quadrants (flocks, ecosystems, strange creatures), tight handling, and a very subtle Lunatic Fringe frivolity. We capture ideas from the C++ version, not a faithful port.
+A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (preserved in git history only). The vision: an endless, procedurally generated, living universe of sectors (flocks, ecosystems, strange creatures), tight handling, and a very subtle Lunatic Fringe frivolity. We capture ideas from the C++ version, not a faithful port.
 
 ## Orientation
 
@@ -15,9 +15,9 @@ A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (pr
 
 ## Decisions and invariants
 
-- Generation is a pure function of the master seed and quadrant coordinates. Quadrant (0,0) is the fixed HOME point and must keep reproducing the original population; a golden test in `src/world.rs` pins it. Do not reorder RNG draws on the original stream; new generators use their own salted streams.
-- Enemy kinds are expressions of genomes (Bogey, Lunatic, Smarty, Fatso and Leech are the HOME pool), not enum branches. Emergent weirdness comes first and balance is tamed afterwards, so far quadrants may be unplayable for now.
+- Generation is a pure function of the master seed and sector coordinates. Sector (0,0) is the fixed HOME point and must keep reproducing the original population; a golden test in `src/world.rs` pins it. Do not reorder RNG draws on the original stream; new generators use their own salted streams.
+- Enemy kinds are expressions of genomes (Bogey, Lunatic, Smarty, Fatso and Leech are the HOME pool), not enum branches. Emergent weirdness comes first and balance is tamed afterwards, so far sectors may be unplayable for now.
 - Bogeys school passively and only turn hostile when approached or hurt; Lunatics have negative mass and fling whatever touches them.
-- Only quadrants near the player are simulated; enemies are not bound to their quadrant and may chase across borders.
-- Quadrants are 6000 units wide (`QUADRANT_SIZE`); an earlier design note said 1200. Unresolved, decide by playing.
-- Known fragility: some tests depend on which wild quadrants load next to HOME, so changes to generation can disturb them.
+- Only sectors near the player are simulated; enemies are not bound to their sector and may chase across borders.
+- Sectors are 6000 units wide (`SECTOR_SIZE`); an earlier design note said 1200. Unresolved, decide by playing.
+- Known fragility: some tests depend on which wild sectors load next to HOME, so changes to generation can disturb them.

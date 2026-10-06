@@ -53,7 +53,7 @@ pub struct Extirpation {
     /// Sectors in the range.
     pub sectors: u32,
     /// Where the last of it died, and how far from HOME that is.
-    pub at: QuadrantId,
+    pub at: SectorId,
     pub depth: f32,
 }
 
@@ -72,7 +72,7 @@ pub struct RunStats {
     pub eggs: u32,
     /// Creatures eaten by predators or starved, anywhere near the ship.
     pub lost_to_nature: u32,
-    pub sectors: HashSet<QuadrantId>,
+    pub sectors: HashSet<SectorId>,
     /// Farthest sector depth reached and the deepest threat multiplier faced.
     pub deepest: f32,
     pub threat: f32,
@@ -95,7 +95,7 @@ pub struct RunStats {
 
 impl RunStats {
     /// Records a first visit to a sector (and how deep it is).
-    pub fn visit(&mut self, id: QuadrantId, depth: f32) {
+    pub fn visit(&mut self, id: SectorId, depth: f32) {
         if self.sectors.insert(id) {
             self.deepest = self.deepest.max(depth);
             self.threat = self.threat.max(world::threat(depth));
@@ -123,19 +123,19 @@ struct Residents {
 
 /// A cached range: sorted sectors, and whether it has been extirpated.
 struct Range {
-    sectors: Vec<QuadrantId>,
+    sectors: Vec<SectorId>,
     done: bool,
 }
 
 /// Deterministic caches behind extirpation; pure functions of the seed.
 #[derive(Default)]
 pub(super) struct Lore {
-    residents: HashMap<QuadrantId, Residents>,
+    residents: HashMap<SectorId, Residents>,
     ranges: HashMap<u64, Vec<Range>>,
 }
 
 impl Lore {
-    fn residents(&mut self, seed: u64, id: QuadrantId) -> &Residents {
+    fn residents(&mut self, seed: u64, id: SectorId) -> &Residents {
         if self.residents.len() >= SECTOR_CACHE_CAP {
             self.residents.clear();
         }
@@ -159,7 +159,7 @@ impl Lore {
 
     /// Index of the range of `lineage` that contains `from`, computing it on first need.
     /// `None` when the lineage is not generated in that sector at all.
-    fn range_of(&mut self, seed: u64, lineage: u64, from: QuadrantId) -> Option<usize> {
+    fn range_of(&mut self, seed: u64, lineage: u64, from: SectorId) -> Option<usize> {
         if let Some(i) = self.ranges.get(&lineage).and_then(|rs| {
             rs.iter()
                 .position(|r| r.sectors.binary_search(&from).is_ok())
@@ -169,14 +169,14 @@ impl Lore {
         if !self.residents(seed, from).lineages.contains_key(&lineage) {
             return None;
         }
-        let mut seen: HashSet<QuadrantId> = HashSet::from([from]);
+        let mut seen: HashSet<SectorId> = HashSet::from([from]);
         let mut queue = VecDeque::from([from]);
         let mut sectors = Vec::new();
         while let Some(at) = queue.pop_front() {
             sectors.push(at);
             for dx in -1..=1 {
                 for dy in -1..=1 {
-                    let next = QuadrantId {
+                    let next = SectorId {
                         x: at.x + dx,
                         y: at.y + dy,
                     };
@@ -210,7 +210,7 @@ impl Lore {
     }
 
     /// The sectors of the range `lineage` has around `from`, for tests and tools.
-    pub(super) fn range(&mut self, seed: u64, lineage: u64, from: QuadrantId) -> Vec<QuadrantId> {
+    pub(super) fn range(&mut self, seed: u64, lineage: u64, from: SectorId) -> Vec<SectorId> {
         self.range_of(seed, lineage, from)
             .map(|i| self.ranges[&lineage][i].sectors.clone())
             .unwrap_or_default()
@@ -220,7 +220,7 @@ impl Lore {
 impl Game {
     /// Called once per step with the ship's sector: counts first visits.
     pub(super) fn note_sector(&mut self) {
-        let here = self.quadrant();
+        let here = self.sector();
         if !self.run.sectors.contains(&here) {
             let depth = self.params().depth;
             self.run.visit(here, depth);
@@ -229,7 +229,7 @@ impl Game {
 
     /// The sectors of the range a lineage has around `from` (empty if it is not generated
     /// there). Computed deterministically from the seed, cached.
-    pub fn species_range(&mut self, lineage: u64, from: QuadrantId) -> Vec<QuadrantId> {
+    pub fn species_range(&mut self, lineage: u64, from: SectorId) -> Vec<SectorId> {
         self.lore.range(self.seed, lineage, from)
     }
 
@@ -254,7 +254,7 @@ impl Game {
         }
         let sector = body
             .origin
-            .map_or_else(|| QuadrantId::containing(body.position), |(q, _)| q);
+            .map_or_else(|| SectorId::containing(body.position), |(q, _)| q);
         self.check_extirpation(body.species, sector, &name);
     }
 
@@ -263,12 +263,12 @@ impl Game {
         if broken {
             self.run.eggs += 1;
         }
-        let sector = QuadrantId::containing(egg.position);
+        let sector = SectorId::containing(egg.position);
         self.check_extirpation(egg.lineage, sector, &egg.adult.name());
     }
 
     /// Announces the extirpation of `lineage`'s range around `sector` if nothing of it is left.
-    fn check_extirpation(&mut self, lineage: u64, sector: QuadrantId, name: &str) {
+    fn check_extirpation(&mut self, lineage: u64, sector: SectorId, name: &str) {
         let seed = self.seed;
         let Some(index) = self.lore.range_of(seed, lineage, sector) else {
             return;
@@ -296,7 +296,7 @@ impl Game {
                 }
             }
         }
-        let inside = |at: Vec2| sectors.binary_search(&QuadrantId::containing(at)).is_ok();
+        let inside = |at: Vec2| sectors.binary_search(&SectorId::containing(at)).is_ok();
         if self
             .bodies
             .iter()
@@ -433,8 +433,8 @@ mod tests {
         }
     }
 
-    fn sector(x: i32, y: i32) -> QuadrantId {
-        QuadrantId { x, y }
+    fn sector(x: i32, y: i32) -> SectorId {
+        SectorId { x, y }
     }
 
     /// Declares that `GHOST` is generated at these (sector, spawn index) pairs, ahead of
@@ -453,7 +453,7 @@ mod tests {
     }
 
     /// A ghost creature standing in `at`'s sector, remembered as spawn `index` of `home`.
-    fn ghost_at(game: &mut Game, at: Vec2, origin: Option<(QuadrantId, u32)>) -> u64 {
+    fn ghost_at(game: &mut Game, at: Vec2, origin: Option<(SectorId, u32)>) -> u64 {
         let id = spawn(game, &ghost(), at);
         game.bodies.iter_mut().find(|b| b.id == id).unwrap().origin = origin;
         id
@@ -605,11 +605,11 @@ mod tests {
         let mut game = Game::new(42);
         game.player_invulnerability = 1e9;
         let lineage = Species::bogey().lineage;
-        let range = game.species_range(lineage, QuadrantId::ORIGIN);
-        assert!(range.contains(&QuadrantId::ORIGIN));
+        let range = game.species_range(lineage, SectorId::ORIGIN);
+        assert!(range.contains(&SectorId::ORIGIN));
         assert!(range.len() as i32 <= (2 * RANGE_RADIUS + 1).pow(2));
         // Everything of theirs that is not a live creature right now is gone already.
-        let live: HashSet<(QuadrantId, u32)> = game
+        let live: HashSet<(SectorId, u32)> = game
             .bodies
             .iter()
             .filter(|b| b.species == lineage)

@@ -1,8 +1,8 @@
 //! Fortified cities: deterministic wall, turret and mine layouts around a civilization's
 //! capital (a full fortress) and around its outposts (a lighter one).
 //!
-//! A layout is a pure function of the world seed, the territory, the quadrant and what else
-//! the quadrant already holds (planetoids, nests, wells). It is made of coarse pieces so it
+//! A layout is a pure function of the world seed, the territory, the sector and what else
+//! the sector already holds (planetoids, nests, wells). It is made of coarse pieces so it
 //! stays cheap in bodies: wall segments are overlapping circles (a pinned `RockKind::Wall`
 //! body each) and turrets are small `BaseKind::Turret` bodies that replace a wall segment at
 //! corners and gates. Four archetypes give four looks and four ways in:
@@ -18,7 +18,7 @@
 //! degraded (a lower tier, then a plain ring) or dropped. Size scales with the territory's
 //! tier (strength and depth) and is held to a body budget.
 
-use crate::world::{QuadrantId, Rng, hash2};
+use crate::world::{Rng, SectorId, hash2};
 use bevy::prelude::Vec2;
 use std::f32::consts::{PI, TAU};
 
@@ -213,7 +213,7 @@ impl Sketch {
 pub struct Plan {
     pub seed: u64,
     pub territory: u64,
-    pub quadrant: QuadrantId,
+    pub sector: SectorId,
     pub archetype: Archetype,
     pub tier: u8,
     pub role: FortRole,
@@ -227,8 +227,8 @@ fn stream(plan: &Plan, archetype: Archetype, tier: u8) -> Rng {
             ^ plan.territory.rotate_left(17)
             ^ ((archetype as u64) << 40)
             ^ (u64::from(tier) << 48),
-        plan.quadrant.x,
-        plan.quadrant.y,
+        plan.sector.x,
+        plan.sector.y,
     ))
 }
 
@@ -711,7 +711,7 @@ fn attempt(
 
 /// The fortress for `plan`, degraded gracefully: its tier, then lower ones, then a plain
 /// ring, and none at all if even that does not fit around `obstacles` (pinned rocks and
-/// wells already placed in the quadrant, as `(center, radius)`). Pure: the same plan and
+/// wells already placed in the sector, as `(center, radius)`). Pure: the same plan and
 /// obstacles give the same layout.
 pub fn layout(plan: &Plan, obstacles: &[(Vec2, f32)]) -> Option<Layout> {
     let mut tier = i32::from(plan.tier.min(MAX_TIER));
@@ -737,7 +737,7 @@ mod tests {
         Plan {
             seed,
             territory: key,
-            quadrant: QuadrantId {
+            sector: SectorId {
                 x: (key % 17) as i32 - 8,
                 y: (key % 13) as i32 - 6,
             },

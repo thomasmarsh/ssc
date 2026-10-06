@@ -621,11 +621,11 @@ mod tests {
     #[test]
     fn generated_pairs_come_back_linked_and_tethers_stay_bounded() {
         let seed = 21;
-        let quadrant =
-            crate::simulation::tests::find_quadrant(seed, |s| s.iter().any(|x| x.link.is_some()));
+        let sector =
+            crate::simulation::tests::find_sector(seed, |s| s.iter().any(|x| x.link.is_some()));
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
-        game.teleport(quadrant.center());
+        game.teleport(sector.center());
         game.step(DT, Input::default());
         assert!(game.tethers.iter().any(|t| t.kind == TetherKind::Link));
         for _ in 0..3000 {

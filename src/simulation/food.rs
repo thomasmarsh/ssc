@@ -20,7 +20,7 @@ pub const FOOD_RADIUS: f32 = 4.5;
 pub const ROCK_NUTRITION: f32 = 1.2;
 /// A speck takes this long to swell to full size after budding.
 pub const GROW_TIME: f32 = 3.0;
-/// Most plankton alive at once, whatever the quadrants say.
+/// Most plankton alive at once, whatever the sectors say.
 pub const FOOD_BUDGET: usize = 900;
 
 /// Fraction of capacity drained per second at rest, and extra at full exertion. A forager
@@ -52,16 +52,16 @@ pub(super) const PREY_RANGE: f32 = 1500.0;
 /// Seconds between growth passes.
 const REGROW_PERIOD: f32 = 1.0;
 /// Specks per second one fully hungry grazer calls up near itself when none is in sight
-/// (scaled by its hunger, and by how little food is around it and in its quadrant).
+/// (scaled by its hunger, and by how little food is around it and in its sector).
 const DEMAND_RATE: f32 = 0.4;
-/// Most specks per second a quadrant of richness one can grow for hungry grazers: the
+/// Most specks per second a sector of richness one can grow for hungry grazers: the
 /// carrying capacity of its land (a grazer eats roughly 0.025 a second).
 const SUPPLY_RATE: f32 = 1.1;
 /// A grazer with this many specks in sight, plus `PLENTY_PER_MOUTH` more for every other
 /// hungry grazer sharing them, asks for no more.
 const PLENTY: f32 = 6.0;
 const PLENTY_PER_MOUTH: f32 = 1.0;
-/// Specks per second a calm quadrant seeds from nowhere, scaled by richness.
+/// Specks per second a calm sector seeds from nowhere, scaled by richness.
 const SEED_RATE: f32 = 0.03;
 /// Planetoid bloom: specks per second is `PLANET_BLOOM + radius * PLANET_BLOOM_PER_UNIT`,
 /// held to `PLANET_BASE_CAP + radius / PLANET_CAP_DIVISOR` specks within the aura.
@@ -203,13 +203,13 @@ impl Body {
 }
 
 impl Game {
-    /// Places a quadrant's starting plankton, never past its cap or the global budget.
-    pub(super) fn populate_food(&mut self, id: QuadrantId) {
+    /// Places a sector's starting plankton, never past its cap or the global budget.
+    pub(super) fn populate_food(&mut self, id: SectorId) {
         let params = world::latent(self.seed, id);
         let have = self
             .food
             .iter()
-            .filter(|f| QuadrantId::containing(f.position) == id)
+            .filter(|f| SectorId::containing(f.position) == id)
             .count();
         let wanted = world::food_cap(&params).saturating_sub(have);
         for Plankton { position, velocity } in world::plankton(self.seed, id, &params)
@@ -230,7 +230,7 @@ impl Game {
             .min(FOOD_BUDGET.saturating_sub(self.food.len()))
     }
 
-    /// Drifts plankton in active quadrants, and lets calm ones regrow.
+    /// Drifts plankton in active sectors, and lets calm ones regrow.
     pub(super) fn update_food(&mut self, dt: f32) {
         let bounds = self.active_bounds();
         let worlds: Vec<(Vec2, f32)> = self
@@ -240,7 +240,7 @@ impl Game {
             .map(|b| (b.position, b.radius + FOOD_RADIUS + 4.0))
             .collect();
         for food in self.food.iter_mut() {
-            if !self.active.contains(&QuadrantId::containing(food.position)) {
+            if !self.active.contains(&SectorId::containing(food.position)) {
                 continue;
             }
             food.velocity = Vec2::from_angle(food.turn * dt).rotate(food.velocity);
@@ -279,11 +279,11 @@ impl Game {
     /// One growth pass. Plankton answers need: every hungry grazer asks for specks near it,
     /// at a rate that rises with its hunger and falls to nothing once it has plenty in sight,
     /// so a population of N grazers is sustained wherever it roams. Hungry grazers lift a
-    /// quadrant's ceiling by half, never further, and the global budget always holds. A calm
-    /// quadrant also seeds specks from nowhere, very slowly, up to its normal cap, so food
+    /// sector's ceiling by half, never further, and the global budget always holds. A calm
+    /// sector also seeds specks from nowhere, very slowly, up to its normal cap, so food
     /// never fully dies out. Rocks and planetoids sprout specks of their own (`sprout_food`).
     pub(super) fn regrow_food(&mut self) {
-        let mut hungry: HashMap<QuadrantId, Vec<(Vec2, f32)>> = HashMap::new();
+        let mut hungry: HashMap<SectorId, Vec<(Vec2, f32)>> = HashMap::new();
         for body in self
             .bodies
             .iter()
@@ -291,7 +291,7 @@ impl Game {
             .filter(|b| b.grazes_plankton() && !b.provisioned)
         {
             hungry
-                .entry(QuadrantId::containing(body.position))
+                .entry(SectorId::containing(body.position))
                 .or_default()
                 .push((body.position, 1.0 - body.energy_fraction()));
         }
@@ -302,7 +302,7 @@ impl Game {
             let params = world::latent(self.seed, id);
             let cap = world::food_cap(&params);
             let center = id.center();
-            let extent = world::QUADRANT_SIZE / 2.0 - 150.0;
+            let extent = world::SECTOR_SIZE / 2.0 - 150.0;
             let inside = |at: Vec2| {
                 Vec2::new(
                     at.x.clamp(center.x - extent, center.x + extent),
@@ -312,7 +312,7 @@ impl Game {
             let mut here = self
                 .food
                 .iter()
-                .filter(|f| QuadrantId::containing(f.position) == id)
+                .filter(|f| SectorId::containing(f.position) == id)
                 .count();
             let grazers = hungry.get(&id).map_or(&[][..], |v| v.as_slice());
             let ceiling = if grazers.is_empty() {
@@ -320,7 +320,7 @@ impl Game {
             } else {
                 cap + cap / 2
             };
-            // A quadrant's land only yields so much a second, however many mouths ask.
+            // A sector's land only yields so much a second, however many mouths ask.
             let supply = SUPPLY_RATE * world::food_richness(&params) * REGROW_PERIOD;
             let mut allowance =
                 supply.floor() as usize + usize::from(self.growth.chance(supply.fract()));
@@ -366,14 +366,14 @@ impl Game {
                 b.active
                     && b.kind == BodyKind::Creature
                     && (b.alert || b.enraged || b.panic > 0.0)
-                    && QuadrantId::containing(b.position) == id
+                    && SectorId::containing(b.position) == id
             });
             let seed = SEED_RATE * world::food_richness(&params) * (1.0 - here as f32 / cap as f32);
             if calm && self.growth.chance(seed * REGROW_PERIOD) {
                 let neighbors: Vec<Vec2> = self
                     .food
                     .iter()
-                    .filter(|f| QuadrantId::containing(f.position) == id)
+                    .filter(|f| SectorId::containing(f.position) == id)
                     .map(|f| f.position)
                     .collect();
                 let spot = if neighbors.is_empty() || self.growth.chance(0.5) {
@@ -603,8 +603,8 @@ mod tests {
     use super::*;
     use crate::genome::{Genome, Species};
     use crate::simulation::tests::{DT, add, body, empty_game, set_player, spawn};
-    use crate::world::QuadrantParams;
     use crate::world::RockKind;
+    use crate::world::SectorParams;
 
     fn grazer() -> Species {
         Species::of(Genome {
@@ -712,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn calm_quadrants_seed_slowly_and_unquiet_ones_do_not() {
+    fn calm_sectors_seed_slowly_and_unquiet_ones_do_not() {
         let mut game = empty_game();
         let params = game.params();
         let cap = world::food_cap(&params);
@@ -730,7 +730,7 @@ mod tests {
             }
         }
         assert!(counts[19] > counts[0], "food seeds itself: {counts:?}");
-        // An alerted creature in the quadrant stops seeding.
+        // An alerted creature in the sector stops seeding.
         game.food.truncate(5);
         let id = spawn(&mut game, &prey(14.0, 8.0), Vec2::new(500.0, 500.0));
         game.bodies.iter_mut().find(|b| b.id == id).unwrap().alert = true;
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn hungry_grazers_summon_food_up_to_the_cap_and_no_further() {
-        let cap = world::food_cap(&QuadrantParams::HOME);
+        let cap = world::food_cap(&SectorParams::HOME);
         let run = |grazers: usize, energy: f32| {
             let mut game = empty_game();
             for k in 0..grazers {
@@ -867,37 +867,37 @@ mod tests {
 
     #[test]
     fn plankton_follows_the_latent_parameters() {
-        let lush = QuadrantParams {
+        let lush = SectorParams {
             swarm: 1.0,
             danger: 0.0,
             density: 1.0,
-            ..QuadrantParams::HOME
+            ..SectorParams::HOME
         };
-        let bare = QuadrantParams {
+        let bare = SectorParams {
             swarm: 0.0,
             danger: 1.0,
             density: 0.0,
-            ..QuadrantParams::HOME
+            ..SectorParams::HOME
         };
         assert!(world::food_cap(&lush) > 2 * world::food_cap(&bare));
-        let home = world::food_cap(&QuadrantParams::HOME);
+        let home = world::food_cap(&SectorParams::HOME);
         assert!((30..=80).contains(&home), "HOME is modest: {home}");
     }
 
     #[test]
     fn generated_plankton_is_deterministic_bounded_and_leaves_the_population_alone() {
-        let id = QuadrantId { x: 3, y: -2 };
+        let id = SectorId { x: 3, y: -2 };
         let params = world::latent(9, id);
         let a = world::plankton(9, id, &params);
         assert_eq!(a, world::plankton(9, id, &params));
         assert_ne!(a, world::plankton(10, id, &params));
         assert!(a.len() <= world::food_cap(&params));
-        let half = world::QUADRANT_SIZE / 2.0;
+        let half = world::SECTOR_SIZE / 2.0;
         assert!(
             a.iter()
                 .all(|p| (p.position - id.center()).abs().max_element() < half)
         );
-        // Food adds no spawns: a quadrant's creatures are unchanged by it.
+        // Food adds no spawns: a sector's creatures are unchanged by it.
         assert_eq!(world::generate(9, id), world::generate(9, id));
     }
 
@@ -1151,18 +1151,22 @@ mod tests {
     }
 
     #[test]
-    fn unloaded_quadrants_drop_their_plankton() {
+    fn unloaded_sectors_drop_their_plankton() {
         let mut game = Game::new(5);
         game.step(DT, Input::default());
-        assert!(game.food.iter().all(|f| {
-            QuadrantId::containing(f.position).chebyshev_distance(game.quadrant()) <= 2
-        }));
+        assert!(
+            game.food.iter().all(|f| {
+                SectorId::containing(f.position).chebyshev_distance(game.sector()) <= 2
+            })
+        );
         let home = game.food.len();
         assert!(home > 0);
-        game.teleport(Vec2::new(12.0 * world::QUADRANT_SIZE, 0.0));
+        game.teleport(Vec2::new(12.0 * world::SECTOR_SIZE, 0.0));
         game.step(DT, Input::default());
-        assert!(game.food.iter().all(|f| {
-            QuadrantId::containing(f.position).chebyshev_distance(game.quadrant()) <= 2
-        }));
+        assert!(
+            game.food.iter().all(|f| {
+                SectorId::containing(f.position).chebyshev_distance(game.sector()) <= 2
+            })
+        );
     }
 }

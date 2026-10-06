@@ -869,7 +869,7 @@ mod tests {
         let mut rooted_total = 0;
         for x in 1..24 {
             for y in -6..6 {
-                let id = QuadrantId { x, y };
+                let id = SectorId { x, y };
                 let a = world::generate(42, id);
                 assert_eq!(a, world::generate(42, id), "deterministic");
                 // A rooter is one body while it clings.
@@ -881,9 +881,9 @@ mod tests {
                     .map(|s| s.genome.parts())
                     .sum();
                 // Rooted residents only ever fill what the original population left of the
-                // quadrant's creature budget.
+                // sector's creature budget.
                 assert!(
-                    original + rooted <= world::QUADRANT_BODY_BUDGET.max(original),
+                    original + rooted <= world::SECTOR_BODY_BUDGET.max(original),
                     "budget: {original} + {rooted}"
                 );
                 for (i, s) in a.iter().enumerate() {
@@ -916,7 +916,7 @@ mod tests {
                         .filter_map(|s| s.species)
                         .map(|s| s.genome.parts())
                         .sum();
-                    if used < world::QUADRANT_BODY_BUDGET {
+                    if used < world::SECTOR_BODY_BUDGET {
                         assert!(n >= 1, "every planetoid with room has a community: {id:?}");
                     }
                 }
@@ -928,7 +928,7 @@ mod tests {
         );
         // HOME is untouched.
         assert!(
-            world::generate(42, QuadrantId::ORIGIN)
+            world::generate(42, SectorId::ORIGIN)
                 .iter()
                 .all(|s| s.rooted.is_none())
         );
@@ -936,9 +936,9 @@ mod tests {
 
     #[test]
     fn a_planetoid_community_loads_attached_and_the_world_stays_under_the_caps() {
-        // Find a nearby quadrant with a planetoid and go there.
+        // Find a nearby sector with a planetoid and go there.
         let (id, planet) = (1..30)
-            .flat_map(|x| (-5..5).map(move |y| QuadrantId { x, y }))
+            .flat_map(|x| (-5..5).map(move |y| SectorId { x, y }))
             .find_map(|id| {
                 let a = world::generate(42, id);
                 let p = a.iter().position(|s| s.rock == RockKind::Planetoid)?;

@@ -44,7 +44,7 @@ fn lifetime(item: &Item) -> f32 {
 }
 
 impl Game {
-    /// The threat of the quadrant the ship is in.
+    /// The threat of the sector the ship is in.
     pub fn threat(&self) -> f32 {
         world::threat(self.params().depth)
     }
@@ -173,10 +173,10 @@ impl Game {
     /// The stream a body's drop is rolled from: fixed by the world for generated spawns.
     fn loot_rng(&mut self, body: &Body) -> Rng {
         match body.origin {
-            Some((quadrant, index)) => {
+            Some((sector, index)) => {
                 let key = (u64::from(index) << 8 | u64::from(body.part))
                     .wrapping_mul(0x9E37_79B9_7F4A_7C15);
-                Rng::new(hash2(self.seed ^ LOOT_SALT ^ key, quadrant.x, quadrant.y))
+                Rng::new(hash2(self.seed ^ LOOT_SALT ^ key, sector.x, sector.y))
             }
             None => Rng::new(self.loot.next_u64()),
         }
@@ -185,7 +185,7 @@ impl Game {
     /// Rolls and scatters whatever a destroyed body leaves behind.
     pub(super) fn drop_loot(&mut self, body: &Body) {
         let mut rng = self.loot_rng(body);
-        let params = world::latent(self.seed, QuadrantId::containing(body.position));
+        let params = world::latent(self.seed, SectorId::containing(body.position));
         let mut drops: Vec<Item> = Vec::new();
         match body.kind {
             BodyKind::Creature => {
@@ -836,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn far_pickups_unload_with_their_quadrant() {
+    fn far_pickups_unload_with_their_sector() {
         let mut game = empty_game();
         game.drop_item(
             Vec2::new(500.0, 0.0),
@@ -845,7 +845,7 @@ mod tests {
         );
         set_player(
             &mut game,
-            Vec2::new(8.0 * world::QUADRANT_SIZE, 0.0),
+            Vec2::new(8.0 * world::SECTOR_SIZE, 0.0),
             Vec2::ZERO,
         );
         game.step(DT, Input::default());
@@ -854,11 +854,11 @@ mod tests {
 
     #[test]
     fn reaching_deeper_gives_better_loot_and_scales_enemies_up() {
-        let near = world::threat(world::latent(5, QuadrantId { x: 1, y: 0 }).depth);
-        let far = world::threat(world::latent(5, QuadrantId { x: 12, y: 0 }).depth);
+        let near = world::threat(world::latent(5, SectorId { x: 1, y: 0 }).depth);
+        let far = world::threat(world::latent(5, SectorId { x: 12, y: 0 }).depth);
         assert!(near < 1.5 && far > 3.5, "{near} {far}");
         for seed in 0..5 {
-            for s in world::generate(seed, QuadrantId { x: 12, y: 3 }) {
+            for s in world::generate(seed, SectorId { x: 12, y: 3 }) {
                 if s.kind == BodyKind::Creature {
                     assert!(s.phenotype.threat > 3.5);
                 }

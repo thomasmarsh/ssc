@@ -171,12 +171,12 @@ mod tests {
 
     const SEED: u64 = 0x535343;
 
-    /// A territory capital quadrant of the wanted fortress archetype.
+    /// A territory capital sector of the wanted fortress archetype.
     fn capital(seed: u64, wanted: Archetype) -> Territory {
         for x in -40..=40 {
             for y in -40..=40 {
-                if let Some(t) = world::territory(seed, QuadrantId { x, y })
-                    && t.capital == (QuadrantId { x, y })
+                if let Some(t) = world::territory(seed, SectorId { x, y })
+                    && t.capital == (SectorId { x, y })
                     && t.fort_archetype() == wanted
                 {
                     return t;
@@ -207,7 +207,7 @@ mod tests {
         for seed in [1_u64, 42, SEED] {
             for x in -30..=30 {
                 for y in -30..=30 {
-                    let id = QuadrantId { x, y };
+                    let id = SectorId { x, y };
                     let spawns = world::generate(seed, id);
                     assert_eq!(spawns, world::generate(seed, id));
                     let forts: Vec<_> = spawns.iter().filter(|s| s.fort.is_some()).collect();
@@ -239,7 +239,7 @@ mod tests {
         assert!(seen > 10, "fortresses should exist");
         for seed in [1_u64, 42, SEED] {
             assert!(
-                world::generate(seed, QuadrantId::ORIGIN)
+                world::generate(seed, SectorId::ORIGIN)
                     .iter()
                     .all(|s| s.fort.is_none())
             );
@@ -247,12 +247,12 @@ mod tests {
     }
 
     #[test]
-    fn every_generated_fortress_can_be_entered_around_what_the_quadrant_holds() {
+    fn every_generated_fortress_can_be_entered_around_what_the_sector_holds() {
         let mut checked = 0;
         for seed in [7_u64, 42, SEED] {
             for x in -36..=36 {
                 for y in -36..=36 {
-                    let id = QuadrantId { x, y };
+                    let id = SectorId { x, y };
                     let Some(t) = world::territory(seed, id) else {
                         continue;
                     };
@@ -623,7 +623,7 @@ mod tests {
     fn the_territory_threat_counts_fortification() {
         let t = capital(SEED, Archetype::Grid);
         let mut plain = t;
-        plain.capital = QuadrantId { x: 5, y: 4 };
+        plain.capital = SectorId { x: 5, y: 4 };
         assert!(t.fortification() >= 1.0);
         assert!(
             t.menace()

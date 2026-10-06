@@ -603,12 +603,12 @@ mod tests {
     #[test]
     fn generated_jointed_creatures_spawn_as_whole_chains() {
         let seed = 17;
-        let quadrant = crate::simulation::tests::find_quadrant(seed, |s| {
+        let sector = crate::simulation::tests::find_sector(seed, |s| {
             s.iter()
                 .any(|x| x.rooted.is_none() && x.species.is_some_and(|sp| sp.genome.is_jointed()))
         });
         // Rooted young are single bodies until they let go, so they are not counted.
-        let wanted: usize = world::generate(seed, quadrant)
+        let wanted: usize = world::generate(seed, sector)
             .iter()
             .filter(|s| s.rooted.is_none())
             .filter_map(|s| s.species)
@@ -617,7 +617,7 @@ mod tests {
             .sum();
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
-        game.teleport(quadrant.center());
+        game.teleport(sector.center());
         game.step(DT, Input::default());
         let found = game.bodies.iter().filter(|b| b.chain.is_some()).count();
         assert!(found >= wanted, "{found} < {wanted}");
