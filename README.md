@@ -36,6 +36,7 @@ cargo test --no-default-features
 - **P / Pause**: pause
 - **S**: toggle slow motion
 - **R**: toggle radar
+- **V**: cycle render style: classic (thin vector lines), glow (HDR bloom) and neon (wide anamorphic bloom). Styles only change presentation; see `RenderStyle` in `rust/main.rs`.
 - **C**: cycle camera: close (original), wide (2×), far (4×), whole quadrant, then close again. Whole-quadrant view centers on the current quadrant; the other views follow the ship. The view preference survives a restart.
 - **Enter**: restart
 - **F1**: toggle fullscreen

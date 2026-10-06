@@ -1,6 +1,10 @@
 //! Procedural vector art and HUD. Nothing here changes gameplay state.
 use crate::Session;
-use bevy::{camera::ScalingMode, prelude::*};
+use bevy::{
+    camera::{Hdr, ScalingMode},
+    core_pipeline::tonemapping::Tonemapping,
+    prelude::*,
+};
 use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{Body, BodyKind, GUARDIAN_COST, Game, Pickup, Shape, TetherKind};
@@ -39,6 +43,9 @@ pub fn setup(mut commands: Commands) {
             },
             ..OrthographicProjection::default_2d()
         }),
+        // HDR with no tonemapping keeps colors exact and lets bloom be toggled safely.
+        Hdr,
+        Tonemapping::None,
         Msaa::Sample4,
     ));
     commands.spawn((
@@ -245,12 +252,13 @@ pub fn update_hud(
     .collect::<String>();
     let (power, threat) = (game.power(), game.threat());
     let status = format!(
-        "QUADRANT ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
+        "QUADRANT ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}   STYLE {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
         quadrant.x,
         quadrant.y,
         game.active_enemies(),
         game.score,
         session.camera_view.label(),
+        session.style.label(),
         health,
         shield,
         game.lives,

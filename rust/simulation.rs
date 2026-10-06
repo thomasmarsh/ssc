@@ -420,6 +420,7 @@ impl Game {
                 body.angle += dt * 0.3;
             }
         }
+        self.contain_in_active_region();
         self.resolve_contacts();
         // After contacts, so an impact cannot leave a joint stretched past its limit.
         self.constrain_chains();
@@ -460,6 +461,49 @@ impl Game {
         for body in &mut self.bodies {
             body.active = body.kind == BodyKind::Player
                 || self.active.contains(&QuadrantId::containing(body.position));
+        }
+    }
+
+    /// Bodies freeze the moment they leave the active quadrants, which used to leave
+    /// wandering creatures lined up along the border. Turn them back at the edge instead.
+    fn contain_in_active_region(&mut self) {
+        let Some(first) = self.active.first() else {
+            return;
+        };
+        let (mut low, mut high) = (*first, *first);
+        for id in &self.active {
+            low = QuadrantId {
+                x: low.x.min(id.x),
+                y: low.y.min(id.y),
+            };
+            high = QuadrantId {
+                x: high.x.max(id.x),
+                y: high.y.max(id.y),
+            };
+        }
+        let margin = Vec2::splat(world::QUADRANT_SIZE / 2.0 - 1.0);
+        let min = low.center() - margin;
+        let max = high.center() + margin;
+        for body in self.bodies.iter_mut().filter(|b| b.active) {
+            if body.kind == BodyKind::Player || body.follower || is_fixed(body) {
+                continue;
+            }
+            let mut turned = false;
+            let p = &mut body.position;
+            let v = &mut body.velocity;
+            if p.x < min.x || p.x > max.x {
+                p.x = p.x.clamp(min.x, max.x);
+                v.x = if p.x == min.x { v.x.abs() } else { -v.x.abs() };
+                turned = true;
+            }
+            if p.y < min.y || p.y > max.y {
+                p.y = p.y.clamp(min.y, max.y);
+                v.y = if p.y == min.y { v.y.abs() } else { -v.y.abs() };
+                turned = true;
+            }
+            if turned && body.kind == BodyKind::Creature {
+                body.wander = body.velocity.y.atan2(body.velocity.x);
+            }
         }
     }
 
@@ -1414,6 +1458,24 @@ mod tests {
         }
         assert_eq!(body(&game, far).position, before);
         assert!(!body(&game, far).active);
+    }
+
+    #[test]
+    fn wanderers_turn_back_at_the_active_edge_instead_of_freezing() {
+        let mut game = empty_game();
+        let edge = world::QUADRANT_SIZE * 0.5;
+        let drifter = spawn(&mut game, &Species::bogey(), Vec2::new(edge - 500.0, 0.0));
+        {
+            let b = game.bodies.iter_mut().find(|b| b.id == drifter).unwrap();
+            b.velocity = Vec2::X * 200.0;
+            b.wander = 0.0;
+        }
+        for _ in 0..600 {
+            game.step(DT, Input::default());
+        }
+        let b = body(&game, drifter);
+        assert!(b.active && b.position.x < edge);
+        assert!(b.velocity.x < 0.0 || b.position.x < edge - 100.0);
     }
 
     #[test]

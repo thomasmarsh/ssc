@@ -3,6 +3,8 @@ mod presentation;
 use bevy::{
     app::AppExit,
     camera::ScalingMode,
+    gizmos::config::{DefaultGizmoConfigGroup, GizmoConfigStore},
+    post_process::bloom::Bloom,
     prelude::*,
     render::{
         RenderPlugin,
@@ -63,6 +65,59 @@ impl CameraView {
     }
 }
 
+/// How the scene is rendered. Gameplay never depends on it, so new looks can be added
+/// here (and in `apply_style`) without touching the simulation.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum RenderStyle {
+    /// Thin vector lines on a flat background.
+    #[default]
+    Classic,
+    /// HDR with soft bloom and heavier lines: a phosphor-lit vector display.
+    Glow,
+    /// Wide, hot bloom with a long anamorphic streak: neon gas tubes.
+    Neon,
+}
+
+impl RenderStyle {
+    fn next(self) -> Self {
+        match self {
+            Self::Classic => Self::Glow,
+            Self::Glow => Self::Neon,
+            Self::Neon => Self::Classic,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Classic => "CLASSIC",
+            Self::Glow => "GLOW",
+            Self::Neon => "NEON",
+        }
+    }
+
+    fn line_width(self) -> f32 {
+        match self {
+            Self::Classic => 2.0,
+            Self::Glow => 2.5,
+            Self::Neon => 3.5,
+        }
+    }
+
+    fn bloom(self) -> Option<Bloom> {
+        match self {
+            Self::Classic => None,
+            Self::Glow => Some(Bloom {
+                intensity: 0.45,
+                ..Bloom::NATURAL
+            }),
+            Self::Neon => Some(Bloom {
+                intensity: 0.7,
+                ..Bloom::ANAMORPHIC
+            }),
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct Session {
     pub game: Game,
@@ -71,6 +126,7 @@ pub struct Session {
     pub slow: bool,
     pub radar: bool,
     pub camera_view: CameraView,
+    pub style: RenderStyle,
 }
 
 impl Default for Session {
@@ -82,6 +138,7 @@ impl Default for Session {
             slow: false,
             radar: true,
             camera_view: CameraView::default(),
+            style: RenderStyle::default(),
         }
     }
 }
@@ -122,6 +179,7 @@ fn main() {
             (
                 controls,
                 camera,
+                apply_style,
                 presentation::draw,
                 presentation::update_hud,
                 smoke_run,
@@ -162,6 +220,9 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::KeyC) {
         session.camera_view = session.camera_view.next();
+    }
+    if keys.just_pressed(KeyCode::KeyV) {
+        session.style = session.style.next();
     }
     if keys.just_pressed(KeyCode::Enter) {
         session.game.reset();
@@ -233,6 +294,32 @@ fn camera(
     *previous_view = session.camera_view;
 }
 
+/// Reconfigures the camera and gizmos when the render style changes.
+fn apply_style(
+    session: Res<Session>,
+    mut commands: Commands,
+    camera: Single<Entity, With<Camera2d>>,
+    mut gizmos: ResMut<GizmoConfigStore>,
+    mut applied: Local<Option<RenderStyle>>,
+) {
+    if *applied == Some(session.style) {
+        return;
+    }
+    *applied = Some(session.style);
+    gizmos.config_mut::<DefaultGizmoConfigGroup>().0.line.width = session.style.line_width();
+    // Hdr and tonemapping stay on the camera for good: toggling them at runtime breaks the
+    // 2D render graph (InvalidViewQuery). Only the bloom pass comes and goes.
+    let mut camera = commands.entity(*camera);
+    match session.style.bloom() {
+        Some(bloom) => {
+            camera.insert(bloom);
+        }
+        None => {
+            camera.remove::<Bloom>();
+        }
+    }
+}
+
 /// Optional bounded renderer smoke run; no effect in regular play.
 #[derive(Resource, Default)]
 struct SmokeRun {
@@ -259,6 +346,13 @@ fn smoke_run(
             Ok("far") => CameraView::Far,
             Ok("quadrant") => CameraView::Quadrant,
             _ => session.camera_view,
+        };
+    }
+    if run.frames == 0 {
+        session.style = match std::env::var("SSC_STYLE").as_deref() {
+            Ok("glow") => RenderStyle::Glow,
+            Ok("neon") => RenderStyle::Neon,
+            _ => session.style,
         };
     }
     // Smoke runs can start somewhere interesting: SSC_TELEPORT="x,y" (invulnerable).
