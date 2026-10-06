@@ -802,6 +802,8 @@ pub enum Charged {
 pub struct Loadout {
     pub parts: Vec<Part>,
     pub arsenal: Arsenal,
+    /// Rig upgrades bought at the bench (mining, later parry and dash).
+    pub skills: super::skills::Skills,
 }
 
 impl Loadout {

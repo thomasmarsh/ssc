@@ -300,7 +300,7 @@ fn controls(
     }
     // Weapon profiles: ] next, [ previous, 1-9 pick directly; L and R shoulders on a pad.
     // B toggles the boosts (Y on a pad). Switching is instant and ignored while paused.
-    // With the bench open the same keys drive it instead: 1-5 pick a tab (d-pad left/right on
+    // With the bench open the same keys drive it instead: 1-6 pick a tab (d-pad left/right on
     // a pad), [ ] (shoulders) pick a target, F (A) does the thing, Q (X) takes from the stash.
     // E (Select) opens and closes the bench while landed.
     if !session.paused {
@@ -314,7 +314,7 @@ fn controls(
             if previous {
                 session.game.bench_move(-1);
             }
-            for (n, key) in DIGITS.into_iter().take(5).enumerate() {
+            for (n, key) in DIGITS.into_iter().take(6).enumerate() {
                 if keys.just_pressed(key) {
                     session.game.bench_tab(n);
                 }
@@ -549,7 +549,7 @@ fn smoke_run(
         arm_for_smoke(&mut session.game, grade);
     }
     // SSC_PAD=kit|deploy|land|bench: stage the pad states beside the nearest planetoid (a kit
-    // in hand, a pad down, landed, or landed with the bench open on tab SSC_BENCH=0..4).
+    // in hand, a pad down, landed, or landed with the bench open on tab SSC_BENCH=0..5).
     if run.frames == 4
         && let Ok(mode) = std::env::var("SSC_PAD")
     {
@@ -693,6 +693,7 @@ fn smoke_pads(game: &mut Game, mode: &str) {
         metal: 150.0,
         volatiles: 80.0,
         crystal: 60.0,
+        ..Default::default()
     };
     let Some(ship) = game.player().map(|p| p.position) else {
         return;

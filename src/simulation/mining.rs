@@ -12,24 +12,11 @@ use super::upgrades::Item;
 use super::*;
 use crate::world::hash2;
 
-/// How much of each material the hold carries.
-pub const CAP: f32 = 200.0;
-/// Beam reach, from the ship's center to the rock's surface. There is no aiming: the beam
-/// takes the nearest minable rock in range.
-pub const BEAM_RANGE: f32 = 260.0;
-/// Shield the beam draws per second, and the shield below which it will not fire.
-pub const BEAM_DRAIN: f32 = 4.0;
-pub const SHIELD_FLOOR: f32 = 6.0;
-/// A rock never shrinks below this radius: it crumbles there.
-pub const CRUMBLE_RADIUS: f32 = 14.0;
-/// Crystal is harvested in cycles of this many seconds, each worth `CYCLE_YIELD`; held past
-/// `BURST_AFTER` seconds it bursts.
-pub const CYCLE: f32 = 0.5;
-pub const CYCLE_YIELD: f32 = 4.0;
-pub const BURST_AFTER: f32 = 3.0 * CYCLE + 0.1;
-/// Ore a planetoid will give before it is spent (it never shrinks).
-pub const PLANETOID_BUDGET: f32 = 400.0;
-const PLANETOID_RATE: f32 = 0.3;
+use super::tuning as t;
+pub use super::tuning::{
+    BEAM_DRAIN, BURST_AFTER, CAP, CRUMBLE_RADIUS, CYCLE, CYCLE_YIELD, PLANETOID_BUDGET,
+    SHIELD_FLOOR,
+};
 /// Fraction of each material lost when the ship is destroyed.
 pub const DEATH_LOSS: f32 = 0.25;
 const MINE_SALT: u64 = 0x31A3_0000_0000_00FE;
@@ -79,6 +66,8 @@ pub struct Cargo {
     pub metal: f32,
     pub volatiles: f32,
     pub crystal: f32,
+    /// Hold space added to every material by cargo upgrades.
+    pub extra: f32,
 }
 
 impl Cargo {
@@ -100,7 +89,7 @@ impl Cargo {
 
     /// The most the hold carries of one material.
     pub fn cap(&self, _kind: Material) -> f32 {
-        CAP
+        CAP + self.extra
     }
 
     /// How much more of a material fits.
@@ -171,6 +160,7 @@ impl Cargo {
             metal: self.metal * f,
             volatiles: self.volatiles * f,
             crystal: self.crystal * f,
+            extra: 0.0,
         };
         self.metal -= lost.metal;
         self.volatiles -= lost.volatiles;
@@ -220,12 +210,12 @@ pub fn ore_for(rock: RockKind, radius: f32) -> f32 {
 /// What a rock gives and how fast (units per second of beam), except crystal's cycles.
 pub(super) fn rate(rock: RockKind) -> f32 {
     match rock {
-        RockKind::Ore => 1.0,
-        RockKind::Plain => 0.4,
-        RockKind::Ice => 1.0,
-        RockKind::Husk => 0.25,
+        RockKind::Ore => t::RATE_ORE,
+        RockKind::Plain => t::RATE_PLAIN,
+        RockKind::Ice => t::RATE_ICE,
+        RockKind::Husk => t::RATE_HUSK,
         RockKind::Crystal => CYCLE_YIELD / CYCLE,
-        RockKind::Planetoid => PLANETOID_RATE,
+        RockKind::Planetoid => t::RATE_PLANETOID,
         RockKind::Wall => 0.0,
     }
 }
@@ -345,7 +335,7 @@ impl Game {
 
     /// Splits a shot rock's remaining ore among its `pieces` fragments.
     pub(super) fn fragment_lode(rock: &Body, pieces: u32, radius: f32) -> Lode {
-        let share = rock.ore() / pieces.max(1) as f32;
+        let share = rock.ore() * t::SHOT_ORE_KEEP / pieces.max(1) as f32;
         Lode {
             ore: share,
             full: share,
@@ -367,6 +357,7 @@ impl Game {
             return 0.0;
         }
         let seed = self.seed;
+        let reach = self.loadout.skills.beam_range();
         let mut best: Option<(f32, usize)> = None;
         let mut blocked: Option<Material> = None;
         for (index, rock) in self.bodies.iter().enumerate() {
@@ -376,7 +367,7 @@ impl Game {
             let offset = rock.position - origin;
             let distance = offset.length();
             let gap = distance - rock.radius;
-            if gap > BEAM_RANGE {
+            if gap > reach {
                 continue;
             }
             let material = rock.material(seed);
@@ -432,15 +423,17 @@ impl Game {
         let rock = &self.bodies[index];
         let material = rock.material(seed);
         let kind = rock.rock;
+        let power = self.loadout.skills.beam_power();
+        let gain = self.loadout.skills.yield_mult();
         let units = if kind == RockKind::Crystal {
             let cycles = |t: f32| ((t + 1e-4) / CYCLE).floor().min(3.0);
-            (cycles(self.mine_clock) - cycles(before)) * CYCLE_YIELD
+            (cycles(self.mine_clock) - cycles(before)) * CYCLE_YIELD * power
         } else {
-            rate(kind) * dt
+            rate(kind) * power * dt
         };
         let burst = kind == RockKind::Crystal && self.mine_clock >= BURST_AFTER;
-        let mined = units.min(rock.ore()).min(self.cargo.room(material));
-        let stored = self.cargo.add(material, mined);
+        let mined = units.min(rock.ore()).min(self.cargo.room(material) / gain);
+        let stored = self.cargo.add(material, mined * gain);
         self.run.mined[material as usize] += stored;
 
         let body = &mut self.bodies[index];
@@ -537,6 +530,7 @@ impl Game {
 mod tests {
     use super::*;
     use crate::genome::{Genome, Species, Weapon};
+    use crate::simulation::skills;
     use crate::simulation::tests::{DT, add, body, empty_game, set_player};
 
     fn mine() -> Input {
@@ -578,10 +572,10 @@ mod tests {
     #[test]
     fn yields_follow_the_kind_of_rock() {
         for (kind, material, per_second) in [
-            (RockKind::Ore, Material::Metal, 1.0),
-            (RockKind::Plain, Material::Metal, 0.4),
-            (RockKind::Ice, Material::Volatiles, 1.0),
-            (RockKind::Husk, Material::Volatiles, 0.25),
+            (RockKind::Ore, Material::Metal, t::RATE_ORE),
+            (RockKind::Plain, Material::Metal, t::RATE_PLAIN),
+            (RockKind::Ice, Material::Volatiles, t::RATE_ICE),
+            (RockKind::Husk, Material::Volatiles, t::RATE_HUSK),
             // Two full cycles in two seconds would burst; one second is two cycles of 4.
             (RockKind::Crystal, Material::Crystal, 8.0),
         ] {
@@ -607,7 +601,7 @@ mod tests {
                 planet.pinned = true;
                 planet.origin = Some((SectorId { x: 3, y: -2 }, index));
                 hold(&mut game, 10.0);
-                assert!((game.cargo.total() - 3.0).abs() < 0.1);
+                assert!((game.cargo.total() - 10.0 * t::RATE_PLANETOID).abs() < 0.2);
                 Material::ALL
                     .into_iter()
                     .find(|&m| game.cargo.amount(m) > 1.0)
@@ -734,8 +728,9 @@ mod tests {
             .collect();
         assert!(shards.len() >= 2);
         let total: f32 = shards.iter().map(|s| s.ore()).sum();
-        assert!((total - before).abs() < 1e-3, "{total} vs {before}");
-        // And a pristine rock's fragments hold what it held, not more.
+        let kept = before * t::SHOT_ORE_KEEP;
+        assert!((total - kept).abs() < 1e-3, "{total} vs {kept}");
+        // And a pristine rock's fragments hold part of what it held, never more.
         let fresh = {
             let id = rock(&mut game, RockKind::Plain, Vec2::new(900.0, 0.0), 60.0);
             body(&game, id).clone()
@@ -748,7 +743,7 @@ mod tests {
             .filter(|b| b.kind == BodyKind::Asteroid)
             .map(|s| s.ore())
             .sum();
-        assert!((total - fresh.ore()).abs() < 1e-3);
+        assert!((total - fresh.ore() * t::SHOT_ORE_KEEP).abs() < 1e-3);
     }
 
     #[test]
@@ -963,7 +958,11 @@ mod tests {
             .count();
         assert!(creatures >= 3);
         // The shell is plain rock once it has hatched: no yield from the creature itself.
-        assert!(game.cargo.total() < 0.2);
+        assert!(
+            game.cargo.total() < t::RATE_PLAIN * 0.2 + 0.1,
+            "{}",
+            game.cargo.total()
+        );
     }
 
     #[test]
@@ -994,6 +993,7 @@ mod tests {
             metal: 100.0,
             volatiles: 40.0,
             crystal: 8.0,
+            ..Default::default()
         };
         game.bodies[0].health = 0.0;
         game.step(DT, Input::default());
@@ -1070,6 +1070,161 @@ mod tests {
                 .iter()
                 .any(|i| matches!(i, Item::Material(Material::Metal, a) if *a >= 20.0))
         );
+    }
+
+    fn shoot() -> Input {
+        Input {
+            fire: true,
+            aim_direction: Some(Vec2::X),
+            ..Default::default()
+        }
+    }
+
+    /// Seconds until `input` has taken the rock apart (gone, mined out or shot), or 300.
+    fn time_to_clear(kind: RockKind, radius: f32, input: Input) -> (f32, Game) {
+        let mut game = rig();
+        let id = rock(&mut game, kind, Vec2::new(130.0, 0.0), radius);
+        // Match what a spawned rock of this kind is made of.
+        let toughness = if kind == RockKind::Ore { 1.6 } else { 1.0 };
+        let hull = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+        hull.health *= toughness;
+        hull.max_health = hull.health;
+        for step in 0..60 * 300 {
+            game.step(DT, input);
+            if game.body(id).is_none() {
+                return (step as f32 * DT, game);
+            }
+        }
+        (300.0, game)
+    }
+
+    #[test]
+    fn mining_a_rock_beats_shooting_it_by_a_wide_margin() {
+        for (kind, radius) in [(RockKind::Ore, 40.0), (RockKind::Plain, 40.0)] {
+            let (mined, game) = time_to_clear(kind, radius, mine());
+            let metal = game.cargo.metal;
+            let (shot, shot_game) = time_to_clear(kind, radius, shoot());
+            assert!(mined < 12.0, "{kind:?} mines out in {mined}s");
+            assert!(
+                metal > 0.8 * ore_for(kind, radius),
+                "{kind:?} yields {metal}"
+            );
+            assert!(
+                shot > 3.0 * mined,
+                "{kind:?}: shooting {shot}s vs mining {mined}s"
+            );
+            // Shooting banks nothing: the ore lives on in fragments you still have to mine.
+            assert_eq!(shot_game.cargo.total(), 0.0);
+        }
+    }
+
+    #[test]
+    fn metal_is_attainable_in_the_first_minute() {
+        // One ordinary ore rock, a few seconds of beam: dozens of metal, a quarter of the hold.
+        let mut game = rig();
+        rock(&mut game, RockKind::Ore, Vec2::new(110.0, 0.0), 36.0);
+        hold(&mut game, 6.0);
+        assert!(game.cargo.metal > 35.0, "{}", game.cargo.metal);
+    }
+
+    #[test]
+    fn shot_rocks_surface_little() {
+        for chance in [
+            t::SALVAGE_CHANCE,
+            t::ICE_CHANCE,
+            t::ORE_CHANCE,
+            t::CRYSTAL_CHANCE,
+        ] {
+            assert!(chance <= 0.12);
+        }
+        const { assert!(t::SHOT_ORE_KEEP < 1.0) };
+    }
+
+    fn mined_in(skill: skills::Skill, level: u8, seconds: f32) -> Game {
+        let mut game = rig();
+        for _ in 0..level {
+            game.loadout.skills.raise(skill);
+        }
+        game.refresh_stats();
+        rock(&mut game, RockKind::Ore, Vec2::new(110.0, 0.0), 60.0);
+        hold(&mut game, seconds);
+        game
+    }
+
+    #[test]
+    fn beam_power_and_yield_raise_what_a_second_of_beam_pays() {
+        let base = mined_in(skills::Skill::BeamPower, 0, 2.0).cargo.metal;
+        let power = mined_in(skills::Skill::BeamPower, 4, 2.0).cargo.metal;
+        assert!((power / base - (1.0 + 4.0 * t::POWER_STEP)).abs() < 0.02);
+        let yields = mined_in(skills::Skill::Yield, 4, 2.0).cargo.metal;
+        assert!((yields / base - (1.0 + 4.0 * t::YIELD_STEP)).abs() < 0.02);
+        // Yield does not make the rock deplete faster: same ore spent.
+        let spent = |g: &Game| {
+            g.bodies
+                .iter()
+                .find(|b| b.kind == BodyKind::Asteroid)
+                .map(|b| b.lode.full - b.lode.ore)
+                .unwrap()
+        };
+        let a = mined_in(skills::Skill::Yield, 0, 2.0);
+        let b = mined_in(skills::Skill::Yield, 4, 2.0);
+        assert!((spent(&a) - spent(&b)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn beam_range_reaches_rocks_that_were_out_of_range() {
+        let far = Vec2::new(t::BEAM_RANGE + 40.0 + 60.0, 0.0);
+        let mut game = rig();
+        rock(&mut game, RockKind::Ore, far, 40.0);
+        hold(&mut game, 1.0);
+        assert_eq!(game.cargo.total(), 0.0, "out of base reach");
+        game.loadout.skills.raise(skills::Skill::BeamRange);
+        game.loadout.skills.raise(skills::Skill::BeamRange);
+        hold(&mut game, 1.0);
+        assert!(game.cargo.metal > 1.0, "{}", game.cargo.metal);
+    }
+
+    #[test]
+    fn cargo_upgrades_grow_the_hold_and_the_magnet_pulls_from_farther() {
+        let mut game = rig();
+        assert_eq!(game.cargo.cap(Material::Metal), CAP);
+        game.loadout.skills.raise(skills::Skill::Cargo);
+        game.loadout.skills.raise(skills::Skill::Cargo);
+        game.refresh_stats();
+        assert_eq!(game.cargo.cap(Material::Metal), CAP + 2.0 * t::CARGO_STEP);
+        game.cargo.metal = CAP;
+        assert!(game.cargo.room(Material::Metal) > 99.0);
+        // A pickup just past the base magnet is drawn in once the magnet is upgraded.
+        let reach = game.stats.magnet + 18.0 + 30.0;
+        let drift = |game: &mut Game| {
+            game.pickups.clear();
+            game.drop_item(Vec2::new(reach, 0.0), Vec2::ZERO, Item::Repair(1.0));
+            let at = game.pickups[0].position.x;
+            game.step(DT, Input::default());
+            at - game.pickups[0].position.x
+        };
+        let before = drift(&mut game);
+        game.loadout.skills.raise(skills::Skill::Magnet);
+        game.loadout.skills.raise(skills::Skill::Magnet);
+        let after = drift(&mut game);
+        assert!(after > before + 0.1, "{before} vs {after}");
+    }
+
+    #[test]
+    fn rig_upgrades_survive_death_and_clear_on_restart() {
+        let mut game = rig();
+        game.loadout.skills.raise(skills::Skill::BeamPower);
+        game.loadout.skills.raise(skills::Skill::Cargo);
+        game.refresh_stats();
+        game.cargo.metal = 100.0;
+        game.player_invulnerability = 0.0;
+        game.bodies[0].health = 0.0;
+        game.step(DT, Input::default());
+        assert_eq!(game.lives, 2);
+        assert_eq!(game.loadout.skills.level(skills::Skill::BeamPower), 1);
+        assert_eq!(game.cargo.cap(Material::Metal), CAP + t::CARGO_STEP);
+        game.reset();
+        assert_eq!(game.loadout.skills.level(skills::Skill::BeamPower), 0);
     }
 
     #[test]

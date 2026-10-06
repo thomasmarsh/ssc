@@ -271,7 +271,7 @@ impl Game {
             }
             if friendly {
                 if body.kind != BodyKind::Player {
-                    let dealt = damage(body, amount, 0.0);
+                    let dealt = damage(body, armored(body, amount, true), 0.0);
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
                     }

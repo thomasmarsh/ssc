@@ -24,7 +24,9 @@ mod pads;
 mod ping;
 mod root;
 pub mod run;
+pub mod skills;
 mod tether;
+pub mod tuning;
 pub mod upgrades;
 mod weapons;
 
@@ -1218,7 +1220,11 @@ impl Game {
                 let dealt = if !bullet.friendly && body.rock == RockKind::Wall {
                     0.0
                 } else {
-                    damage(body, bullet.damage, self.player_invulnerability)
+                    damage(
+                        body,
+                        armored(body, bullet.damage, bullet.friendly),
+                        self.player_invulnerability,
+                    )
                 };
                 if bullet.friendly && matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                     self.run.damage_dealt += dealt;
@@ -1321,7 +1327,7 @@ impl Game {
                     continue;
                 }
                 if friendly && body.kind != BodyKind::Player {
-                    let dealt = damage(body, amount, 0.0);
+                    let dealt = damage(body, armored(body, amount, true), 0.0);
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
                     }
@@ -1631,6 +1637,21 @@ fn mass_sign(body: &Body) -> f32 {
     }
 }
 
+/// What the ship's own weapons do to a body: free rocks shrug most of it off (the mining
+/// beam, not the gun, is how rock becomes material). Everything else, nest stones included,
+/// takes it in full.
+fn armored(body: &Body, amount: f32, friendly: bool) -> f32 {
+    if friendly
+        && body.kind == BodyKind::Asteroid
+        && !body.pinned
+        && !matches!(body.rock, RockKind::Planetoid | RockKind::Wall)
+    {
+        amount / tuning::ROCK_HULL_FACTOR
+    } else {
+        amount
+    }
+}
+
 fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) -> f32 {
     if body.kind == BodyKind::BlackHole
         || body.rock == RockKind::Planetoid
@@ -1665,7 +1686,11 @@ fn ram_contact(ship: &mut Body, other: &mut Body, closing_speed: f32, invulnerab
     ship.contact_cooldown = 0.65;
     if ship.rig.ram > 0 && other.kind != BodyKind::Player {
         let force = (0.6 + closing_speed.abs() / 400.0).min(1.6);
-        let dealt = damage(other, RAM_DAMAGE * f32::from(ship.rig.ram) * force, 0.0);
+        let dealt = damage(
+            other,
+            armored(other, RAM_DAMAGE * f32::from(ship.rig.ram) * force, true),
+            0.0,
+        );
         if matches!(other.kind, BodyKind::Creature | BodyKind::Base) {
             return dealt;
         }

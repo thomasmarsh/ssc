@@ -23,6 +23,7 @@
 //!   enemy suffers one seeded raid roll when its sector reloads.
 
 use super::arsenal::Profile;
+use super::skills::Skill;
 use super::upgrades::Rarity;
 use super::*;
 use crate::genome::ROOT_ARMED;
@@ -104,15 +105,17 @@ pub enum BenchTab {
     Upgrade,
     Arms,
     Stash,
+    Rig,
 }
 
 impl BenchTab {
-    pub const ALL: [BenchTab; 5] = [
+    pub const ALL: [BenchTab; 6] = [
         Self::Repair,
         Self::Reforge,
         Self::Upgrade,
         Self::Arms,
         Self::Stash,
+        Self::Rig,
     ];
 
     pub fn label(self) -> &'static str {
@@ -122,6 +125,7 @@ impl BenchTab {
             Self::Upgrade => "UPGRADE",
             Self::Arms => "ARMS",
             Self::Stash => "STASH",
+            Self::Rig => "RIG",
         }
     }
 }
@@ -1126,7 +1130,7 @@ impl Game {
         self.pad.bench.is_some() && self.pad.landed.is_some()
     }
 
-    /// Picks a tab (0 to 4).
+    /// Picks a tab (0 to 5).
     pub fn bench_tab(&mut self, n: usize) {
         if let (Some(bench), Some(&tab)) = (self.pad.bench.as_mut(), BenchTab::ALL.get(n)) {
             bench.tab = tab;
@@ -1152,6 +1156,7 @@ impl Game {
             BenchTab::Reforge | BenchTab::Upgrade => self.loadout.parts.len(),
             BenchTab::Arms => self.bench_profiles().len(),
             BenchTab::Stash => Material::ALL.len(),
+            BenchTab::Rig => Skill::ALL.len(),
         }
     }
 
@@ -1203,6 +1208,7 @@ impl Game {
             BenchTab::Upgrade => self.bench_upgrade(cursor),
             BenchTab::Arms => self.bench_level(cursor),
             BenchTab::Stash => self.bench_stash(cursor, true),
+            BenchTab::Rig => self.bench_skill(cursor),
         }
     }
 
@@ -1313,6 +1319,29 @@ impl Game {
             self.refresh_stats();
             self.bench_done(
                 format!("{}  LEVEL {level} -> {to}", profile.label()),
+                Rarity::Rare,
+            );
+        }
+    }
+
+    /// Buys the next level of a rig upgrade. Levels only go up.
+    fn bench_skill(&mut self, index: usize) {
+        let Some(&skill) = Skill::ALL.get(index) else {
+            return;
+        };
+        let level = self.loadout.skills.level(skill);
+        let Some(price) = skill.price(level) else {
+            self.bench_failed(format!("{} IS AT MAX", skill.label()));
+            return;
+        };
+        if !self.cargo.spend(&price) {
+            self.bench_failed(format!("{} NEEDS {}", skill.label(), price_text(&price)));
+            return;
+        }
+        if let Some(to) = self.loadout.skills.raise(skill) {
+            self.refresh_stats();
+            self.bench_done(
+                format!("{}  LEVEL {level} -> {to}", skill.label()),
                 Rarity::Rare,
             );
         }
@@ -1452,6 +1481,31 @@ impl Game {
                 }
                 footer = "F raises the weapon one level".into();
             }
+            BenchTab::Rig => {
+                for (i, skill) in Skill::ALL.into_iter().enumerate() {
+                    let level = self.loadout.skills.level(skill);
+                    let (text, ok) = match skill.price(level) {
+                        Some(price) => (
+                            format!(
+                                "{}  LEVEL {level}/{} > {}  {}  {}",
+                                skill.label(),
+                                skill.max_level(),
+                                level + 1,
+                                skill.summary(),
+                                price_text(&price)
+                            ),
+                            can(&price),
+                        ),
+                        None => (format!("{}  LEVEL {level}  MAX", skill.label()), false),
+                    };
+                    rows.push(BenchRow {
+                        text,
+                        selected: i == bench.cursor,
+                        ok,
+                    });
+                }
+                footer = "F buys the next level; upgrades are kept for the run".into();
+            }
             BenchTab::Stash => {
                 let stash = self.landed_pad().map(|p| p.stash).unwrap_or_default();
                 for (i, kind) in Material::ALL.into_iter().enumerate() {
@@ -1500,6 +1554,7 @@ mod tests {
             metal,
             volatiles,
             crystal,
+            ..Default::default()
         };
     }
 
@@ -2168,6 +2223,50 @@ mod tests {
         assert_eq!(game.loadout.arsenal.level(Profile::Spread), cap, "capped");
         assert_eq!(game.cargo.metal, 200.0, "no charge at the cap");
         assert!(level_price(Profile::Stock, 1).is_none());
+    }
+
+    #[test]
+    fn the_rig_tab_sells_mining_upgrades_for_materials_and_never_takes_them_back() {
+        let mut game = empty_game();
+        world(&mut game, 7);
+        landed(&mut game);
+        game.pad.cover_broken = COVER_BREAK;
+        bench(&mut game, 5);
+        let panel = game.bench_panel().unwrap();
+        assert_eq!(panel.tab, BenchTab::Rig);
+        assert_eq!(panel.rows.len(), Skill::ALL.len());
+        // Short of the price: nothing bought, nothing spent.
+        stock(&mut game, 5.0, 0.0, 0.0);
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::BeamPower), 0);
+        assert_eq!(game.cargo.metal, 5.0);
+        // Cursor on the cargo hold: buying it grows the hold at once.
+        for _ in 0..Skill::Cargo.index() {
+            game.bench_move(1);
+        }
+        stock(&mut game, 100.0, 50.0, 0.0);
+        let price = Skill::Cargo.price(0).unwrap();
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::Cargo), 1);
+        assert_eq!(game.cargo.metal, 100.0 - price[0].1);
+        assert!(game.cargo.cap(Material::Metal) > super::mining::CAP);
+        // Climb to the top, paying more each time, then no more.
+        let mut last = 0.0;
+        for level in 1..Skill::Cargo.max_level() {
+            stock(&mut game, 1000.0, 1000.0, 0.0);
+            game.bench_confirm();
+            assert_eq!(game.loadout.skills.level(Skill::Cargo), level + 1);
+            let spent = 2000.0 - game.cargo.metal - game.cargo.volatiles;
+            assert!(spent > last);
+            last = spent;
+        }
+        stock(&mut game, 1000.0, 1000.0, 0.0);
+        game.bench_confirm();
+        assert_eq!(
+            game.loadout.skills.level(Skill::Cargo),
+            Skill::Cargo.max_level()
+        );
+        assert_eq!(game.cargo.metal, 1000.0, "no charge at the cap");
     }
 
     #[test]

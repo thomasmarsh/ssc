@@ -8,6 +8,7 @@ use bevy::{
 use ssc::fortress::{Archetype, FortPart, PartKind, SEG_SPACING};
 use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::arsenal::Profile;
+use ssc::simulation::skills::Skill;
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
     Beam, Body, BodyKind, Cache, EchoKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, GuideKind,
@@ -60,8 +61,16 @@ const FEED_LINES: usize = 5;
 const BENCH_LINES: usize = 11;
 /// Panel rows: five slots, a header and up to eleven profiles, a header and up to nine
 /// boosts, a header and three materials. Rows with nothing to say are empty (no height).
-const RIG_LINES: usize =
-    Slot::ALL.len() + 1 + Profile::ALL.len() + 1 + 9 + 1 + Material::ALL.len() + 2;
+const RIG_LINES: usize = Slot::ALL.len()
+    + 1
+    + Profile::ALL.len()
+    + 1
+    + 9
+    + 1
+    + Skill::ALL.len()
+    + 1
+    + Material::ALL.len()
+    + 2;
 
 pub fn setup(mut commands: Commands) {
     commands.spawn((
@@ -101,7 +110,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-5 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-6 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -449,6 +458,14 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             }
             None => (String::new(), MUTED),
         });
+    }
+    lines.push(("\nRIG   bench tab 6\n".into(), CYAN));
+    for skill in Skill::ALL {
+        let level = game.loadout.skills.level(skill);
+        lines.push((
+            format!("{:<11}{}/{}\n", skill.label(), level, skill.max_level()),
+            if level > 0 { OWNED } else { MUTED },
+        ));
     }
     lines.push(("\nCARGO\n".into(), CYAN));
     for kind in Material::ALL {

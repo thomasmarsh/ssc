@@ -59,6 +59,7 @@ impl Game {
     pub(super) fn refresh_stats(&mut self) {
         let stats = self.loadout.stats();
         self.stats = stats;
+        self.cargo.extra = self.loadout.skills.cargo_bonus();
         let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
             return;
         };
@@ -220,33 +221,34 @@ impl Game {
                     // Wall segments are pinned and never get here; they leave nothing.
                     RockKind::Wall => {}
                     RockKind::Plain | RockKind::Husk | RockKind::Planetoid => {
-                        if rng.chance(0.07) {
+                        if rng.chance(tuning::SALVAGE_CHANCE) {
                             drops.push(upgrades::roll_salvage(&mut rng, &source));
                         }
                     }
                     // Ice melts into shield charge.
                     RockKind::Ice => {
-                        if rng.chance(0.22) {
+                        if rng.chance(tuning::ICE_CHANCE) {
                             drops.push(Item::Recharge(25.0 + 15.0 * grade.sqrt()));
-                            drops.push(Item::Material(Material::Volatiles, 5.0));
+                            drops.push(Item::Material(Material::Volatiles, tuning::ICE_VOLATILES));
                         }
                     }
                     // Ore is mostly scrap, now and then a salvaged part of heavy gear.
                     RockKind::Ore => {
-                        if rng.chance(0.2) {
+                        if rng.chance(tuning::ORE_CHANCE) {
                             if rng.chance(0.2) {
                                 source.affinity[Slot::Plating.index()] += 3.0;
                                 source.affinity[Slot::Engine.index()] += 2.0;
                                 drops.push(Item::Part(upgrades::roll_part(&mut rng, &source)));
                             } else {
-                                let amount = ((45.0 * grade) as u32 / 5 * 5).max(5) as f32;
+                                let amount =
+                                    ((tuning::ORE_SCRAP * grade) as u32 / 5 * 5).max(5) as f32;
                                 drops.push(Item::Material(Material::Metal, amount));
                             }
                         }
                     }
                     // Crystal holds charge: a surge is often found in the shards.
                     RockKind::Crystal => {
-                        if rng.chance(0.45) {
+                        if rng.chance(tuning::CRYSTAL_CHANCE) {
                             drops.push(Item::Surge(upgrades::roll_surge(&mut rng, &source)));
                         }
                     }
@@ -354,7 +356,7 @@ impl Game {
     /// Pickups drift and slow, are drawn in by the ship's magnet, and are taken on contact.
     pub(super) fn update_pickups(&mut self, dt: f32) {
         let ship = self.player().map(|p| (p.position, p.radius));
-        let magnet = self.stats.magnet;
+        let magnet = self.stats.magnet + self.loadout.skills.magnet_bonus();
         let mut taken = Vec::new();
         for (index, pickup) in self.pickups.iter_mut().enumerate() {
             pickup.age += dt;
@@ -701,7 +703,8 @@ mod tests {
         set_player(&mut game, Vec2::ZERO, Vec2::new(300.0, 0.0));
         let before = body(&game, rock).health;
         game.step(DT, fire());
-        assert!(body(&game, rock).health < before - 10.0);
+        // Free rocks shrug off the ship's weapons, rams included (see `tuning`).
+        assert!(body(&game, rock).health < before - 0.5);
     }
 
     #[test]
