@@ -24,6 +24,21 @@ pub const CRYSTAL_CHANCE: f32 = 0.12;
 pub const ORE_SCRAP: f32 = 15.0;
 pub const ICE_VOLATILES: f32 = 3.0;
 
+// ---- kinetic impacts -----------------------------------------------------------------------
+
+/// Bodies striking each other hurt both by their reduced mass and the speed they close at (see
+/// `impact`). Below `IMPACT_MIN_SPEED` (normal flight, schooling, resting contact) nothing is
+/// dealt, which also keeps separation jitter harmless; speeds are clamped at
+/// `IMPACT_SPEED_CAP`. Damage is `IMPACT_SCALE * 1/2 * reduced mass * (speed - min)^2`, capped
+/// at `IMPACT_CAP`. The ship takes `IMPACT_PLAYER_SHARE` of it. A pair that has just struck
+/// cannot strike again for `IMPACT_PAIR_COOLDOWN` seconds.
+pub const IMPACT_MIN_SPEED: f32 = 300.0;
+pub const IMPACT_SPEED_CAP: f32 = 1400.0;
+pub const IMPACT_SCALE: f32 = 3.0e-5;
+pub const IMPACT_CAP: f32 = 160.0;
+pub const IMPACT_PLAYER_SHARE: f32 = 0.5;
+pub const IMPACT_PAIR_COOLDOWN: f32 = 0.35;
+
 // ---- the mining beam -----------------------------------------------------------------------
 
 /// How much of each material the hold carries before cargo upgrades.

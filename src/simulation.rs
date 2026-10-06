@@ -19,6 +19,7 @@ mod food;
 mod fortress;
 mod growth;
 mod guide;
+mod impact;
 mod loot;
 mod mining;
 mod pads;
@@ -70,8 +71,6 @@ const MAX_BODIES: usize = 1500;
 const PLANETOID_SPIN: f32 = 0.02;
 const SHARD_FACTOR: f32 = 0.62;
 const MIN_SHARD_RADIUS: f32 = 13.0;
-/// Rocks colliding faster than this (closing speed) take damage from the impact.
-const ROCK_SHATTER_SPEED: f32 = 300.0;
 /// Creatures bred by a base wander no farther than this from it before turning back.
 const HOME_LEASH: f32 = 800.0;
 /// Enemies this close to a destroyed base lose their bearings for a while.
@@ -353,6 +352,9 @@ pub struct Game {
     /// The parry shield's timers; its rolls have their own stream.
     parry: parry::ParryState,
     dash: dash::DashState,
+    /// Pairs of bodies that struck recently and the time until they may strike again; see
+    /// `impact`.
+    impact_gap: HashMap<(u64, u64), f32>,
     parry_rng: Rng,
     /// The sonar ring, its echoes and their cache; see `ping`.
     ping: ping::PingState,
@@ -444,6 +446,7 @@ impl Game {
             pad: PadState::default(),
             parry: parry::ParryState::default(),
             dash: dash::DashState::default(),
+            impact_gap: HashMap::new(),
             parry_rng: Rng::new(seed ^ parry::PARRY_SALT),
             ping: ping::PingState::default(),
             beam: None,
@@ -1053,6 +1056,8 @@ impl Game {
         // A dashing ship staggers what it touches; a flinger's touch is a graze.
         let dashing = self.dashing();
         let mut grazes = Vec::new();
+        self.prune_impacts();
+        let mut struck = Vec::new();
         for i in 0..self.bodies.len() {
             let (before, after) = self.bodies.split_at_mut(i + 1);
             let a = &mut before[i];
@@ -1128,7 +1133,8 @@ impl Game {
                         let speed = ((FLING_SPEED + relative * 0.8).min(FLING_MAX_SPEED)
                             * strength)
                             .min(FLING_HARD_CAP);
-                        victim.velocity = direction * speed;
+                        let thrown = direction * speed;
+                        victim.velocity = thrown;
                         if victim.kind == BodyKind::Asteroid {
                             damage(victim, 40.0 * strength, 0.0);
                         }
@@ -1140,10 +1146,18 @@ impl Game {
                     let impulse = normal * (-1.7 * closing_speed / inverse_sum);
                     a.velocity -= impulse * inverse_a;
                     b.velocity += impulse * inverse_b;
-                    if a.kind == BodyKind::Asteroid && b.kind == BodyKind::Asteroid {
-                        let hit = (-closing_speed - ROCK_SHATTER_SPEED).max(0.0) * 0.35;
-                        damage(a, hit, 0.0);
-                        damage(b, hit, 0.0);
+                    // Fast strikes hurt both by speed and mass; a pair just struck is quiet.
+                    let key = impact::pair_key(a.id, b.id);
+                    let raw = if self.impact_gap.contains_key(&key) {
+                        0.0
+                    } else {
+                        impact::kinetic_damage(-closing_speed, inverse_a, inverse_b)
+                    };
+                    if raw > 0.0 {
+                        self.impact_gap
+                            .insert(key, self.time + tuning::IMPACT_PAIR_COOLDOWN);
+                        rammed += impact::strike(a, b, raw, invulnerability);
+                        struck.push((a.position.lerp(b.position, 0.5), raw));
                     }
                 }
                 if a.kind == BodyKind::Player && a.contact_cooldown <= 0.0 {
@@ -1157,6 +1171,10 @@ impl Game {
         self.run.damage_dealt += rammed;
         for at in grazes {
             self.dash_graze(at);
+        }
+        for (at, raw) in struck {
+            self.effect(at, 14.0 + raw * 0.25, 0.25, EffectKind::Impact);
+            self.cue(Cue::Impact { at });
         }
         for position in flings {
             self.effect(position, 30.0, 0.3, EffectKind::Impact);
