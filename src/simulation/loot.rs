@@ -196,7 +196,7 @@ impl Game {
                 let grade = world::threat(params.depth);
                 let mut source = Source::plain(grade, params);
                 match body.rock {
-                    RockKind::Plain | RockKind::Husk => {
+                    RockKind::Plain | RockKind::Husk | RockKind::Planetoid => {
                         if rng.chance(0.07) {
                             drops.push(upgrades::roll_salvage(&mut rng, &source));
                         }

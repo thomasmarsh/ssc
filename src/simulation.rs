@@ -5,20 +5,28 @@
 //! player's active region are generated on demand and simulated; bodies elsewhere are
 //! frozen, and quadrants far from the player are dropped and regenerated on return.
 
+mod brain;
 mod chain;
 mod creature;
 mod cues;
 mod ecology;
+mod food;
+mod growth;
 mod loot;
+mod root;
 mod tether;
 pub mod upgrades;
 mod weapons;
 
+pub use brain::Brain;
 pub use chain::{Chain, Part};
 pub use cues::Cue;
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
+pub use food::{FOOD_RADIUS, Food, fertility};
+pub use growth::Egg;
 pub use loot::{Notice, Pickup};
-pub use tether::{Tether, TetherKind};
+pub use root::{Root, STAND as ROOT_STAND};
+pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 use upgrades::{Item, Loadout, Stats};
 pub use weapons::{Mine, Shape};
 
@@ -34,6 +42,8 @@ const MAX_EFFECTS: usize = 128;
 /// Hard ceiling on loaded bodies; shattering and breeding stop short of it.
 const MAX_BODIES: usize = 1500;
 /// A destroyed rock splits into pieces this much smaller, unless they would be tiny.
+/// Radians per second a planetoid turns.
+const PLANETOID_SPIN: f32 = 0.02;
 const SHARD_FACTOR: f32 = 0.62;
 const MIN_SHARD_RADIUS: f32 = 13.0;
 /// Rocks colliding faster than this (closing speed) take damage from the impact.
@@ -170,6 +180,34 @@ pub struct Body {
     /// Asteroids: what the rock is made of, and what lives in a husk.
     pub rock: RockKind,
     pub den: Option<(Species, u8)>,
+    /// Creatures: stored energy, up to `max_energy` (which scales with size). It drains with
+    /// time and movement and is restored by eating; see `food`.
+    pub energy: f32,
+    pub max_energy: f32,
+    /// Creatures: fed by the base that bred them, so they never tire or starve.
+    pub provisioned: bool,
+    /// Eaten or starved: leaves without score, loot or a fanfare.
+    pub consumed: bool,
+    /// Juveniles: the genome this body grows into (`genome` is the juvenile's until then),
+    /// seconds since birth and progress toward maturity in [0, 1]. See `growth`.
+    pub adult: Option<Genome>,
+    pub age: f32,
+    pub growth: f32,
+    /// Creatures: how many births removed from its founding species it is.
+    pub generation: u16,
+    /// Learners only: the net that predicts where the ship will be. Boxed so a body that does
+    /// not learn pays one pointer; see `brain`.
+    pub brain: Option<Box<Brain>>,
+    /// Creatures: the host rock or planetoid this one clings to, if any; see `root`.
+    pub root: Option<Root>,
+    /// Seconds before a creature that let go of a host may cling again.
+    unrooted: f32,
+    /// Seconds until an adult may next try to reproduce.
+    breed_clock: f32,
+    /// Seconds spent with no energy at all.
+    starving: f32,
+    /// Seconds until a predator may bite again.
+    bite_clock: f32,
     wander: f32,
     /// Rotation of a spiral emitter.
     spin: f32,
@@ -238,6 +276,12 @@ pub enum EffectKind {
     Impact,
     Explosion,
     Respawn,
+    /// A birth or hatching.
+    Birth,
+    /// A juvenile coming of age.
+    Mature,
+    /// Two mates pairing, a faint pulse at each.
+    Pair,
 }
 
 #[derive(Clone, Debug)]
@@ -272,10 +316,23 @@ pub struct Game {
     pub player_invulnerability: f32,
     /// Last known player position; anchors the active region while the player is dead.
     pub focus: Vec2,
+    /// Drifting plankton: food for grazers. Not bodies, so it never collides or counts as one.
+    pub food: Vec<Food>,
+    /// Eggs waiting to hatch. Not bodies: they drift, can be shot, unload with their
+    /// quadrant and count against the body budget.
+    pub eggs: Vec<Egg>,
     seed: u64,
     rng: Rng,
     /// Loot has its own stream, so drops never disturb the gameplay one.
     loot: Rng,
+    /// Individual variation of creatures born during play (base broods, hatchlings, litters).
+    variation: Rng,
+    /// Where new plankton buds, on its own stream.
+    growth: Rng,
+    /// Reproduction (timing, spacing, rare mode flips) has its own stream too.
+    breeding: Rng,
+    /// Seconds until the next plankton regrowth pass.
+    food_clock: f32,
     /// Cooldowns of the ship's missile pods, mine layer and nova pulse.
     arm_clock: [f32; 3],
     next_id: u64,
@@ -307,9 +364,15 @@ impl Game {
             time: 0.0,
             player_invulnerability: 2.0,
             focus: Vec2::ZERO,
+            food: Vec::new(),
+            eggs: Vec::new(),
             seed,
             rng: Rng::new(seed),
             loot: Rng::new(seed ^ loot::LOOT_SALT),
+            variation: Rng::new(seed ^ crate::genome::INDIVIDUAL_SALT),
+            growth: Rng::new(seed ^ world::FOOD_SALT),
+            breeding: Rng::new(seed ^ growth::BREED_SALT),
+            food_clock: 0.0,
             next_id: 1,
             next_chain: 1,
             fallen: HashMap::new(),
@@ -400,19 +463,31 @@ impl Game {
         self.control_player(dt, input);
         self.update_arms(dt, input.fire);
         if self.stats.shears {
-            // Shears cut a cord the moment it latches.
+            // Shears cut a weak cord the moment it latches and wear a stout one through.
             for tether in self
                 .tethers
                 .iter_mut()
                 .filter(|t| t.kind == TetherKind::Latch)
             {
-                tether.health = 0.0;
+                if tether.max_health <= tether::SHEARS_INSTANT {
+                    tether.health = 0.0;
+                } else if tether.attached() {
+                    tether.health -= tether::SHEARS_RATE * dt;
+                }
             }
         }
         self.steer_creatures(dt);
+        self.update_roots(dt);
         self.update_bases(dt);
         self.tend_broods(dt);
         self.graze();
+        self.update_food(dt);
+        self.update_metabolism(dt);
+        self.graze_plankton();
+        self.hunt(dt);
+        self.update_growth(dt);
+        self.update_reproduction(dt);
+        self.update_eggs(dt);
         self.update_tethers(dt);
         self.update_chains(dt);
         self.fire_weapons();
@@ -429,10 +504,15 @@ impl Game {
                     body.velocity *= (120.0 + (speed - 120.0) * (-0.5 * dt).exp()) / speed;
                 }
                 body.angle += dt * 0.3;
+            } else if body.rock == RockKind::Planetoid {
+                body.angle += dt * PLANETOID_SPIN;
             }
         }
+        // Rooted life rides its host, and again after contacts have shoved the host.
+        self.sync_roots();
         self.contain_in_active_region();
         self.resolve_contacts();
+        self.sync_roots();
         // After contacts, so an impact cannot leave a joint stretched past its limit.
         self.constrain_chains();
         self.move_bullets(dt);
@@ -454,6 +534,7 @@ impl Game {
         for id in self.active.clone() {
             if self.loaded.insert(id) {
                 self.populate(id);
+                self.populate_food(id);
             }
         }
         self.loaded
@@ -465,6 +546,14 @@ impl Game {
             QuadrantId::containing(p.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
         });
         let loaded = &self.loaded;
+        self.food.retain(|f| {
+            let at = QuadrantId::containing(f.position);
+            at.chebyshev_distance(home) <= UNLOAD_DISTANCE || loaded.contains(&at)
+        });
+        self.eggs.retain(|e| {
+            let at = QuadrantId::containing(e.position);
+            at.chebyshev_distance(home) <= UNLOAD_DISTANCE || loaded.contains(&at)
+        });
         self.bodies.retain(|body| {
             body.kind == BodyKind::Player
                 || QuadrantId::containing(body.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
@@ -479,23 +568,9 @@ impl Game {
     /// Bodies freeze the moment they leave the active quadrants, which used to leave
     /// wandering creatures lined up along the border. Turn them back at the edge instead.
     fn contain_in_active_region(&mut self) {
-        let Some(first) = self.active.first() else {
+        let Some((min, max)) = self.active_bounds() else {
             return;
         };
-        let (mut low, mut high) = (*first, *first);
-        for id in &self.active {
-            low = QuadrantId {
-                x: low.x.min(id.x),
-                y: low.y.min(id.y),
-            };
-            high = QuadrantId {
-                x: high.x.max(id.x),
-                y: high.y.max(id.y),
-            };
-        }
-        let margin = Vec2::splat(world::QUADRANT_SIZE / 2.0 - 1.0);
-        let min = low.center() - margin;
-        let max = high.center() + margin;
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if body.kind == BodyKind::Player || body.follower || is_fixed(body) {
                 continue;
@@ -519,6 +594,24 @@ impl Game {
         }
     }
 
+    /// Corners of the rectangle the active quadrants cover.
+    fn active_bounds(&self) -> Option<(Vec2, Vec2)> {
+        let first = self.active.first()?;
+        let (mut low, mut high) = (*first, *first);
+        for id in &self.active {
+            low = QuadrantId {
+                x: low.x.min(id.x),
+                y: low.y.min(id.y),
+            };
+            high = QuadrantId {
+                x: high.x.max(id.x),
+                y: high.y.max(id.y),
+            };
+        }
+        let margin = Vec2::splat(world::QUADRANT_SIZE / 2.0 - 1.0);
+        Some((low.center() - margin, high.center() + margin))
+    }
+
     fn populate(&mut self, id: QuadrantId) {
         let fallen = self.fallen.get(&id).cloned().unwrap_or_default();
         // A spawn whose creature wandered off but is still loaded must not be duplicated.
@@ -533,7 +626,23 @@ impl Game {
                 continue;
             }
             let mut body = match &spawn.species {
-                Some(species) => self.make_creature(species, spawn.position),
+                Some(species) => match spawn.rooted.filter(|r| r.growth < 1.0) {
+                    // A young rooter clings from the start, partway grown.
+                    Some(rooting) => {
+                        let mut young = self.newborn(
+                            species.lineage,
+                            species.generation,
+                            spawn.phenotype,
+                            species.genome,
+                            None,
+                            spawn.position,
+                        );
+                        young.growth = rooting.growth;
+                        young.shape_to_growth();
+                        young
+                    }
+                    None => self.make_creature(species, spawn.position),
+                },
                 None => self.make_body(spawn.kind, spawn.position),
             };
             if let Some(radius) = spawn.radius {
@@ -551,6 +660,8 @@ impl Game {
                     RockKind::Ore => (1.6, 2.2),
                     RockKind::Crystal => (0.55, 1.0),
                     RockKind::Husk => (1.5, 1.2),
+                    // Heavy enough to read as fixed; it never takes damage anyway.
+                    RockKind::Planetoid => (1.0, 6.0),
                 };
                 body.health *= toughness;
                 body.max_health = body.health;
@@ -575,6 +686,11 @@ impl Game {
                     || body.genome.nest == crate::genome::Nest::Base)
             {
                 body.home = Some(spawn.position);
+            }
+            if let (Some(rooting), Some(&host)) =
+                (spawn.rooted, spawn.rooted.and_then(|r| made.get(&r.host)))
+            {
+                self.root_body(&mut body, host, rooting.angle);
             }
             let head = self.add_body(body);
             made.insert(spawn.index, head);
@@ -756,6 +872,9 @@ impl Game {
                 if a.chain.is_some() && a.chain == b.chain {
                     continue;
                 }
+                if clings(a, b) {
+                    continue;
+                }
                 let inverse_a = inverse_mass(a);
                 let inverse_b = inverse_mass(b);
                 let inverse_sum = inverse_a + inverse_b;
@@ -824,6 +943,7 @@ impl Game {
     }
 
     fn move_bullets(&mut self, dt: f32) {
+        self.shoot_eggs(dt);
         let mut impacts = Vec::new();
         // (where, radius, damage, body already struck, from the ship's side)
         let mut blasts: Vec<(Vec2, f32, f32, u64, bool)> = Vec::new();
@@ -1037,6 +1157,12 @@ impl Game {
         let mut lost_player = None;
         for body in &destroyed {
             let (kind, position, radius) = (body.kind, body.position, body.radius);
+            if body.consumed {
+                // Eaten or starved: gone without a bang, a score or a drop.
+                self.effect(position, radius, 0.25, EffectKind::Impact);
+                self.record_fallen(body);
+                continue;
+            }
             self.effect(position, radius * 2.5, 0.65, EffectKind::Explosion);
             self.score = self.score.saturating_add(match kind {
                 BodyKind::Creature => (body.genome.bounty * body.genes.threat) as u64,
@@ -1051,7 +1177,10 @@ impl Game {
                     self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
                     self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, true);
                 }
-                BodyKind::Asteroid => self.shatter(body),
+                BodyKind::Asteroid => {
+                    self.release_from(body);
+                    self.shatter(body);
+                }
                 BodyKind::Base => self.base_destroyed(position),
                 _ => {}
             }
@@ -1150,6 +1279,20 @@ impl Game {
             rig: Rig::default(),
             rock: RockKind::Plain,
             den: None,
+            energy: 0.0,
+            max_energy: 0.0,
+            provisioned: false,
+            consumed: false,
+            adult: None,
+            age: 0.0,
+            growth: 0.0,
+            generation: 0,
+            brain: None,
+            root: None,
+            unrooted: 0.0,
+            breed_clock: 0.0,
+            starving: 0.0,
+            bite_clock: 0.0,
             wander: 0.0,
             spin: 0.0,
             fire_cooldown: 0.0,
@@ -1160,14 +1303,19 @@ impl Game {
     }
 
     fn effect(&mut self, position: Vec2, radius: f32, lifetime: f32, kind: EffectKind) {
-        self.cue(match kind {
-            EffectKind::Impact => Cue::Impact { at: position },
-            EffectKind::Explosion => Cue::Explosion {
+        let cue = match kind {
+            EffectKind::Impact => Some(Cue::Impact { at: position }),
+            EffectKind::Explosion => Some(Cue::Explosion {
                 at: position,
                 radius,
-            },
-            EffectKind::Respawn => Cue::Respawn { at: position },
-        });
+            }),
+            EffectKind::Respawn => Some(Cue::Respawn { at: position }),
+            // Births and coming of age are seen, not heard.
+            EffectKind::Birth | EffectKind::Mature | EffectKind::Pair => None,
+        };
+        if let Some(cue) = cue {
+            self.cue(cue);
+        }
         if self.effects.len() < MAX_EFFECTS {
             self.effects.push(Effect {
                 position,
@@ -1182,7 +1330,18 @@ impl Game {
 
 /// Bodies that never move: gravity wells, bases and the stones of a nest.
 fn is_fixed(body: &Body) -> bool {
-    body.pinned || matches!(body.kind, BodyKind::BlackHole | BodyKind::Base)
+    body.pinned || body.root.is_some() || matches!(body.kind, BodyKind::BlackHole | BodyKind::Base)
+}
+
+/// True when one of the two clings to the other, or both cling to the same host: they never
+/// collide, so a rooter neither shoves its rock nor its neighbors.
+fn clings(a: &Body, b: &Body) -> bool {
+    match (a.root, b.root) {
+        (Some(x), Some(y)) => x.host == y.host || x.host == b.id || y.host == a.id,
+        (Some(x), None) => x.host == b.id,
+        (None, Some(y)) => y.host == a.id,
+        (None, None) => false,
+    }
 }
 
 fn inverse_mass(body: &Body) -> f32 {
@@ -1208,9 +1367,19 @@ fn is_hurt(body: &Body) -> bool {
 
 fn contact_damage(body: &Body) -> f32 {
     match body.kind {
-        BodyKind::Creature => body.genome.contact_damage * body.genes.sharpness(),
+        BodyKind::Creature => {
+            // A rooted creature defends its place: its sting is sharper.
+            let sting = if body.root.is_some() {
+                1.0 + body.genome.root_defense * crate::genome::ROOT_STING
+            } else {
+                1.0
+            };
+            body.genome.contact_damage * body.genes.sharpness() * sting
+        }
         BodyKind::BlackHole => 22.0,
         BodyKind::Base => 15.0,
+        // A planetoid is a gentle wall: ships and creatures simply bounce off it.
+        BodyKind::Asteroid if body.rock == RockKind::Planetoid => 0.0,
         BodyKind::Asteroid => 12.0,
         BodyKind::Player => 0.0,
     }
@@ -1236,6 +1405,7 @@ fn mass_sign(body: &Body) -> f32 {
 
 fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) {
     if body.kind == BodyKind::BlackHole
+        || body.rock == RockKind::Planetoid
         || (body.kind == BodyKind::Player && player_invulnerability > 0.0)
     {
         return;
@@ -1351,6 +1521,8 @@ mod tests {
         game.effects.clear();
         game.tethers.clear();
         game.chains.clear();
+        game.food.clear();
+        game.eggs.clear();
         game.bodies[0].position = Vec2::ZERO;
         game.player_invulnerability = 0.0;
         game
@@ -1523,6 +1695,9 @@ mod tests {
     }
 
     fn bogeys(game: &mut Game, center: Vec2, count: usize) -> Vec<u64> {
+        // These tests are about flocking alone: hungry bogeys would otherwise call up
+        // plankton and wander toward it, so growth is switched off.
+        game.food_clock = f32::MAX;
         (0..count)
             .map(|i| {
                 let angle = i as f32 * 2.4;

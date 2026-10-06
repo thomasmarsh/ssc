@@ -180,6 +180,10 @@ impl Game {
         body.mass = (head.mass * scale * scale).max(1.5);
         body.part = part;
         body.follower = part > 0;
+        // Only the head steers, so only the head keeps a brain.
+        if part > 0 {
+            body.brain = None;
+        }
         body
     }
 
@@ -601,10 +605,12 @@ mod tests {
         let seed = 17;
         let quadrant = crate::simulation::tests::find_quadrant(seed, |s| {
             s.iter()
-                .any(|x| x.species.is_some_and(|sp| sp.genome.is_jointed()))
+                .any(|x| x.rooted.is_none() && x.species.is_some_and(|sp| sp.genome.is_jointed()))
         });
+        // Rooted young are single bodies until they let go, so they are not counted.
         let wanted: usize = world::generate(seed, quadrant)
             .iter()
+            .filter(|s| s.rooted.is_none())
             .filter_map(|s| s.species)
             .filter(|sp| sp.genome.is_jointed())
             .map(|sp| sp.genome.parts() as usize)

@@ -1,7 +1,7 @@
 //! The universe is an unbounded grid of quadrants. Each quadrant's contents are a pure
 //! function of (world seed, quadrant id), so they can be regenerated at will.
 
-use crate::genome::{GenePool, Niche, Species, Weapon};
+use crate::genome::{GenePool, Habit, INDIVIDUAL_SALT, Niche, Species, Weapon};
 use crate::simulation::BodyKind;
 use bevy::prelude::Vec2;
 use std::f32::consts::TAU;
@@ -308,6 +308,8 @@ pub enum RockKind {
     Crystal,
     /// An inhabited shell that hatches creatures when approached or hurt.
     Husk,
+    /// A large, fixed, indestructible fertile body that blooms plankton around it.
+    Planetoid,
 }
 
 /// An entity to be placed when a quadrant is first loaded.
@@ -337,6 +339,18 @@ pub struct Spawn {
     pub rock: RockKind,
     /// Husks only: the species inside and how many.
     pub den: Option<(Species, u8)>,
+    /// Creatures only: clings to an earlier spawn (a rock or planetoid) from the start.
+    pub rooted: Option<Rooting>,
+}
+
+/// Where a creature spawns attached: its host's index in the quadrant's output, its angle
+/// around the host in the host's own frame, and how grown it is (below one it is a young
+/// one that will let go, one is an adult).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rooting {
+    pub host: u32,
+    pub angle: f32,
+    pub growth: f32,
 }
 
 impl Spawn {
@@ -357,6 +371,7 @@ impl Spawn {
             arms: None,
             rock: RockKind::Plain,
             den: None,
+            rooted: None,
         }
     }
 
@@ -399,7 +414,7 @@ pub fn compose(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Spawn>
 /// Most bodies one cluster of creatures may add; jointed species form smaller clusters.
 const MAX_CLUSTER_PARTS: u32 = 24;
 /// Most creature bodies one quadrant generates, however its pool is composed.
-const QUADRANT_BODY_BUDGET: u32 = 220;
+pub const QUADRANT_BODY_BUDGET: u32 = 220;
 
 fn bodies_used(out: &[Spawn]) -> u32 {
     out.iter()
@@ -657,6 +672,28 @@ pub fn compose_with(
         });
     }
 
+    // Every creature is an individual: its own jitter from a stream keyed by its stable
+    // spawn index, so reloading a quadrant gives the same creature back and nothing on
+    // the original or species streams moves. Bases and husks vary their offspring at birth.
+    for (index, spawn) in out.iter_mut().enumerate() {
+        if let Some(species) = spawn.species {
+            let mut variation = Rng::new(hash2(
+                seed ^ INDIVIDUAL_SALT,
+                id.x.wrapping_mul(4099).wrapping_add(index as i32),
+                id.y,
+            ));
+            spawn.species = Some(species.individual(&mut variation));
+        }
+    }
+
+    // A fertile planetoid, last on its own stream so nothing before it moves. HOME has none:
+    // its population and golden figures stay exactly as they were.
+    if id != QuadrantId::ORIGIN
+        && let Some(planetoid) = planetoid(seed, id, params, &out)
+    {
+        out.push(planetoid);
+    }
+
     // What each free rock is made of follows the neighborhood. Drawn from a position hash,
     // not a stream, so HOME's rocks keep their places and only their make-up varies.
     for (index, spawn) in out.iter_mut().enumerate() {
@@ -671,7 +708,213 @@ pub fn compose_with(
         }
         spawn.index = index as u32;
     }
+
+    // Rooted residents come last, on their own stream, so nothing before them moves and no
+    // original spawn count changes. HOME's rocks stay ordinary.
+    if id != QuadrantId::ORIGIN {
+        root_residents(seed, id, params, pool, &genes, &mut out);
+    }
     out
+}
+
+/// Separates the stream that seeds rooted residents from every other one.
+pub const ROOT_SALT: u64 = 0x600D_5EED_0000_001B;
+/// Most rooted creatures one quadrant seeds, and most on one host.
+const ROOTED_QUADRANT_CAP: u32 = 70;
+const ROOTED_HOST_CAP: u32 = 36;
+/// A rooter fits a planetoid if it is this fraction of its radius or less, and a rock if
+/// it is this fraction (ice and ore are tougher stones).
+const PLANET_FIT: f32 = 0.3;
+const ROCK_FIT: f32 = 0.55;
+/// A planetoid carries one rooter per this much radius, give or take a third.
+const PLANET_PER_RADIUS: f32 = 26.0;
+
+/// Seeds rooted creatures on the quadrant's rocks and planetoids. A planetoid always gets a
+/// community (native rooters when the pool has them, else sessile cousins of its species);
+/// a plain rock only sometimes, and only of native rooters. Sizes follow the host: only
+/// species that fit are chosen, and a bigger world holds more of them.
+fn root_residents(
+    seed: u64,
+    id: QuadrantId,
+    params: &QuadrantParams,
+    pool: &GenePool,
+    genes: &Phenotype,
+    out: &mut Vec<Spawn>,
+) {
+    let mut rng = Rng::new(hash2(seed ^ ROOT_SALT, id.x, id.y));
+    let natives: Vec<Species> = pool
+        .entries
+        .iter()
+        .map(|e| e.species)
+        .filter(|s| s.genome.habit() != Habit::Free)
+        .collect();
+    let mut room = QUADRANT_BODY_BUDGET
+        .saturating_sub(bodies_used(out))
+        .min(ROOTED_QUADRANT_CAP);
+    let mut hosts: Vec<(usize, Vec2, f32, RockKind)> = out
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.kind == BodyKind::Asteroid)
+        .filter(|(_, s)| match s.rock {
+            RockKind::Planetoid => true,
+            RockKind::Plain | RockKind::Ice | RockKind::Ore => !s.pinned,
+            RockKind::Crystal | RockKind::Husk => false,
+        })
+        .map(|(i, s)| (i, s.position, s.radius.unwrap_or(35.0), s.rock))
+        .collect();
+    // Worlds first, so their communities are never crowded out by stray rocks.
+    hosts.sort_by_key(|h| h.3 != RockKind::Planetoid);
+    for (host, at, radius, rock) in hosts {
+        let planet = rock == RockKind::Planetoid;
+        let (bound, count) = if planet {
+            let spread = 0.7 + 0.6 * rng.f32();
+            (
+                radius * PLANET_FIT,
+                ((radius / PLANET_PER_RADIUS * spread).round() as u32).clamp(3, ROOTED_HOST_CAP),
+            )
+        } else {
+            let chance = if natives.is_empty() || radius < 30.0 {
+                0.0
+            } else {
+                0.08 + 0.12 * params.swarm
+            };
+            let hit = rng.chance(chance);
+            (
+                radius * ROCK_FIT,
+                if hit {
+                    1 + u32::from(radius >= 45.0 && rng.chance(0.4))
+                } else {
+                    0
+                },
+            )
+        };
+        if count == 0 || room == 0 {
+            continue;
+        }
+        // Rooters that fit: a lifelong rooter must fit as an adult, a rooted young one only
+        // while it clings.
+        let fits = |s: &Species| {
+            let g = &s.genome;
+            let size = if g.habit() == Habit::Life {
+                g.radius
+            } else {
+                g.juvenile().radius
+            };
+            size <= bound
+        };
+        let mut kinds: Vec<Species> = natives.iter().copied().filter(fits).collect();
+        if kinds.is_empty() && planet {
+            // No native rooters: a sessile cousin of something from the pool.
+            // Up to three, so a world holds a small community rather than one kind.
+            for _ in 0..rng.int(1, 3) {
+                let species = pool.any(&mut rng);
+                kinds.push(species.sessile(rng.chance(0.6), bound));
+            }
+        }
+        if kinds.is_empty() {
+            continue;
+        }
+        let mut taken: Vec<(f32, f32)> = Vec::new();
+        for _ in 0..count {
+            let species = kinds[rng.int(0, kinds.len() as u32 - 1) as usize];
+            let mut variation = Rng::new(hash2(
+                seed ^ ROOT_SALT ^ INDIVIDUAL_SALT,
+                id.x.wrapping_mul(4099).wrapping_add(out.len() as i32),
+                id.y,
+            ));
+            let mut species = species.individual(&mut variation);
+            species.genome.radius = species.genome.radius.min(bound);
+            let size = species.genome.radius;
+            let angle = (0..10).find_map(|_| {
+                let candidate = rng.range(0.0, TAU);
+                taken
+                    .iter()
+                    .all(|&(a, r)| {
+                        let apart = (candidate - a).rem_euclid(TAU);
+                        let apart = apart.min(TAU - apart);
+                        apart * radius > r + size + 4.0
+                    })
+                    .then_some(candidate)
+            });
+            let Some(angle) = angle else { break };
+            // Every rooter is a single body while it clings, whatever it grows into.
+            if room == 0 {
+                break;
+            }
+            taken.push((angle, size));
+            let growth = if species.genome.habit() == Habit::Life {
+                1.0
+            } else {
+                rng.range(0.0, 0.95)
+            };
+            out.push(Spawn {
+                phenotype: *genes,
+                rooted: Some(Rooting {
+                    host: host as u32,
+                    angle,
+                    growth,
+                }),
+                index: out.len() as u32,
+                ..Spawn::creature(species, at + Vec2::from_angle(angle) * radius)
+            });
+            room -= 1;
+        }
+    }
+}
+
+/// Separates the planetoid stream from every other one.
+pub const PLANETOID_SALT: u64 = 0x91A4_E701_0000_0017;
+/// Planetoid radii: always larger than any rock, still small beside a quadrant.
+pub const PLANETOID_MIN_RADIUS: f32 = 110.0;
+pub const PLANETOID_MAX_RADIUS: f32 = 700.0;
+/// A planetoid's surface stays this far inside a quadrant's border, so two across a border
+/// always leave a channel of at least twice this between them.
+const PLANETOID_MARGIN: f32 = 450.0;
+/// Open space kept between a planetoid and anything else generated.
+const PLANETOID_CLEARANCE: f32 = 220.0;
+
+/// How likely a quadrant is to hold a planetoid: swarming and calm places favor them.
+pub fn planetoid_chance(params: &QuadrantParams) -> f32 {
+    (0.05 + 0.4 * params.swarm + 0.2 * (1.0 - params.danger)).clamp(0.05, 0.75)
+}
+
+/// A quadrant's planetoid, if it has one: a fixed, slowly turning world that blooms life
+/// around it. `others` are the spawns already generated; the planetoid keeps clear of them.
+fn planetoid(
+    seed: u64,
+    id: QuadrantId,
+    params: &QuadrantParams,
+    others: &[Spawn],
+) -> Option<Spawn> {
+    let mut rng = Rng::new(hash2(seed ^ PLANETOID_SALT, id.x, id.y));
+    if !rng.chance(planetoid_chance(params)) {
+        return None;
+    }
+    // Most are modest, a few are vast: the size is skewed toward the small end.
+    let mut radius =
+        PLANETOID_MIN_RADIUS + (PLANETOID_MAX_RADIUS - PLANETOID_MIN_RADIUS) * rng.f32().powf(2.2);
+    let center = id.center();
+    for attempt in 0..32 {
+        // A crowded quadrant gets a smaller world rather than none.
+        if attempt > 0 && attempt % 8 == 0 {
+            radius = (radius * 0.7).max(PLANETOID_MIN_RADIUS);
+        }
+        let extent = QUADRANT_SIZE / 2.0 - radius - PLANETOID_MARGIN;
+        let position = center + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
+        let clear = others.iter().all(|s| {
+            let size = s.radius.unwrap_or(40.0);
+            s.position.distance(position) > radius + size + PLANETOID_CLEARANCE
+        });
+        if clear {
+            return Some(Spawn {
+                radius: Some(radius),
+                pinned: true,
+                rock: RockKind::Planetoid,
+                ..Spawn::at(BodyKind::Asteroid, position)
+            });
+        }
+    }
+    None
 }
 
 /// Chooses a rock's make-up from a uniform roll. Ice favors calm regions, ore advanced
@@ -692,6 +935,64 @@ fn rock_for(roll: f32, params: &QuadrantParams) -> RockKind {
     } else {
         RockKind::Plain
     }
+}
+
+/// Separates the plankton stream from every other one.
+pub const FOOD_SALT: u64 = 0xF00D_B10E_0000_0013;
+/// Most plankton a quadrant of richness one can hold.
+const FOOD_CAP_BASE: f32 = 90.0;
+/// Fraction of a quadrant's plankton cap present when it is first loaded.
+const FOOD_INITIAL: f32 = 0.6;
+/// Plankton gathers in blooms of about this radius.
+const BLOOM_RADIUS: f32 = 380.0;
+
+/// A speck of drifting food as generated.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Plankton {
+    pub position: Vec2,
+    pub velocity: Vec2,
+}
+
+/// How lush a place is, in [0.35, 1]: calm, crowded and matter-rich quadrants grow the
+/// most life-food, dangerous bare ones the least.
+pub fn food_richness(params: &QuadrantParams) -> f32 {
+    let lush = 0.5 * params.swarm + 0.3 * (1.0 - params.danger) + 0.2 * params.density;
+    0.35 + 0.65 * lush.clamp(0.0, 1.0)
+}
+
+/// The most plankton one quadrant sustains; regrowth stops here.
+pub fn food_cap(params: &QuadrantParams) -> usize {
+    (FOOD_CAP_BASE * food_richness(params)).round() as usize
+}
+
+/// A quadrant's starting plankton, as a few blooms. It draws only from its own salted
+/// stream and never touches `compose`, so the population (and HOME's golden figures) is
+/// exactly what it was before food existed.
+pub fn plankton(seed: u64, id: QuadrantId, params: &QuadrantParams) -> Vec<Plankton> {
+    let mut rng = Rng::new(hash2(seed ^ FOOD_SALT, id.x, id.y));
+    let total = (food_cap(params) as f32 * FOOD_INITIAL).round() as u32;
+    if total == 0 {
+        return Vec::new();
+    }
+    let center = id.center();
+    let extent = QUADRANT_SIZE / 2.0 - 150.0;
+    let blooms = rng.int(3, 6).min(total);
+    let mut out = Vec::with_capacity(total as usize);
+    for bloom in 0..blooms {
+        let heart = center + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
+        // Spread the total evenly, giving the remainder to the first blooms.
+        let share = total / blooms + u32::from(bloom < total % blooms);
+        for _ in 0..share {
+            let at = heart + rng.direction() * rng.range(0.0, BLOOM_RADIUS);
+            let position = Vec2::new(
+                at.x.clamp(center.x - extent, center.x + extent),
+                at.y.clamp(center.y - extent, center.y + extent),
+            );
+            let velocity = rng.direction() * rng.range(4.0, 12.0);
+            out.push(Plankton { position, velocity });
+        }
+    }
+    out
 }
 
 /// A new station's kind and what it shoots, from the quadrant's character on its own stream.
@@ -754,7 +1055,7 @@ mod tests {
     #[test]
     fn wild_structures_and_materials_are_diverse_and_repeatable() {
         let mut stations = [0; 4];
-        let mut rocks = [0; 5];
+        let mut rocks = [0; 6];
         let mut hollows = 0;
         for x in 3..=12 {
             for y in 3..=12 {
@@ -772,10 +1073,11 @@ mod tests {
                             RockKind::Ore => 2,
                             RockKind::Crystal => 3,
                             RockKind::Husk => 4,
+                            RockKind::Planetoid => 5,
                         };
                         rocks[index] += 1;
                     }
-                    hollows += usize::from(spawn.pinned);
+                    hollows += usize::from(spawn.pinned && spawn.rock != RockKind::Planetoid);
                 }
             }
         }
@@ -843,12 +1145,31 @@ mod tests {
         for seed in 0..20 {
             let spawns = generate(seed, QuadrantId::ORIGIN);
             assert!(spawns.iter().all(|s| s.position.length() > 800.0));
-            assert!(
-                spawns.iter().any(|s| {
-                    s.species == Some(Species::bogey()) && s.position.length() < 2200.0
-                })
-            );
+            assert!(spawns.iter().any(|s| {
+                s.species
+                    .is_some_and(|sp| sp.lineage == Species::bogey().lineage)
+                    && s.position.length() < 2200.0
+            }));
         }
+    }
+
+    #[test]
+    fn creatures_are_individuals_with_stable_genomes() {
+        let a = generate(0x535343, QuadrantId::ORIGIN);
+        let b = generate(0x535343, QuadrantId::ORIGIN);
+        let genomes = |v: &[Spawn]| -> Vec<_> { v.iter().filter_map(|s| s.species).collect() };
+        assert_eq!(genomes(&a), genomes(&b));
+        let bogeys: Vec<_> = genomes(&a)
+            .into_iter()
+            .filter(|s| s.lineage == Species::bogey().lineage)
+            .collect();
+        assert!(bogeys.len() > 5);
+        assert!(bogeys.iter().any(|s| s.genome != bogeys[0].genome));
+        assert!(
+            bogeys
+                .iter()
+                .all(|s| s.genome.distance(&Species::bogey().genome) < 0.2)
+        );
     }
 
     fn census(spawns: &[Spawn]) -> [usize; 6] {
@@ -1020,7 +1341,7 @@ mod tests {
             for (i, s) in spawns.iter().enumerate() {
                 assert_eq!(s.index as usize, i);
                 assert!(s.link.is_none_or(|j| (j as usize) < i));
-                if s.kind == BodyKind::Asteroid {
+                if s.kind == BodyKind::Asteroid && s.rock != RockKind::Planetoid {
                     assert!(s.radius.unwrap() <= ASTEROID_MAX_RADIUS);
                 }
             }
@@ -1029,7 +1350,7 @@ mod tests {
         for x in -8..=8 {
             for y in -8..=8 {
                 for s in generate(3, QuadrantId { x, y }) {
-                    if s.kind == BodyKind::Asteroid {
+                    if s.kind == BodyKind::Asteroid && s.rock != RockKind::Planetoid {
                         assert!(s.radius.unwrap() <= ASTEROID_MAX_RADIUS);
                     }
                 }
@@ -1038,11 +1359,80 @@ mod tests {
     }
 
     #[test]
+    fn planetoids_are_large_fixed_sparse_clear_and_never_at_home() {
+        let mut found = 0;
+        let mut centers: Vec<(QuadrantId, Vec2, f32)> = Vec::new();
+        for x in -10..=10 {
+            for y in -10..=10 {
+                let id = QuadrantId { x, y };
+                let spawns = generate(5, id);
+                assert_eq!(spawns, generate(5, id), "static from generation");
+                let worlds: Vec<&Spawn> = spawns
+                    .iter()
+                    .filter(|s| s.rock == RockKind::Planetoid)
+                    .collect();
+                assert!(worlds.len() <= 1);
+                if id == QuadrantId::ORIGIN {
+                    assert!(worlds.is_empty(), "HOME keeps its original population");
+                }
+                for w in worlds {
+                    found += 1;
+                    let r = w.radius.unwrap();
+                    assert!(w.pinned && w.kind == BodyKind::Asteroid);
+                    assert!(r > ASTEROID_MAX_RADIUS);
+                    assert!((PLANETOID_MIN_RADIUS..=PLANETOID_MAX_RADIUS).contains(&r));
+                    // The last of the original spawns, so no earlier index moves; rooted
+                    // residents follow it.
+                    let originals = spawns.iter().filter(|s| s.rooted.is_none()).count();
+                    assert_eq!(w.index as usize, originals - 1);
+                    let half = QUADRANT_SIZE / 2.0 - r - PLANETOID_MARGIN;
+                    assert!((w.position - id.center()).abs().max_element() <= half + 0.01);
+                    // Open space around it: a ship always fits between it and anything else.
+                    for s in spawns
+                        .iter()
+                        .filter(|s| s.index != w.index && s.rooted.is_none())
+                    {
+                        let gap = s.position.distance(w.position) - r - s.radius.unwrap_or(0.0);
+                        assert!(gap > PLANETOID_CLEARANCE * 0.99, "gap {gap}");
+                    }
+                    centers.push((id, w.position, r));
+                }
+            }
+        }
+        assert!(
+            found > 60,
+            "planetoids are common but not everywhere: {found}"
+        );
+        assert!(found < 21 * 21 * 3 / 4);
+        // Two planetoids, even across a border, leave a wide channel between them.
+        for (i, a) in centers.iter().enumerate() {
+            for b in &centers[i + 1..] {
+                assert!(a.1.distance(b.1) - a.2 - b.2 > 2.0 * PLANETOID_MARGIN - 1.0);
+            }
+        }
+        // Swarming, calm places favor them.
+        let lush = QuadrantParams {
+            swarm: 1.0,
+            danger: 0.0,
+            ..QuadrantParams::HOME
+        };
+        let bare = QuadrantParams {
+            swarm: 0.0,
+            danger: 1.0,
+            ..QuadrantParams::HOME
+        };
+        assert!(planetoid_chance(&lush) > 2.0 * planetoid_chance(&bare));
+    }
+
+    #[test]
     fn a_nest_is_a_closed_ring_with_exactly_one_opening_wide_enough_for_a_ship() {
         let mut checked = 0;
         for seed in 0..60 {
             let spawns = compose(seed, QuadrantId { x: 9, y: 9 }, &wild_params());
-            let stones: Vec<&Spawn> = spawns.iter().filter(|s| s.pinned).collect();
+            let stones: Vec<&Spawn> = spawns
+                .iter()
+                .filter(|s| s.pinned && s.rock != RockKind::Planetoid)
+                .collect();
             for ring in stones.chunks(8) {
                 if ring.len() < 8 {
                     continue;

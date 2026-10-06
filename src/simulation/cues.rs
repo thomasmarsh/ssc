@@ -29,6 +29,11 @@ pub enum Cue {
     Pickup {
         rarity: Rarity,
     },
+    /// A cord found the ship; `strength` is the cord's, so a strong one sounds heavier.
+    Latch {
+        at: Vec2,
+        strength: f32,
+    },
     /// The ship lost shield or hull this step.
     Hurt {
         hull: bool,

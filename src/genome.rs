@@ -23,6 +23,19 @@ pub const LINEAGE_CELL: i32 = 8;
 const FOUNDERS_PER_NODE: u64 = 3;
 /// No creature has more bodies than this, however its genes combine.
 pub const MAX_PARTS: u32 = 28;
+/// Largest fractional jitter of an ordinary individual, and of the wider 4% tail.
+pub const JITTER_SMALL: f32 = 0.05;
+pub const JITTER_WIDE: f32 = 0.25;
+/// Chance an individual also carries one outlier gene.
+pub const OUTLIER_CHANCE: f32 = 0.01;
+/// Offspring mutation: ordinary jitter, the rare wider jitter and its chance per birth, and
+/// the chance per birth that a social, trigger or fear category flips.
+pub const MUTATION_SMALL: f32 = 0.01;
+pub const MUTATION_RARE: f32 = 0.08;
+pub const MUTATION_RARE_CHANCE: f32 = 0.03;
+pub const MUTATION_FLIP_CHANCE: f32 = 0.002;
+/// Separates individual variation from every other stream.
+pub const INDIVIDUAL_SALT: u64 = 0x1D1F_A11E_0000_0011;
 /// Extra fling strength a negative-mass body has on top of its fling gene.
 pub const NEGATIVE_MASS_FLING: f32 = 0.6;
 
@@ -71,8 +84,9 @@ categorical! {
     Weapon { None, Projectile, Tether, Mine, Missile, Needles, Nova, Spiral }
 }
 categorical! {
-    /// What it eats or harvests.
-    Diet { None, Rocks, Siphon, Dust }
+    /// What it eats or harvests. `Graze` browses drifting plankton; `Hunt` eats smaller
+    /// creatures of other lineages it touches. New diets are appended so older indices hold.
+    Diet { None, Rocks, Siphon, Dust, Graze, Hunt }
 }
 categorical! {
     /// What it flees from.
@@ -82,23 +96,34 @@ categorical! {
     /// Where it makes its home.
     Nest { None, Rocks, Base }
 }
+categorical! {
+    /// How it reproduces: a live juvenile beside the parent, or a drifting egg that hatches.
+    /// Appended after every older gene, so earlier genes and their draws are unchanged.
+    Birth { Live, Egg }
+}
+categorical! {
+    /// How often an adult reproduces when conditions allow.
+    Fecundity { Rare, Steady, Prolific }
+}
 
 macro_rules! genome {
     (
         real { $($rf:ident: $lo:expr, $hi:expr, $rd:expr;)* }
         int { $($if_:ident: $ilo:expr, $ihi:expr, $id:expr;)* }
         cat { $($cf:ident: $ct:ident = $cd:ident::$cv:ident;)* }
+        tail { $($tf:ident: $tlo:expr, $thi:expr, $td:expr;)* }
     ) => {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct Genome {
             $(pub $rf: f32,)*
             $(pub $if_: u8,)*
             $(pub $cf: $ct,)*
+            $(pub $tf: f32,)*
         }
         impl Default for Genome {
             /// An inert drifter; every authored or sampled genome starts from here.
             fn default() -> Self {
-                Self { $($rf: $rd,)* $($if_: $id,)* $($cf: $cd::$cv,)* }
+                Self { $($rf: $rd,)* $($if_: $id,)* $($cf: $cd::$cv,)* $($tf: $td,)* }
             }
         }
         impl Genome {
@@ -108,6 +133,7 @@ macro_rules! genome {
                     $(Gene::Real { v: &mut self.$rf, lo: $lo, hi: $hi },)*
                     $(Gene::Int { v: &mut self.$if_, lo: $ilo, hi: $ihi },)*
                     $(Gene::Cat { v: &mut self.$cf },)*
+                    $(Gene::Real { v: &mut self.$tf, lo: $tlo, hi: $thi },)*
                 ]
             }
         }
@@ -174,7 +200,55 @@ genome! {
         diet: Diet = Diet::None;
         fear: Fear = Fear::None;
         nest: Nest = Nest::None;
+        birth: Birth = Birth::Live;
+        fecundity: Fecundity = Fecundity::Steady;
     }
+    // Real genes appended after every older gene (categoricals included), so the index of
+    // each earlier gene, and the noise channel it reads, never moves.
+    tail {
+        // How much a creature trusts what it has learned of the player's movement over a
+        // plain lead (0 = does not learn), and how fast its brain trains.
+        learner: 0.0, 1.0, 0.0;
+        learn_rate: 0.0, 1.0, 0.5;
+        // Rooting. `root` is the habit: below `ROOT_JUVENILE` the creature roams free, up to
+        // `ROOT_LIFE` it clings to a rock while young and lets go, and above that it never
+        // leaves (see `Genome::habit`). `root_defense` is how hard a rooted creature fights
+        // for its place (stinging contact, and armed young keep their weapons). The three
+        // detach genes decide what makes a young one let go early: the share of its growth
+        // it has reached, hunger at a poor host, or a crowded host.
+        root: 0.0, 1.0, 0.0;
+        root_defense: 0.0, 1.0, 0.0;
+        detach_size: 0.4, 1.0, 1.0;
+        detach_hunger: 0.0, 0.5, 0.0;
+        detach_crowd: 0.3, 1.0, 1.0;
+        // Cords (only tether weapons use them). Strength scales the pull's stiffness and
+        // ceiling, slack is how far past its rest length the ship may stretch a cord before it
+        // snaps, hardness is the hits it takes to cut, drag the share of the ship's speed
+        // away from the owner that it bleeds. The defaults are the classic weak cord.
+        cord_strength: 1.0, 8.0, 1.0;
+        cord_slack: 200.0, 3000.0, 200.0;
+        cord_hardness: 1.0, 10.0, 2.0;
+        cord_drag: 0.0, 1.0, 0.0;
+    }
+}
+
+/// `root` below this roams free; from here to `ROOT_LIFE` it is rooted while young.
+pub const ROOT_JUVENILE: f32 = 0.4;
+pub const ROOT_LIFE: f32 = 0.75;
+/// A rooted creature's contact sting is multiplied by one plus its defense gene times this,
+/// and young ones keep their weapon from this much defense.
+pub const ROOT_STING: f32 = 1.5;
+pub const ROOT_ARMED: f32 = 0.4;
+
+/// How a creature relates to the rocks it may cling to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Habit {
+    /// Roams free always.
+    Free,
+    /// Clings to a rock while young and lets go at an age, a hunger or a crowd its genes set.
+    Juvenile,
+    /// Clings to its rock for life; only the loss of the rock frees it.
+    Life,
 }
 
 /// The role a creature plays in a quadrant's population, read from its genes alone.
@@ -235,6 +309,43 @@ impl Genome {
             } else {
                 0.0
             }
+    }
+
+    /// How much energy the body can store: it scales with size.
+    pub fn energy_capacity(&self) -> f32 {
+        30.0 + 2.5 * self.radius
+    }
+
+    /// Seconds between this species' reproductions at best.
+    pub fn breeding_period(&self) -> f32 {
+        match self.fecundity {
+            Fecundity::Rare => 300.0,
+            Fecundity::Steady => 150.0,
+            Fecundity::Prolific => 75.0,
+        }
+    }
+
+    /// True for diets that must eat to live. Everything else (nothing, siphon, dust) draws
+    /// on ambient energy and never tires or starves.
+    pub fn forages(&self) -> bool {
+        matches!(self.diet, Diet::Rocks | Diet::Graze | Diet::Hunt)
+    }
+
+    /// How the creature relates to rocks. A jointed body cannot cling, so a lifelong
+    /// rooter that grows a spine is rooted only while young.
+    pub fn habit(&self) -> Habit {
+        if self.root < ROOT_JUVENILE {
+            Habit::Free
+        } else if self.root < ROOT_LIFE || self.is_jointed() {
+            Habit::Juvenile
+        } else {
+            Habit::Life
+        }
+    }
+
+    /// True when a rooting species' young keep their weapon: they have a defense to use.
+    pub fn defended_young(&self) -> bool {
+        self.habit() != Habit::Free && self.root_defense >= ROOT_ARMED
     }
 
     /// Physical mass: always positive; the sign is expressed through repulsion.
@@ -357,6 +468,231 @@ impl Genome {
             }
         }
         self.limited()
+    }
+
+    /// One individual of a species: the same genome with per-creature variation, so no two
+    /// members of a flock are identical. About 95% of draws are a tiny jitter (up to
+    /// `JITTER_SMALL` of a gene's value), about 4% spread wider (up to `JITTER_WIDE`), and
+    /// about 1% add an outlier on top of a small jitter: one gene pushed 2 to 3 times up or down, or one
+    /// social or temperament category flipped. The caller supplies a stream derived from
+    /// the individual's stable identity, so the draw is deterministic and never touches
+    /// the streams that place the population. Always passes through `limited()`.
+    pub fn individual(self, rng: &mut Rng) -> Self {
+        let roll = rng.f32();
+        let outlier = roll >= 1.0 - OUTLIER_CHANCE;
+        let spread = if (0.95..1.0 - OUTLIER_CHANCE).contains(&roll) {
+            JITTER_WIDE
+        } else {
+            JITTER_SMALL
+        };
+        let mut g = self;
+        let triangle = |rng: &mut Rng| (rng.f32() + rng.f32() - 1.0) * spread;
+        // Scale-like genes vary by a fraction of their value.
+        for v in [
+            &mut g.speed,
+            &mut g.cruise,
+            &mut g.sight,
+            &mut g.lose,
+            &mut g.fire_period,
+            &mut g.radius,
+            &mut g.flocking,
+            &mut g.lead,
+            &mut g.hull,
+            &mut g.shot_speed,
+            &mut g.weapon_range,
+            &mut g.alarm,
+        ] {
+            *v *= 1.0 + triangle(rng);
+        }
+        // Genes that rest at zero for creatures without the trait only vary where present.
+        for v in [&mut g.standoff, &mut g.strafe] {
+            if *v > 0.0 {
+                *v *= 1.0 + triangle(rng);
+            }
+        }
+        // Pigment shifts by a fraction of its whole range.
+        g.hue = (g.hue + triangle(rng) * 0.5).rem_euclid(1.0);
+        g.pale += triangle(rng) * 0.5;
+        g.bright += triangle(rng) * 0.5;
+        if outlier {
+            let pick = rng.int(0, 11);
+            if pick < 8 {
+                let factor = rng.range(2.0, 3.0);
+                let factor = if rng.chance(0.5) {
+                    factor
+                } else {
+                    1.0 / factor
+                };
+                match pick {
+                    0 => g.speed *= factor,
+                    1 => g.sight *= factor,
+                    2 => g.fire_period *= factor,
+                    3 => g.radius *= factor,
+                    4 => g.flocking = (g.flocking.max(0.2)) * factor,
+                    5 => g.hull *= factor,
+                    6 => g.standoff = g.standoff.max(80.0) * factor,
+                    _ => g.alarm *= factor,
+                }
+            } else {
+                match pick {
+                    8 => g.social.set(rng.int(0, 4) as u8),
+                    9 => g.trigger.set(rng.int(0, 2) as u8),
+                    10 => g.fear.set(rng.int(0, 3) as u8),
+                    _ => g.diet.set(rng.int(0, 3) as u8),
+                }
+            }
+        }
+        if g.weapon == Weapon::Tether {
+            // Cords vary a little between individuals, from values already drawn so this
+            // adds no draws (HOME's population must not move).
+            let wobble = |k: f32| ((roll * k).fract() * 2.0 - 1.0) * spread;
+            g.cord_strength *= 1.0 + wobble(131.0);
+            g.cord_slack *= 1.0 + wobble(173.0);
+            g.cord_hardness *= 1.0 + wobble(211.0);
+        }
+        let mut g = g.limited();
+        // A creature never loses a target it can see.
+        g.lose = g.lose.max(g.sight);
+        g.limited()
+    }
+
+    /// Heritable mutation for offspring: far milder than `individual`, so that variety
+    /// accumulates slowly and lineages stay recognizable over many generations. Scale-like
+    /// genes move by up to `MUTATION_SMALL` of their value, about 3% of births move them by
+    /// up to `MUTATION_RARE`, and the social, trigger and fear categories almost never flip.
+    /// Body plan, weapon and diet are untouched. Always passes through `limited()`.
+    pub fn mutate(self, rng: &mut Rng) -> Self {
+        let rare = rng.chance(MUTATION_RARE_CHANCE);
+        let spread = if rare { MUTATION_RARE } else { MUTATION_SMALL };
+        let mut g = self;
+        let triangle = |rng: &mut Rng| (rng.f32() + rng.f32() - 1.0) * spread;
+        for v in [
+            &mut g.speed,
+            &mut g.cruise,
+            &mut g.sight,
+            &mut g.lose,
+            &mut g.fire_period,
+            &mut g.radius,
+            &mut g.flocking,
+            &mut g.lead,
+            &mut g.hull,
+            &mut g.shot_speed,
+            &mut g.weapon_range,
+            &mut g.alarm,
+        ] {
+            *v *= 1.0 + triangle(rng);
+        }
+        for v in [&mut g.standoff, &mut g.strafe] {
+            if *v > 0.0 {
+                *v *= 1.0 + triangle(rng);
+            }
+        }
+        g.hue = (g.hue + triangle(rng) * 0.5).rem_euclid(1.0);
+        g.pale += triangle(rng) * 0.5;
+        g.bright += triangle(rng) * 0.5;
+        if rng.chance(MUTATION_FLIP_CHANCE) {
+            match rng.int(0, 2) {
+                0 => g.social.set(rng.int(0, 3) as u8),
+                1 => g.trigger.set(rng.int(0, 2) as u8),
+                _ => g.fear.set(rng.int(0, 3) as u8),
+            }
+        }
+        if g.root >= ROOT_JUVENILE {
+            // Rooters drift in how hard they fight and when the young let go.
+            g.root_defense += triangle(rng);
+            g.detach_size *= 1.0 + triangle(rng);
+            g.detach_hunger *= 1.0 + triangle(rng);
+            g.detach_crowd *= 1.0 + triangle(rng);
+        }
+        if g.weapon == Weapon::Tether {
+            // Cord throwers drift in how hard their cords are to shake or cut.
+            g.cord_strength *= 1.0 + triangle(rng);
+            g.cord_slack *= 1.0 + triangle(rng);
+            g.cord_hardness *= 1.0 + triangle(rng);
+            if g.cord_drag > 0.0 {
+                g.cord_drag += triangle(rng);
+            }
+        }
+        if g.learner > 0.0 {
+            // Learners drift in how much they trust their brain and how fast it trains.
+            g.learner += triangle(rng);
+            g.learn_rate *= 1.0 + triangle(rng);
+        }
+        let mut g = g.limited();
+        g.lose = g.lose.max(g.sight);
+        g.limited()
+    }
+
+    /// Recombination of two parents of the same lineage. Body plan (segments, limbs, their
+    /// proportions and gait), weapon (kind, volley and shot genes), temperament and
+    /// ecology (diet, nest, birth, fecundity) each travel whole from one parent, so a child
+    /// never gets a serpent's gait on a rock's body or a spiral without its volley. Other
+    /// continuous genes blend by a random weight, other integers and categories pick a
+    /// parent. A `mutate` follows, then `limited()`: the result is always valid.
+    pub fn crossover(a: Self, b: Self, rng: &mut Rng) -> Self {
+        let (mut a, mut b) = (a, b);
+        let mut child = a;
+        {
+            let (ga, gb) = (a.genes(), b.genes());
+            for (slot, (x, y)) in child.genes().into_iter().zip(ga.into_iter().zip(gb)) {
+                match (slot, x, y) {
+                    (Gene::Real { v, .. }, Gene::Real { v: x, .. }, Gene::Real { v: y, .. }) => {
+                        *v = *x + (*y - *x) * rng.f32();
+                    }
+                    (Gene::Int { v, .. }, Gene::Int { v: x, .. }, Gene::Int { v: y, .. }) => {
+                        *v = if rng.chance(0.5) { *x } else { *y };
+                    }
+                    (Gene::Cat { v }, Gene::Cat { v: x }, Gene::Cat { v: y }) => {
+                        v.set(if rng.chance(0.5) { x.get() } else { y.get() });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let pick = |rng: &mut Rng| if rng.chance(0.5) { a } else { b };
+        let body = pick(rng);
+        child.segments = body.segments;
+        child.limbs = body.limbs;
+        child.limb_len = body.limb_len;
+        child.sides = body.sides;
+        child.stiffness = body.stiffness;
+        child.wave = body.wave;
+        child.rhythm = body.rhythm;
+        child.lag = body.lag;
+        child.taper = body.taper;
+        child.aspect = body.aspect;
+        let arms = pick(rng);
+        child.weapon = arms.weapon;
+        child.volley = arms.volley;
+        child.hardpoint_every = arms.hardpoint_every;
+        child.fire_period = arms.fire_period;
+        child.shot_speed = arms.shot_speed;
+        child.weapon_range = arms.weapon_range;
+        child.fling = arms.fling;
+        child.fling_chaos = arms.fling_chaos;
+        child.contact_damage = arms.contact_damage;
+        child.cord_strength = arms.cord_strength;
+        child.cord_slack = arms.cord_slack;
+        child.cord_hardness = arms.cord_hardness;
+        child.cord_drag = arms.cord_drag;
+        // A habit travels whole: the rooting genes come from the body-plan parent.
+        child.root = body.root;
+        child.root_defense = body.root_defense;
+        child.detach_size = body.detach_size;
+        child.detach_hunger = body.detach_hunger;
+        child.detach_crowd = body.detach_crowd;
+        let temper = pick(rng);
+        child.social = temper.social;
+        child.trigger = temper.trigger;
+        child.fear = temper.fear;
+        child.bond = temper.bond;
+        child.rage = temper.rage;
+        let ecology = pick(rng);
+        child.diet = ecology.diet;
+        child.nest = ecology.nest;
+        child.birth = ecology.birth;
+        child.fecundity = ecology.fecundity;
+        child.limited().mutate(rng)
     }
 
     /// Draws a fresh genome from a distribution biased by quadrant parameters: tech
@@ -555,6 +891,99 @@ impl Genome {
         g.hue = rng.f32();
         g.pale = rng.range(0.0, 0.7);
         g.bright = rng.range(0.65, 1.0);
+
+        // Foraging diets come last, from the final draw, so every earlier gene of every
+        // sampled species stays where it was. Calm, crowded places breed grazers; wild,
+        // aggressive ones breed the predators that eat them (and only bodies big enough to).
+        let roll = rng.f32();
+        if g.diet == Diet::None {
+            let hunt = 0.04 + 0.2 * above(aggression) + 0.12 * danger;
+            let graze = 0.3 + 0.3 * swarm;
+            if roll < hunt && g.body_mass() >= 8.0 {
+                g.diet = Diet::Hunt;
+            } else if roll < hunt + graze {
+                g.diet = Diet::Graze;
+            }
+        }
+
+        // Reproduction comes last, from one more draw: two in five lay eggs, and the rest
+        // of the draw picks how fecund the species is.
+        let roll = rng.f32();
+        g.birth = if roll < 0.4 { Birth::Egg } else { Birth::Live };
+        g.fecundity = match (roll * 37.0).fract() {
+            f if f < 0.3 => Fecundity::Rare,
+            f if f < 0.8 => Fecundity::Steady,
+            _ => Fecundity::Prolific,
+        };
+
+        // Learning comes last, from one more draw: keen, technological places breed the
+        // creatures that study the ship, and only hunters that engage it have use for that.
+        let roll = rng.f32();
+        let engages = g.fear != Fear::Player && g.trigger != Trigger::Harm;
+        if engages && roll < 0.04 + 0.3 * above(tech) {
+            let fract = (roll * 97.0).fract();
+            g.learner = 0.35 + 0.65 * fract;
+            g.learn_rate = 0.3 + 0.7 * (fract * 31.0).fract();
+        }
+
+        // Rooting comes last, from one more draw: a minority of species cling to rocks, more
+        // in crowded, calm places. Most rooters only cling while young; a body without a
+        // spine may cling for life. Danger sharpens their defenses.
+        let roll = rng.f32();
+        let chance = 0.07 + 0.12 * swarm + 0.07 * (1.0 - danger);
+        if roll < chance {
+            let part = (roll / chance * 61.0).fract();
+            let (a, b, c) = (
+                (part * 37.0).fract(),
+                (part * 71.0).fract(),
+                (part * 113.0).fract(),
+            );
+            g.root = if part < 0.55 || g.is_jointed() {
+                0.45 + 0.25 * a
+            } else {
+                0.78 + 0.2 * a
+            };
+            g.root_defense = (0.2 + 0.6 * b + 0.3 * danger).min(1.0);
+            g.detach_size = 0.7 + 0.3 * c;
+            g.detach_hunger = 0.1 + 0.2 * (b * 7.0).fract();
+            g.detach_crowd = 0.5 + 0.5 * (c * 5.0).fract();
+        }
+
+        // Cords come last, from one more draw. Most cord throwers keep the classic weak
+        // cord, a minority are strong, and a rare few (about 3 in 100) grip: the ship cannot
+        // out-thrust them and must shoot, shear or kill. Danger and tech make strong ones
+        // a little likelier.
+        let roll = rng.f32();
+        if g.weapon == Weapon::Tether {
+            let bias = 0.04 * danger + 0.04 * tech;
+            let part = (roll * 53.0).fract();
+            let lerp = |lo: f32, hi: f32, t: f32| lo + (hi - lo) * t;
+            let (a, b, c) = (
+                (part * 17.0).fract(),
+                (part * 29.0).fract(),
+                (part * 43.0).fract(),
+            );
+            if roll >= 1.0 - 0.03 - bias * 0.25 {
+                g.cord_strength = lerp(6.0, 8.0, a);
+                g.cord_slack = lerp(2000.0, 3000.0, b);
+                g.cord_hardness = lerp(6.0, 9.0, c);
+                g.cord_drag = lerp(0.5, 0.9, part);
+            } else if roll >= 0.88 - bias {
+                g.cord_strength = lerp(3.0, 5.5, a);
+                g.cord_slack = lerp(500.0, 1200.0, b);
+                g.cord_hardness = lerp(4.0, 6.0, c);
+                g.cord_drag = lerp(0.2, 0.5, part);
+            } else if roll >= 0.6 {
+                g.cord_strength = lerp(1.2, 2.2, a);
+                g.cord_slack = lerp(220.0, 330.0, b);
+                g.cord_hardness = lerp(2.4, 3.6, c);
+                g.cord_drag = lerp(0.0, 0.2, part);
+            } else {
+                g.cord_strength = lerp(1.0, 1.25, a);
+                g.cord_slack = lerp(200.0, 260.0, b);
+                g.cord_hardness = lerp(2.0, 2.5, c);
+            }
+        }
         g.limited()
     }
 
@@ -590,7 +1019,10 @@ impl Genome {
             social: Social::School,
             trigger: Trigger::Proximity,
             weapon: Weapon::Projectile,
+            diet: Diet::Graze,
             nest: Nest::Rocks,
+            birth: Birth::Egg,
+            fecundity: Fecundity::Rare,
             ..Self::default()
         }
     }
@@ -627,6 +1059,8 @@ impl Genome {
             speed: 285.0,
             cruise: 110.0,
             lead: 0.55,
+            learner: 0.6,
+            learn_rate: 0.5,
             alarm: 380.0,
             contact_damage: 6.0,
             bounty: 200.0,
@@ -696,7 +1130,8 @@ impl Genome {
         }
     }
 
-    /// What a brooding parent leaves behind: a small, unarmed, short-bodied relative.
+    /// What a newborn is before it matures: a small, unarmed, single-bodied relative that
+    /// schools. It grows into the genome it came from (`Body::adult`).
     pub fn juvenile(&self) -> Self {
         Self {
             radius: (self.radius * 0.55).max(6.0),
@@ -706,9 +1141,14 @@ impl Genome {
             speed: self.speed * 1.1,
             fling: self.fling * 0.5,
             bounty: (self.bounty * 0.3).max(20.0),
-            segments: self.segments.min(3),
+            segments: 1,
             limbs: 0,
-            weapon: Weapon::None,
+            // A young one that clings to a rock fights for its place.
+            weapon: if self.defended_young() {
+                self.weapon
+            } else {
+                Weapon::None
+            },
             social: Social::School,
             bond: 0.0,
             ..*self
@@ -772,6 +1212,9 @@ pub struct Species {
     pub genome: Genome,
 }
 
+/// Distinguishes the lineage of a sessile cousin from the species it was grown from.
+const SESSILE_SALT: u64 = 0x5E55_1100_0000_0019;
+
 /// Lineage ids of the five hand-authored HOME species.
 const HOME_LINEAGES: [u64; 5] = [
     0x484F_4D45_0000_0001,
@@ -810,12 +1253,62 @@ impl Species {
         }
     }
 
+    /// The same lineage as one individual: the genome varied by `Genome::individual`.
+    pub fn individual(self, rng: &mut Rng) -> Self {
+        Self {
+            genome: self.genome.individual(rng),
+            ..self
+        }
+    }
+
+    /// The child of two members of one lineage: their genomes recombined, a generation on
+    /// from the older parent. Mates of different lineages cannot cross; the child is then
+    /// simply a mutated copy of `self`.
+    pub fn crossover(self, mate: Self, rng: &mut Rng) -> Self {
+        if self.lineage != mate.lineage {
+            return Self {
+                genome: self.genome.mutate(rng),
+                generation: self.generation.saturating_add(1),
+                ..self
+            };
+        }
+        Self {
+            genome: Genome::crossover(self.genome, mate.genome, rng),
+            generation: self.generation.max(mate.generation).saturating_add(1),
+            ..self
+        }
+    }
+
     /// A serpent as a one-off species, for tests and experiments.
     pub fn serpent() -> Self {
         Self {
             lineage: 0x484F_4D45_0000_000B,
             generation: 0,
             genome: Genome::serpent(),
+        }
+    }
+
+    /// A sessile cousin of this species, for places with no native rooters: the same creature
+    /// without a spine or limbs, sized to fit a host `bound` in radius, with a rooted habit
+    /// (for life when `life`) and its own lineage, so it never interbreeds with the free
+    /// relatives it came from.
+    pub fn sessile(self, life: bool, bound: f32) -> Self {
+        let mut genome = self.genome;
+        genome.segments = 1;
+        genome.limbs = 0;
+        genome.hardpoint_every = 0;
+        let radius = genome.radius.min(bound).max(6.0);
+        genome.hull *= (radius / genome.radius).clamp(0.4, 1.0);
+        genome.radius = radius;
+        genome.root = if life { 0.9 } else { 0.6 };
+        genome.root_defense = 0.6;
+        genome.detach_size = 0.85;
+        genome.detach_hunger = 0.2;
+        genome.detach_crowd = 0.8;
+        Self {
+            lineage: (self.lineage ^ SESSILE_SALT) | 1,
+            genome: genome.limited(),
+            ..self
         }
     }
 
@@ -1020,6 +1513,213 @@ mod tests {
     }
 
     #[test]
+    fn individuals_stay_valid_and_mostly_close_to_their_species() {
+        let mut rng = Rng::new(11);
+        let (mut small, mut wide, mut far) = (0, 0, 0);
+        let samples = 4000;
+        for i in 0..samples {
+            let base = match i % 5 {
+                0 => Genome::bogey(),
+                1 => Genome::lunatic(),
+                2 => Genome::smarty(),
+                3 => Genome::fatso(),
+                _ => Genome::serpent(),
+            };
+            let mut g = base.individual(&mut rng);
+            assert_eq!(g, g.limited());
+            assert!(g.parts() <= MAX_PARTS && g.lose >= g.sight);
+            for gene in g.genes() {
+                if let Gene::Real { v, lo, hi } = gene {
+                    assert!(v.is_finite() && *v >= lo && *v <= hi);
+                }
+            }
+            // The species stays recognizable: body plan and weapon are never touched.
+            assert_eq!(
+                (g.segments, g.limbs, g.weapon),
+                (base.segments, base.limbs, base.weapon)
+            );
+            // The rooting genes (five) and the cord genes (four, which only tetherers vary) do not
+            // vary here; measure over the rest.
+            let n = base.normalized().len() as f32;
+            let d = base.distance(&g) * n / (n - 9.0);
+            if d < 0.01 {
+                small += 1;
+            } else if d < 0.028 {
+                wide += 1;
+            } else {
+                far += 1;
+            }
+        }
+        assert!(small > samples * 85 / 100, "most are tiny jitters: {small}");
+        assert!(wide + far > 0, "some spread wider");
+        assert!(far > 0 && far < samples / 20, "a few outliers: {far}");
+    }
+
+    fn parents(i: usize, rng: &mut Rng) -> (Genome, Genome) {
+        let base = match i % 6 {
+            0 => Genome::bogey(),
+            1 => Genome::lunatic(),
+            2 => Genome::smarty(),
+            3 => Genome::fatso(),
+            4 => Genome::serpent(),
+            _ => Genome::leech(),
+        };
+        // Two relatives of one lineage, one of them quite a different individual.
+        (
+            base.individual(rng),
+            Genome::individual(base, rng).individual(rng),
+        )
+    }
+
+    #[test]
+    fn crossover_children_are_valid_and_inherit_within_the_parents_range() {
+        let mut rng = Rng::new(21);
+        for i in 0..4000 {
+            let (mut a, mut b) = parents(i, &mut rng);
+            let sp = QuadrantParams {
+                depth: 0.0,
+                danger: rng.f32(),
+                aggression: rng.f32(),
+                density: rng.f32(),
+                distortion: rng.f32(),
+                tech: rng.f32(),
+                swarm: rng.f32(),
+            };
+            if i % 4 == 0 {
+                // Fully unrelated random genomes still cross into valid ones.
+                a = Genome::sample(&mut rng, &sp);
+                b = Genome::sample(&mut rng, &sp);
+            }
+            let mut child = Genome::crossover(a, b, &mut rng);
+            assert_eq!(child, child.limited());
+            assert!(child.parts() <= MAX_PARTS && child.lose >= child.sight);
+            let (ga, gb) = (a.genes(), b.genes());
+            for (c, (x, y)) in child.genes().into_iter().zip(ga.into_iter().zip(gb)) {
+                match (c, x, y) {
+                    (
+                        Gene::Real { v, lo, hi },
+                        Gene::Real { v: x, .. },
+                        Gene::Real { v: y, .. },
+                    ) => {
+                        assert!(v.is_finite() && *v >= lo && *v <= hi);
+                        let slack = (hi - lo) * 0.05 + 0.2 * x.abs().max(y.abs());
+                        // Pigment wraps around at the ends of its range.
+                        let wrapped = *v < lo + slack || *v > hi - slack;
+                        assert!(
+                            wrapped || (*v >= x.min(*y) - slack && *v <= x.max(*y) + slack),
+                            "{v} {x} {y}"
+                        );
+                    }
+                    (Gene::Int { v, lo, hi }, ..) => assert!((lo..=hi).contains(v)),
+                    _ => {}
+                }
+            }
+            // Gene groups travel whole: the child's body plan is one parent's.
+            assert!(child.segments == a.segments || child.segments == b.segments);
+            assert!(child.weapon == a.weapon || child.weapon == b.weapon);
+            assert!(child.diet == a.diet || child.diet == b.diet);
+        }
+    }
+
+    #[test]
+    fn crossover_is_deterministic_and_mixes_the_parents() {
+        let a = Genome::bogey();
+        let mut b = Genome::bogey();
+        b.speed = 400.0;
+        b.hull = 300.0;
+        b.hue = 0.1;
+        let one = Genome::crossover(a, b, &mut Rng::new(5));
+        assert_eq!(one, Genome::crossover(a, b, &mut Rng::new(5)));
+        let mut rng = Rng::new(6);
+        let speeds: Vec<f32> = (0..200)
+            .map(|_| Genome::crossover(a, b, &mut rng).speed)
+            .collect();
+        assert!(speeds.iter().any(|s| *s < 200.0) && speeds.iter().any(|s| *s > 250.0));
+        assert!(
+            speeds
+                .iter()
+                .all(|s| (a.speed * 0.9..=b.speed * 1.1).contains(s))
+        );
+    }
+
+    #[test]
+    fn a_lineage_bred_for_thirty_generations_stays_itself_but_varies() {
+        let mut rng = Rng::new(31);
+        let (mut kept, mut varied, mut worst) = (0, 0, 0.0f32);
+        let founders = [
+            Genome::bogey(),
+            Genome::lunatic(),
+            Genome::smarty(),
+            Genome::fatso(),
+            Genome::leech(),
+            Genome::serpent(),
+        ];
+        let runs = 300;
+        for run in 0..runs {
+            let founder = founders[run % founders.len()];
+            // A small mixed population; each generation is bred from two random members,
+            // sexually or not.
+            let mut pop: Vec<Genome> = (0..6).map(|_| founder.individual(&mut rng)).collect();
+            for _ in 0..30 {
+                let next: Vec<Genome> = (0..6)
+                    .map(|k| {
+                        let a = pop[rng.int(0, 5) as usize];
+                        if k % 3 == 0 {
+                            a.mutate(&mut rng)
+                        } else {
+                            Genome::crossover(a, pop[rng.int(0, 5) as usize], &mut rng)
+                        }
+                    })
+                    .collect();
+                pop = next;
+            }
+            for g in &pop {
+                let d = founder.distance(g);
+                worst = worst.max(d);
+                assert!(d < 0.12, "drifted too far: {d}");
+                assert_eq!(*g, g.limited());
+            }
+            let g = pop[0];
+            if (g.social, g.trigger, g.fear, g.diet)
+                == (founder.social, founder.trigger, founder.fear, founder.diet)
+                && g.weapon == founder.weapon
+            {
+                kept += 1;
+            }
+            varied += (pop.iter().any(|x| x.speed != pop[0].speed)) as usize;
+        }
+        assert!(kept > runs * 95 / 100, "categories intact in {kept}/{runs}");
+        assert!(varied > runs * 95 / 100, "still varied: {varied}");
+        assert!(worst > 0.0);
+    }
+
+    #[test]
+    fn single_parent_descent_does_not_compound_outliers() {
+        let mut rng = Rng::new(32);
+        let founder = Genome::bogey();
+        let mut far = 0;
+        for _ in 0..200 {
+            let mut g = founder;
+            for _ in 0..30 {
+                g = g.mutate(&mut rng);
+            }
+            far += (founder.distance(&g) > 0.05) as usize;
+        }
+        assert!(far < 10, "{far} of 200 lines wandered off");
+    }
+
+    #[test]
+    fn individuals_are_deterministic_and_actually_vary() {
+        let base = Genome::bogey();
+        let a = base.individual(&mut Rng::new(3));
+        assert_eq!(a, base.individual(&mut Rng::new(3)));
+        assert_ne!(a, base.individual(&mut Rng::new(4)));
+        assert_ne!(a, base);
+        let sp = Species::bogey().individual(&mut Rng::new(3));
+        assert_eq!(sp.lineage, Species::bogey().lineage);
+    }
+
+    #[test]
     fn the_home_pool_is_exactly_the_five_classics() {
         for seed in [0, 7, 0x535343] {
             let pool = GenePool::for_quadrant(seed, QuadrantId::ORIGIN);
@@ -1218,5 +1918,150 @@ mod tests {
         let id = QuadrantId { x: -7, y: 5 };
         assert_eq!(GenePool::for_quadrant(3, id), GenePool::for_quadrant(3, id));
         assert_ne!(GenePool::for_quadrant(3, id), GenePool::for_quadrant(4, id));
+    }
+
+    #[test]
+    fn foraging_diets_are_appended_and_sampled_without_moving_older_genes() {
+        // Older diets keep their indices, so stored genomes read the same.
+        assert_eq!(
+            [Diet::None, Diet::Rocks, Diet::Siphon, Diet::Dust].map(|d| d.get()),
+            [0, 1, 2, 3]
+        );
+        assert_eq!(Genome::bogey().diet, Diet::Graze);
+        assert!(Genome::bogey().forages() && !Genome::lunatic().forages());
+        let (mut graze, mut hunt, mut other) = (0, 0, 0);
+        let params = QuadrantParams {
+            aggression: 0.8,
+            swarm: 0.6,
+            ..QuadrantParams::HOME
+        };
+        let mut rng = Rng::new(77);
+        for _ in 0..3000 {
+            let g = Genome::sample(&mut rng, &params);
+            match g.diet {
+                Diet::Graze => graze += 1,
+                Diet::Hunt => {
+                    hunt += 1;
+                    assert!(g.body_mass() >= 8.0, "a predator needs bulk");
+                }
+                _ => other += 1,
+            }
+        }
+        assert!(
+            graze > 500 && hunt > 100 && other > 1000,
+            "{graze} {hunt} {other}"
+        );
+    }
+
+    #[test]
+    fn cord_genes_are_mostly_weak_a_minority_strong_a_few_gripping_and_valid() {
+        let params = QuadrantParams {
+            tech: 0.7,
+            danger: 0.6,
+            ..QuadrantParams::HOME
+        };
+        let mut rng = Rng::new(5);
+        let (mut tethers, mut weak, mut strong, mut grip) = (0, 0, 0, 0);
+        for _ in 0..20_000 {
+            let g = Genome::sample(&mut rng, &params);
+            assert_eq!(g, g.limited());
+            if g.weapon != Weapon::Tether {
+                // Only cord throwers carry cord genes.
+                assert_eq!(
+                    (g.cord_strength, g.cord_slack, g.cord_hardness),
+                    (1.0, 200.0, 2.0)
+                );
+                continue;
+            }
+            tethers += 1;
+            if g.cord_slack <= 260.0 && g.cord_hardness <= 2.5 && g.cord_drag == 0.0 {
+                weak += 1;
+                assert!(g.cord_strength <= 1.25);
+            }
+            if g.cord_strength >= 3.0 {
+                strong += 1;
+            }
+            if g.cord_strength >= 6.0 {
+                grip += 1;
+                assert!(g.cord_slack >= 2000.0 && g.cord_drag >= 0.5);
+            }
+        }
+        assert!(tethers > 1000, "{tethers}");
+        assert!(
+            weak > tethers * 55 / 100,
+            "most cords are weak: {weak}/{tethers}"
+        );
+        assert!(
+            strong > tethers / 20 && strong < tethers * 30 / 100,
+            "a minority are strong: {strong}/{tethers}"
+        );
+        assert!(
+            grip > 0 && grip < tethers / 12,
+            "a few grip: {grip}/{tethers}"
+        );
+        // HOME's leech keeps the classic cord, individuals stay near it, and mutation and
+        // crossover keep cords valid.
+        let leech = Genome::leech();
+        assert_eq!(
+            (leech.cord_strength, leech.cord_slack, leech.cord_hardness),
+            (1.0, 200.0, 2.0)
+        );
+        let mut rng = Rng::new(9);
+        for _ in 0..300 {
+            let g = leech.individual(&mut rng);
+            assert!(g.cord_hardness < 2.6 && g.cord_slack < 260.0 && g.cord_strength < 1.3);
+            let child = Genome::crossover(g, Genome::leech().mutate(&mut rng), &mut rng);
+            assert_eq!(child, child.limited());
+        }
+    }
+
+    #[test]
+    fn wild_pools_hold_grazers_and_predators_but_home_is_untouched() {
+        let mut diets = std::collections::HashSet::new();
+        for x in -16..=16 {
+            for y in -16..=16 {
+                for e in GenePool::for_quadrant(5, QuadrantId { x, y }).entries {
+                    diets.insert(e.species.genome.diet.get());
+                }
+            }
+        }
+        assert!(diets.contains(&(Diet::Graze.get())) && diets.contains(&(Diet::Hunt.get())));
+        assert_eq!(
+            GenePool::for_quadrant(5, QuadrantId::ORIGIN),
+            GenePool::home()
+        );
+    }
+
+    #[test]
+    fn learners_are_rare_in_the_wild_keen_where_tech_is_high_and_valid() {
+        let count = |tech: f32| {
+            let params = QuadrantParams {
+                tech,
+                ..QuadrantParams::HOME
+            };
+            let mut rng = Rng::new(31);
+            let mut learners = 0;
+            for _ in 0..3000 {
+                let g = Genome::sample(&mut rng, &params);
+                assert_eq!(g, g.limited());
+                if g.learner > 0.0 {
+                    learners += 1;
+                    assert!((0.35..=1.0).contains(&g.learner) && g.learn_rate > 0.0);
+                }
+            }
+            learners
+        };
+        let (dull, keen) = (count(0.2), count(0.95));
+        assert!(dull > 20 && dull < 400, "{dull}");
+        assert!(keen > dull * 2, "{keen} vs {dull}");
+        // Only Smarty learns at HOME, and offspring of learners stay valid learners.
+        assert!(Genome::smarty().learner > 0.0);
+        assert_eq!(Genome::bogey().learner + Genome::fatso().learner, 0.0);
+        let mut rng = Rng::new(5);
+        let child = Genome::crossover(Genome::smarty(), Genome::smarty(), &mut rng);
+        assert!(child.learner > 0.3 && child == child.limited());
+        // Non-learners never gain the trait through breeding.
+        let plain = Genome::crossover(Genome::bogey(), Genome::bogey(), &mut rng);
+        assert_eq!(plain.learner, 0.0);
     }
 }

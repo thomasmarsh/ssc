@@ -23,10 +23,11 @@ pub enum Sound {
     Pickup,
     HurtShield,
     HurtHull,
+    Latch,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 14] = [
+    pub const ALL: [Sound; 15] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -41,6 +42,7 @@ impl Sound {
         Sound::Pickup,
         Sound::HurtShield,
         Sound::HurtHull,
+        Sound::Latch,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -147,6 +149,19 @@ impl Sound {
                     (saw(150.0, t) * 0.6 + noise.next() * 0.5) * decay(t, 0.07)
                 });
                 lowpass(&mut v, 2400.0);
+                v
+            }
+            // A cord taking hold: a metallic twang that sags into a low clank, unlike any hurt.
+            Sound::Latch => {
+                let mut noise = Noise::new(97);
+                let mut v = voice(0.34, |t, _| {
+                    let twang = square(sweep((t / 0.3).min(1.0), 880.0, 140.0), t);
+                    let clank = square(95.0, t) * decay(t, 0.12);
+                    (twang * decay(t, 0.09) * 0.8 + clank + noise.next() * 0.25 * decay(t, 0.03))
+                        * 0.7
+                });
+                lowpass(&mut v, 3200.0);
+                crush(&mut v, 20.0, 3);
                 v
             }
             Sound::HurtHull => {

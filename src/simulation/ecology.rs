@@ -268,6 +268,7 @@ impl Game {
                 let direction = Vec2::from_angle(
                     k as f32 * TAU / f32::from(count.max(1)) + self.rng.range(-0.4, 0.4),
                 );
+                let species = species.individual(&mut self.variation);
                 let mut body = self.make_creature(&species, position + direction * (radius + 30.0));
                 body.velocity = direction * 140.0;
                 body.genes = genes;
@@ -307,6 +308,10 @@ impl Game {
             .filter(|b| b.active && b.kind == BodyKind::Creature && b.genome.diet == Diet::Rocks)
         {
             for rock in self.bodies.iter().filter(|b| b.active && edible(b)) {
+                // A creature never eats the rock it clings to.
+                if creature.root.is_some_and(|r| r.host == rock.id) {
+                    continue;
+                }
                 if !taken.contains(&rock.id)
                     && creature.position.distance(rock.position)
                         < creature.radius + rock.radius + 6.0
@@ -337,6 +342,7 @@ impl Game {
                 })
             {
                 eater.health = (eater.health + rock.radius * GRAZE_HEAL).min(eater.max_health);
+                eater.feed(rock.radius * food::ROCK_NUTRITION);
             }
         }
         self.consume(&taken);
@@ -388,27 +394,42 @@ impl Game {
                 .iter()
                 .filter(|b| b.parent == Some(id) && !b.follower)
                 .count();
-            let genome = parent.genome.juvenile();
-            if tended >= LITTER_CAP || self.bodies.len() + genome.parts() as usize >= MAX_BODIES {
+            // Litters follow the same rules as any other reproduction: calm parents with
+            // energy to spare, in places that are not already crowded.
+            let pays = parent.genome.forages() && !parent.provisioned;
+            if tended >= LITTER_CAP
+                || parent.alert
+                || parent.enraged
+                || parent.panic > 0.0
+                || (pays && parent.energy_fraction() < growth::BREED_ENERGY * 0.75)
+                || !self.room_to_breed(&parent, 1)
+            {
                 continue;
             }
-            let species = Species {
-                lineage: parent.species,
-                generation: 0,
-                genome,
-            };
+            if pays {
+                self.bodies[index].energy -= parent.max_energy * growth::LITTER_COST;
+            }
+            let adult = parent.genome.mutate(&mut self.variation);
+            let brain = self.inherited_brain(&adult, &parent, None);
             let direction = self.rng.direction();
-            let spot = parent.position + direction * (parent.radius + genome.radius + 20.0);
-            let mut child = self.make_creature(&species, spot);
+            let spot =
+                parent.position + direction * (parent.radius + adult.juvenile().radius + 20.0);
+            let mut child = self.newborn(
+                parent.species,
+                parent.generation + 1,
+                parent.genes,
+                adult,
+                brain,
+                spot,
+            );
             child.velocity = parent.velocity;
-            child.genes = parent.genes;
             child.parent = Some(id);
             child.home = Some(parent.position);
             child.wander = direction.y.atan2(direction.x);
             child.angle = child.wander;
             child.fire_cooldown = 1.0 + self.rng.f32() * 2.0;
             self.add_body(child);
-            self.effect(spot, 14.0, 0.3, EffectKind::Respawn);
+            self.effect(spot, 14.0, 0.3, EffectKind::Birth);
         }
     }
 
@@ -418,9 +439,11 @@ impl Game {
             return;
         }
         let direction = self.rng.direction();
-        let mut body = self.make_creature(species, center + direction * 90.0);
+        let species = species.individual(&mut self.variation);
+        let mut body = self.make_creature(&species, center + direction * 90.0);
         body.velocity = direction * 70.0;
         body.genes = genes;
+        body.provisioned = true;
         body.home = Some(center);
         body.wander = direction.y.atan2(direction.x);
         body.angle = body.wander;

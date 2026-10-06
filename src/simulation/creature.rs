@@ -38,6 +38,13 @@ impl Game {
         body.genome = genome;
         body.species = species.lineage;
         body.brood_timer = 4.0 + (body.id % 5) as f32 * 2.0;
+        body.max_energy = genome.energy_capacity();
+        body.energy = body.max_energy * food::starting_energy(&genome, body.id);
+        body.generation = species.generation;
+        body.breed_clock = growth::first_clock(&genome, body.id);
+        if genome.learner > 0.0 {
+            body.brain = Some(Box::new(Brain::new(body.id)));
+        }
         body
     }
 
@@ -65,8 +72,13 @@ impl Game {
             heading: Vec2,
             chain: Option<u32>,
             heavy: bool,
+            /// A rock a rooting creature may cling to.
+            rock: bool,
             well: bool,
             grazable: bool,
+            /// Free for a predator to chase: a lone, unprotected creature, and its mass.
+            huntable: bool,
+            mass: f32,
             raising_alarm: bool,
             alarm_range: f32,
         }
@@ -87,8 +99,11 @@ impl Game {
                     heading: Vec2::from_angle(b.wander),
                     chain: b.chain,
                     heavy: matches!(b.kind, BodyKind::Asteroid | BodyKind::BlackHole),
+                    rock: root::can_host(b),
                     well: b.kind == BodyKind::BlackHole,
                     grazable: ecology::edible(b),
+                    huntable: food::huntable(b),
+                    mass: b.mass,
                     raising_alarm: creature
                         && match g.trigger {
                             // Hunters raise the alarm on seeing the player (packs, on
@@ -109,6 +124,15 @@ impl Game {
             .filter(|b| b.friendly)
             .map(|b| (b.position, b.velocity))
             .collect();
+        let plankton: Vec<Vec2> = if self
+            .bodies
+            .iter()
+            .any(|b| b.active && b.kind == BodyKind::Creature && b.genome.diet == Diet::Graze)
+        {
+            self.food.iter().map(|f| f.position).collect()
+        } else {
+            Vec::new()
+        };
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if body.kind != BodyKind::Creature {
                 continue;
@@ -121,7 +145,9 @@ impl Game {
             let phenotype = body.genes;
             // Individuals differ a little in pace and in how restless they are.
             let temperament = (body.id % 5) as f32 / 4.0;
-            let cruise = g.cruise * (0.85 + 0.3 * temperament);
+            // A tired forager is slower; a fed one (or one that needs no food) is unchanged.
+            let vigor = body.vigor();
+            let cruise = g.cruise * (0.85 + 0.3 * temperament) * vigor;
             let lead = g.lead * phenotype.sensor_acuity;
             let flock = g.flocking * phenotype.flocking;
             let perception = if g.social == Social::Solitary {
@@ -130,7 +156,7 @@ impl Game {
                 PERCEPTION * flock
             };
             // Aggression moves pace only a little; it mostly shows in rage and fire rate.
-            let speed = g.speed * (1.0 + (phenotype.aggression - 1.0) * 0.4);
+            let speed = g.speed * (1.0 + (phenotype.aggression - 1.0) * 0.4) * vigor;
 
             let mut separation = Vec2::ZERO;
             let mut heading = Vec2::ZERO;
@@ -141,6 +167,11 @@ impl Game {
             let mut heavy: Option<(f32, Vec2)> = None;
             let mut well: Option<(f32, Vec2)> = None;
             let mut meal: Option<(f32, Vec2)> = None;
+            let mut perch: Option<(f32, Vec2)> = None;
+            let seeking = body.wants_host();
+            let mut prey: Option<(f32, Vec2)> = None;
+            let hunting = body.hunts_prey();
+            let prey_sight = (g.sight * phenotype.sensor_acuity).clamp(250.0, 900.0);
             for other in neighbors
                 .iter()
                 .filter(|n| n.id != body.id && (body.chain.is_none() || n.chain != body.chain))
@@ -148,7 +179,18 @@ impl Game {
                 let offset = body.position - other.position;
                 let distance_squared = offset.length_squared();
                 let range = body.radius + other.radius + 35.0;
-                if distance_squared < range * range && distance_squared > 0.1 {
+                if seeking
+                    && other.rock
+                    && distance_squared < root::SEEK_RANGE * root::SEEK_RANGE
+                    && perch.is_none_or(|(best, _)| distance_squared < best)
+                {
+                    perch = Some((distance_squared, -offset));
+                }
+                // A creature looking for a rock to cling to is not repelled by one.
+                if !(seeking && other.rock)
+                    && distance_squared < range * range
+                    && distance_squared > 0.1
+                {
                     crowding += offset / distance_squared * 6500.0;
                 }
                 if other.heavy
@@ -168,6 +210,15 @@ impl Game {
                     && meal.is_none_or(|(best, _)| distance_squared < best)
                 {
                     meal = Some((distance_squared, -offset));
+                }
+                if hunting
+                    && other.huntable
+                    && other.species != body.species
+                    && other.mass < body.mass * food::PREY_MASS_RATIO
+                    && distance_squared < prey_sight * prey_sight
+                    && prey.is_none_or(|(best, _)| distance_squared < best)
+                {
+                    prey = Some((distance_squared, -offset));
                 }
                 if other.species != body.species || distance_squared > perception * perception {
                     continue;
@@ -199,13 +250,36 @@ impl Game {
             if body.panic > 0.0 {
                 body.alert = false;
             }
+            // A rooted creature does not steer: it holds its place, turning to face a threat.
+            if body.root.is_some() {
+                if let (true, Some((p, _))) = (body.alert, player) {
+                    body.angle = (p - body.position).to_angle();
+                }
+                continue;
+            }
             let enraged = body.enraged;
             let speed = match (g.rage > 0.0, enraged) {
                 (true, true) => speed * FRENZY_PACE,
                 (true, false) => speed * CAUTIOUS_PACE,
                 _ => speed,
             };
-            let to_player = player.map(|(p, v)| p + v * lead - body.position);
+            // A learner watches the ship while it hunts it and aims at where its brain
+            // expects the ship to be; everyone else leads by a plain gene.
+            let learner = g.learner;
+            let to_player = match (player, body.brain.as_mut()) {
+                (Some((p, v)), Some(brain)) if learner > 0.0 => {
+                    brain.observe(
+                        dt,
+                        body.alert,
+                        p,
+                        v,
+                        p - body.position,
+                        brain::step_size(g.learn_rate),
+                    );
+                    Some(p + brain.aim_offset(v, lead, learner) - body.position)
+                }
+                _ => player.map(|(p, v)| p + v * lead - body.position),
+            };
 
             // The wander heading doubles as the shared heading that neighbors align to.
             if crowd > 0.0 {
@@ -268,6 +342,9 @@ impl Game {
                     * cruise
                     * (g.mass_affinity + phenotype.mass_affinity);
             }
+            if let (true, Some((_, toward))) = (seeking && !body.alert, perch) {
+                desired += toward.normalize_or_zero() * cruise * 1.8;
+            }
             match g.fear {
                 Fear::Wells => {
                     if let Some((_, toward)) = well {
@@ -301,7 +378,34 @@ impl Game {
             if let (Diet::Rocks, Some((_, toward)), false) = (g.diet, meal, body.alert) {
                 desired += toward.normalize_or_zero() * cruise * 1.2;
             }
-            let top_speed = if body.alert { speed } else { cruise * 1.4 };
+            // Hunger beats hostility: a grazer weak with hunger breaks off its pursuit to eat.
+            let desperate = body.energy_fraction() < food::DESPERATE_BELOW;
+            if body.grazes_plankton()
+                && (!body.alert || desperate)
+                && let Some(toward) = plankton
+                    .iter()
+                    .map(|&p| p - body.position)
+                    .filter(|d| d.length_squared() < food::FOOD_SIGHT * food::FOOD_SIGHT)
+                    .min_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))
+            {
+                let pull = if body.alert {
+                    speed * 1.1
+                } else {
+                    cruise * 1.2
+                };
+                desired += toward.normalize_or_zero() * pull;
+            }
+            let chasing = !body.alert && prey.is_some();
+            if let (true, Some((_, toward))) = (chasing, prey) {
+                desired += toward.normalize_or_zero() * speed * 0.7;
+            }
+            let top_speed = if body.alert {
+                speed
+            } else if chasing {
+                (cruise * 1.4).max(speed * 0.7)
+            } else {
+                cruise * 1.4
+            };
             // A jointed creature's head steers with the muscle to tow the body it drags.
             let tow = body
                 .chain
@@ -322,7 +426,7 @@ impl Game {
     /// Hardpoints fire. Any part of any creature can carry a gun or cord launcher, as its
     /// genome says; only hunting creatures shoot, and only at targets in range.
     pub(super) fn fire_weapons(&mut self) {
-        let Some(target) = self.player().map(|p| p.position) else {
+        let Some((target, ship_velocity)) = self.player().map(|p| (p.position, p.velocity)) else {
             return;
         };
         for index in 0..self.bodies.len() {
@@ -338,7 +442,29 @@ impl Game {
                 continue;
             }
             let distance = body.position.distance(target);
-            let direction = (target - body.position).normalize_or_zero();
+            // A learner leads its shots with its brain's guess of where the ship will be
+            // when they arrive; everyone else shoots at where it is.
+            let aim_at = match body.brain.as_ref() {
+                Some(brain) if g.learner > 0.0 => {
+                    let speed = if g.weapon == Weapon::Tether {
+                        tether::TIP_SPEED
+                    } else {
+                        g.shot_speed
+                    };
+                    let flight = distance / speed.max(1.0);
+                    target + brain.shot_offset(ship_velocity, flight, g.learner)
+                }
+                _ => target,
+            };
+            let direction = (aim_at - body.position).normalize_or_zero();
+            // A rooted defender covers only the open side of its rock, never through it.
+            if let Some(root) = body.root
+                && let Some(host) = self.body(root.host)
+                && direction.dot((body.position - host.position).normalize_or_zero())
+                    < root::FIRE_ARC
+            {
+                continue;
+            }
             let pace = if g.rage > 0.0 {
                 if body.enraged { 0.4 } else { 1.15 }
             } else {
@@ -358,8 +484,11 @@ impl Game {
                             .any(|t| t.owner == id && t.kind == TetherKind::Latch)
                     {
                         let from = body.position;
-                        self.tethers
-                            .push(Tether::latch(id, from, direction, g.reel));
+                        let rooted = body.root.is_some();
+                        let cord = Cord::from_genome(&g, body.genes.threat, rooted);
+                        self.tethers.push(Tether::latch_with(
+                            id, from, direction, g.reel, cord, rooted,
+                        ));
                         self.bodies[index].fire_cooldown = g.fire_period;
                     }
                 }

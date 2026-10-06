@@ -7,7 +7,10 @@ use bevy::{
 };
 use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
-use ssc::simulation::{Body, BodyKind, GUARDIAN_COST, Game, Pickup, Shape, TetherKind};
+use ssc::simulation::{
+    Body, BodyKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, Pickup, STRONG_CORD, Shape,
+    TetherKind, fertility,
+};
 use ssc::world::{BaseKind, QUADRANT_SIZE, RockKind, hash2};
 
 /// World units visible top to bottom. Width follows the window's aspect ratio.
@@ -243,9 +246,16 @@ pub fn update_hud(
         .player()
         .map_or((0.0, 0.0), |ship| (ship.health, ship.shield));
     let flags = [
-        game.tethered()
-            .then_some("   /   TETHERED - shoot the cord or break away"),
-        session.slow.then_some("   /   SLOW MOTION"),
+        game.latched_cord().map(|cord| {
+            let meter = (cord.tension * 8.0).round() as usize;
+            let gauge = format!("[{}{}]", "#".repeat(meter), ".".repeat(8 - meter.min(8)));
+            if cord.cord.strength >= STRONG_CORD || cord.cord.slack > 450.0 {
+                format!("   /   GRIPPED {gauge} - shoot the cord, you cannot break away")
+            } else {
+                format!("   /   TETHERED {gauge} - shoot the cord or break away")
+            }
+        }),
+        session.slow.then(|| "   /   SLOW MOTION".to_string()),
     ]
     .into_iter()
     .flatten()
@@ -406,14 +416,73 @@ fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
     );
 }
 
+/// A fertile planetoid: a slowly turning rocky world with a rim of greenery, craters and a
+/// breathing halo of life around it.
+fn draw_planetoid(gizmos: &mut Gizmos, time: f32, body: &Body) {
+    let (p, r) = (body.position, body.radius);
+    let rock = Color::srgb(0.55, 0.47, 0.4);
+    let green = Color::srgb(0.55, 0.9, 0.4);
+    let sides = ((r / 6.0) as u32).clamp(28, 80);
+    let rim = |k: u32, scale: f32| {
+        let angle = body.angle + k as f32 * std::f32::consts::TAU / sides as f32;
+        let seed = (body.id % 17) as f32;
+        let uneven =
+            0.97 + 0.025 * (3.0 * angle + seed).sin() + 0.015 * (7.0 * angle + 2.0 * seed).sin();
+        p + Vec2::from_angle(angle) * r * uneven * scale
+    };
+    gizmos.lineloop_2d((0..sides).map(|k| rim(k, 1.0)), rock);
+    gizmos.lineloop_2d((0..sides).map(|k| rim(k, 0.93)), rock.with_alpha(0.3));
+    // Craters, turning with the body.
+    for k in 0..(4 + (r / 90.0) as u32) {
+        let d = Vec2::from_angle(body.angle + k as f32 * 1.7 + (body.id % 5) as f32);
+        let at = p + d * r * (0.25 + 0.14 * k as f32);
+        gizmos
+            .circle_2d(
+                at,
+                r * (0.07 + 0.03 * ((k + 1) % 3) as f32),
+                rock.with_alpha(0.45),
+            )
+            .resolution(10);
+    }
+    // Greenery: lime tufts along the rim that sway, and a soft halo that breathes.
+    for k in 0..sides {
+        if (k as u64 + body.id).is_multiple_of(3) {
+            continue;
+        }
+        let sway = 0.1 * (time * 1.3 + k as f32 * 0.9).sin();
+        let a = rim(k, 0.98);
+        let out = (a - p).normalize_or_zero();
+        let tuft = a + (out + Vec2::new(-out.y, out.x) * sway) * r * 0.1;
+        gizmos.line_2d(a, tuft, green.with_alpha(0.55));
+    }
+    // A soft halo of life that breathes: pale lime and faint, so it never reads as a
+    // (bright green, tight) gravity well.
+    let breathe = 0.5 + 0.5 * (time * 0.8 + body.id as f32).sin();
+    let halo = Color::srgb(0.8, 0.95, 0.4);
+    for (ring, scale) in [1.1, 1.22].into_iter().enumerate() {
+        gizmos
+            .circle_2d(
+                p,
+                r * scale + 5.0 * breathe,
+                halo.with_alpha((0.1 - 0.04 * ring as f32) * (0.6 + 0.4 * breathe)),
+            )
+            .resolution(((r / 5.0) as u32).clamp(48, 128));
+    }
+}
+
 fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
     let (p, r) = (body.position, body.radius);
+    if body.rock == RockKind::Planetoid {
+        draw_planetoid(gizmos, time, body);
+        return;
+    }
     let tint = match body.rock {
         RockKind::Plain => color,
         RockKind::Ice => Color::srgb(0.5, 0.85, 1.0),
         RockKind::Ore => Color::srgb(0.8, 0.58, 0.3),
         RockKind::Crystal => Color::srgb(0.8, 0.4, 1.0),
         RockKind::Husk => Color::srgb(0.55, 0.85, 0.45),
+        RockKind::Planetoid => color,
     };
     let sides = match body.rock {
         RockKind::Crystal => 6,
@@ -478,6 +547,23 @@ fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
                 );
             }
         }
+        RockKind::Planetoid => {}
+    }
+    // A faint lichen film on rocks that sprout plankton: a few lime flecks on the rim.
+    if fertility(body).is_some() {
+        let lichen = Color::srgba(0.7, 0.95, 0.35, 0.4);
+        for k in 0..3u32 {
+            let at = corner((k * 3 + body.id as u32) % sides);
+            let inward = p + (at - p) * 0.86;
+            gizmos
+                .circle_2d(inward, (r * 0.07).max(1.5), lichen)
+                .resolution(5);
+            gizmos.line_2d(
+                inward,
+                inward + Vec2::from_angle(body.angle + k as f32 * 2.3) * r * 0.12,
+                lichen.with_alpha(0.25),
+            );
+        }
     }
 }
 
@@ -532,7 +618,14 @@ pub fn draw(
                     );
                 }
             }
-            BodyKind::Creature => draw_creature(&mut gizmos, game.time, body, color),
+            BodyKind::Creature => {
+                draw_creature(&mut gizmos, game.time, body, color);
+                if let Some(root) = body.root
+                    && let Some(host) = game.body(root.host)
+                {
+                    draw_roots(&mut gizmos, game.time, body, host, color);
+                }
+            }
             BodyKind::Base => draw_station(&mut gizmos, game.time, body, color),
             BodyKind::Asteroid => draw_rock(&mut gizmos, game.time, body, color),
             BodyKind::BlackHole => {
@@ -556,6 +649,22 @@ pub fn draw(
                 }
             }
         }
+        // A hungry forager shows a faint amber ring that warms as its energy runs out.
+        if body.kind == BodyKind::Creature && !body.follower && body.vigor() < 1.0 {
+            let need = 1.0 - body.vigor();
+            let pulse = if body.is_starving() {
+                0.75 + 0.25 * (game.time * 4.0 + body.id as f32).sin()
+            } else {
+                1.0
+            };
+            gizmos
+                .circle_2d(
+                    p,
+                    r * 1.35,
+                    Color::srgba(1.0, 0.7, 0.25, (0.12 + 0.5 * need / 0.4) * pulse * 0.6),
+                )
+                .resolution(20);
+        }
         if body.shield > 0.0 && body.max_shield > 0.0 && !body.follower {
             let fraction = body.shield / body.max_shield;
             gizmos
@@ -566,6 +675,55 @@ pub fn draw(
                 )
                 .resolution(24);
         }
+    }
+    // Plankton: tiny pale-lime motes (distinct from the green gravity wells) that swell in when they bud and breathe gently.
+    for food in game.food.iter().filter(|f| {
+        (f.position - camera)
+            .abs()
+            .cmplt(half + Vec2::splat(20.0))
+            .all()
+    }) {
+        let phase = food.position.x * 0.013 + food.position.y * 0.007;
+        let size = FOOD_RADIUS * food.grown() * (1.0 + 0.12 * (game.time * 1.7 + phase).sin());
+        let mote = Color::srgba(0.78, 0.95, 0.4, 0.65 * food.grown());
+        gizmos.circle_2d(food.position, size, mote).resolution(8);
+        gizmos.line_2d(
+            food.position - Vec2::X * size * 1.6,
+            food.position + Vec2::X * size * 1.6,
+            Color::srgba(0.78, 0.95, 0.4, 0.18 * food.grown()),
+        );
+    }
+    // Eggs: small speckled ovals in the parent's colors that wobble as they near hatching.
+    for egg in game.eggs.iter().filter(|e| {
+        (e.position - camera)
+            .abs()
+            .cmplt(half + Vec2::splat(30.0))
+            .all()
+    }) {
+        let [r, g, b] = egg.adult.color();
+        let shell = Color::srgba(r, g, b, 0.85);
+        let soon = ((egg.progress() - 0.8) / 0.2).clamp(0.0, 1.0);
+        let wobble = soon * 0.35 * (game.time * 14.0 + egg.position.x).sin();
+        let axis = Vec2::from_angle(wobble + 1.2);
+        let side = Vec2::new(-axis.y, axis.x);
+        let oval = (0..12).map(|i| {
+            let t = i as f32 * std::f32::consts::TAU / 12.0;
+            egg.position + axis * t.sin() * egg.radius * 1.25 + side * t.cos() * egg.radius * 0.9
+        });
+        gizmos.lineloop_2d(oval, shell);
+        let core = 0.35 + 0.65 * egg.progress();
+        gizmos
+            .circle_2d(
+                egg.position,
+                egg.radius * 0.35 * core,
+                shell.with_alpha(0.5),
+            )
+            .resolution(6);
+        gizmos.line_2d(
+            egg.position - side * egg.radius * 0.5,
+            egg.position + side * egg.radius * 0.5,
+            shell.with_alpha(0.35 * soon),
+        );
     }
     for pickup in game.pickups.iter().filter(|p| {
         (p.position - camera)
@@ -592,24 +750,71 @@ pub fn draw(
         let Some((from, to)) = game.tether_ends(tether) else {
             continue;
         };
-        let strain = if tether.kind == TetherKind::Latch && tether.attached() {
-            ((from.distance(to) - tether.rest) / 200.0).clamp(0.0, 1.0)
+        let latched = tether.kind == TetherKind::Latch && tether.attached();
+        // How near the ship is to snapping it, or how hard it pulls, whichever is more.
+        let strain = if latched {
+            tether.strain.max(tether.tension)
         } else {
             0.0
         };
-        let color = Color::srgb(0.75 + 0.25 * strain, 0.4 - 0.2 * strain, 1.0 - 0.7 * strain);
+        // Strong cords read as heavier: more strands, hotter and brighter, trembling under load.
+        let power = if tether.kind == TetherKind::Latch {
+            ((tether.cord.strength - 1.0) / 7.0).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        // Strong cords shift from violet to hot magenta; the glow styles bloom the extra heat.
+        let heat = 1.0 + 0.7 * power;
+        let color = Color::srgb(
+            (0.75 + 0.25 * strain + 0.25 * power).min(1.0) * heat,
+            (0.4 - 0.2 * strain - 0.2 * power).max(0.05) * heat,
+            (1.0 - 0.7 * strain - 0.45 * power).max(0.1) * heat,
+        );
+        let color = if latched && tether.health < tether.max_health * 0.5 {
+            // A frayed cord flickers.
+            let flicker = 0.55 + 0.45 * (game.time * 40.0).sin().abs();
+            color.with_alpha(flicker)
+        } else {
+            color
+        };
         // A rippling cord, taut and straight as it nears breaking.
         let along = to - from;
         let side = Vec2::new(-along.y, along.x).normalize_or_zero();
         let ripple = 7.0 * (1.0 - strain);
-        let points = (0..=16).map(|i| {
-            let t = i as f32 / 16.0;
-            let wobble = (t * 9.0 - game.time * 14.0).sin() * ripple * (t * (1.0 - t) * 4.0);
-            from + along * t + side * wobble
-        });
-        gizmos.linestrip_2d(points, color);
+        let tremble = 3.5 * tether.tension;
+        let strands = if tether.cord.strength >= 6.0 && tether.kind == TetherKind::Latch {
+            3
+        } else if tether.cord.strength >= STRONG_CORD && tether.kind == TetherKind::Latch {
+            2
+        } else {
+            1
+        };
+        for strand in 0..strands {
+            let lane = (strand as f32 - (strands - 1) as f32 * 0.5) * 3.0;
+            let points = (0..=16).map(|i| {
+                let t = i as f32 / 16.0;
+                let envelope = t * (1.0 - t) * 4.0;
+                let wobble = (t * 9.0 - game.time * 14.0).sin() * ripple * envelope
+                    + (t * 37.0 + game.time * 70.0 + strand as f32 * 2.0).sin()
+                        * tremble
+                        * envelope;
+                from + along * t + side * (wobble + lane)
+            });
+            gizmos.linestrip_2d(points, color);
+        }
         if tether.tip.is_some() {
-            gizmos.circle_2d(to, 5.0, color).resolution(8);
+            gizmos.circle_2d(to, 5.0 + 3.0 * power, color).resolution(8);
+        } else if latched {
+            // A clamp where it holds the ship, bigger the stronger the cord, and a tension
+            // ring at the middle that swells as the cord loads up.
+            gizmos
+                .circle_2d(to, 7.0 + 6.0 * power, color)
+                .resolution(10);
+            if tether.tension > 0.05 {
+                gizmos
+                    .circle_2d(from + along * 0.5, 3.0 + 9.0 * tether.tension, color)
+                    .resolution(12);
+            }
         }
     }
     for bullet in &game.bullets {
@@ -692,15 +897,32 @@ pub fn draw(
     for effect in &game.effects {
         let fade = (effect.remaining / effect.lifetime).clamp(0.0, 1.0);
         let r = effect.radius * (1.0 + (1.0 - fade) * 1.5);
-        gizmos
-            .circle_2d(effect.position, r, Color::srgba(1.0, 0.66, 0.3, fade))
-            .resolution(24);
+        let (ring, spark) = match effect.kind {
+            // A birth is a soft lime bloom; coming of age is a bright, clean pulse.
+            EffectKind::Birth => (
+                Color::srgba(0.78, 0.95, 0.4, fade),
+                Color::srgba(0.9, 1.0, 0.7, fade),
+            ),
+            EffectKind::Pair => (
+                Color::srgba(0.85, 0.7, 1.0, fade * 0.45),
+                Color::srgba(0.95, 0.85, 1.0, fade * 0.3),
+            ),
+            EffectKind::Mature => (
+                Color::srgba(0.7, 0.9, 1.0, fade),
+                Color::srgba(1.0, 1.0, 1.0, fade),
+            ),
+            _ => (
+                Color::srgba(1.0, 0.66, 0.3, fade),
+                Color::srgba(1.0, 0.85, 0.5, fade),
+            ),
+        };
+        gizmos.circle_2d(effect.position, r, ring).resolution(24);
         for i in 0..8 {
             let direction = Vec2::from_angle(i as f32 * std::f32::consts::TAU / 8.0);
             gizmos.line_2d(
                 effect.position + direction * r,
                 effect.position + direction * (r + 8.0 * fade),
-                Color::srgba(1.0, 0.85, 0.5, fade),
+                spark,
             );
         }
     }
@@ -1009,6 +1231,28 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
     gizmos.circle_2d(center, 2.5 * ui_scale, CYAN).resolution(6);
 }
 
+/// A rooted creature's hold: a collar where it meets the surface and fine roots that spread
+/// into the rock, swaying a little with the creature's breath. Only drawn outward from the
+/// host's rim, so it reads the same under every render style.
+fn draw_roots(gizmos: &mut Gizmos, time: f32, body: &Body, host: &Body, color: Color) {
+    let out = (body.position - host.position).normalize_or_zero();
+    let side = Vec2::new(-out.y, out.x);
+    let base = host.position + out * host.radius;
+    let r = body.radius;
+    let faint = color.with_alpha(0.55);
+    // A collar hugging the rim.
+    gizmos.line_2d(base - side * r * 0.95, base + side * r * 0.95, faint);
+    // Roots reaching down into the rock.
+    for k in 0..5 {
+        let t = k as f32 / 4.0 - 0.5;
+        let breath = 0.12 * (time * 1.1 + body.id as f32 + k as f32).sin();
+        let length = r * (0.9 + 0.5 * (1.0 - 2.0 * t.abs()));
+        let tip = base - out * length + side * (t * r * 1.9 + breath * r);
+        let mid = base - out * length * 0.5 + side * t * r * 0.9;
+        gizmos.linestrip_2d([base + side * t * r * 0.5, mid, tip], faint);
+    }
+}
+
 /// Creatures take their color from the pigment genes; temper shows as a shift toward
 /// pale (agitated) or red (berserk).
 fn body_color(body: &Body) -> Color {
@@ -1152,6 +1396,31 @@ fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
         gizmos
             .circle_2d(p, r * 0.62, Color::srgba(0.85, 0.65, 0.35, 0.4))
             .resolution(16);
+    }
+    if let (true, Some(skill)) = (head, body.learner_skill()) {
+        // A learner sweeps a faint scanning arc around itself. A fresh brain barely shows
+        // one; as it studies the ship the arc lengthens, brightens and gains a glint at
+        // its leading end.
+        let sweep = 0.7 + 2.0 * skill;
+        let start = time * 1.6 + body.id as f32 * 2.3;
+        let ring = r * 1.55 + 5.0;
+        let alpha = 0.16 + 0.5 * skill;
+        let steps = 10;
+        let arc = (0..=steps).map(|i| {
+            let angle = start + sweep * i as f32 / steps as f32;
+            p + Vec2::from_angle(angle) * ring
+        });
+        gizmos.linestrip_2d(arc, Color::srgba(0.75, 0.95, 1.0, alpha));
+        if skill > 0.15 {
+            let tip = p + Vec2::from_angle(start + sweep) * ring;
+            gizmos
+                .circle_2d(
+                    tip,
+                    1.6 + 1.4 * skill,
+                    Color::srgba(1.0, 1.0, 1.0, 0.35 + 0.5 * skill),
+                )
+                .resolution(6);
+        }
     }
     if g.social == ssc::genome::Social::Brood && head {
         gizmos.circle_2d(p, r * 0.3, color).resolution(8);
