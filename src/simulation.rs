@@ -1104,8 +1104,8 @@ impl Game {
                     ));
                     bullet.burst = 0.0;
                 }
-                if bullet.pierce > 0 {
-                    // Passes through, remembering what it struck.
+                if bullet.pierce > 0 && body.rock != RockKind::Planetoid {
+                    // Passes through (but never through a planetoid: it swallows every shot), remembering what it struck.
                     if let Some(slot) = bullet.struck.iter_mut().find(|id| **id == 0) {
                         *slot = body.id;
                     }
@@ -1376,6 +1376,14 @@ impl Game {
     }
 }
 
+/// True when a disc of `extent` around `center` reaches into the view: a camera at `camera`
+/// seeing `half` units each way, plus `margin`. Visibility depends on the body's whole extent,
+/// never just its center, so a huge body whose edge is on screen is always drawn.
+pub fn extent_in_view(center: Vec2, extent: f32, camera: Vec2, half: Vec2, margin: f32) -> bool {
+    let reach = half + Vec2::splat(margin + extent.max(0.0));
+    (center - camera).abs().cmplt(reach).all()
+}
+
 /// Bodies that never move: gravity wells, bases and the stones of a nest.
 fn is_fixed(body: &Body) -> bool {
     body.pinned || body.root.is_some() || matches!(body.kind, BodyKind::BlackHole | BodyKind::Base)
@@ -1601,6 +1609,181 @@ mod tests {
             .unwrap();
         player.position = position;
         player.velocity = velocity;
+    }
+
+    /// A pinned planetoid of the given radius at `at`, as the generator makes them.
+    fn planetoid_at(game: &mut Game, at: Vec2, radius: f32) -> u64 {
+        let id = add(game, BodyKind::Asteroid, at);
+        let w = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+        w.rock = RockKind::Planetoid;
+        w.radius = radius;
+        w.pinned = true;
+        w.mass = 900.0;
+        id
+    }
+
+    #[test]
+    fn extent_in_view_uses_the_whole_body_not_its_center() {
+        let half = Vec2::new(900.0, 450.0);
+        let camera = Vec2::ZERO;
+        // A center far off screen: culled for a speck, drawn for a world whose edge shows.
+        let center = Vec2::new(1300.0, 0.0);
+        assert!(!extent_in_view(center, 10.0, camera, half, 120.0));
+        assert!(extent_in_view(center, 700.0, camera, half, 120.0));
+        // Edge exactly on screen (center distance minus radius inside the view).
+        for dx in [901.0, 1200.0, 1590.0] {
+            assert!(extent_in_view(
+                Vec2::new(dx, 300.0),
+                700.0,
+                camera,
+                half,
+                0.0
+            ));
+        }
+        assert!(!extent_in_view(
+            Vec2::new(1700.0, 0.0),
+            700.0,
+            camera,
+            half,
+            0.0
+        ));
+        // Per axis: a tall world above the view.
+        assert!(extent_in_view(
+            Vec2::new(0.0, 1100.0),
+            700.0,
+            camera,
+            half,
+            0.0
+        ));
+        assert!(!extent_in_view(
+            Vec2::new(0.0, 1200.0),
+            700.0,
+            camera,
+            half,
+            0.0
+        ));
+    }
+
+    /// Every kind of shot, at several speeds and angles, from just outside and far away: the
+    /// planetoid's surface swallows it, and nothing ever ends up inside.
+    #[test]
+    fn planetoids_absorb_every_projectile() {
+        let radius = 300.0;
+        let at = Vec2::new(0.0, 0.0);
+        let mut failures = Vec::new();
+        for kind in 0..8 {
+            for speed in [150.0, 520.0, 1400.0, 4000.0] {
+                for (start, aim) in [(330.0, 0.0), (900.0, 0.4), (1800.0, 2.0), (1200.0, -2.6)] {
+                    let mut game = empty_game();
+                    game.stream_quadrants();
+                    set_player(&mut game, Vec2::new(-4000.0, 4000.0), Vec2::ZERO);
+                    game.bodies[0].health = 1e9;
+                    game.player_invulnerability = 1e9;
+                    planetoid_at(&mut game, at, radius);
+                    let from = Vec2::from_angle(aim) * start;
+                    // Aim at a point on the disc, not always the center.
+                    let target = Vec2::from_angle(aim + 1.0) * radius * 0.6;
+                    let direction = (target - from).normalize();
+                    let mut bullet = if kind < 5 {
+                        Bullet::friendly(from, direction * speed, 60.0)
+                    } else {
+                        Bullet::hostile(from, direction * speed, 60.0, 5.0)
+                    };
+                    match kind {
+                        1 => bullet.pierce = 3,
+                        2 => bullet.blast = 2,
+                        3 => bullet.homing = 3,
+                        4 => bullet.burst = 80.0,
+                        6 => {
+                            bullet.radius = 1.8;
+                            bullet.shape = Shape::Needle;
+                        }
+                        7 => {
+                            bullet.radius = 6.0;
+                            bullet.burst = 75.0;
+                            bullet.fragile = true;
+                        }
+                        _ => {}
+                    }
+                    game.bullets.push(bullet);
+                    let mut inside = false;
+                    for _ in 0..3600 {
+                        game.step(DT, Input::default());
+                        inside |= game
+                            .bullets
+                            .iter()
+                            .any(|b| b.position.distance(at) < radius);
+                        if game.bullets.is_empty() {
+                            break;
+                        }
+                    }
+                    if inside || !game.bullets.is_empty() {
+                        failures.push((kind, speed, start, aim, inside));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "leaked through: {failures:?}");
+    }
+
+    #[test]
+    fn planetoids_stop_mines_and_ships_and_creatures_at_any_speed() {
+        let radius = 250.0;
+        let mut game = empty_game();
+        game.stream_quadrants();
+        let id = planetoid_at(&mut game, Vec2::ZERO, radius);
+        let at = body(&game, id).position;
+        // A mine that starts inside, and one that drifts in fast.
+        game.mines.push(Mine {
+            position: Vec2::new(100.0, 0.0),
+            velocity: Vec2::ZERO,
+            friendly: false,
+            age: 0.0,
+            fuse: None,
+            damage: 0.0,
+            blast: 0.0,
+        });
+        game.mines.push(Mine {
+            position: Vec2::new(-radius - 20.0, 0.0),
+            velocity: Vec2::new(900.0, 0.0),
+            friendly: false,
+            age: 0.0,
+            fuse: None,
+            damage: 0.0,
+            blast: 0.0,
+        });
+        let creature = spawn(&mut game, &Species::bogey(), Vec2::new(0.0, -radius - 60.0));
+        game.player_invulnerability = 1e9;
+        for speed in [650.0, 1000.0, 2500.0] {
+            set_player(
+                &mut game,
+                Vec2::new(radius + 80.0, 0.0),
+                Vec2::new(-speed, 0.0),
+            );
+            {
+                let c = game.bodies.iter_mut().find(|b| b.id == creature).unwrap();
+                c.position = Vec2::new(0.0, -radius - 60.0);
+                c.velocity = Vec2::new(0.0, speed);
+            }
+            for _ in 0..90 {
+                game.step(DT, Input::default());
+                let ship = game.player().unwrap();
+                assert!(
+                    ship.position.distance(at) >= radius,
+                    "ship inside at {speed}"
+                );
+                let c = body(&game, creature);
+                assert!(
+                    c.position.distance(at) >= radius,
+                    "creature inside at {speed}"
+                );
+            }
+        }
+        assert!(
+            game.mines.iter().all(|m| m.position.distance(at) >= radius),
+            "mines stay out: {:?}",
+            game.mines.iter().map(|m| m.position).collect::<Vec<_>>()
+        );
     }
 
     #[test]

@@ -442,6 +442,16 @@ fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
     );
 }
 
+/// How far past its center a body's drawing reaches (a planetoid's halo goes out to 1.22
+/// radii plus its breathing).
+fn body_draw_extent(body: &Body) -> f32 {
+    if body.rock == RockKind::Planetoid {
+        body.radius * 1.25 + 6.0
+    } else {
+        body.radius
+    }
+}
+
 /// A fertile planetoid: a slowly turning rocky world with a rim of greenery, craters and a
 /// breathing halo of life around it.
 fn draw_planetoid(gizmos: &mut Gizmos, time: f32, body: &Body) {
@@ -606,10 +616,9 @@ pub fn draw(
     };
     draw_backdrop(&mut gizmos, camera, half);
     for body in game.bodies.iter().filter(|b| {
-        (b.position - camera)
-            .abs()
-            .cmplt(half + Vec2::splat(120.0))
-            .all()
+        // Cull on the body's full extent, not its center: a planetoid is hundreds of units
+        // wide and must stay drawn while only its edge (or halo) is on screen.
+        ssc::simulation::extent_in_view(b.position, body_draw_extent(b), camera, half, 120.0)
     }) {
         let p = body.position;
         let r = body.radius;

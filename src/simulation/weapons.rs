@@ -196,11 +196,26 @@ impl Game {
         } else {
             Vec::new()
         };
+        let planets: Vec<(Vec2, f32)> = self
+            .bodies
+            .iter()
+            .filter(|b| b.active && b.rock == RockKind::Planetoid)
+            .map(|b| (b.position, b.radius))
+            .collect();
         let mut bursts = Vec::new();
         for mine in &mut self.mines {
             mine.age += dt;
             mine.velocity *= (-1.4 * dt).exp();
             mine.position += mine.velocity * dt;
+            // A planetoid is solid: a mine that drifts or is laid into one rests on its surface.
+            for rock in planets.iter() {
+                let offset = mine.position - rock.0;
+                if offset.length_squared() < rock.1 * rock.1 {
+                    let out = offset.try_normalize().unwrap_or(Vec2::X);
+                    mine.position = rock.0 + out * (rock.1 + 0.5);
+                    mine.velocity = Vec2::ZERO;
+                }
+            }
             if mine.fuse.is_none() {
                 let tripped = if mine.friendly {
                     hostile_targets
