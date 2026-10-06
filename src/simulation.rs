@@ -3111,3 +3111,104 @@ mod tests {
         assert!(!names.contains("Bogey"));
     }
 }
+
+#[cfg(test)]
+mod home_flocking_tests {
+    use super::*;
+    use crate::genome::Species;
+
+    /// (fraction of bogeys with a bogey neighbour within perception, mean nearest-neighbour
+    /// distance, bogey count) for the calm bogeys of a fresh HOME game.
+    fn measure(game: &Game) -> (f32, f32, usize) {
+        let lineage = Species::bogey().lineage;
+        let spots: Vec<Vec2> = game
+            .bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Creature && b.species == lineage && !b.follower)
+            .map(|b| b.position)
+            .collect();
+        let nearest: Vec<f32> = spots
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                spots
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i)
+                    .map(|(_, q)| p.distance(*q))
+                    .fold(f32::INFINITY, f32::min)
+            })
+            .collect();
+        let near = nearest.iter().filter(|d| **d < 380.0).count() as f32;
+        (
+            near / nearest.len() as f32,
+            nearest.iter().sum::<f32>() / nearest.len() as f32,
+            spots.len(),
+        )
+    }
+
+    fn clusters(game: &Game, link: f32) -> Vec<usize> {
+        let lineage = Species::bogey().lineage;
+        let spots: Vec<Vec2> = game
+            .bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Creature && b.species == lineage && !b.follower)
+            .map(|b| b.position)
+            .collect();
+        let mut group: Vec<usize> = (0..spots.len()).collect();
+        for i in 0..spots.len() {
+            for j in 0..i {
+                if spots[i].distance(spots[j]) < link {
+                    let (a, b) = (group[i], group[j]);
+                    for g in group.iter_mut().filter(|g| **g == a) {
+                        *g = b;
+                    }
+                }
+            }
+        }
+        let mut sizes: Vec<usize> = (0..spots.len())
+            .map(|k| group.iter().filter(|g| **g == k).count())
+            .filter(|n| *n > 0)
+            .collect();
+        sizes.sort_unstable_by(|a, b| b.cmp(a));
+        sizes
+    }
+
+    /// Before the schooling tuning, a minute of idling at HOME left singletons (three at 30 s),
+    /// a mean nearest-neighbour distance of 245 and only 91 percent of bogeys within perception
+    /// of a schoolmate. Now bands stay bands.
+    #[test]
+    fn home_bogeys_stay_in_schools_and_stay_calm() {
+        let mut game = Game::new(0x535343);
+        game.player_invulnerability = 1e9;
+        let lineage = Species::bogey().lineage;
+        for second in 1..=60 {
+            for _ in 0..60 {
+                game.step(1.0 / 60.0, Input::default());
+            }
+            if second % 30 != 0 {
+                continue;
+            }
+            let (near, spacing, count) = measure(&game);
+            let sizes = clusters(&game, 380.0);
+            assert!(count >= 33);
+            assert!(
+                near >= 0.95,
+                "{second}s: only {near} have a schoolmate near"
+            );
+            assert!(spacing < 170.0, "{second}s: spacing {spacing}");
+            assert!(
+                sizes.iter().filter(|n| **n == 1).count() <= 1,
+                "{second}s: bogeys are alone: {sizes:?}"
+            );
+            assert!(spacing > 50.0, "{second}s: packed into a ball: {spacing}");
+            assert!(
+                game.bodies
+                    .iter()
+                    .filter(|b| b.kind == BodyKind::Creature && b.species == lineage)
+                    .all(|b| !b.alert),
+                "{second}s: a bogey turned hostile with nobody near"
+            );
+        }
+    }
+}

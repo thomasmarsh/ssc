@@ -11,6 +11,11 @@ use crate::genome::{Diet, Fear, Social, Trigger, Weapon};
 const PERCEPTION: f32 = 380.0;
 const PERSONAL_SPACE: f32 = 110.0;
 const LOOSE_RADIUS: f32 = 220.0;
+/// True schools (passive schoolers that wait to be provoked) hold together more: they pull
+/// stragglers back from nearer, keep a steadier common pace and fidget less, so a band
+/// stays a band instead of straggling into singletons.
+const SCHOOL_LOOSE_RADIUS: f32 = 170.0;
+const SCHOOL_PULL_SPAN: f32 = 160.0;
 /// How far a creature with a mass affinity notices rocks and gravity wells.
 const HEAVY_RANGE: f32 = 600.0;
 /// An enraged creature pursues the player this far, whatever its sight.
@@ -155,9 +160,11 @@ impl Game {
             let phenotype = body.genes;
             // Individuals differ a little in pace and in how restless they are.
             let temperament = (body.id % 5) as f32 / 4.0;
+            let schooling = g.social == Social::School && g.trigger != Trigger::Sight;
             // A tired forager is slower; a fed one (or one that needs no food) is unchanged.
             let vigor = body.vigor();
-            let cruise = g.cruise * (0.85 + 0.3 * temperament) * vigor;
+            let pace_spread = if schooling { 0.1 } else { 0.3 };
+            let cruise = g.cruise * (1.0 - pace_spread / 2.0 + pace_spread * temperament) * vigor;
             let lead = g.lead * phenotype.sensor_acuity;
             let flock = g.flocking * phenotype.flocking;
             let perception = if g.social == Social::Solitary {
@@ -336,7 +343,12 @@ impl Game {
                 let merged = own + (heading / crowd - own) * blend;
                 body.wander = merged.y.atan2(merged.x);
             }
-            body.wander += (self.rng.f32() - 0.5) * (1.5 + 2.0 * temperament) * dt;
+            let restless = if schooling {
+                0.8 + 0.8 * temperament
+            } else {
+                1.5 + 2.0 * temperament
+            };
+            body.wander += (self.rng.f32() - 0.5) * restless * dt;
 
             if let (Some(home), false) = (body.home, body.alert || body.panic > 0.0) {
                 let back = home - body.position;
@@ -377,9 +389,13 @@ impl Game {
                 // Loose cohesion: only stragglers drift back, so the crowd stays spread out.
                 let to_center = center / crowd - body.position;
                 let gap = to_center.length();
-                if gap > LOOSE_RADIUS {
-                    desired +=
-                        to_center / gap * cruise * ((gap - LOOSE_RADIUS) / 200.0).min(1.0) * flock;
+                let (radius, span) = if schooling {
+                    (SCHOOL_LOOSE_RADIUS, SCHOOL_PULL_SPAN)
+                } else {
+                    (LOOSE_RADIUS, 200.0)
+                };
+                if gap > radius {
+                    desired += to_center / gap * cruise * ((gap - radius) / span).min(1.0) * flock;
                 }
                 desired += separation * speed * 1.4 * flock;
             }
