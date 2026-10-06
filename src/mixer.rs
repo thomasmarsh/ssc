@@ -126,6 +126,7 @@ fn spec(cue: &Cue) -> Spec {
         Cue::Switch { dry: true } | Cue::Dry => ship(Sound::Dry, 0.6, 0.0),
         Cue::Hurt { hull: false } => ship(Sound::HurtShield, 0.7, 0.0),
         Cue::Hurt { hull: true } => ship(Sound::HurtHull, 0.95, 0.0),
+        Cue::Extirpated => ship(Sound::Extirpated, 0.7, 0.0),
         // Being caught is news: louder and a little lower the stronger the cord.
         Cue::Latch { strength, .. } => {
             ship(Sound::Latch, (0.55 + 0.08 * strength).clamp(0.55, 1.0), 0.0)
@@ -146,6 +147,7 @@ fn interval(sound: Sound) -> f32 {
         Sound::Mine => 0.12,
         Sound::Switch | Sound::Dry => 0.06,
         Sound::Deploy | Sound::Land | Sound::Takeoff => 0.4,
+        Sound::Extirpated => 1.0,
     }
 }
 

@@ -60,7 +60,7 @@ impl CameraView {
             Self::Close => "CLOSE",
             Self::Wide => "WIDE",
             Self::Far => "FAR",
-            Self::Quadrant => "QUADRANT",
+            Self::Quadrant => "SECTOR",
         }
     }
 
@@ -145,6 +145,11 @@ pub struct Session {
     pub radar: bool,
     pub camera_view: CameraView,
     pub style: RenderStyle,
+    /// Best score this session (kept in memory only), whether the run just ended beat it,
+    /// and whether the ended run has been entered yet.
+    pub best: Option<u64>,
+    pub new_best: bool,
+    recorded: bool,
 }
 
 impl Default for Session {
@@ -157,6 +162,9 @@ impl Default for Session {
             radar: true,
             camera_view: CameraView::default(),
             style: RenderStyle::default(),
+            best: None,
+            new_best: false,
+            recorded: false,
         }
     }
 }
@@ -215,6 +223,7 @@ fn main() {
                 audio::play_cues,
                 presentation::draw,
                 presentation::update_hud,
+                presentation::update_summary,
                 smoke_run,
             )
                 .chain(),
@@ -229,6 +238,12 @@ fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>) {
     let input = session.input;
     let dt = time.delta_secs() * if session.slow { 0.35 } else { 1.0 };
     session.game.step(dt, input);
+    if session.game.game_over && !session.recorded {
+        session.recorded = true;
+        let score = session.game.score;
+        session.new_best = session.best.is_none_or(|best| score > best);
+        session.best = session.best.max(Some(score));
+    }
 }
 
 /// Every physical input device the player can use.
@@ -342,6 +357,8 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::Enter) {
         session.game.reset();
+        session.recorded = false;
+        session.new_best = false;
         session.paused = false;
         session.slow = false;
     }
@@ -483,7 +500,7 @@ fn smoke_run(
         session.camera_view = match std::env::var("SSC_CAMERA").as_deref() {
             Ok("wide") => CameraView::Wide,
             Ok("far") => CameraView::Far,
-            Ok("quadrant") => CameraView::Quadrant,
+            Ok("quadrant" | "sector") => CameraView::Quadrant,
             _ => session.camera_view,
         };
     }
@@ -519,6 +536,12 @@ fn smoke_run(
         && let Ok(mode) = std::env::var("SSC_PAD")
     {
         smoke_pads(&mut session.game, &mode);
+    }
+    // SSC_SUMMARY=over|death: stage a run (with a few extirpations) and show its summary.
+    if run.frames == 4
+        && let Ok(mode) = std::env::var("SSC_SUMMARY")
+    {
+        smoke_summary(&mut session, &mode);
     }
     // SSC_MINE=1: hold the mining beam on the nearest free rock (aimed at it each frame).
     if std::env::var_os("SSC_MINE").is_some() && run.frames > 2 {
@@ -558,6 +581,60 @@ fn smoke_run(
             );
     } else {
         exit.write(AppExit::Success);
+    }
+}
+
+/// Fills in a plausible run and ends it (`over`) or shows the per-life recap (`death`).
+fn smoke_summary(session: &mut Session, mode: &str) {
+    let game = &mut session.game;
+    let run = &mut game.run;
+    for n in 0..17 {
+        run.visit(
+            ssc::world::QuadrantId { x: n % 5, y: n / 5 },
+            (n % 5 + n / 5) as f32,
+        );
+    }
+    run.kills = 41;
+    run.by_species = vec![(1, "BOGEY".into(), 25), (2, "KRAZOX".into(), 9)];
+    run.elders = 1;
+    run.bases = 2;
+    run.eggs = 3;
+    run.juveniles = 2;
+    run.lost_to_nature = 4;
+    run.mined = [80.0, 31.0, 9.0];
+    run.rocks_depleted = 5;
+    run.shots = 450;
+    run.damage_dealt = 3200.0;
+    run.damage_taken = 410.0;
+    run.deaths = if mode == "over" { 3 } else { 1 };
+    run.weapons = 3;
+    run.parts = 6;
+    run.pads = 1;
+    run.distance = 38_200.0;
+    run.extirpated = vec![
+        ssc::simulation::run::Extirpation {
+            name: "BOGEY".into(),
+            lineage: 1,
+            sectors: 7,
+            at: ssc::world::QuadrantId { x: 0, y: 0 },
+            depth: 0.0,
+        },
+        ssc::simulation::run::Extirpation {
+            name: "KRAZOX".into(),
+            lineage: 2,
+            sectors: 2,
+            at: ssc::world::QuadrantId { x: 3, y: 1 },
+            depth: 3.0,
+        },
+    ];
+    game.score = 4500;
+    game.time = 192.0;
+    if mode == "over" {
+        game.lives = 0;
+        game.game_over = true;
+    } else {
+        game.lives = 2;
+        game.run.recap = 1e6;
     }
 }
 

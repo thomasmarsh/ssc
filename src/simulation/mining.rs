@@ -410,12 +410,18 @@ impl Game {
         };
         let burst = kind == RockKind::Crystal && self.mine_clock >= BURST_AFTER;
         let mined = units.min(rock.ore()).min(self.cargo.room(material));
-        self.cargo.add(material, mined);
+        let stored = self.cargo.add(material, mined);
+        self.run.mined[material as usize] += stored;
 
         let body = &mut self.bodies[index];
         body.init_lode();
-        let ore = body.lode.ore - mined;
+        let before_ore = body.lode.ore;
+        let ore = before_ore - mined;
         body.set_ore(ore);
+        if kind == RockKind::Planetoid && before_ore > 1e-3 && body.lode.ore <= 1e-3 {
+            self.run.planetoids_drained += 1;
+        }
+        let body = &mut self.bodies[index];
         let origin_key = body.origin;
         let spent = body.lode.full - body.lode.ore;
         if let Some(key) = origin_key {
@@ -467,6 +473,7 @@ impl Game {
         let rock = self.bodies[index].clone();
         self.release_from(&rock);
         let leftover = rock.lode.ore;
+        self.run.rocks_depleted += 1;
         let body = &mut self.bodies[index];
         body.health = 0.0;
         body.consumed = true;

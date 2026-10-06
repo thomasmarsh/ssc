@@ -58,6 +58,8 @@ pub enum Cue {
     Hurt {
         hull: bool,
     },
+    /// A species-range was wiped out (see `run`).
+    Extirpated,
 }
 
 impl Game {
@@ -86,6 +88,10 @@ impl Game {
                 at: b.position,
             })
             .collect();
+        self.run.shots += born
+            .iter()
+            .filter(|c| matches!(c, Cue::Shot { friendly: true, .. }))
+            .count() as u32;
         for cue in born {
             self.cue(cue);
         }

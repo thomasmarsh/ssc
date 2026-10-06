@@ -271,12 +271,19 @@ impl Game {
             }
             if friendly {
                 if body.kind != BodyKind::Player {
-                    damage(body, amount, 0.0);
+                    let dealt = damage(body, amount, 0.0);
+                    if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
+                        self.run.damage_dealt += dealt;
+                    }
                 }
             } else {
                 match body.kind {
-                    BodyKind::Player => damage(body, amount, invulnerability),
-                    BodyKind::Asteroid => damage(body, amount * 0.5, 0.0),
+                    BodyKind::Player => {
+                        damage(body, amount, invulnerability);
+                    }
+                    BodyKind::Asteroid => {
+                        damage(body, amount * 0.5, 0.0);
+                    }
                     _ => {}
                 }
             }

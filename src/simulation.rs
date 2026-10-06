@@ -19,6 +19,7 @@ mod loot;
 mod mining;
 mod pads;
 mod root;
+pub mod run;
 mod tether;
 pub mod upgrades;
 mod weapons;
@@ -333,6 +334,9 @@ pub struct Game {
     pad: PadState,
     pub beam: Option<Beam>,
     pub score: u64,
+    /// Counters for this run, and the extirpations it caused; see `run`.
+    pub run: run::RunStats,
+    lore: run::Lore,
     pub lives: u32,
     pub game_over: bool,
     pub time: f32,
@@ -416,6 +420,8 @@ impl Game {
             mine_target: None,
             mine_note: 0.0,
             score: 0,
+            run: run::RunStats::default(),
+            lore: run::Lore::default(),
             lives: 3,
             game_over: false,
             time: 0.0,
@@ -515,6 +521,8 @@ impl Game {
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
         self.stream_quadrants();
+        self.note_sector();
+        let start = self.player().map(|p| p.position);
         self.update_civilizations(dt);
         self.update_loadout(dt, &input);
         let recharge = self.stats.recharge;
@@ -603,6 +611,18 @@ impl Game {
         self.update_mines(dt);
         self.update_husks();
         self.update_pickups(dt);
+        let travelled = match (start, self.player()) {
+            (Some(from), Some(ship)) => from.distance(ship.position),
+            _ => 0.0,
+        };
+        let taken = match (ship_before, self.player()) {
+            (Some((shield, health)), Some(ship)) => {
+                (shield + health - ship.shield - ship.health.max(0.0)).max(0.0)
+            }
+            (Some((shield, health)), None) => shield + health,
+            _ => 0.0,
+        };
+        self.note_step(dt, travelled, taken);
         self.remove_destroyed();
         self.cue_player_damage(ship_before);
     }
@@ -960,6 +980,7 @@ impl Game {
     fn resolve_contacts(&mut self) {
         let invulnerability = self.player_invulnerability;
         let mut flings = Vec::new();
+        let mut rammed = 0.0;
         for i in 0..self.bodies.len() {
             let (before, after) = self.bodies.split_at_mut(i + 1);
             let a = &mut before[i];
@@ -1041,13 +1062,14 @@ impl Game {
                     }
                 }
                 if a.kind == BodyKind::Player && a.contact_cooldown <= 0.0 {
-                    ram_contact(a, b, closing_speed, invulnerability);
+                    rammed += ram_contact(a, b, closing_speed, invulnerability);
                 }
                 if b.kind == BodyKind::Player && b.contact_cooldown <= 0.0 {
-                    ram_contact(b, a, closing_speed, invulnerability);
+                    rammed += ram_contact(b, a, closing_speed, invulnerability);
                 }
             }
         }
+        self.run.damage_dealt += rammed;
         for position in flings {
             self.effect(position, 30.0, 0.3, EffectKind::Impact);
         }
@@ -1143,7 +1165,10 @@ impl Game {
             }
             if let Some((index, fraction)) = hit {
                 let body = &mut self.bodies[index];
-                damage(body, bullet.damage, self.player_invulnerability);
+                let dealt = damage(body, bullet.damage, self.player_invulnerability);
+                if bullet.friendly && matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
+                    self.run.damage_dealt += dealt;
+                }
                 if !is_fixed(body) {
                     body.velocity +=
                         bullet.velocity.normalize_or_zero() * (180.0 / body.mass) * mass_sign(body);
@@ -1242,7 +1267,10 @@ impl Game {
                     continue;
                 }
                 if friendly && body.kind != BodyKind::Player {
-                    damage(body, amount, 0.0);
+                    let dealt = damage(body, amount, 0.0);
+                    if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
+                        self.run.damage_dealt += dealt;
+                    }
                 } else if !friendly && body.kind == BodyKind::Player {
                     damage(body, amount, invulnerability);
                 }
@@ -1272,6 +1300,7 @@ impl Game {
                 // Eaten or starved: gone without a bang, a score or a drop.
                 self.effect(position, radius, 0.25, EffectKind::Impact);
                 self.record_fallen(body);
+                self.note_creature_lost(body, true);
                 continue;
             }
             self.effect(position, radius * 2.5, 0.65, EffectKind::Explosion);
@@ -1301,8 +1330,14 @@ impl Game {
                 self.siphon(body);
             }
             self.record_fallen(body);
+            if kind == BodyKind::Base {
+                self.run.bases += 1;
+            }
+            self.note_creature_lost(body, false);
         }
         if let Some(position) = lost_player {
+            self.run.deaths += 1;
+            self.run.recap = run::RECAP_SECONDS;
             self.lives = self.lives.saturating_sub(1);
             self.bullets.retain(|bullet| bullet.friendly);
             self.tethers.retain(|t| t.kind != TetherKind::Latch);
@@ -1531,12 +1566,12 @@ fn mass_sign(body: &Body) -> f32 {
     }
 }
 
-fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) {
+fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) -> f32 {
     if body.kind == BodyKind::BlackHole
         || body.rock == RockKind::Planetoid
         || (body.kind == BodyKind::Player && player_invulnerability > 0.0)
     {
-        return;
+        return 0.0;
     }
     // Armor softens what the ship takes; deep-space fauna is simply harder to kill.
     let amount = match body.kind {
@@ -1550,11 +1585,12 @@ fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) {
     body.shield -= absorbed;
     body.health -= amount - absorbed;
     body.since_hit = 0.0;
+    amount
 }
 
 /// Contact between the ship and `other`: the ship is hurt unless its lunatic field is on,
 /// and rams whatever it hits when fitted for it.
-fn ram_contact(ship: &mut Body, other: &mut Body, closing_speed: f32, invulnerability: f32) {
+fn ram_contact(ship: &mut Body, other: &mut Body, closing_speed: f32, invulnerability: f32) -> f32 {
     let harm = if ship.rig.aura > 0 {
         0.0
     } else {
@@ -1564,8 +1600,12 @@ fn ram_contact(ship: &mut Body, other: &mut Body, closing_speed: f32, invulnerab
     ship.contact_cooldown = 0.65;
     if ship.rig.ram > 0 && other.kind != BodyKind::Player {
         let force = (0.6 + closing_speed.abs() / 400.0).min(1.6);
-        damage(other, RAM_DAMAGE * f32::from(ship.rig.ram) * force, 0.0);
+        let dealt = damage(other, RAM_DAMAGE * f32::from(ship.rig.ram) * force, 0.0);
+        if matches!(other.kind, BodyKind::Creature | BodyKind::Base) {
+            return dealt;
+        }
     }
+    0.0
 }
 
 /// The shots one trigger pull sends out: (angle from the nose, share of full damage).

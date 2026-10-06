@@ -130,6 +130,7 @@ impl Game {
                 self.notify(format!("{} +{taken:.0}{full}", kind.label()), rarity);
             }
             Item::Part(part) => {
+                self.run.parts += 1;
                 let name = part.name.to_uppercase();
                 let summary = part.summary();
                 let acquired = self.loadout.acquire(part);

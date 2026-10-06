@@ -560,6 +560,9 @@ impl Game {
         if before != after || !self.civ_fall(tid).capital || !self.civ_fall(tid).elder {
             self.notify(format!("{what}  {name}  - {tail}"), upgrades::Rarity::Epic);
         }
+        if before != Standing::Fallen && after == Standing::Fallen {
+            self.run.civs_toppled += 1;
+        }
         if after == Standing::Fallen && self.raid.as_ref().is_some_and(|r| r.territory == tid) {
             self.raid = None;
         }

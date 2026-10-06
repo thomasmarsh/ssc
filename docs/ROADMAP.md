@@ -34,6 +34,8 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 
 **Feedback and feel.** The prototype has no audio. Hit feedback, screen shake, pickup pop, and the C++ game's subtle absurdity (named species already give some of this) will matter more than numbers.
 
+**Run record (built).** Death and game over show run stats and the species the player extirpated from their local range (see UNIVERSE.md). Possible next steps: a persisted best run, a seed-shareable run code, per-lineage ecology consequences for extirpation (predators starving, niches reopening), and tuning how the wry line responds.
+
 ## Constraints from the generator
 
 - New spawnable things (pickups, drops) must not disturb quadrant (0,0)'s golden test or the original RNG stream; give them their own salted stream, or derive them from kills at runtime.

@@ -30,10 +30,11 @@ pub enum Sound {
     Deploy,
     Land,
     Takeoff,
+    Extirpated,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 21] = [
+    pub const ALL: [Sound; 22] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -55,6 +56,7 @@ impl Sound {
         Sound::Deploy,
         Sound::Land,
         Sound::Takeoff,
+        Sound::Extirpated,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -240,6 +242,17 @@ impl Sound {
                     (sine(f, t) * 0.7 + noise.next() * 0.25 * (1.0 - rise)) * swell
                 });
                 lowpass_sweep(&mut v, 900.0, 2600.0);
+                v
+            }
+            // A species gone: three slow falling tones, minor and unhurried.
+            Sound::Extirpated => {
+                let mut v = voice(0.9, |t, _| {
+                    let notes = [330.0, 277.0, 220.0];
+                    let i = ((t / 0.3) as usize).min(2);
+                    let local = t - i as f32 * 0.3;
+                    (sine(notes[i], t) * 0.8 + sine(notes[i] * 0.5, t) * 0.4) * decay(local, 0.2)
+                });
+                lowpass(&mut v, 1800.0);
                 v
             }
             Sound::HurtHull => {

@@ -612,6 +612,7 @@ impl Game {
             }
         }
         self.pad.kits = self.pad.kits.saturating_sub(1);
+        self.run.pads += 1;
         let order = self.pad.next_order;
         self.pad.next_order += 1;
         self.pad.pads.insert(
@@ -1667,6 +1668,7 @@ mod tests {
         game.pad_action();
         assert_eq!(game.pad.pads.len(), 1);
         assert_eq!(game.pad.kits, 1);
+        assert_eq!(game.run.pads, 1);
         assert_eq!(game.pad.pads[&(QuadrantId { x: 0, y: 0 }, 7)].hp, PAD_HP);
         assert!(game.body(id).is_some());
         // One per planetoid: a second kit is not spent.

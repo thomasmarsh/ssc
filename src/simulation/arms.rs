@@ -163,6 +163,7 @@ impl Game {
         };
         match gain {
             Gain::New(level) => {
+                self.run.weapons += 1;
                 self.notify(
                     format!(
                         "ARMED  {} {level}  {}{fuel_note}   [ ] to switch",

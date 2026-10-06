@@ -598,6 +598,7 @@ impl Game {
                 self.effect(egg.position, 18.0, 0.4, EffectKind::Birth);
             } else if egg.age > egg.incubation * SPOIL_FACTOR {
                 self.eggs.remove(index);
+                self.note_egg_lost(&egg, false);
             } else {
                 index += 1;
             }
@@ -626,13 +627,16 @@ impl Game {
             return;
         }
         let mut broken: Vec<Vec2> = Vec::new();
+        let mut lost: Vec<Egg> = Vec::new();
         for bullet in self.bullets.iter_mut().filter(|b| b.friendly) {
             let to = bullet.position + bullet.velocity * dt;
             let hit = self.eggs.iter().position(|e| {
                 segment_circle(bullet.position, to, e.position, e.radius + bullet.radius).is_some()
             });
             if let Some(i) = hit {
-                broken.push(self.eggs.remove(i).position);
+                let egg = self.eggs.remove(i);
+                broken.push(egg.position);
+                lost.push(egg);
                 if bullet.pierce == 0 {
                     bullet.remaining = 0.0;
                 }
@@ -640,6 +644,9 @@ impl Game {
         }
         for at in broken {
             self.effect(at, 12.0, 0.2, EffectKind::Impact);
+        }
+        for egg in lost {
+            self.note_egg_lost(&egg, true);
         }
     }
 }
