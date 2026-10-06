@@ -442,7 +442,13 @@ impl Genome {
     /// The same lineage as expressed in sector `id`: every gene nudged by a smooth
     /// noise field, so neighboring sectors hold close relatives. `amplitude` is zero at
     /// the founding node (the unmutated type specimen) and grows with distance.
-    fn expressed(mut self, seed: u64, lineage: u64, id: SectorId, amplitude: f32) -> Self {
+    pub(crate) fn expressed(
+        mut self,
+        seed: u64,
+        lineage: u64,
+        id: SectorId,
+        amplitude: f32,
+    ) -> Self {
         if amplitude <= 0.0 {
             return self;
         }

@@ -867,7 +867,8 @@ mod tests {
     fn rooted_spawns_are_deterministic_scale_with_the_host_and_stay_in_budget() {
         let mut planets = 0;
         let mut rooted_total = 0;
-        for x in 1..24 {
+        // The opening rings hold no rooters; from ring three they live on rocks and planetoids.
+        for x in 3..24 {
             for y in -6..6 {
                 let id = SectorId { x, y };
                 let a = world::generate(42, id);
@@ -916,7 +917,8 @@ mod tests {
                         .filter_map(|s| s.species)
                         .map(|s| s.genome.parts())
                         .sum();
-                    if used < world::SECTOR_BODY_BUDGET {
+                    let lived_in = !crate::range::ecology(42, id).presence.is_empty();
+                    if used < world::SECTOR_BODY_BUDGET && lived_in {
                         assert!(n >= 1, "every planetoid with room has a community: {id:?}");
                     }
                 }

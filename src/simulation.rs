@@ -2652,13 +2652,21 @@ mod tests {
     #[test]
     fn destroyed_spawns_stay_destroyed_across_unload_and_reload() {
         let mut game = Game::new(7);
+        // HOME is empty: stand in the first ring-one sector that holds a herd.
+        let herd = find_sector(7, |s| s.iter().filter(|s| s.species.is_some()).count() >= 2);
+        game.teleport(herd.center());
+        game.step(DT, Input::default());
         let victim = game
             .bodies
             .iter()
-            .find(|b| b.kind == BodyKind::Creature && b.origin.is_some())
+            .find(|b| b.kind == BodyKind::Creature && b.origin.is_some_and(|(q, _)| q == herd))
             .unwrap();
         let (victim_id, origin) = (victim.id, victim.origin.unwrap());
-        let before = game.bodies.iter().filter(|b| b.origin.is_some()).count();
+        let before = game
+            .bodies
+            .iter()
+            .filter(|b| b.origin.is_some_and(|(q, _)| q == herd))
+            .count();
         game.bodies
             .iter_mut()
             .find(|b| b.id == victim_id)
@@ -2667,20 +2675,20 @@ mod tests {
         game.player_invulnerability = 1e9;
         game.step(DT, Input::default());
         // Leave far enough for the sector to unload, then come back.
-        game.teleport(Vec2::new(6.0 * world::SECTOR_SIZE, 0.0));
+        game.teleport(herd.center() + Vec2::new(6.0 * world::SECTOR_SIZE, 0.0));
         game.step(DT, Input::default());
         assert!(
             game.bodies
                 .iter()
-                .all(|b| b.origin.is_none_or(|(q, _)| q != SectorId::ORIGIN))
+                .all(|b| b.origin.is_none_or(|(q, _)| q != herd))
         );
-        game.teleport(Vec2::ZERO);
+        game.teleport(herd.center());
         game.step(DT, Input::default());
         assert!(game.bodies.iter().all(|b| b.origin != Some(origin)));
         let after = game
             .bodies
             .iter()
-            .filter(|b| b.origin.is_some_and(|(q, _)| q == SectorId::ORIGIN))
+            .filter(|b| b.origin.is_some_and(|(q, _)| q == herd))
             .count();
         assert!(
             after >= before - 1 - 8,
@@ -3236,9 +3244,14 @@ mod tests {
                 names.insert(b.genome.name());
             }
         }
-        // Nothing here is a classic, and the casts are varied.
-        assert!(names.len() > 8, "{names:?}");
-        assert!(!names.contains("Bogey"));
+        // Far ranges are mostly sampled species, and the casts are varied (a classic's
+        // range can reach this far, so a few of the five may turn up too).
+        let classics = ["Bogey", "Lunatic", "Smarty", "Fatso", "Leech"];
+        let novel = names
+            .iter()
+            .filter(|n| !classics.contains(&n.as_str()))
+            .count();
+        assert!(novel > 8, "{names:?}");
     }
 }
 
@@ -3248,7 +3261,7 @@ mod home_flocking_tests {
     use crate::genome::Species;
 
     /// (fraction of bogeys with a bogey neighbour within perception, mean nearest-neighbour
-    /// distance, bogey count) for the calm bogeys of a fresh HOME game.
+    /// distance, bogey count) for the calm bogeys of a fresh game at the start school.
     fn measure(game: &Game) -> (f32, f32, usize) {
         let lineage = Species::bogey().lineage;
         let spots: Vec<Vec2> = game
@@ -3304,14 +3317,18 @@ mod home_flocking_tests {
         sizes
     }
 
-    /// Before the schooling tuning, a minute of idling at HOME left singletons (three at 30 s),
-    /// a mean nearest-neighbour distance of 245 and only 91 percent of bogeys within perception
-    /// of a schoolmate. Now bands stay bands.
+    /// Before the schooling tuning, a minute of idling beside a school left singletons (three
+    /// at 30 s), a mean nearest-neighbour distance of 245 and only 91 percent of bogeys within
+    /// perception of a schoolmate. Now bands stay bands. HOME is empty, so the school is the
+    /// start one on ring two (the steering is unchanged, only where the test stands).
     #[test]
-    fn home_bogeys_stay_in_schools_and_stay_calm() {
-        let mut game = Game::new(0x535343);
+    fn start_bogeys_stay_in_schools_and_stay_calm() {
+        let seed = 0x535343;
+        let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
         let lineage = Species::bogey().lineage;
+        let school = crate::range::start_sector(seed, Species::bogey());
+        game.teleport(crate::range::calm_spot(seed, school));
         for second in 1..=60 {
             for _ in 0..60 {
                 game.step(1.0 / 60.0, Input::default());
@@ -3321,14 +3338,17 @@ mod home_flocking_tests {
             }
             let (near, spacing, count) = measure(&game);
             let sizes = clusters(&game, 380.0);
-            assert!(count >= 33);
+            // At most 4 percent alone (HOME's single band allowed one of 33).
+            assert!(count >= 6, "{second}s: the school thinned to {count}");
             assert!(
                 near >= 0.95,
                 "{second}s: only {near} have a schoolmate near"
             );
-            assert!(spacing < 170.0, "{second}s: spacing {spacing}");
+            // 170 at HOME's one big band; ring-two schools are of varied size, and the mean
+            // wanders between about 125 and 177 across seeds (245 before the tuning).
+            assert!(spacing < 185.0, "{second}s: spacing {spacing}");
             assert!(
-                sizes.iter().filter(|n| **n == 1).count() <= 1,
+                sizes.iter().filter(|n| **n == 1).count() as f32 <= (count as f32 * 0.04).ceil(),
                 "{second}s: bogeys are alone: {sizes:?}"
             );
             assert!(spacing > 50.0, "{second}s: packed into a ball: {spacing}");

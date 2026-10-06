@@ -600,13 +600,16 @@ mod tests {
         assert!(game.run.extirpated.is_empty());
     }
 
-    /// Plays out wiping HOME's Bogeys from their local range, and reports the run.
+    /// Plays out wiping the start Bogeys from their local range, and reports the run.
     fn wipe_home_bogeys() -> (Game, RunReport) {
         let mut game = Game::new(42);
         game.player_invulnerability = 1e9;
         let lineage = Species::bogey().lineage;
-        let range = game.species_range(lineage, SectorId::ORIGIN);
-        assert!(range.contains(&SectorId::ORIGIN));
+        let school = crate::range::start_sector(42, Species::bogey());
+        game.teleport(school.center());
+        game.step(DT, Input::default());
+        let range = game.species_range(lineage, school);
+        assert!(range.contains(&school));
         assert!(range.len() as i32 <= (2 * RANGE_RADIUS + 1).pow(2));
         // Everything of theirs that is not a live creature right now is gone already.
         let live: HashSet<(SectorId, u32)> = game
@@ -630,7 +633,7 @@ mod tests {
             .map(|b| b.id)
             .collect();
         ids.sort_unstable();
-        assert!(ids.len() > 3, "HOME holds a school of bogeys");
+        assert!(ids.len() > 3, "the start holds a school of bogeys");
         let last = ids.pop().unwrap();
         for id in ids {
             kill(&mut game, id);
@@ -642,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn wiping_out_homes_bogeys_extirpates_them_and_only_them() {
+    fn wiping_out_the_start_bogeys_extirpates_them_and_only_them() {
         let (game, report) = wipe_home_bogeys();
         assert_eq!(game.run.extirpated.len(), 1);
         let found = &game.run.extirpated[0];
@@ -652,11 +655,13 @@ mod tests {
         assert!(report.extirpated[0].starts_with(&found.name));
         assert!(game.run.kills > 3);
         assert_eq!(game.run.by_species[0].1, found.name);
-        // The other four HOME species still stand.
+        // Nothing else was wiped out with them.
         assert!(
-            game.bodies
+            game.run
+                .by_species
                 .iter()
-                .any(|b| b.species == Species::lunatic().lineage)
+                .skip(1)
+                .all(|(_, name, _)| *name != found.name)
         );
     }
 

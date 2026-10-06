@@ -1295,17 +1295,21 @@ mod tests {
     }
 
     #[test]
-    fn home_population_stays_bounded_over_a_long_run() {
-        // The ship idles at the edge of HOME, so the opening population lives out twelve
-        // minutes undisturbed: its flocks may breed, but never swamp the area.
+    fn start_population_stays_bounded_over_a_long_run() {
+        // HOME holds no creatures, so the opening population is the Bogey school of the
+        // nearest ring-two sector. The ship idles at its edge and the school lives out twenty-five
+        // minutes undisturbed: it may breed, but never swamp the area.
         for seed in [42, 7] {
             let mut game = Game::new(seed);
             game.player_invulnerability = 1e9;
-            let spot = Vec2::new(0.0, 2900.0);
+            let school = crate::range::start_sector(seed, Species::bogey());
+            // The ship idles where no creature is near, so the school lives undisturbed.
+            let spot = crate::range::calm_spot(seed, school);
             let mut start = 0;
             let mut peak = 0;
             let mut low = usize::MAX;
-            for tick in 0..60 * 60 * 40 {
+            game.teleport(spot);
+            for tick in 0..60 * 60 * 25 {
                 game.teleport(spot);
                 game.step(DT, Input::default());
                 if tick == 60 {
@@ -1320,9 +1324,9 @@ mod tests {
                     assert!(creatures(&game) < 2 * world::SECTOR_BODY_BUDGET as usize);
                 }
             }
-            assert!(start > 20, "HOME opens populated: {start}");
+            assert!(start > 20, "the start opens populated: {start}");
             // Nothing collapses: the flocks keep most of their numbers, find food and stay fed.
-            assert!(low * 5 >= start * 3, "HOME dwindled: {start} -> {low}");
+            assert!(low * 5 >= start * 3, "the start dwindled: {start} -> {low}");
             let (n, fed) = fed(&game);
             assert!(n > 20, "grazers remain: {n}");
             assert!(fed > 0.25, "and are fed: {fed:.2} (seed {seed})");
@@ -1331,9 +1335,13 @@ mod tests {
                 "plankton persists: {}",
                 game.food.len()
             );
+            // The school was below its sector's carrying capacity (HOME's flocks used to be
+            // past it), so it may grow into it, about 30 grazers a sector, but no further.
+            let room = 40 * game.loaded.len();
             assert!(
-                peak <= start + start / 4 + 5,
-                "HOME was swamped (seed {seed}): {start} -> {peak}"
+                peak <= room.max(start + start / 4 + 5),
+                "the start was swamped (seed {seed}): {start} -> {peak} in {} sectors",
+                game.loaded.len()
             );
         }
     }

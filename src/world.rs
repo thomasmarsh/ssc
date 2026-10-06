@@ -247,11 +247,25 @@ const NOISE_FREQUENCY: f32 = 0.07;
 /// Distance from the origin (in sectors) over which the home neighborhood fades out.
 const HOME_RADIUS: f32 = 1.5;
 
-/// Maps a sector to its latent parameters. Distance from the origin sets danger,
-/// the angle around it tints the flavor (swarms to one side, distortions to another),
-/// and domain-warped noise adds low-frequency variation that changes gradually from
-/// one sector to the next. Near the origin everything eases to `HOME`.
+/// Maps a sector to its latent parameters: the biome character (`latent_base`) with the
+/// ecology's two fields laid over it. How rock-rich a place is (`density`) and how lush its
+/// life is (`swarm`, which also gathers flocks) come from the species ranges and the matter
+/// field (see `range`), so the rock belts sit between range clusters. Near the origin
+/// everything eases to `HOME`.
 pub fn latent(seed: u64, id: SectorId) -> SectorParams {
+    latent_with(seed, id, true)
+}
+
+/// The biome character alone, without the ecology fields. Species sampled for a range use
+/// it, so ranges never depend on themselves.
+pub(crate) fn latent_base(seed: u64, id: SectorId) -> SectorParams {
+    latent_with(seed, id, false)
+}
+
+/// Distance from the origin sets danger, the angle around it tints the flavor (swarms to one
+/// side, distortions to another), and domain-warped noise adds low-frequency variation that
+/// changes gradually from one sector to the next.
+fn latent_with(seed: u64, id: SectorId, ecological: bool) -> SectorParams {
     let q = Vec2::new(id.x as f32, id.y as f32);
     let r = q.length();
     let theta = q.y.atan2(q.x);
@@ -260,7 +274,7 @@ pub fn latent(seed: u64, id: SectorId) -> SectorParams {
     // How much the angular flavor is felt grows with distance.
     let flavor = 1.0 - (-r / 2.0).exp();
     let tint = |base: f32, bias: f32| (base + (bias - 0.5) * 0.7 * flavor).clamp(0.0, 1.0);
-    let wild = SectorParams {
+    let mut wild = SectorParams {
         depth: r,
         danger,
         aggression: (field(seed, 1, at) * 0.7 + danger * 0.3).clamp(0.0, 1.0),
@@ -269,9 +283,18 @@ pub fn latent(seed: u64, id: SectorId) -> SectorParams {
         tech: tint(field(seed, 4, at), 0.5 - 0.5 * theta.cos()),
         swarm: tint(field(seed, 5, at), 0.5 + 0.5 * theta.cos()),
     };
+    if ecological {
+        let (life, matter) = crate::range::fields(seed, id);
+        wild.density = matter;
+        wild.swarm = (LIFE_SWARM * life + (1.0 - LIFE_SWARM) * wild.swarm).clamp(0.0, 1.0);
+    }
     let home = (-(r / HOME_RADIUS).powi(2)).exp();
     wild.lerp(SectorParams::HOME, home)
 }
+
+/// How much of a sector's gathering strength (`swarm`) comes from its life field rather than
+/// the biome noise.
+const LIFE_SWARM: f32 = 0.65;
 
 /// What kind of station a base is. Each does a different job and looks different.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -429,17 +452,43 @@ pub fn generate(seed: u64, id: SectorId) -> Vec<Spawn> {
     compose(seed, id, &latent(seed, id))
 }
 
-/// The generation policy. It reads only `params` (plus the seeded stream for placement),
-/// so any parameter vector, hand-authored or sampled, yields a coherent population. At
-/// `SectorParams::HOME` it reproduces the original hand-tuned one.
+/// The generation policy. It reads the parameters and the sector's ecology (the species
+/// whose ranges cover it, see `range`), plus the seeded stream for placement. Sector (0, 0)
+/// is HOME, a peaceful safe zone: rocks, plankton and a planetoid, but no creatures.
 pub fn compose(seed: u64, id: SectorId, params: &SectorParams) -> Vec<Spawn> {
-    compose_with(seed, id, params, &GenePool::for_sector(seed, id))
+    compose_with(seed, id, params, &crate::range::ecology(seed, id).pool())
 }
 
 /// Most bodies one cluster of creatures may add; jointed species form smaller clusters.
 const MAX_CLUSTER_PARTS: u32 = 24;
 /// Most creature bodies one sector generates, however its pool is composed.
 pub const SECTOR_BODY_BUDGET: u32 = 220;
+/// Separates the stream that places the ranges' populations from the rest.
+const POP_SALT: u64 = 0xB0B5_7A11_0000_0039;
+
+/// How a niche populates a sector at full abundance: expected clusters, and the smallest and
+/// largest cluster, and how far a cluster spreads.
+#[derive(Clone, Copy)]
+struct ClusterPlan {
+    clusters: f32,
+    size: (u32, u32),
+    spread: f32,
+}
+
+fn cluster_plan(niche: Niche) -> ClusterPlan {
+    let (clusters, size, spread) = match niche {
+        Niche::School => (2.4, (3, 8), 140.0),
+        Niche::Fling => (1.0, (1, 3), 90.0),
+        Niche::Hunter => (1.2, (1, 3), 80.0),
+        Niche::Heavy => (2.0, (1, 3), 100.0),
+        Niche::Tether => (0.8, (1, 2), 90.0),
+    };
+    ClusterPlan {
+        clusters,
+        size,
+        spread,
+    }
+}
 
 pub(crate) fn bodies_used(out: &[Spawn]) -> u32 {
     out.iter()
@@ -448,15 +497,18 @@ pub(crate) fn bodies_used(out: &[Spawn]) -> u32 {
         .sum()
 }
 
-/// The policy proper: parameters decide how much of each niche to place and where, and
-/// the gene pool decides which species fills each niche.
+/// The policy proper: parameters decide how many rocks and how much structure, the gene pool
+/// (the sector's species, weighted by how present each range is) decides who lives here and
+/// how many of each. An empty pool is a place with no creatures.
 pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GenePool) -> Vec<Spawn> {
     let mut rng = Rng::new(hash2(seed, id.x, id.y));
-    // Species choices and bonds draw from their own stream, so the original one is
+    // Species choices and bonds draw from their own streams, so the rock stream is
     // untouched whichever species the pool offers.
     let mut wild = Rng::new(hash2(seed ^ WILD_SALT, id.x, id.y));
+    let mut pop = Rng::new(hash2(seed ^ POP_SALT, id.x, id.y));
     let center = id.center();
     let extent = SECTOR_SIZE / 2.0 - 250.0;
+    let ring = crate::range::ring(id);
     let SectorParams {
         depth,
         danger,
@@ -467,7 +519,7 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
         swarm,
     } = *params;
     let count = |x: f32| x.round().max(0.0) as u32;
-    // Ranges scale linearly in a parameter; 0.5 is the original midpoint.
+    // Ranges scale linearly in a parameter; 0.5 is the midpoint.
     let range = |low: f32, high: f32, p: f32| (count(low * 2.0 * p), count(high * 2.0 * p));
     let mut out = Vec::new();
 
@@ -479,10 +531,16 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
         threat: threat(depth),
     };
 
+    // The sector's planetoid is decided first, so everything else keeps clear of it.
+    let world = planetoid(seed, id, params);
+    let keep_clear = world
+        .as_ref()
+        .map(|w| (w.position, w.radius.unwrap_or(0.0) + PLANETOID_KEEP_OUT));
     let place = |rng: &mut Rng| -> Vec2 {
         for _ in 0..16 {
             let p = center + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
-            if id != SectorId::ORIGIN || p.length() > SAFE_RADIUS {
+            let open = id != SectorId::ORIGIN || p.length() > SAFE_RADIUS;
+            if open && keep_clear.is_none_or(|(at, reach)| p.distance(at) > reach) {
                 return p;
             }
         }
@@ -492,7 +550,6 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
     let (low, high) = range(10.0, 20.0, density);
     for _ in 0..rng.int(low, high.max(low)) {
         let radius = rng.range(25.0, 57.0);
-        // Draw order matters: it is the original stream, pinned by the golden test.
         let position = place(&mut rng);
         let velocity = rng.direction() * rng.range(15.0, 55.0);
         out.push(Spawn {
@@ -501,7 +558,8 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
             ..Spawn::at(BodyKind::Asteroid, position)
         });
     }
-    let wells = if rng.chance((1.2 * distortion).min(1.0)) {
+    // HOME has no gravity wells: nothing there is a hazard.
+    let wells = if ring > 0 && rng.chance((1.2 * distortion).min(1.0)) {
         rng.int(1, count(4.0 * distortion).max(1))
     } else {
         0
@@ -536,46 +594,41 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
         }
     };
 
-    let extra = count(danger * 2.0);
-    let (low, high) = range(2.0, 4.0, swarm);
-    let (largest, _) = range(10.0, 0.0, swarm);
-    for index in 0..rng.int(low, high.max(low)) + extra {
-        // The home sector always has a flock within reach of the starting position.
-        let anchor = if id == SectorId::ORIGIN && index == 0 {
-            rng.direction() * rng.range(1300.0, 1800.0)
-        } else {
-            place(&mut rng)
-        };
-        let size = rng.int(count(4.0 * swarm * 2.0).clamp(1, 4), largest.max(4));
-        let species = pool.fill(Niche::School, &mut wild);
-        cluster(&mut rng, &mut wild, &mut out, anchor, species, size, 140.0);
-    }
-    let (low, high) = range(1.0, 3.0, aggression);
-    for _ in 0..rng.int(low, high.max(low)) {
-        let anchor = place(&mut rng);
-        let size = rng.int(1, 3);
-        let species = pool.fill(Niche::Fling, &mut wild);
-        cluster(&mut rng, &mut wild, &mut out, anchor, species, size, 90.0);
-    }
-    for _ in 0..rng.int(0, count(2.0 * tech) + extra) {
-        let anchor = place(&mut rng);
-        let size = rng.int(1, 2);
-        let species = pool.fill(Niche::Hunter, &mut wild);
-        cluster(&mut rng, &mut wild, &mut out, anchor, species, size, 80.0);
-    }
-    if rng.chance((0.7 * tech + 0.4 * danger).min(1.0)) {
-        let anchor = place(&mut rng);
-        let species = pool.fill(Niche::Heavy, &mut wild);
-        cluster(&mut rng, &mut wild, &mut out, anchor, species, 1, 0.0);
+    // The population: each species whose range covers the sector, in proportion to how
+    // present it is here. A thin edge of a range holds a few creatures, its heart a crowd,
+    // and a place with little life holds fewer of everything.
+    let lush = POP_BASE + POP_LIFE * swarm;
+    for entry in &pool.entries {
+        let plan = cluster_plan(entry.species.genome.niche());
+        let expected = plan.clusters * entry.weight * lush;
+        let clusters = expected.floor() as u32 + u32::from(pop.chance(expected.fract()));
+        for _ in 0..clusters {
+            let anchor = place(&mut pop);
+            let size = pop.int(plan.size.0, plan.size.1);
+            let size = (size as f32 * (0.4 + 0.6 * entry.weight)).round().max(1.0) as u32;
+            cluster(
+                &mut pop,
+                &mut wild,
+                &mut out,
+                anchor,
+                entry.species,
+                size,
+                plan.spread,
+            );
+        }
     }
 
-    // Structures and exotic fauna are gated on parameters that are all zero at HOME, so
-    // they never perturb the original population.
+    // Structures and exotic fauna are gated on the depth ramp: nothing of the kind within
+    // two rings of HOME, so the opening stays gentle.
     let above = |p: f32| (p - 0.5).max(0.0);
+    let wildness = if ring <= 2 {
+        0.0
+    } else {
+        (depth / 1.5).min(1.0)
+    };
+    let populated = !pool.entries.is_empty();
 
     // Nests: ring-shaped rock shelters with a few grazing creatures of a nesting species.
-    // Away from home, hollows are common: the gentler the neighborhood, the fewer.
-    let wildness = (depth / 1.5).min(1.0);
     let nest_chance = (wildness * (0.3 + 0.7 * above(swarm) + 0.3 * danger)).min(0.85);
     for _ in 0..(wild.chance(nest_chance) as u32 + wild.chance(nest_chance * 0.4) as u32) {
         let heart = place(&mut wild);
@@ -591,6 +644,9 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
                     heart + Vec2::from_angle(angle) * NEST_RING_RADIUS,
                 )
             });
+        }
+        if !populated {
+            continue;
         }
         let species = pool.nesting(&mut wild);
         let room = SECTOR_BODY_BUDGET.saturating_sub(bodies_used(&out)) / species.genome.parts();
@@ -610,9 +666,9 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
     }
 
     // Bases breed whichever niche the sector favors, and build a heavy guardian.
-    let base_chance =
-        (0.6 * danger + above(aggression) + 0.6 * above(tech) + 0.6 * above(swarm)).min(0.85);
-    if wild.chance(base_chance) {
+    let base_chance = wildness
+        * (0.6 * danger + above(aggression) + 0.6 * above(tech) + 0.6 * above(swarm)).min(0.85);
+    if populated && wild.chance(base_chance) {
         let niche = if swarm >= aggression && swarm >= tech {
             Niche::School
         } else if aggression >= tech {
@@ -633,36 +689,14 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
         });
     }
 
-    // Cord-throwers: loners that latch on, and bonded pairs joined by a cord that forms a
-    // barrier.
-    let tether_weight = 1.2 * above(tech) + 0.8 * danger;
-    if wild.chance(tether_weight.min(0.9)) {
-        let groups = 1 + wild.chance(tether_weight * 0.4) as u32;
-        for _ in 0..groups {
-            let anchor = place(&mut wild);
-            let species = pool.fill(Niche::Tether, &mut wild);
-            let make = |position| Spawn {
-                phenotype: genes,
-                ..Spawn::creature(species, position)
-            };
-            if wild.chance(species.genome.bond) {
-                let first = out.len() as u32;
-                out.push(make(anchor));
-                out.push(Spawn {
-                    link: Some(first),
-                    ..make(anchor + wild.direction() * 280.0)
-                });
-            } else {
-                out.push(make(anchor));
-            }
-        }
-    }
-
     // Exotic fauna: any species of the pool, wherever tech, distortion or danger run high.
     // A chain body plan with a wave gene slithers when it turns up here or in any slot above.
-    let exotic = (0.9 * above(tech) + 0.9 * above(distortion) + 0.35 * danger).min(0.85);
+    let exotic = wildness * (0.9 * above(tech) + 0.9 * above(distortion) + 0.35 * danger).min(0.85);
     for _ in 0..(wild.chance(exotic) as u32 + wild.chance(exotic * 0.3) as u32) {
         let anchor = place(&mut wild);
+        if !populated {
+            continue;
+        }
         let species = pool.any(&mut wild);
         let size = wild.int(1, 2);
         for _ in 0..size.min((MAX_CLUSTER_PARTS / species.genome.parts()).max(1)) {
@@ -678,6 +712,9 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
     let husk_chance = (wildness * (0.25 + 0.5 * danger + 0.4 * above(swarm))).min(0.9);
     for _ in 0..(den.chance(husk_chance) as u32 + den.chance(husk_chance * 0.35) as u32) {
         let heart = place(&mut den);
+        if !populated {
+            continue;
+        }
         let species = pool.any(&mut den);
         let tenants = den
             .int(2, 4)
@@ -690,6 +727,29 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
             den: Some((species, tenants as u8)),
             ..Spawn::at(BodyKind::Asteroid, heart)
         });
+    }
+
+    // A planetoid anchors a small local population: a few of the sector's own species
+    // gather in its oasis, so even a sparse place has life around its landmark.
+    if let (Some(w), true) = (&world, populated) {
+        let radius = w.radius.unwrap_or(0.0);
+        let species = pool.any(&mut pop);
+        let anchor = w.position + pop.direction() * (radius + pop.range(300.0, 520.0));
+        let anchor = Vec2::new(
+            anchor.x.clamp(center.x - extent, center.x + extent),
+            anchor.y.clamp(center.y - extent, center.y + extent),
+        );
+        let plan = cluster_plan(species.genome.niche());
+        let size = pop.int(plan.size.0, plan.size.1.min(OASIS_MAX));
+        cluster(
+            &mut pop,
+            &mut wild,
+            &mut out,
+            anchor,
+            species,
+            size,
+            plan.spread,
+        );
     }
 
     // Every creature is an individual: its own jitter from a stream keyed by its stable
@@ -706,16 +766,11 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
         }
     }
 
-    // A fertile planetoid, last on its own stream so nothing before it moves. HOME has none:
-    // its population and golden figures stay exactly as they were.
-    if id != SectorId::ORIGIN
-        && let Some(planetoid) = planetoid(seed, id, params, &out)
-    {
-        out.push(planetoid);
-    }
+    // The planetoid is the last of the sector's own spawns, so no earlier index moves.
+    out.extend(world);
 
     // What each free rock is made of follows the neighborhood. Drawn from a position hash,
-    // not a stream, so HOME's rocks keep their places and only their make-up varies.
+    // not a stream, so rocks keep their places and only their make-up varies.
     for (index, spawn) in out.iter_mut().enumerate() {
         if spawn.kind == BodyKind::Asteroid && !spawn.pinned && spawn.rock == RockKind::Plain {
             let roll = (hash2(
@@ -729,15 +784,22 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
         spawn.index = index as u32;
     }
 
-    // Rooted residents come last, on their own stream, so nothing before them moves and no
-    // original spawn count changes. HOME's rocks stay ordinary.
-    if id != SectorId::ORIGIN {
+    // Rooted residents come last, on their own stream, so nothing before them moves. The
+    // opening rings stay free of them.
+    if ring >= 3 {
         root_residents(seed, id, params, pool, &genes, &mut out);
-        // Civilizations come last of all, on their own stream, and only inside territories.
-        crate::territory::civ_spawns(seed, id, params, &genes, &mut out);
     }
+    // Civilizations come last of all, on their own stream, and only inside territories.
+    crate::territory::civ_spawns(seed, id, params, &genes, &mut out);
     out
 }
+
+/// Population per sector scales with life: `POP_BASE + POP_LIFE * life` (one at an average
+/// place), so sparse areas hold a few creatures and lush ones many.
+const POP_BASE: f32 = 0.55;
+const POP_LIFE: f32 = 0.9;
+/// Most creatures in the cluster that gathers around a planetoid.
+const OASIS_MAX: u32 = 3;
 
 /// Separates the stream that seeds rooted residents from every other one.
 pub const ROOT_SALT: u64 = 0x600D_5EED_0000_001B;
@@ -763,6 +825,9 @@ fn root_residents(
     genes: &Phenotype,
     out: &mut Vec<Spawn>,
 ) {
+    if pool.entries.is_empty() {
+        return;
+    }
     let mut rng = Rng::new(hash2(seed ^ ROOT_SALT, id.x, id.y));
     let natives: Vec<Species> = pool
         .entries
@@ -894,44 +959,48 @@ pub const PLANETOID_MAX_RADIUS: f32 = 700.0;
 const PLANETOID_MARGIN: f32 = 450.0;
 /// Open space kept between a planetoid and anything else generated.
 const PLANETOID_CLEARANCE: f32 = 220.0;
+/// Other things are placed at least this far beyond a planetoid's surface (their own size and
+/// spread then still leave `PLANETOID_CLEARANCE`).
+const PLANETOID_KEEP_OUT: f32 = PLANETOID_CLEARANCE + 230.0;
+/// HOME's planetoid: its radius range, and how far its center lies from HOME.
+const HOME_PLANETOID_RADIUS: (f32, f32) = (220.0, 300.0);
+const HOME_PLANETOID_DISTANCE: (f32, f32) = (1700.0, 2100.0);
 
-/// How likely a sector is to hold a planetoid: swarming and calm places favor them.
+/// How likely a sector is to hold a planetoid: rock-rich, lush and calm places favor them,
+/// so they sit in the belts and the life that gathers round them.
 pub fn planetoid_chance(params: &SectorParams) -> f32 {
-    (0.05 + 0.4 * params.swarm + 0.2 * (1.0 - params.danger)).clamp(0.05, 0.75)
+    (0.03 + 0.4 * params.density + 0.2 * params.swarm + 0.1 * (1.0 - params.danger))
+        .clamp(0.03, 0.75)
 }
 
 /// A sector's planetoid, if it has one: a fixed, slowly turning world that blooms life
-/// around it. `others` are the spawns already generated; the planetoid keeps clear of them.
-fn planetoid(seed: u64, id: SectorId, params: &SectorParams, others: &[Spawn]) -> Option<Spawn> {
+/// around it. HOME always has one, near the start, the base the ship returns to.
+fn planetoid(seed: u64, id: SectorId, params: &SectorParams) -> Option<Spawn> {
     let mut rng = Rng::new(hash2(seed ^ PLANETOID_SALT, id.x, id.y));
+    if id == SectorId::ORIGIN {
+        let radius = rng.range(HOME_PLANETOID_RADIUS.0, HOME_PLANETOID_RADIUS.1);
+        let distance = rng.range(HOME_PLANETOID_DISTANCE.0, HOME_PLANETOID_DISTANCE.1);
+        return Some(Spawn {
+            radius: Some(radius),
+            pinned: true,
+            rock: RockKind::Planetoid,
+            ..Spawn::at(BodyKind::Asteroid, rng.direction() * distance)
+        });
+    }
     if !rng.chance(planetoid_chance(params)) {
         return None;
     }
     // Most are modest, a few are vast: the size is skewed toward the small end.
-    let mut radius =
+    let radius =
         PLANETOID_MIN_RADIUS + (PLANETOID_MAX_RADIUS - PLANETOID_MIN_RADIUS) * rng.f32().powf(2.2);
-    let center = id.center();
-    for attempt in 0..32 {
-        // A crowded sector gets a smaller world rather than none.
-        if attempt > 0 && attempt % 8 == 0 {
-            radius = (radius * 0.7).max(PLANETOID_MIN_RADIUS);
-        }
-        let extent = SECTOR_SIZE / 2.0 - radius - PLANETOID_MARGIN;
-        let position = center + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
-        let clear = others.iter().all(|s| {
-            let size = s.radius.unwrap_or(40.0);
-            s.position.distance(position) > radius + size + PLANETOID_CLEARANCE
-        });
-        if clear {
-            return Some(Spawn {
-                radius: Some(radius),
-                pinned: true,
-                rock: RockKind::Planetoid,
-                ..Spawn::at(BodyKind::Asteroid, position)
-            });
-        }
-    }
-    None
+    let extent = SECTOR_SIZE / 2.0 - radius - PLANETOID_MARGIN;
+    let position = id.center() + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
+    Some(Spawn {
+        radius: Some(radius),
+        pinned: true,
+        rock: RockKind::Planetoid,
+        ..Spawn::at(BodyKind::Asteroid, position)
+    })
 }
 
 /// Chooses a rock's make-up from a uniform roll. Ice favors calm regions, ore advanced
@@ -1106,7 +1175,7 @@ mod tests {
             "inhabited rocks and hollows should be common"
         );
         for spawn in generate(0x535343, SectorId::ORIGIN) {
-            assert_eq!(spawn.rock, RockKind::Plain);
+            assert!(matches!(spawn.rock, RockKind::Plain | RockKind::Planetoid));
             assert!(spawn.base_kind.is_none() && spawn.den.is_none());
         }
     }
@@ -1159,22 +1228,48 @@ mod tests {
     }
 
     #[test]
-    fn origin_start_is_clear_and_has_a_nearby_flock() {
+    fn home_is_a_peaceful_clear_start_with_rocks_and_a_planetoid() {
         for seed in 0..20 {
             let spawns = generate(seed, SectorId::ORIGIN);
             assert!(spawns.iter().all(|s| s.position.length() > 800.0));
-            assert!(spawns.iter().any(|s| {
-                s.species
-                    .is_some_and(|sp| sp.lineage == Species::bogey().lineage)
-                    && s.position.length() < 2200.0
+            // Nothing alive and nothing hazardous: no creatures, bases, husks, wells or
+            // rooted tenants.
+            assert!(spawns.iter().all(|s| {
+                s.species.is_none()
+                    && s.base_kind.is_none()
+                    && s.den.is_none()
+                    && s.rooted.is_none()
+                    && s.civ.is_none()
+                    && s.kind != BodyKind::BlackHole
+                    && s.rock != RockKind::Crystal
             }));
+            let rocks = spawns
+                .iter()
+                .filter(|s| s.kind == BodyKind::Asteroid && s.rock == RockKind::Plain)
+                .count();
+            assert!(rocks >= 5, "seed {seed}: only {rocks} rocks to mine");
+            let worlds: Vec<_> = spawns
+                .iter()
+                .filter(|s| s.rock == RockKind::Planetoid)
+                .collect();
+            assert_eq!(worlds.len(), 1, "one home-base planetoid");
+            let w = worlds[0];
+            let (r, d) = (w.radius.unwrap(), w.position.length());
+            assert!(w.pinned && (HOME_PLANETOID_RADIUS.0..=HOME_PLANETOID_RADIUS.1).contains(&r));
+            assert!((HOME_PLANETOID_DISTANCE.0..=HOME_PLANETOID_DISTANCE.1).contains(&d));
+            // The planetoid is within a short flight of the start, clear of every rock.
+            assert!(d - r < 2000.0);
+            for s in spawns.iter().filter(|s| s.index != w.index) {
+                assert!(s.position.distance(w.position) - r - s.radius.unwrap_or(0.0) > 200.0);
+            }
         }
     }
 
     #[test]
     fn creatures_are_individuals_with_stable_genomes() {
-        let a = generate(0x535343, SectorId::ORIGIN);
-        let b = generate(0x535343, SectorId::ORIGIN);
+        let id = crate::range::start_sector(0x535343, Species::bogey());
+        let a = generate(0x535343, id);
+        let b = generate(0x535343, id);
         let genomes = |v: &[Spawn]| -> Vec<_> { v.iter().filter_map(|s| s.species).collect() };
         assert_eq!(genomes(&a), genomes(&b));
         let bogeys: Vec<_> = genomes(&a)
@@ -1190,33 +1285,25 @@ mod tests {
         );
     }
 
-    fn census(spawns: &[Spawn]) -> [usize; 6] {
+    fn census(spawns: &[Spawn]) -> [usize; 3] {
         let count = |kind: BodyKind| spawns.iter().filter(|s| s.kind == kind).count();
-        let species = |wanted: Species| {
-            spawns
-                .iter()
-                .filter(|s| s.species.is_some_and(|sp| sp.lineage == wanted.lineage))
-                .count()
-        };
         [
             spawns.len(),
             count(BodyKind::Asteroid),
-            count(BodyKind::BlackHole),
-            species(Species::bogey()),
-            species(Species::lunatic()),
-            species(Species::smarty()) + species(Species::fatso()),
+            count(BodyKind::Creature) + count(BodyKind::BlackHole) + count(BodyKind::Base),
         ]
     }
 
-    /// The original hand-tuned world is exactly what the policy produces at HOME. These
-    /// figures were recorded from the generator before it was parameterized.
+    /// HOME is the peaceful start: rocks, one planetoid and nothing alive. These figures pin
+    /// the clean-break generator (counts and a position checksum for three seeds); change
+    /// them only on purpose.
     #[test]
-    fn sector_zero_reproduces_the_original_population() {
+    fn sector_zero_is_the_peaceful_home_the_golden_pins() {
         assert_eq!(latent(7, SectorId::ORIGIN), SectorParams::HOME);
         for (seed, expected, checksum) in [
-            (0x535343, [54, 14, 1, 33, 5, 1], -78201.925),
-            (1, [53, 17, 0, 29, 7, 0], 3084.996),
-            (42, [51, 14, 1, 30, 4, 2], 53527.571),
+            (0x535343, [15, 15, 0], 6261.067),
+            (1, [18, 18, 0], 5613.966),
+            (42, [15, 15, 0], 28916.180),
         ] {
             let spawns = generate(seed, SectorId::ORIGIN);
             assert_eq!(census(&spawns), expected, "seed {seed}");
@@ -1225,11 +1312,6 @@ mod tests {
                 .map(|s| f64::from(s.position.x) + 3.0 * f64::from(s.position.y))
                 .sum();
             assert!((sum - checksum).abs() < 0.05, "seed {seed}: {sum}");
-            assert!(
-                spawns
-                    .iter()
-                    .all(|s| s.phenotype == Phenotype::default() || s.kind == BodyKind::Creature)
-            );
             assert!(spawns.iter().all(|s| s.phenotype == Phenotype::default()));
         }
     }
@@ -1238,30 +1320,37 @@ mod tests {
     fn latent_space_is_smooth_bounded_and_grows_more_dangerous_outward() {
         let seed = 31;
         let params = |x, y| latent(seed, SectorId { x, y });
-        let channels = |p: SectorParams| {
-            [
-                p.danger,
-                p.aggression,
-                p.density,
-                p.distortion,
-                p.tech,
-                p.swarm,
-            ]
-        };
-        let mut largest_step = 0.0_f32;
+        // The biome channels are smooth noise; density and swarm are the ecology's fields
+        // (rock belts and life from the species ranges), which may step where a small range
+        // ends but are still bounded.
+        let biome = |p: SectorParams| [p.danger, p.aggression, p.distortion, p.tech];
+        let ecology = |p: SectorParams| [p.density, p.swarm];
+        let (mut largest_step, mut largest_field) = (0.0_f32, 0.0_f32);
         for x in -12..=12 {
             for y in -12..=12 {
-                let here = channels(params(x, y));
-                assert!(here.iter().all(|v| (0.0..=1.0).contains(v)));
+                let here = params(x, y);
+                assert!(
+                    [biome(here).as_slice(), ecology(here).as_slice()]
+                        .concat()
+                        .iter()
+                        .all(|v| (0.0..=1.0).contains(v))
+                );
                 for (dx, dy) in [(1, 0), (0, 1)] {
-                    let next = channels(params(x + dx, y + dy));
-                    for (a, b) in here.iter().zip(next) {
+                    let next = params(x + dx, y + dy);
+                    for (a, b) in biome(here).iter().zip(biome(next)) {
                         largest_step = largest_step.max((a - b).abs());
+                    }
+                    for (a, b) in ecology(here).iter().zip(ecology(next)) {
+                        largest_field = largest_field.max((a - b).abs());
                     }
                 }
             }
         }
         assert!(largest_step < 0.4, "abrupt biome change: {largest_step}");
+        assert!(
+            largest_field < 0.75,
+            "abrupt ecology change: {largest_field}"
+        );
         let danger = |r: i32| params(r, 0).danger;
         assert!(danger(0) < danger(2) && danger(2) < danger(6) && danger(6) < danger(12));
         // Different master seeds chart different universes; same seed, same universe.
@@ -1316,7 +1405,7 @@ mod tests {
     #[test]
     fn new_elements_are_absent_at_home_and_present_in_wild_sectors() {
         let exotic = |s: &Spawn| {
-            s.pinned
+            (s.pinned && s.rock != RockKind::Planetoid)
                 || s.brood.is_some()
                 || s.link.is_some()
                 || s.kind == BodyKind::Base
@@ -1377,7 +1466,7 @@ mod tests {
     }
 
     #[test]
-    fn planetoids_are_large_fixed_sparse_clear_and_never_at_home() {
+    fn planetoids_are_large_fixed_sparse_and_clear_and_home_has_one() {
         let mut found = 0;
         let mut centers: Vec<(SectorId, Vec2, f32)> = Vec::new();
         for x in -10..=10 {
@@ -1391,24 +1480,34 @@ mod tests {
                     .collect();
                 assert!(worlds.len() <= 1);
                 if id == SectorId::ORIGIN {
-                    assert!(worlds.is_empty(), "HOME keeps its original population");
+                    assert_eq!(worlds.len(), 1, "HOME is the home-base planetoid's sector");
                 }
                 for w in worlds {
                     found += 1;
                     let r = w.radius.unwrap();
                     assert!(w.pinned && w.kind == BodyKind::Asteroid);
                     assert!(r > ASTEROID_MAX_RADIUS);
-                    assert!((PLANETOID_MIN_RADIUS..=PLANETOID_MAX_RADIUS).contains(&r));
+                    assert!(
+                        (PLANETOID_MIN_RADIUS..=PLANETOID_MAX_RADIUS).contains(&r)
+                            || id == SectorId::ORIGIN
+                    );
                     // The last of the original spawns, so no earlier index moves; rooted
                     // residents follow it.
-                    let originals = spawns.iter().filter(|s| s.rooted.is_none()).count();
+                    let originals = spawns
+                        .iter()
+                        .filter(|s| s.rooted.is_none() && s.civ.is_none())
+                        .count();
                     assert_eq!(w.index as usize, originals - 1);
                     let half = SECTOR_SIZE / 2.0 - r - PLANETOID_MARGIN;
-                    assert!((w.position - id.center()).abs().max_element() <= half + 0.01);
-                    // Open space around it: a ship always fits between it and anything else.
+                    assert!(
+                        (w.position - id.center()).abs().max_element() <= half + 0.01
+                            || id == SectorId::ORIGIN
+                    );
+                    // Open space around it: a ship always fits between it and anything else
+                    // (but the oasis creatures that gather by design).
                     for s in spawns
                         .iter()
-                        .filter(|s| s.index != w.index && s.rooted.is_none())
+                        .filter(|s| s.index != w.index && s.rooted.is_none() && s.species.is_none())
                     {
                         let gap = s.position.distance(w.position) - r - s.radius.unwrap_or(0.0);
                         assert!(gap > PLANETOID_CLEARANCE * 0.99, "gap {gap}");

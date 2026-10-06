@@ -758,6 +758,13 @@ mod tests {
         let kills = |seed: u64| {
             let mut game = Game::new(seed);
             game.player_invulnerability = 1e9;
+            // HOME is empty: stand in a sector rich in creatures.
+            let rich = crate::simulation::tests::find_sector(seed, |s| {
+                s.iter().filter(|s| s.species.is_some()).count() > 20
+            });
+            game.teleport(rich.center());
+            game.step(DT, Input::default());
+            game.player_invulnerability = 1e9;
             let ids: Vec<u64> = game
                 .bodies
                 .iter()
