@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>/*TITLE*/</title>
+<style>
+:root{--bg:#f3f4f7;--panel:#fff;--ink:#1c2230;--mute:#667085;--line:#d3d8e0;--accent:#2563eb;--gold:#b87d00;--rock:#6b5a4a;--ok:#1a8f4c;--well:#7c3aed;--ring:#2b3a55;--hover:#000;--stage:#dfe2e8}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1017;--panel:#161a24;--ink:#e6e9f0;--mute:#9aa3b5;--line:#2a3142;--accent:#6ea0ff;--gold:#f5c542;--rock:#c2a68a;--ok:#4ade80;--well:#b794f6;--ring:#9fb2d6;--hover:#fff;--stage:#07090d}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column}
+header{padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline}
+header h1{font-size:16px;margin:0}
+header .meta{color:var(--mute);font-size:12px}
+header b{color:var(--ink);font-weight:600}
+#bar{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);align-items:center}
+#bar label{display:inline-flex;gap:4px;align-items:center;cursor:pointer;white-space:nowrap}
+#bar .sw{width:10px;height:10px;border-radius:2px;display:inline-block}
+#jump{display:inline-flex;gap:4px;margin-left:auto}
+input[type=text]{width:9em;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);font:inherit}
+button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:3px 9px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+#main{flex:1;display:flex;min-height:0}
+#stage{flex:1;position:relative;background:var(--stage);overflow:hidden;touch-action:none;min-height:280px;cursor:grab}
+#stage.drag{cursor:grabbing}
+#svg{width:100%;height:100%;display:block;user-select:none}
+#zoom{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:4px}
+#zoom button{width:32px;height:32px;padding:0;font-size:16px}
+#coord{position:absolute;left:10px;bottom:8px;font-size:12px;color:var(--mute);background:color-mix(in srgb,var(--panel) 80%,transparent);padding:1px 6px;border-radius:4px;pointer-events:none}
+#tip{position:absolute;pointer-events:none;z-index:5;max-width:300px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px 10px;box-shadow:0 4px 18px #0004;font-size:12.5px;display:none}
+#panel{width:340px;border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:12px 14px}
+#panel h2{margin:0 0 2px;font-size:15px}
+#panel h3{margin:14px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}
+.sub{color:var(--mute);font-size:12px}
+.row{display:flex;gap:6px;align-items:center;margin:2px 0}
+.row .k{color:var(--mute);min-width:5.4em}
+.bar{display:inline-block;width:70px;height:7px;background:var(--line);border-radius:4px;overflow:hidden;vertical-align:middle}
+.bar i{display:block;height:100%;background:var(--accent)}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.tag{display:inline-block;padding:0 6px;border-radius:9px;border:1px solid var(--line);font-size:11px;margin-right:4px}
+.gold{color:var(--gold)}.ok{color:var(--ok)}
+details{margin-top:14px}summary{cursor:pointer;color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.leg{display:grid;grid-template-columns:34px 1fr;gap:4px 8px;align-items:center;margin-top:6px;font-size:12.5px}
+.leg svg{width:30px;height:20px;overflow:visible}
+.ramp{height:12px;border-radius:3px;width:30px}
+/* svg classes */
+.ring{fill:none;stroke:var(--ring);stroke-width:1;stroke-dasharray:5 4;opacity:.45;vector-effect:non-scaling-stroke}
+.rlabel{fill:var(--ring);font-weight:600;opacity:.8;pointer-events:none}
+.grid{fill:none;stroke:var(--ink);stroke-width:.5;opacity:.18;vector-effect:non-scaling-stroke}
+.redge{fill:none;stroke:var(--ink);stroke-width:1;opacity:.35;vector-effect:non-scaling-stroke}
+.conf{fill:none;stroke:var(--gold);stroke-width:2;vector-effect:non-scaling-stroke}
+.tedge{fill:none;stroke-width:2.4;vector-effect:non-scaling-stroke;stroke-linecap:square}
+.rock{fill:var(--rock)}
+.hatch{stroke:var(--rock);stroke-width:.045}
+.hover{fill:none;stroke:var(--hover);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none}
+.pin{fill:none;stroke:var(--accent);stroke-width:3;vector-effect:non-scaling-stroke;pointer-events:none}
+.ico{vector-effect:non-scaling-stroke;stroke-width:1.3}
+.home{fill:var(--accent);stroke:var(--bg)}
+.planet{fill:var(--rock);stroke:var(--ink)}
+.renew{fill:none;stroke:var(--ok);stroke-width:2;vector-effect:non-scaling-stroke}
+.well{fill:none;stroke:var(--well);stroke-width:1.6;vector-effect:non-scaling-stroke}
+.crown{fill:var(--gold);stroke:var(--ink)}
+.dtext{fill:var(--ink);font-weight:600;pointer-events:none}
+.dmute{fill:var(--mute);pointer-events:none}
+svg.lo .lod{display:none}
+svg.lo2 .lod2{display:none}
+@media (max-width:760px){
+ #main{flex-direction:column}
+ #stage{flex:none;height:62vh}
+ #panel{width:auto;border-left:0;border-top:1px solid var(--line);flex:1;min-height:200px}
+ #jump{margin-left:0}
+}
+</style>
+</head>
+<body>
+<header>
+ <h1>SSC sector map</h1>
+ <span class="meta">seed <b id="h-seed"></b> &middot; generator v<b id="h-ver"></b> &middot; <b id="h-grid"></b> &middot; <span id="h-note"></span></span>
+</header>
+<div id="bar">
+ <label><input type="checkbox" data-layer="ranges" checked><span class="sw" style="background:linear-gradient(90deg,#4a8,#58c,#c85)"></span>ranges</label>
+ <label><input type="checkbox" data-layer="life" checked>life</label>
+ <label><input type="checkbox" data-layer="rock" checked>rock</label>
+ <label><input type="checkbox" data-layer="regions" checked>regions</label>
+ <label><input type="checkbox" data-layer="rings" checked>rings</label>
+ <label><input type="checkbox" data-layer="civs" checked>civilizations</label>
+ <label><input type="checkbox" data-layer="planets" checked>planetoids</label>
+ <label><input type="checkbox" data-layer="wells" checked>wells</label>
+ <label><input type="checkbox" data-layer="apex" checked>apexes</label>
+ <label><input type="checkbox" data-layer="grid">grid</label>
+ <form id="jump"><input type="text" id="jx" placeholder="x,y" aria-label="Jump to sector x,y" inputmode="text" autocomplete="off"><button type="submit">Go</button></form>
+</div>
+<div id="main">
+ <div id="stage">
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sector map"></svg>
+  <div id="zoom"><button id="zin" title="Zoom in" aria-label="Zoom in">+</button><button id="zout" title="Zoom out" aria-label="Zoom out">&minus;</button><button id="zfit" title="Fit whole map" aria-label="Fit">&#9635;</button><button id="zhome" title="Center on HOME (0,0)" aria-label="Home">H</button></div>
+  <div id="coord"></div>
+  <div id="tip"></div>
+ </div>
+ <aside id="panel"></aside>
+</div>
+<script>
+(function(){
+"use strict";
+const D=/*DATA*/;
+const NS="http://www.w3.org/2000/svg";
+const $=s=>document.querySelector(s);
+const cols=D.cols,rows=D.rows,cells=D.cells;
+const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14;
+const KINDS=["Home","Range","Confluence","Belt","Reach","Oasis","Civilization"];
+const FORMS=["the peaceful start, no creatures","a dominant species range","many ranges converge (rare, biodiverse)","a rock-rich band with little life","a sparse gap between ranges","a planetoid with life around it in the middle of nowhere","a civilization's territory"];
+const hc=-D.x0,hr=D.y1; /* HOME's cell */
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const cellAt=(c,r)=>(c>=0&&c<cols&&r>=0&&r<rows)?cells[r*cols+c]:null;
+const sx=c=>D.x0+c, sy=r=>D.y1-r;
+$("#h-seed").textContent=D.seed;$("#h-ver").textContent=D.version;
+$("#h-grid").textContent=cols+" x "+rows+" sectors, x "+D.x0+".."+(D.x0+cols-1)+", y "+(D.y1-rows+1)+".."+D.y1;
+$("#h-note").textContent="sector "+D.size+" units wide, north (+y) up";
+
+const svg=$("#svg"),stage=$("#stage"),tip=$("#tip");
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e}
+const defs=el("defs",{},svg);
+const pat=el("pattern",{id:"hatch",width:".22",height:".22",patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"},defs);
+el("line",{x1:"0",y1:"0",x2:"0",y2:".22",class:"hatch"},pat);
+const world=el("g",{},svg);
+const G={};
+["fill","rock","hatch","tfill","regions","conf","tedge","grid","rings","wells","planets","civs","apex","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
+G.hatch.setAttribute("class","lod2");
+["wells","planets","civs","apex","home"].forEach(n=>G[n].setAttribute("class","lod"));
+G.grid.setAttribute("class","lod2");G.regions.setAttribute("class","lod2");
+
+const layers={ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,grid:false};
+const showMap={rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],grid:["grid"]};
+function applyLayers(){for(const l in showMap)for(const g of showMap[l])G[g].style.display=layers[l]?"":"none"}
+
+const dark=()=>matchMedia("(prefers-color-scheme: dark)").matches;
+function fillColor(hue,life){
+ const d=dark();
+ let l,s;
+ if(layers.life){l=d?12+life*38:92-life*42;s=(hue<0?6:22)+life*(hue<0?10:45)}
+ else{l=d?30:72;s=hue<0?6:45}
+ return"hsl("+(hue<0?220:hue)+","+s.toFixed(0)+"%,"+l.toFixed(1)+"%)";
+}
+function leadHue(row){return(layers.ranges&&row[SP].length)?D.species[row[SP][0][0]][1]:-1}
+
+function build(){
+ for(const n of ["fill","rock","hatch","tfill","regions","conf","tedge","grid","rings","wells","planets","civs","apex","home"])G[n].textContent="";
+ /* range hue by life level */
+ const fills=new Map(),rocks=[[],[],[],[]],hatch=[],conf=[],tf=new Map(),tedge=new Map(),redge=[];
+ const rect=(c,r)=>"M"+c+" "+r+"h1v1h-1z";
+ for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+  const row=cells[r*cols+c];
+  const hue=leadHue(row),lb=Math.min(5,Math.floor(row[LIFE]*6));
+  const key=hue+"|"+lb;
+  let a=fills.get(key);if(!a){a=[];fills.set(key,a)}a.push(rect(c,r));
+  const m=row[MAT];
+  if(m>=.4){rocks[m<.55?0:m<.7?1:m<.85?2:3].push(rect(c,r))}
+  if(row[KIND]===3)hatch.push(rect(c,r));
+  if(row[KIND]===2)conf.push("M"+(c+.07)+" "+(r+.07)+"h.86v.86h-.86z");
+  const t=row[TER];
+  if(t>=0){let a2=tf.get(t);if(!a2){a2=[];tf.set(t,a2)}a2.push(rect(c,r))}
+  const rt=cellAt(c+1,r),bt=cellAt(c,r+1);
+  if(rt){if(rt[REG]!==row[REG])redge.push("M"+(c+1)+" "+r+"v1");edge(tedge,t,rt[TER],"M"+(c+1)+" "+r+"v1")}
+  if(bt){if(bt[REG]!==row[REG])redge.push("M"+c+" "+(r+1)+"h1");edge(tedge,t,bt[TER],"M"+c+" "+(r+1)+"h1")}
+ }
+ function edge(map,a,b,seg){if(a===b)return;for(const t of[a,b]){if(t<0)continue;let x=map.get(t);if(!x){x=[];map.set(t,x)}x.push(seg)}}
+ for(const[key,list]of fills){const[h,lb]=key.split("|").map(Number);el("path",{d:list.join(""),fill:fillColor(h,(lb+.5)/6)},G.fill)}
+ const ops=[.08,.16,.27,.4];
+ rocks.forEach((l,i)=>{if(l.length)el("path",{d:l.join(""),class:"rock","fill-opacity":ops[i]},G.rock)});
+ if(hatch.length)el("path",{d:hatch.join(""),fill:"url(#hatch)",opacity:".7"},G.hatch);
+ if(redge.length)el("path",{d:redge.join(""),class:"redge"},G.regions);
+ if(conf.length)el("path",{d:conf.join(""),class:"conf"},G.conf);
+ for(const[t,l]of tf)el("path",{d:l.join(""),fill:D.territories[t][8],"fill-opacity":".22"},G.tfill);
+ for(const[t,l]of tedge)el("path",{d:l.join(""),class:"tedge",stroke:D.territories[t][8]},G.tedge);
+ /* grid */
+ let g="";for(let c=0;c<=cols;c++)g+="M"+c+" 0V"+rows;for(let r=0;r<=rows;r++)g+="M0 "+r+"H"+cols;
+ el("path",{d:g,class:"grid"},G.grid);
+ buildRings();buildIcons();
+ G.conf.style.display="";
+ applyLayers();
+}
+const ringLabels=[];
+function buildRings(){
+ ringLabels.length=0;
+ const axis=(p,n)=>p<0?-p:p>=n?p-n+1:0,far=(p,n)=>Math.max(Math.abs(p),Math.abs(p-(n-1)));
+ const lo=Math.max(1,Math.max(axis(hc,cols),axis(hr,rows))),hi=Math.max(far(hc,cols),far(hr,rows));
+ for(let k=lo;k<=hi+1;k++){
+  const x0=hc-k,y0=hr-k,x1=hc+k+1,y1=hr+k+1;
+  if(x0>=cols||x1<=0||y0>=rows||y1<=0)continue;
+  if(x0<=0&&x1>=cols&&y0<=0&&y1>=rows)continue;
+  el("rect",{x:x0,y:y0,width:2*k+1,height:2*k+1,class:"ring"},G.rings);
+  const t=el("text",{class:"rlabel"},G.rings);t.textContent=k;t.dataset.k=k;t.dataset.x=x1;t.dataset.y=y0;ringLabels.push(t);
+ }
+ if(hc>=0&&hc<cols&&hr>=0&&hr<rows){const t=el("text",{class:"rlabel"},G.rings);t.textContent="0";t.dataset.k=0;t.dataset.x=hc+1;t.dataset.y=hr;ringLabels.push(t)}
+}
+function buildIcons(){
+ if(hc>=0&&hc<cols&&hr>=0&&hr<rows){
+  const x=hc+.5,y=hr+.5;
+  el("path",{d:"M"+(x-.34)+" "+(y+.06)+"L"+x+" "+(y-.3)+"L"+(x+.34)+" "+(y+.06)+"h-.1v.3h-.48v-.3z",class:"ico home"},G.home);
+ }
+ for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+  const row=cells[r*cols+c];
+  for(const p of row[PLA]){
+   const px=c+.5+p[2],py=r+.5-p[3],rad=.07+.2*(p[0]/700);
+   el("circle",{cx:px,cy:py,r:rad,class:"ico planet"},G.planets);
+   if(p[1])el("circle",{cx:px,cy:py,r:rad+.06,class:"renew"},G.planets);
+  }
+  for(const w of row[WELL]){
+   const px=c+.5+w[0],py=r+.5-w[1];
+   el("circle",{cx:px,cy:py,r:.07,class:"well"},G.wells);
+   el("circle",{cx:px,cy:py,r:.025,fill:"var(--well)"},G.wells);
+  }
+  if(row[TER]>=0){
+   const t=D.territories[row[TER]],col=t[8],peace=t[9]===1;
+   if(row[CAP]){
+    const s=.2+.045*t[4],x=c+.5,y=r+.5;
+    if(peace){el("circle",{cx:x,cy:y,r:.2,fill:"var(--panel)",stroke:"var(--ok)",class:"ico","stroke-width":2.2},G.civs);el("circle",{cx:x,cy:y,r:.07,fill:"var(--ok)"},G.civs)}
+    else el("path",{d:"M"+x+" "+(y-s)+"L"+(x+s)+" "+y+"L"+x+" "+(y+s)+"L"+(x-s)+" "+y+"z",fill:col,stroke:"var(--ink)",class:"ico"},G.civs);
+    for(let i=0;i<t[4];i++)el("rect",{x:x-s+i*.1,y:y+s+.03,width:.07,height:.07,fill:"var(--ink)"},G.civs);
+   }
+   for(let i=0;i<row[OUT];i++){
+    const x=c+.3+i*.2,y=r+.82;
+    el("path",{d:"M"+x+" "+(y-.07)+"l.07 .13h-.14z",fill:col,stroke:"var(--ink)",class:"ico"},G.civs);
+   }
+  }
+  if(row[APX]>=0){
+   const a=D.apexes[row[APX]],big=a[1]==="apex",s=big?.3:.2,x=c+.5,y=r+.5;
+   const d="M"+(x-s)+" "+(y+s*.6)+"V"+(y-s*.5)+"L"+(x-s/2)+" "+y+"L"+x+" "+(y-s*.8)+"L"+(x+s/2)+" "+y+"L"+(x+s)+" "+(y-s*.5)+"V"+(y+s*.6)+"z";
+   el("path",{d,class:"ico crown","fill-opacity":big?1:.35},G.apex);
+  }
+ }
+}
+
+/* view */
+const v={x:0,y:0,k:10};
+let W=800,H=600,fitK=10;
+function measure(){const b=stage.getBoundingClientRect();W=b.width;H=b.height;fitK=Math.min(W/cols,H/rows)*.97}
+function fit(){measure();v.k=fitK;v.x=(W-cols*v.k)/2;v.y=(H-rows*v.k)/2;apply()}
+function clampK(k){return Math.min(160,Math.max(fitK*.4,k,1))}
+function zoomAt(px,py,f){const nk=clampK(v.k*f),r=nk/v.k;v.x=px-(px-v.x)*r;v.y=py-(py-v.y)*r;v.k=nk;apply()}
+function centerOn(c,r,k){v.k=clampK(k||v.k);v.x=W/2-(c+.5)*v.k;v.y=H/2-(r+.5)*v.k;apply()}
+function niceStep(n){for(const s of[1,2,5,10,20,50,100,200])if(s>=n)return s;return 500}
+let detailTimer=0;
+function apply(){
+ world.setAttribute("transform","translate("+v.x+" "+v.y+") scale("+v.k+")");
+ svg.classList.toggle("lo",v.k<6);svg.classList.toggle("lo2",v.k<9);
+ const step=niceStep(Math.ceil(46/v.k)),fs=11/v.k;
+ for(const t of ringLabels){const k=+t.dataset.k;t.style.display=(k%step===0)?"":"none";t.setAttribute("font-size",fs);t.setAttribute("x",+t.dataset.x+2/v.k);t.setAttribute("y",+t.dataset.y+fs)}
+ clearTimeout(detailTimer);detailTimer=setTimeout(detail,80);
+ placeMarks();
+}
+function detail(){
+ G.detail.textContent="";
+ if(v.k<30)return;
+ const c0=Math.max(0,Math.floor(-v.x/v.k)),c1=Math.min(cols-1,Math.floor((W-v.x)/v.k));
+ const r0=Math.max(0,Math.floor(-v.y/v.k)),r1=Math.min(rows-1,Math.floor((H-v.y)/v.k));
+ const fs=11/v.k,big=v.k>=64;
+ for(let r=r0;r<=r1;r++)for(let c=c0;c<=c1;c++){
+  const row=cells[r*cols+c],n=row[SP].length;
+  if(n){
+   const t=el("text",{x:c+.97,y:r+.97,"text-anchor":"end","font-size":fs*1.15,class:row[KIND]===2?"dtext gold":"dtext"},G.detail);t.textContent=n;
+  }
+  if(big){const t=el("text",{x:c+.05,y:r+.05+fs,"font-size":fs,class:"dmute"},G.detail);t.textContent=sx(c)+","+sy(r)}
+  if(row[CAP]&&row[TER]>=0&&D.territories[row[TER]][9]!==1){const t=el("text",{x:c+.5,y:r+.5-.3-.15*0,"text-anchor":"middle","font-size":fs*1.1,class:"dtext"},G.detail);t.textContent="F"+D.territories[row[TER]][4]}
+  if(row[RING]===0&&c===hc&&r===hr){const t=el("text",{x:c+.5,y:r+.5-.4,"text-anchor":"middle","font-size":fs*1.3,class:"dtext"},G.detail);t.textContent="HOME"}
+ }
+}
+
+/* hover and pin */
+const hoverBox=el("rect",{width:1,height:1,class:"hover",display:"none"},G.hover);
+const pinBox=el("rect",{width:1,height:1,class:"pin",display:"none"},G.pin);
+let pinned=null;
+function placeMarks(){}
+function place(box,cr){if(!cr){box.setAttribute("display","none");return}box.setAttribute("x",cr[0]);box.setAttribute("y",cr[1]);box.setAttribute("display","")}
+function cellFromEvent(e){const b=stage.getBoundingClientRect(),c=Math.floor((e.clientX-b.left-v.x)/v.k),r=Math.floor((e.clientY-b.top-v.y)/v.k);return(c>=0&&c<cols&&r>=0&&r<rows)?[c,r]:null}
+
+const bar=p=>'<span class="bar"><i style="width:'+Math.round(Math.max(0,Math.min(1,p))*100)+'%"></i></span>';
+const lifeWord=l=>l<.2?"barren":l<.4?"sparse":l<.65?"living":"lush";
+const rockWord=m=>m>=.8?"dense belt":m>=.65?"belt":m>=.45?"rocky":m>=.25?"light":"clear";
+function describe(cr,full){
+ const[c,r]=cr,row=cells[r*cols+c],x=sx(c),y=sy(r);
+ const reg=D.regions[row[REG]],terr=row[TER]>=0?D.territories[row[TER]]:null;
+ let h='<h2>'+esc(reg[0])+'</h2><div class="sub">sector ('+x+', '+y+') &middot; centre ('+(x*D.size)+', '+(y*D.size)+') &middot; ring '+row[RING]+'</div>';
+ h+='<div class="row"><span class="k">Form</span><span><b>'+KINDS[row[KIND]]+'</b>'+(full?' - '+FORMS[row[KIND]]:'')+'</span></div>';
+ if(row[KIND]===0)h+='<div class="row ok"><b>HOME - peaceful, no creatures, a planetoid to land on</b></div>';
+ const sp=row[SP];
+ if(sp.length){
+  const lead=D.species[sp[0][0]];
+  h+='<div class="row"><span class="k">Range</span><span><span class="dot" style="background:hsl('+lead[1]+',60%,50%)"></span> '+esc(lead[0])+' ('+esc(lead[2])+')</span></div>';
+  h+='<h3>Species ('+sp.length+')'+(row[KIND]===2?' <span class="gold">convergence</span>':'')+'</h3>';
+  const lim=full?sp.length:6;
+  for(let i=0;i<Math.min(lim,sp.length);i++){const s=D.species[sp[i][0]];h+='<div class="row"><span class="dot" style="background:'+s[4]+'"></span><span style="min-width:6em">'+esc(s[0])+'</span>'+bar(sp[i][1])+' <span class="sub">'+Math.round(sp[i][1]*100)+'% '+esc(s[2])+', '+esc(s[3])+'</span></div>'}
+  if(sp.length>lim)h+='<div class="sub">and '+(sp.length-lim)+' more</div>';
+ }else if(row[KIND]!==0)h+='<div class="row"><span class="k">Range</span><span class="sub">no species range reaches here</span></div>';
+ h+='<h3>Ground</h3>';
+ h+='<div class="row"><span class="k">Life</span>'+bar(row[LIFE])+' <span>'+row[LIFE].toFixed(2)+' <span class="sub">'+lifeWord(row[LIFE])+'</span></span></div>';
+ h+='<div class="row"><span class="k">Rock</span>'+bar(row[MAT])+' <span>'+row[MAT].toFixed(2)+' <span class="sub">'+rockWord(row[MAT])+'</span></span></div>';
+ const pl=row[PLA];
+ h+='<div class="row"><span class="k">Bodies</span><span>'+row[CRE]+' creatures, '+row[AST]+' asteroids, '+pl.length+' planetoid'+(pl.length===1?'':'s')+(row[WELL].length?', '+row[WELL].length+' gravity well'+(row[WELL].length===1?'':'s'):'')+(row[BAS]?', '+row[BAS]+' base'+(row[BAS]===1?'':'s'):'')+'</span></div>';
+ if(pl.length)h+='<div class="row"><span class="k">Planetoid</span><span>'+pl.map(p=>'radius '+p[0]+(p[1]?' <span class="ok">renewable</span>':'')).join('; ')+'</span></div>';
+ if(terr){
+  h+='<h3>Territory</h3><div class="row"><span class="dot" style="background:'+terr[8]+'"></span><b>'+esc(terr[0])+'</b></div>';
+  h+='<div class="row"><span class="k">Strength</span><span>'+terr[2].toFixed(2)+' &middot; threat x'+terr[3].toFixed(2)+' &middot; fort tier '+terr[4]+'</span></div>';
+  h+='<div class="row"><span class="k">Capital</span><span>('+terr[5]+', '+terr[6]+'), radius '+terr[7].toFixed(1)+(row[CAP]?' <span class="gold">&#9733; here</span>':'')+'</span></div>';
+  if(row[OUT])h+='<div class="row"><span class="k">Outposts</span><span>'+row[OUT]+' here</span></div>';
+  if(terr[9]===1)h+='<div class="row ok"><b>The early outpost: peaceful, fights only when hurt</b></div>';
+ }
+ if(row[APX]>=0){const a=D.apexes[row[APX]];h+='<h3>Apex</h3><div class="row gold"><b>&#9818; '+esc(a[0])+'</b> <span class="sub">'+esc(a[1])+'</span></div>'}
+ return h;
+}
+function showTip(e,cr){
+ if(!cr||e.pointerType==="touch"){tip.style.display="none";return}
+ tip.innerHTML=describe(cr,false);tip.style.display="block";
+ const b=stage.getBoundingClientRect();let x=e.clientX-b.left+14,y=e.clientY-b.top+14;
+ const tw=tip.offsetWidth,th=tip.offsetHeight;
+ if(x+tw>b.width-4)x=e.clientX-b.left-tw-14;if(y+th>b.height-4)y=e.clientY-b.top-th-14;
+ tip.style.left=Math.max(4,x)+"px";tip.style.top=Math.max(4,y)+"px";
+}
+const LEGEND='<details open><summary>Legend</summary><div class="leg">'
++'<svg viewBox="0 0 30 20"><rect width="10" height="20" fill="hsl(150,55%,45%)"/><rect x="10" width="10" height="20" fill="hsl(210,55%,45%)"/><rect x="20" width="10" height="20" fill="hsl(25,55%,45%)"/></svg><span>Hue: the dominant species range (stable per range); grey where none reaches</span>'
++'<div class="ramp" style="background:linear-gradient(90deg,hsl(220,8%,16%),hsl(150,60%,48%))"></div><span>Tint: life density, empty to biodiverse</span>'
++'<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="var(--rock)" fill-opacity=".45"/><path d="M0 20L20 0M10 20L30 0M20 20L30 10M0 10L10 0" stroke="var(--rock)" stroke-width="2"/></svg><span>Brown shade: rock density; hatched where the region is a belt</span>'
++'<svg viewBox="0 0 30 20"><rect x="3" y="3" width="24" height="14" fill="none" stroke="var(--gold)" stroke-width="2"/></svg><span>Gold border: confluence, 4+ species strongly present</span>'
++'<svg viewBox="0 0 30 20"><rect x="2" y="2" width="26" height="16" fill="none" stroke="var(--ring)" stroke-dasharray="4 3"/></svg><span>Dashed square: Moore ring from HOME, numbered</span>'
++'<svg viewBox="0 0 30 20"><path d="M15 3L26 10L15 17L4 10z" fill="#c33" fill-opacity=".8" stroke="var(--ink)"/></svg><span>Civilization capital (pips: fort tier), outlined in its tint; triangles are outposts</span>'
++'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="7" fill="var(--panel)" stroke="var(--ok)" stroke-width="2.5"/><circle cx="15" cy="10" r="2.5" fill="var(--ok)"/></svg><span>The early outpost, peaceful</span>'
++'<svg viewBox="0 0 30 20"><path d="M5 17V6L10 11L15 3L20 11L25 6V17z" fill="var(--gold)" stroke="var(--ink)"/></svg><span>Apex elder (small and faint: a lesser one)</span>'
++'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="5" fill="var(--rock)" stroke="var(--ink)"/><circle cx="15" cy="10" r="8" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Planetoid (size by radius); green ring: renewable</span>'
++'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6" fill="none" stroke="var(--well)" stroke-width="2"/><circle cx="15" cy="10" r="2" fill="var(--well)"/></svg><span>Gravity well</span>'
++'<svg viewBox="0 0 30 20"><path d="M15 2L27 11h-4v7H7v-7H3z" fill="var(--accent)"/></svg><span>HOME, sector (0,0)</span>'
++'</div><p class="sub">Drag to pan, wheel or pinch to zoom, click or tap a sector to pin it. North (+y) is up. Zoom in for species counts, coordinates and fort tiers.</p></details>';
+function panel(){
+ const p=$("#panel");
+ p.innerHTML=(pinned?describe(pinned,true)+'<p><button id="unpin">Unpin</button></p>':'<h2>No sector pinned</h2><div class="sub">Click or tap a sector for details. Hover shows a quick tip.</div>')+LEGEND;
+ const u=$("#unpin");if(u)u.onclick=()=>{pin(null)};
+}
+function pin(cr,center){
+ pinned=cr;place(pinBox,cr);panel();
+ if(cr){try{history.replaceState(null,"","#"+sx(cr[0])+","+sy(cr[1]))}catch(e){}}
+ if(cr&&center)centerOn(cr[0],cr[1],Math.max(v.k,30));
+}
+
+/* pointers: drag, pinch, wheel, click */
+const ptrs=new Map();let moved=false,startPt=null,pinch=0;
+stage.addEventListener("pointerdown",e=>{
+ if(e.target.closest("#zoom"))return;
+ stage.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+ moved=false;startPt={x:e.clientX,y:e.clientY};
+ if(ptrs.size===2){const[a,b]=[...ptrs.values()];pinch=Math.hypot(a.x-b.x,a.y-b.y)}
+});
+stage.addEventListener("pointermove",e=>{
+ const p=ptrs.get(e.pointerId);
+ if(!p){const cr=cellFromEvent(e);place(hoverBox,cr);showTip(e,cr);const b=stage.getBoundingClientRect();$("#coord").textContent=cr?"("+sx(cr[0])+", "+sy(cr[1])+")":"";return}
+ if(ptrs.size===2){
+  p.x=e.clientX;p.y=e.clientY;const[a,b]=[...ptrs.values()],d=Math.hypot(a.x-b.x,a.y-b.y),bb=stage.getBoundingClientRect();
+  if(pinch>0)zoomAt((a.x+b.x)/2-bb.left,(a.y+b.y)/2-bb.top,d/pinch);pinch=d;moved=true;return;
+ }
+ const dx=e.clientX-p.x,dy=e.clientY-p.y;
+ if(!moved&&Math.hypot(e.clientX-startPt.x,e.clientY-startPt.y)<5)return;
+ moved=true;stage.classList.add("drag");tip.style.display="none";
+ p.x=e.clientX;p.y=e.clientY;v.x+=dx;v.y+=dy;apply();
+});
+function release(e){
+ if(!ptrs.has(e.pointerId))return;
+ const wasOne=ptrs.size===1;ptrs.delete(e.pointerId);stage.classList.remove("drag");pinch=0;
+ if(e.type==="pointerup"&&wasOne&&!moved){const cr=cellFromEvent(e);if(cr)pin(cr)}
+}
+stage.addEventListener("pointerup",release);stage.addEventListener("pointercancel",release);
+stage.addEventListener("pointerleave",e=>{if(!ptrs.has(e.pointerId)){tip.style.display="none";place(hoverBox,null)}});
+stage.addEventListener("wheel",e=>{e.preventDefault();const b=stage.getBoundingClientRect();zoomAt(e.clientX-b.left,e.clientY-b.top,Math.exp(-e.deltaY*(e.deltaMode?.05:.0015)))},{passive:false});
+$("#zin").onclick=()=>zoomAt(W/2,H/2,1.5);
+$("#zout").onclick=()=>zoomAt(W/2,H/2,1/1.5);
+$("#zfit").onclick=fit;
+$("#zhome").onclick=()=>{if(inGrid(0,0))centerOn(hc,hr,Math.max(v.k,30));else status("HOME (0,0) is outside this map")};
+function inGrid(x,y){const c=x-D.x0,r=D.y1-y;return c>=0&&c<cols&&r>=0&&r<rows}
+function status(t){$("#coord").textContent=t}
+$("#jump").addEventListener("submit",e=>{
+ e.preventDefault();
+ const m=$("#jx").value.match(/^\s*\(?\s*(-?\d+)\s*[, ]\s*(-?\d+)\s*\)?\s*$/);
+ if(!m){status("type a sector like 12,-5");return}
+ const x=+m[1],y=+m[2];
+ if(!inGrid(x,y)){status("("+x+", "+y+") is outside this map");return}
+ pin([x-D.x0,D.y1-y],true);
+});
+$("#jx").addEventListener("keydown",e=>e.stopPropagation());
+for(const cb of document.querySelectorAll("[data-layer]"))cb.addEventListener("change",()=>{
+ const l=cb.dataset.layer;layers[l]=cb.checked;
+ if(l==="ranges"||l==="life")build();else applyLayers();
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",build);
+new ResizeObserver(()=>{const oldFit=fitK;measure();if(Math.abs(oldFit-fitK)>.01&&Math.abs(v.k-oldFit)<.01)fit()}).observe(stage);
+
+measure();build();fit();panel();
+const h=location.hash.match(/^#(-?\d+),(-?\d+)$/);
+if(h&&inGrid(+h[1],+h[2]))pin([+h[1]-D.x0,D.y1-+h[2]],true);
+})();
+</script>
+</body>
+</html>

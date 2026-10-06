@@ -11,6 +11,7 @@ A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (pr
 
 - `cargo test --no-default-features` (headless, no GPU needed)
 - `cargo clippy --all-targets -- -D warnings` and `cargo fmt`; keep all three clean
+- `cargo run --no-default-features --bin sectormap -- --seed N --cols C --rows R --out map.html` writes an offline HTML map of the generated universe (see `docs/UNIVERSE.md`).
 - `cargo run` to play. For a bounded renderer check: `SSC_TELEPORT="x,y" SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=<path> cargo run`. The first screenshot after a fresh build may come out black; re-run it.
 
 ## Decisions and invariants

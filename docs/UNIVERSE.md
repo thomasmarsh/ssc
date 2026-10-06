@@ -231,6 +231,16 @@ Code: `src/simulation/civmine.rs` (mining), `src/fortress.rs` (pure layouts), `s
 - **Tuning knobs.** `SEG_RADIUS`, `SEG_SPACING`, `GATE_HALF`, `CAPITAL_BUDGET`, `OUTPOST_BUDGET`, per-archetype tables in `fortress.rs`; `fort_tier` and `menace` in `territory.rs`; `WALL_HULL`, turret `hull` (`BaseKind::Turret`), `TURRET_REACH`, `PERIOD`, `LAY_*` in `simulation/fortress.rs`; `MAX_MINERS`, `ORE_BUDGET`, `YIELD`, `FEED_RATE`, `FLEE_RANGE`, `SPILL`, `STOCK_CAP` in `civmine.rs`.
 - **Known gaps.** Miners are found only among generated members with a clear line, so fort garrisons rarely mine (outposts and patrols do). Fortress balance is by numbers, not playtested; wall and turret damage is not persisted (only destruction). Raiders and members do not path through mazes (they steer straight and bump walls). No dedicated sounds.
 
+## Sector map (built)
+
+`src/sectormap.rs` and the thin binary `src/bin/sectormap.rs` sample the same pure functions the game uses (`world::generate`, the range ecology fields, rings, regions, territories with the early outpost, planetoids with `renewable`, apex spawns, HOME) over a grid and write ONE self-contained HTML file (inline SVG, CSS and JS, no network). It needs no Bevy app or GPU and builds with `--no-default-features`.
+
+```sh
+cargo run --no-default-features --bin sectormap -- --seed 5460803 --cols 200 --rows 200 --out map.html
+```
+
+Options: `--seed` (decimal or `0x` hex; default the game's `0x535343`), `--cols` and `--rows` (1 to 256, default 41), `--center X,Y` (default 0,0), `--out` (default `sectormap.html`). The same options give byte-identical output. The page shows range hue, life tint, rock shade (hatched belts), gold borders on confluences, Moore rings from HOME, region and territory outlines, icons for HOME, planetoids (green ring when renewable), gravity wells, capitals (fort tier pips), outposts, the early outpost and apexes; layer toggles, a legend, hover tips, pan and zoom, click-to-pin with a detail panel and a coordinate jump box. Bump `GENERATOR_VERSION` when the page or its data layout changes. Not a game rule: nothing in the simulation reads it.
+
 ## Not built yet
 
 - **Richer joint graphs.** Other joint types, and weapons derived from surface area.

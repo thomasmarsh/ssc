@@ -26,6 +26,14 @@ The simulation library can be built and its tests run without desktop rendering 
 cargo test --no-default-features
 ```
 
+To see the procedural universe from above, generate an offline sector map (one self-contained HTML file; no GPU needed) and open it in a browser:
+
+```sh
+cargo run --no-default-features --bin sectormap -- --seed 5460803 --cols 200 --rows 200 --out map.html
+```
+
+See [docs/UNIVERSE.md](docs/UNIVERSE.md#sector-map-built) for the options and what the page shows.
+
 ## Controls
 
 - **Up**: thrust

@@ -58,7 +58,7 @@ pub use guide::{
 };
 pub use legacy::{Bequest, Legacy, Wreck};
 pub use loot::{Notice, Pickup};
-pub use mining::{Beam, Cargo, Lode, Material};
+pub use mining::{Beam, Cargo, Lode, Material, renewable};
 pub use pads::{
     Bench, BenchPanel, BenchRow, BenchTab, HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP,
     Pad, PadHint, PadKey, PadState, STASH_CAP, price_text,
