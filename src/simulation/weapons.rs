@@ -304,6 +304,9 @@ impl Game {
             })
         };
         if stats.missiles > 0 && firing && self.arm_clock[0] <= 0.0 {
+            if !self.pay_launch() {
+                return;
+            }
             self.arm_clock[0] = MISSILE_PERIOD;
             let count = usize::from(stats.missiles);
             for k in 0..count {
@@ -327,6 +330,9 @@ impl Game {
             && hostile_near(self, 1100.0)
             && self.mines.iter().filter(|m| m.friendly).count() < 14
         {
+            if !self.pay_launch() {
+                return;
+            }
             self.arm_clock[1] = 4.0 / f32::from(stats.mines);
             let behind = -Vec2::from_angle(angle);
             self.lay_mine(Mine {
@@ -340,6 +346,9 @@ impl Game {
             });
         }
         if stats.nova > 0 && self.arm_clock[2] <= 0.0 && hostile_near(self, 750.0) {
+            if !self.pay_launch() {
+                return;
+            }
             self.arm_clock[2] = NOVA_PERIOD;
             let ring = 12 + 4 * usize::from(stats.nova);
             let phase = self.rng.range(0.0, TAU);
@@ -680,46 +689,47 @@ mod tests {
 
     #[test]
     fn missile_pods_mine_layer_and_nova_work_for_the_ship() {
-        use crate::simulation::upgrades::{Effect, Rarity, Slot, Surge, Trait};
-        let surge = |t: Trait, level: u8, name: &str| Surge {
-            name: name.into(),
-            slot: Slot::Cannon,
-            rarity: Rarity::Common,
-            effects: vec![Effect::Trait(t, level)],
-            duration: 60.0,
-            remaining: 60.0,
-        };
-        let mut game = empty_game();
-        game.player_invulnerability = 1e9;
-        game.collect(Item::Surge(surge(Trait::Missiles, 2, "m")));
-        game.collect(Item::Surge(surge(Trait::Mines, 1, "n")));
-        game.collect(Item::Surge(surge(Trait::Nova, 1, "o")));
-        // Something hostile nearby wakes the mine layer and the nova.
-        spawn(&mut game, &Species::fatso(), Vec2::new(0.0, 500.0));
-        game.step(
-            DT,
-            Input {
-                fire: true,
-                ..Default::default()
-            },
-        );
-        assert!(game.bullets.iter().any(|b| b.shape == Shape::Missile));
-        assert!(game.bullets.iter().any(|b| b.shape == Shape::Orb));
-        assert!(game.mines.iter().any(|m| m.friendly));
+        use crate::simulation::upgrades::{Effect, Surge, Trait, test_surge};
+        // One profile is in force at a time; each launcher is billed per launch.
+        for (kind, volatiles) in [
+            (Trait::Missiles, 3.5 * 1.2),
+            (Trait::Mines, 3.0),
+            (Trait::Nova, 5.0),
+        ] {
+            let level = if kind == Trait::Missiles { 2 } else { 1 };
+            let mut game = empty_game();
+            game.player_invulnerability = 1e9;
+            game.collect(Item::Surge(Surge {
+                fuel: 100.0,
+                ..test_surge(Effect::Trait(kind, level))
+            }));
+            // Something hostile nearby wakes the mine layer and the nova.
+            spawn(&mut game, &Species::fatso(), Vec2::new(0.0, 500.0));
+            game.step(
+                DT,
+                Input {
+                    fire: true,
+                    ..Default::default()
+                },
+            );
+            match kind {
+                Trait::Missiles => assert!(game.bullets.iter().any(|b| b.shape == Shape::Missile)),
+                Trait::Nova => assert!(game.bullets.iter().any(|b| b.shape == Shape::Orb)),
+                _ => assert!(game.mines.iter().any(|m| m.friendly)),
+            }
+            let spent = 100.0 - game.cargo.volatiles;
+            assert!(
+                spent >= volatiles - 0.01 && spent < volatiles + 1.0,
+                "{kind:?} {spent}"
+            );
+        }
     }
 
     #[test]
     fn needles_are_a_burst_of_weak_fast_shots_for_the_ship_too() {
-        use crate::simulation::upgrades::{Effect, Rarity, Slot, Surge, Trait};
+        use crate::simulation::upgrades::{Effect, Trait, test_surge};
         let mut game = empty_game();
-        game.collect(Item::Surge(Surge {
-            name: "n".into(),
-            slot: Slot::Cannon,
-            rarity: Rarity::Common,
-            effects: vec![Effect::Trait(Trait::Needles, 2)],
-            duration: 60.0,
-            remaining: 60.0,
-        }));
+        game.collect(Item::Surge(test_surge(Effect::Trait(Trait::Needles, 2))));
         game.step(
             DT,
             Input {

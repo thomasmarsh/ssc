@@ -6,6 +6,7 @@ use bevy::{
     prelude::*,
 };
 use ssc::genome::{Trigger, Weapon};
+use ssc::simulation::arsenal::Profile;
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
     Beam, Body, BodyKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, Material, Pickup,
@@ -27,18 +28,20 @@ pub struct Hud;
 pub struct Overlay;
 #[derive(Component)]
 pub struct Legend;
-/// The cargo hold readout under the ship panel.
+/// The banner that announces a weapon switch or a dry fall-back.
 #[derive(Component)]
-pub struct CargoHud;
+pub struct ArsenalFlash;
 /// One line of the pickup feed (newest last), a span so each can take its rarity's color.
 #[derive(Component)]
 pub struct FeedLine(usize);
-/// One line of the ship panel: the five slots, then up to five running surges.
+/// One line of the ship panel: the five slots, the arsenal, the boosts, then the cargo hold.
 #[derive(Component)]
 pub struct RigLine(usize);
 
 const FEED_LINES: usize = 5;
-const SURGE_LINES: usize = 5;
+/// Panel rows: five slots, a header and up to eleven profiles, a header and up to nine
+/// boosts, a header and three materials. Rows with nothing to say are empty (no height).
+const RIG_LINES: usize = Slot::ALL.len() + 1 + Profile::ALL.len() + 1 + 9 + 1 + Material::ALL.len();
 
 pub fn setup(mut commands: Commands) {
     commands.spawn((
@@ -78,7 +81,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    hold M  mine nearest rock (no fire)\nC  camera    P  pause    S  slow motion    R  radar    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts\nhold M  mine nearest rock (no fire)    PAD  L / R switch weapon    Y  boosts    R2  mine    L2 / A  brake\nC  camera    P  pause    S  slow motion    R  radar    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -130,7 +133,7 @@ pub fn setup(mut commands: Commands) {
             },
         ))
         .with_children(|panel| {
-            for line in 0..Slot::ALL.len() + SURGE_LINES {
+            for line in 0..RIG_LINES {
                 panel.spawn((
                     RigLine(line),
                     TextSpan::new(""),
@@ -140,14 +143,15 @@ pub fn setup(mut commands: Commands) {
             }
         });
     commands.spawn((
-        CargoHud,
+        ArsenalFlash,
         Text::new(""),
-        TextFont::from_font_size(13.0),
-        TextColor(MUTED),
+        TextFont::from_font_size(22.0),
+        TextColor(CYAN),
+        TextLayout::justify(Justify::Center),
         Node {
             position_type: PositionType::Absolute,
-            left: px(28),
-            top: px(345),
+            width: percent(100),
+            bottom: px(190),
             ..default()
         },
     ));
@@ -166,8 +170,10 @@ pub fn setup(mut commands: Commands) {
     ));
 }
 
-type CargoOnly = (
-    With<CargoHud>,
+type FlashOnly = (
+    With<ArsenalFlash>,
+    Without<RigLine>,
+    Without<FeedLine>,
     Without<Hud>,
     Without<Overlay>,
     Without<Legend>,
@@ -176,7 +182,7 @@ type LegendOnly = (
     With<Legend>,
     Without<Hud>,
     Without<Overlay>,
-    Without<CargoHud>,
+    Without<ArsenalFlash>,
 );
 
 fn rarity_color(rarity: Rarity) -> Color {
@@ -223,7 +229,21 @@ fn territory_line(game: &Game) -> String {
     )
 }
 
-/// Text for the ship panel lines: slot contents, then running surges.
+const DRY_RED: Color = Color::srgb(1.0, 0.42, 0.34);
+const OWNED: Color = Color::srgb(0.62, 0.72, 0.82);
+
+fn material_color(kind: Material) -> Color {
+    let [r, g, b] = kind.color();
+    Color::srgb(r, g, b)
+}
+
+fn bar(fraction: f32, width: usize) -> String {
+    let filled = ((fraction * width as f32).round() as usize).min(width);
+    format!("{}{}", "#".repeat(filled), ".".repeat(width - filled))
+}
+
+/// Text for the ship panel lines: slot contents, the arsenal with the active profile
+/// highlighted, the boosts, then the hold.
 fn rig_lines(game: &Game) -> Vec<(String, Color)> {
     let mut lines = Vec::new();
     for slot in Slot::ALL {
@@ -243,42 +263,118 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             best.map_or(Color::srgb(0.25, 0.33, 0.42), rarity_color),
         ));
     }
-    for index in 0..SURGE_LINES {
-        lines.push(match game.loadout.surges.get(index) {
-            Some(surge) => (
-                format!(
-                    "{:<16}{:>3.0}s\n",
-                    surge.name.to_uppercase(),
-                    surge.remaining
-                ),
-                rarity_color(surge.rarity),
+    let arsenal = &game.loadout.arsenal;
+    lines.push(("\nARSENAL   [ ] switch   1-9 pick\n".into(), CYAN));
+    for (n, profile) in arsenal.owned().into_iter().enumerate() {
+        let active = profile == arsenal.active;
+        let dry = !game.usable(profile);
+        let level = arsenal.level(profile);
+        let marker = if active { ">" } else { " " };
+        let fuel = match profile.material() {
+            None => "free".to_string(),
+            Some(kind) => format!(
+                "{} [{}] {:3.0}{}",
+                kind.letter(),
+                bar(game.cargo.fraction(kind), 8),
+                game.cargo.amount(kind),
+                if dry { "  DRY" } else { "" },
             ),
+        };
+        let name = if profile == Profile::Stock {
+            profile.label().to_string()
+        } else {
+            format!("{} {}", profile.label(), level)
+        };
+        let color = match (active, dry) {
+            (_, true) => DRY_RED,
+            (true, false) => CYAN,
+            (false, false) => OWNED,
+        };
+        lines.push((format!("{marker}{:<3}{name:<12} {fuel}\n", n + 1), color));
+    }
+    for _ in arsenal.owned().len()..Profile::ALL.len() {
+        lines.push((String::new(), MUTED));
+    }
+    if arsenal.boosts.is_empty() {
+        lines.push((String::new(), MUTED));
+    } else {
+        let state = if arsenal.boosts_on { "ON" } else { "OFF (B)" };
+        lines.push((format!("\nBOOSTS {state}\n"), CYAN));
+    }
+    for index in 0..9 {
+        lines.push(match arsenal.boosts.get(index) {
+            Some(boost) => {
+                let low = game.cargo.amount(boost.material) < boost.drain;
+                let tag = if !arsenal.boosts_on {
+                    "off"
+                } else if boost.running {
+                    "RUN"
+                } else if boost.dry || low {
+                    "DRY"
+                } else {
+                    "rdy"
+                };
+                (
+                    format!(
+                        "{tag} {:<14}{} {:.1}/s {}\n",
+                        boost.name.to_uppercase(),
+                        boost.material.letter(),
+                        boost.drain,
+                        boost.need.label()
+                    ),
+                    if boost.dry || (low && arsenal.boosts_on && boost.running) {
+                        DRY_RED
+                    } else if boost.running {
+                        rarity_color(boost.rarity)
+                    } else {
+                        OWNED
+                    },
+                )
+            }
             None => (String::new(), MUTED),
         });
+    }
+    lines.push(("\nCARGO\n".into(), CYAN));
+    for kind in Material::ALL {
+        lines.push((
+            format!(
+                "{}  [{}]  {:3.0}/{:.0}\n",
+                kind.letter(),
+                bar(game.cargo.fraction(kind), 10),
+                game.cargo.amount(kind),
+                game.cargo.cap(kind),
+            ),
+            material_color(kind),
+        ));
     }
     lines
 }
 
-/// One line per material: its letter, a bar to the cap and the count.
-fn cargo_text(game: &Game) -> String {
-    let mut text = String::from("CARGO");
-    for kind in Material::ALL {
-        let filled = (game.cargo.fraction(kind) * 10.0).round() as usize;
-        text.push_str(&format!(
-            "\n{}  [{}{}]  {:3.0}/{:.0}",
-            kind.letter(),
-            "#".repeat(filled),
-            ".".repeat(10 - filled.min(10)),
-            game.cargo.amount(kind),
-            game.cargo.cap(kind),
-        ));
+/// The brief banner after a weapon switch or a dry fall-back, with its fade.
+fn arsenal_banner(game: &Game) -> (String, Color) {
+    if game.arsenal_flash <= 0.0 {
+        return (String::new(), CYAN);
     }
-    text
+    let arsenal = &game.loadout.arsenal;
+    let profile = arsenal.active;
+    let alpha = (game.arsenal_flash / 0.5).min(1.0);
+    let dry = !game.usable(profile);
+    let level = arsenal.level(profile);
+    let text = if profile == Profile::Stock {
+        format!("<  {}  >", profile.label())
+    } else {
+        format!("<  {} {level}  >", profile.label())
+    };
+    let color = if dry { DRY_RED } else { CYAN };
+    (
+        if dry { format!("{text}  DRY") } else { text },
+        color.with_alpha(alpha),
+    )
 }
 
 pub fn update_hud(
     session: Res<Session>,
-    mut cargo: Single<&mut Text, CargoOnly>,
+    mut flash: Single<(&mut Text, &mut TextColor), FlashOnly>,
     mut feed: Query<(&mut TextSpan, &mut TextColor, &FeedLine), Without<RigLine>>,
     mut rig: Query<(&mut TextSpan, &mut TextColor, &RigLine), Without<FeedLine>>,
     mut hud: Single<&mut Text, (With<Hud>, Without<Overlay>)>,
@@ -286,10 +382,11 @@ pub fn update_hud(
     mut legend: Single<&mut Text, LegendOnly>,
 ) {
     let game = &session.game;
-    let hold = cargo_text(game);
-    if cargo.0 != hold {
-        cargo.0 = hold;
+    let (banner, tint) = arsenal_banner(game);
+    if flash.0.0 != banner {
+        flash.0.0 = banner;
     }
+    flash.1.0 = tint;
     // Species have no fixed names: list the most common ones nearby, as their genes spell them.
     let mut census: Vec<(u64, String, usize)> = Vec::new();
     for body in game
@@ -1109,6 +1206,25 @@ fn draw_rig(gizmos: &mut Gizmos, game: &Game, ship: &Body, thrusting: bool) {
         let tip = p - d * r * 1.0 + s * sign * r * 1.05;
         gizmos.line_2d(root, tip, color);
         gizmos.circle_2d(tip, 2.4, color).resolution(8);
+    }
+    // The active weapon profile shows as a small mark ahead of the nose, in its material's
+    // color (red when it is dry). The stock gun draws nothing.
+    let arsenal = &game.loadout.arsenal;
+    if let Some(kind) = arsenal.active.material() {
+        let color = if game.usable(arsenal.active) {
+            material_color(kind).with_alpha(0.75)
+        } else {
+            DRY_RED.with_alpha(0.75)
+        };
+        let tip = p + d * r * 2.7;
+        let wing = r * 0.28;
+        gizmos.line_2d(tip, tip - d * wing * 1.4 + s * wing, color);
+        gizmos.line_2d(tip, tip - d * wing * 1.4 - s * wing, color);
+        for k in 1..arsenal.level(arsenal.active) {
+            let back = d * wing * 0.9 * f32::from(k);
+            gizmos.line_2d(tip - back, tip - back - d * wing * 1.4 + s * wing, color);
+            gizmos.line_2d(tip - back, tip - back - d * wing * 1.4 - s * wing, color);
+        }
     }
     if ship.rig.aura > 0 {
         let pulse = 2.2 + 0.2 * (game.time * 6.0).sin();

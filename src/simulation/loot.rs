@@ -51,7 +51,7 @@ impl Game {
 
     /// How much ship the player has (the bare ship is 1).
     pub fn power(&self) -> f32 {
-        self.stats.power()
+        self.loadout.power()
     }
 
     /// Recomputes the stats from the loadout and fits the ship to them: a bigger hull or
@@ -78,11 +78,9 @@ impl Game {
         };
     }
 
-    /// Runs surges down and ages notices.
-    pub(super) fn update_loadout(&mut self, dt: f32) {
-        if self.loadout.tick(dt) {
-            self.refresh_stats();
-        }
+    /// Runs the boosts on their fuel and ages notices.
+    pub(super) fn update_loadout(&mut self, dt: f32, input: &Input) {
+        self.update_boosts(dt, input);
         for notice in &mut self.notices {
             notice.remaining -= dt;
         }
@@ -134,16 +132,27 @@ impl Game {
             Item::Part(part) => {
                 let name = part.name.to_uppercase();
                 let summary = part.summary();
-                match self.loadout.install(part) {
-                    Install::Added => self.notify(format!("INSTALLED  {name}  {summary}"), rarity),
-                    Install::Replaced(old) => self.notify(
+                let acquired = self.loadout.acquire(part);
+                for (profile, gain) in acquired.profiles {
+                    let fuel = match gain {
+                        upgrades::Gain::New(_) => super::arms::UNLOCK_FUEL,
+                        _ => super::arms::UPGRADE_FUEL,
+                    };
+                    self.grant_profile(profile, gain, fuel, rarity);
+                }
+                match acquired.installed {
+                    None => {}
+                    Some(Install::Added) => {
+                        self.notify(format!("INSTALLED  {name}  {summary}"), rarity)
+                    }
+                    Some(Install::Replaced(old)) => self.notify(
                         format!(
                             "INSTALLED  {name}  {summary}  (replaces {})",
                             old.name.to_uppercase()
                         ),
                         rarity,
                     ),
-                    Install::Scrapped(part) => {
+                    Some(Install::Scrapped(part)) => {
                         let value = (part.rating() * 200.0) as u64;
                         self.score = self.score.saturating_add(value);
                         let metal = (part.rating() * 10.0).round();
@@ -156,19 +165,7 @@ impl Game {
                 }
                 self.refresh_stats();
             }
-            Item::Surge(surge) => {
-                self.notify(
-                    format!(
-                        "{}  {:.0}s  {}",
-                        surge.name.to_uppercase(),
-                        surge.duration,
-                        surge.summary()
-                    ),
-                    rarity,
-                );
-                self.loadout.start(surge);
-                self.refresh_stats();
-            }
+            Item::Surge(surge) => self.charge(surge),
         }
     }
 
@@ -322,10 +319,12 @@ impl Game {
         }
     }
 
-    /// A wrecked ship loses its surges and its best part, which is left floating where it
-    /// died for the respawned ship to recover.
+    /// A wrecked ship loses part of its hold and its best part, which is left floating where
+    /// it died for the respawned ship to recover. The arsenal stays: owned weapon profiles
+    /// (and their levels) and owned boosts are never lost, only the fuel in the hold is at
+    /// risk (see `shed_cargo`). Boosts stop; nothing runs through the wreck.
     pub(super) fn shed_on_death(&mut self, position: Vec2) {
-        self.loadout.surges.clear();
+        self.loadout.arsenal.stop_boosts();
         self.shed_cargo(position);
         if let Some(best) = self.loadout.best_part() {
             let part = self.loadout.parts.remove(best);
@@ -377,10 +376,11 @@ impl Game {
 
 #[cfg(test)]
 mod tests {
+    use super::arsenal::{Need, Profile};
     use super::*;
     use crate::genome::Species;
     use crate::simulation::tests::{DT, add, body, empty_game, set_player, spawn};
-    use upgrades::{Effect, Part as ShipPart, Rarity, Slot, Stat, Surge, Trait};
+    use upgrades::{Effect, Part as ShipPart, Rarity, Slot, Stat, Surge, Trait, test_surge};
 
     fn plating(bonus: f32) -> ShipPart {
         ShipPart {
@@ -392,15 +392,16 @@ mod tests {
         }
     }
 
-    fn surge(effect: Effect, seconds: f32) -> Surge {
-        Surge {
-            name: "Test Surge".into(),
-            slot: Slot::Cannon,
-            rarity: Rarity::Common,
-            effects: vec![effect],
-            duration: seconds,
-            remaining: seconds,
-        }
+    /// A pickup carrying one effect, with 100 fuel (see `upgrades::test_surge`).
+    fn surge(effect: Effect) -> Surge {
+        test_surge(effect)
+    }
+
+    fn boost(effect: Effect, need: Need) -> Item {
+        Item::Surge(Surge {
+            need,
+            ..surge(effect)
+        })
     }
 
     fn fire() -> Input {
@@ -424,21 +425,55 @@ mod tests {
     }
 
     #[test]
-    fn a_surge_boosts_then_ends() {
+    fn a_boost_runs_on_fuel_only_while_needed_and_stops_when_dry() {
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Stat(Stat::FireRate, 1.0), 2.0)));
-        assert!(game.stats.fire_period < 0.09);
-        for _ in 0..150 {
+        let overdrive = Surge {
+            fuel: 3.0,
+            drain: 2.0,
+            ..surge(Effect::Stat(Stat::FireRate, 1.0))
+        };
+        game.collect(Item::Surge(overdrive));
+        assert_eq!(game.cargo.metal, 3.0);
+        // Idle: nothing runs, nothing burns.
+        for _ in 0..30 {
             game.step(DT, Input::default());
         }
         assert_eq!(game.stats.fire_period, Stats::BASE.fire_period);
-        assert!(game.loadout.surges.is_empty());
+        assert_eq!(game.cargo.metal, 3.0);
+        // Firing wakes it and it burns 2 a second.
+        for _ in 0..30 {
+            game.step(DT, fire());
+        }
+        assert!(game.stats.fire_period < 0.09);
+        assert!(
+            (game.cargo.metal - 2.0).abs() < 0.05,
+            "{}",
+            game.cargo.metal
+        );
+        // The fuel runs out about a second later, and the ship is back to base.
+        for _ in 0..90 {
+            game.step(DT, fire());
+        }
+        assert_eq!(game.stats.fire_period, Stats::BASE.fire_period);
+        assert!(game.cargo.metal < 0.05);
+        assert!(game.loadout.arsenal.boosts[0].dry);
+        assert!(game.notices.iter().any(|n| n.text.contains("OUT OF METAL")));
+        // It stays owned: fuel makes it run again, and the master switch stops it.
+        game.collect(Item::Material(Material::Metal, 20.0));
+        game.step(DT, fire());
+        assert!(game.stats.fire_period < 0.09);
+        game.toggle_boosts();
+        game.step(DT, fire());
+        assert_eq!(game.stats.fire_period, Stats::BASE.fire_period);
+        game.toggle_boosts();
+        game.step(DT, fire());
+        assert!(game.stats.fire_period < 0.09);
     }
 
     #[test]
     fn spread_fires_a_fan_and_each_shot_is_weaker() {
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Trait(Trait::Spread, 2), 30.0)));
+        game.collect(Item::Surge(surge(Effect::Trait(Trait::Spread, 2))));
         game.step(DT, fire());
         assert_eq!(game.bullets.len(), 5);
         let center = game.bullets.iter().map(|b| b.damage).fold(0.0, f32::max);
@@ -449,36 +484,40 @@ mod tests {
     #[test]
     fn broadside_and_tail_guns_fire_sideways_and_back() {
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Trait(Trait::Broadside, 1), 30.0)));
-        game.collect(Item::Surge(Surge {
-            name: "Tail".into(),
-            ..surge(Effect::Trait(Trait::Tailgun, 1), 30.0)
-        }));
+        game.collect(Item::Surge(surge(Effect::Trait(Trait::Broadside, 1))));
         game.step(DT, fire());
-        assert_eq!(game.bullets.len(), 4);
+        // Broadside: the nose gun and one gun off each flank.
+        assert_eq!(game.bullets.len(), 3);
         let forward = Vec2::from_angle(game.player().unwrap().angle);
-        let dots: Vec<f32> = game
-            .bullets
-            .iter()
-            .map(|b| b.velocity.normalize().dot(forward))
-            .collect();
-        assert!(dots.iter().any(|d| *d > 0.9));
-        assert!(dots.iter().any(|d| *d < -0.9));
-        assert_eq!(dots.iter().filter(|d| d.abs() < 0.2).count(), 2);
+        let dots = |game: &Game| -> Vec<f32> {
+            game.bullets
+                .iter()
+                .map(|b| b.velocity.normalize().dot(forward))
+                .collect()
+        };
+        assert_eq!(dots(&game).iter().filter(|d| d.abs() < 0.2).count(), 2);
+        // The tail gun is another profile: finding it switches over to it.
+        let mut game = empty_game();
+        game.collect(Item::Surge(surge(Effect::Trait(Trait::Tailgun, 1))));
+        game.step(DT, fire());
+        assert_eq!(game.bullets.len(), 2);
+        let d = dots(&game);
+        assert!(d.iter().any(|d| *d > 0.9) && d.iter().any(|d| *d < -0.9));
     }
 
     #[test]
     fn damage_and_fire_rate_follow_the_stats() {
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Stat(Stat::Damage, 1.0), 30.0)));
+        game.collect(Item::Surge(surge(Effect::Stat(Stat::Damage, 1.0))));
         game.step(DT, fire());
         assert_eq!(game.bullets[0].damage, 52.0);
+        assert!(game.cargo.metal < 100.0);
     }
 
     #[test]
     fn piercing_shots_pass_through_a_line_of_targets_once_each() {
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Trait(Trait::Pierce, 2), 30.0)));
+        game.collect(Item::Surge(surge(Effect::Trait(Trait::Pierce, 2))));
         let ids: Vec<u64> = [300.0, 360.0, 420.0, 480.0]
             .into_iter()
             .map(|x| add(&mut game, BodyKind::Asteroid, Vec2::new(x, 0.0)))
@@ -516,7 +555,7 @@ mod tests {
     #[test]
     fn a_blast_hurts_neighbors_of_the_target() {
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Trait(Trait::Blast, 1), 30.0)));
+        game.collect(Item::Surge(surge(Effect::Trait(Trait::Blast, 1))));
         let near = add(&mut game, BodyKind::Asteroid, Vec2::new(300.0, 0.0));
         let beside = add(&mut game, BodyKind::Asteroid, Vec2::new(300.0, 80.0));
         let far = add(&mut game, BodyKind::Asteroid, Vec2::new(300.0, 400.0));
@@ -542,10 +581,7 @@ mod tests {
             let mut game = empty_game();
             game.player_invulnerability = 1e9;
             if level > 0 {
-                game.collect(Item::Surge(surge(
-                    Effect::Trait(Trait::Homing, level),
-                    30.0,
-                )));
+                game.collect(Item::Surge(surge(Effect::Trait(Trait::Homing, level))));
             }
             let target = spawn(&mut game, &Species::fatso(), Vec2::new(500.0, 160.0));
             game.bodies
@@ -575,8 +611,12 @@ mod tests {
     fn armor_softens_hits() {
         let mut plain = empty_game();
         let mut armored = empty_game();
-        armored.collect(Item::Surge(surge(Effect::Stat(Stat::Armor, 1.0), 30.0)));
+        armored.collect(boost(Effect::Stat(Stat::Armor, 1.0), Need::Danger));
         for game in [&mut plain, &mut armored] {
+            // One quiet step wakes the armor (a hit this recent counts as danger).
+            game.bodies[0].since_hit = 0.0;
+            game.step(DT, Input::default());
+            game.player_invulnerability = 0.0;
             let ship = &mut game.bodies[0];
             damage(ship, 40.0, 0.0);
         }
@@ -613,7 +653,7 @@ mod tests {
     fn ballast_ignores_wells_and_shears_cut_cords() {
         let mut game = empty_game();
         add(&mut game, BodyKind::BlackHole, Vec2::new(40.0, 0.0));
-        game.collect(Item::Surge(surge(Effect::Trait(Trait::Ballast, 1), 60.0)));
+        game.collect(boost(Effect::Trait(Trait::Ballast, 1), Need::Wells));
         let hull = game.player().unwrap().health;
         for _ in 0..30 {
             game.step(DT, Input::default());
@@ -621,7 +661,7 @@ mod tests {
         assert_eq!(game.player().unwrap().health, hull);
 
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Trait(Trait::Shears, 1), 60.0)));
+        game.collect(boost(Effect::Trait(Trait::Shears, 1), Need::Cords));
         let leech = spawn(&mut game, &Species::leech(), Vec2::new(0.0, 400.0));
         game.tethers
             .push(Tether::latch(leech, Vec2::new(0.0, 400.0), -Vec2::Y, 55.0));
@@ -633,22 +673,19 @@ mod tests {
     #[test]
     fn a_lunatic_field_flings_what_touches_the_ship_and_ramming_hurts_it() {
         let mut game = empty_game();
-        game.collect(Item::Surge(Surge {
-            effects: vec![Effect::Trait(Trait::Aura, 2)],
-            ..surge(Effect::Trait(Trait::Aura, 2), 30.0)
-        }));
+        game.collect(boost(Effect::Trait(Trait::Aura, 2), Need::Firing));
         let rock = add(&mut game, BodyKind::Asteroid, Vec2::new(30.0, 0.0));
         let hull = game.player().unwrap().health;
-        game.step(DT, Input::default());
+        game.step(DT, fire());
         assert!(body(&game, rock).velocity.length() > 200.0, "not flung");
         assert_eq!(game.player().unwrap().health, hull, "contact hurt the ship");
 
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Trait(Trait::Ram, 2), 30.0)));
+        game.collect(boost(Effect::Trait(Trait::Ram, 2), Need::Firing));
         let rock = add(&mut game, BodyKind::Asteroid, Vec2::new(30.0, 0.0));
         set_player(&mut game, Vec2::ZERO, Vec2::new(300.0, 0.0));
         let before = body(&game, rock).health;
-        game.step(DT, Input::default());
+        game.step(DT, fire());
         assert!(body(&game, rock).health < before - 10.0);
     }
 
@@ -674,7 +711,7 @@ mod tests {
         assert!(game.pickups.is_empty(), "unclaimed salvage fades");
         // A bigger magnet reaches farther.
         let mut game = empty_game();
-        game.collect(Item::Surge(surge(Effect::Stat(Stat::Magnet, 3.0), 60.0)));
+        game.collect(boost(Effect::Stat(Stat::Magnet, 3.0), Need::Loot));
         game.drop_item(
             Vec2::new(450.0, 0.0),
             Vec2::ZERO,
@@ -740,16 +777,24 @@ mod tests {
     }
 
     #[test]
-    fn dying_costs_surges_and_the_best_part_but_it_can_be_recovered() {
+    fn dying_costs_the_best_part_but_never_the_arsenal() {
         let mut game = empty_game();
         game.collect(Item::Part(plating(0.2)));
         game.collect(Item::Part(plating(0.6)));
-        game.collect(Item::Surge(surge(Effect::Stat(Stat::Damage, 1.0), 60.0)));
+        game.collect(Item::Surge(surge(Effect::Trait(Trait::Spread, 2))));
+        game.collect(boost(Effect::Stat(Stat::Damage, 1.0), Need::Firing));
         assert!((game.stats.max_hull - 180.0).abs() < 1e-3);
+        game.step(DT, fire());
+        assert!(game.loadout.arsenal.boosts[0].running);
         game.bodies[0].health = 0.0;
         game.step(DT, Input::default());
         assert_eq!(game.lives, 2);
-        assert!(game.loadout.surges.is_empty());
+        // Owned profiles and boosts survive; only the running state is cut.
+        let arsenal = &game.loadout.arsenal;
+        assert_eq!(arsenal.level(Profile::Spread), 2);
+        assert_eq!(arsenal.active, Profile::Spread);
+        assert_eq!(arsenal.boosts.len(), 1);
+        assert!(!arsenal.boosts[0].running);
         assert_eq!(game.loadout.parts.len(), 1);
         assert!((game.stats.max_hull - 120.0).abs() < 1e-3);
         let ship = game.player().unwrap();
@@ -764,7 +809,13 @@ mod tests {
             .expect("the best part is left behind");
         assert_eq!(wreck.effects, vec![Effect::Stat(Stat::Hull, 0.6)]);
         // Flying back into it restores the ship.
-        game.pickups[0].position = game.player().unwrap().position;
+        let at = game.player().unwrap().position;
+        let wreck_at = game
+            .pickups
+            .iter()
+            .position(|p| matches!(p.item, Item::Part(_)))
+            .unwrap();
+        game.pickups[wreck_at].position = at;
         game.step(DT, Input::default());
         assert!((game.stats.max_hull - 180.0).abs() < 1e-3);
     }

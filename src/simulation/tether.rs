@@ -414,7 +414,7 @@ pub(super) fn segment_distance(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> f32 {
 mod tests {
     use super::*;
     use crate::simulation::tests::{DT, body, empty_game, set_player, spawn};
-    use crate::simulation::upgrades::{Effect, Item, Rarity, Slot, Surge, Trait};
+    use crate::simulation::upgrades::{Effect, Item, Surge, Trait};
 
     fn leech(game: &mut Game, position: Vec2) -> u64 {
         let id = spawn(game, &Species::leech(), position);
@@ -849,12 +849,8 @@ mod tests {
             let mut game = empty_game();
             let effect = Effect::Trait(Trait::Shears, 1);
             game.collect(Item::Surge(Surge {
-                name: "Test Surge".into(),
-                slot: Slot::Cannon,
-                rarity: Rarity::Common,
-                effects: vec![effect],
-                duration: 60.0,
-                remaining: 60.0,
+                need: crate::simulation::arsenal::Need::Cords,
+                ..crate::simulation::upgrades::test_surge(effect)
             }));
             let id = leech(&mut game, Vec2::new(0.0, 400.0));
             game.bodies

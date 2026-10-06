@@ -5,6 +5,8 @@
 //! player's active region are generated on demand and simulated; bodies elsewhere are
 //! frozen, and quadrants far from the player are dropped and regenerated on return.
 
+mod arms;
+pub mod arsenal;
 mod brain;
 mod chain;
 mod civ;
@@ -364,6 +366,10 @@ pub struct Game {
     food_clock: f32,
     /// Cooldowns of the ship's missile pods, mine layer and nova pulse.
     arm_clock: [f32; 3],
+    /// Seconds before another weapon switch is accepted (a tiny debounce).
+    switch_clock: f32,
+    /// Seconds the HUD keeps announcing the last switch or dry fall-back.
+    pub arsenal_flash: f32,
     next_id: u64,
     next_chain: u32,
     /// Spawns destroyed so far, per quadrant, so a quadrant reloads as it was left.
@@ -390,6 +396,8 @@ impl Game {
             pickups: Vec::new(),
             mines: Vec::new(),
             arm_clock: [0.0; 3],
+            switch_clock: 0.0,
+            arsenal_flash: 0.0,
             loadout: Loadout::default(),
             stats: Stats::BASE,
             notices: Vec::new(),
@@ -500,7 +508,7 @@ impl Game {
         self.effects.retain(|effect| effect.remaining > 0.0);
         self.stream_quadrants();
         self.update_civilizations(dt);
-        self.update_loadout(dt);
+        self.update_loadout(dt, &input);
         let recharge = self.stats.recharge;
         let beaming = self.beam.is_some();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
@@ -839,6 +847,14 @@ impl Game {
     }
 
     fn control_player(&mut self, dt: f32, input: Input) {
+        // The trigger pull is billed first: a dry profile falls back to stock fire right
+        // away, so the same shot still goes out.
+        let ready = input.fire
+            && self.bullets.len() < MAX_BULLETS
+            && self.player().is_some_and(|p| p.fire_cooldown <= 0.0);
+        if ready {
+            self.pay_volley();
+        }
         let stats = self.stats;
         let Some(player) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
             return;

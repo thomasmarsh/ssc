@@ -21,6 +21,18 @@ use ssc::world::{QUADRANT_SIZE, Rng};
 /// Left stick deadzone for thrust; the right stick aims and fires past a larger push.
 const STICK_DEADZONE: f32 = 0.15;
 const FIRE_STICK_THRESHOLD: f32 = 0.3;
+/// Number keys that pick the 1st to 9th owned weapon profile.
+const DIGITS: [KeyCode; 9] = [
+    KeyCode::Digit1,
+    KeyCode::Digit2,
+    KeyCode::Digit3,
+    KeyCode::Digit4,
+    KeyCode::Digit5,
+    KeyCode::Digit6,
+    KeyCode::Digit7,
+    KeyCode::Digit8,
+    KeyCode::Digit9,
+];
 
 /// Camera preferences belong to the desktop adapter, independent of simulation rules.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -260,6 +272,25 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyV) {
         session.style = session.style.next();
     }
+    // Weapon profiles: ] next, [ previous, 1-9 pick directly; L and R shoulders on a pad.
+    // B toggles the boosts (Y on a pad). Switching is instant and ignored while paused.
+    if !session.paused {
+        let pad = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
+        if keys.just_pressed(KeyCode::BracketRight) || pad(GamepadButton::RightTrigger) {
+            session.game.switch_weapon(1);
+        }
+        if keys.just_pressed(KeyCode::BracketLeft) || pad(GamepadButton::LeftTrigger) {
+            session.game.switch_weapon(-1);
+        }
+        for (n, key) in DIGITS.into_iter().enumerate() {
+            if keys.just_pressed(key) {
+                session.game.select_weapon(n);
+            }
+        }
+        if keys.just_pressed(KeyCode::KeyB) || pad(GamepadButton::North) {
+            session.game.toggle_boosts();
+        }
+    }
     if keys.just_pressed(KeyCode::Enter) {
         session.game.reset();
         session.paused = false;
@@ -298,8 +329,9 @@ fn controls(
             stick_aim = Some(right);
         }
         pad_brake |= pad.pressed(GamepadButton::LeftTrigger2) || pad.pressed(GamepadButton::South);
-        // The right bumper holds the mining beam (no aiming needed; the guns go quiet).
-        pad_mine |= pad.pressed(GamepadButton::RightTrigger);
+        // The right trigger (R2) holds the mining beam (no aiming needed; the guns go quiet).
+        // The bumpers are the weapon switch.
+        pad_mine |= pad.pressed(GamepadButton::RightTrigger2);
     }
     let pad_fire = stick_aim.is_some();
     session.input = Input {

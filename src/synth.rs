@@ -25,10 +25,12 @@ pub enum Sound {
     HurtHull,
     Latch,
     Mine,
+    Switch,
+    Dry,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 16] = [
+    pub const ALL: [Sound; 18] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -45,6 +47,8 @@ impl Sound {
         Sound::HurtHull,
         Sound::Latch,
         Sound::Mine,
+        Sound::Switch,
+        Sound::Dry,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -174,6 +178,24 @@ impl Sound {
                     (noise.next() * 0.55 + sine(150.0, t) * 0.6) * decay(t, 0.05)
                 });
                 lowpass(&mut v, 1500.0);
+                v
+            }
+            // A crisp two-note click, rising: a selector snapping to its next detent.
+            Sound::Switch => voice(0.09, |t, _| {
+                let f = if t < 0.035 { 1250.0 } else { 1880.0 };
+                (sine(f, t) * 0.7 + tri(f * 2.0, t) * 0.2) * decay(t % 0.035, 0.012) * 0.9
+            }),
+            // A short low buzz-stutter: the trigger finds an empty chamber.
+            Sound::Dry => {
+                let mut v = voice(0.2, |t, _| {
+                    let gate = if ((t / 0.05) as usize).is_multiple_of(2) {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    square(sweep(t / 0.2, 190.0, 120.0), t) * gate * decay(t, 0.12)
+                });
+                lowpass(&mut v, 1800.0);
                 v
             }
             Sound::HurtHull => {

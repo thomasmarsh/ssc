@@ -105,12 +105,12 @@ Every spawn has a stable index within its quadrant (its position in the generato
 - No rock grows past `ASTEROID_MAX_RADIUS` (60), so no single stone can wall off the player. A test checks every generated rock across the explored universe.
 - A destroyed rock shatters into two or three pieces (ice adds another), each about 0.62 of its radius, flying apart; pieces under 13 units simply vanish, so shattering always terminates. Rocks also take damage when flung by a Lunatic or when two rocks collide fast.
 - **Nests** are rings of nine pinned stones with one stone missing. The opening is wide enough for a ship and the rest of the ring is not, so the hollow is a refuge. A few bogeys graze inside. Stones are ordinary rocks that never move, so shooting or flinging stones into the ring opens new gaps. Nests are more common away from HOME, especially where swarm is high.
-- Free rocks vary in outline and material: ice is brittle and yields shield charge; ore is dense and tough with richer salvage; purple crystal bursts on destruction, hurting nearby ships and fauna, and often yields a surge. HOME rocks remain ordinary.
+- Free rocks vary in outline and material: ice is brittle and yields shield charge; ore is dense and tough with richer salvage; purple crystal bursts on destruction, hurting nearby ships and fauna, and often yields a charge (a weapon unlock or a boost). HOME rocks remain ordinary.
 - Inhabited husks have a hollow mouth and moving feelers. They release two to four creatures when approached or shot, including on a lethal hit. Shells and sheltered nests are seeded more frequently away from HOME.
 
 ## Mining and materials (built)
 
-The ship carries three materials, `Cargo { metal, volatiles, crystal }`, cap 200 each (`src/simulation/mining.rs`). Hold `M` (gamepad right bumper) to extend a beam at the nearest minable rock within 260 units of the ship's center to its surface; there is no aiming and no cone. Mining and firing exclude each other (the beam wins while held). The beam draws 4 shield per second, suppresses shield recharge while on, refuses below 6 shield and has no heat. Mute moved to `N`.
+The ship carries three materials, `Cargo { metal, volatiles, crystal }`, cap 200 each (`src/simulation/mining.rs`). Hold `M` (gamepad right trigger R2; the bumpers switch weapon) to extend a beam at the nearest minable rock within 260 units of the ship's center to its surface; there is no aiming and no cone. Mining and firing exclude each other (the beam wins while held). The beam draws 4 shield per second, suppresses shield recharge while on, refuses below 6 shield and has no heat. Mute moved to `N`.
 
 - Every rock holds ore = radius^2 / 40 (ore x1.5, husk x0.5), derived from size and kind, never drawn from RNG and never stored with the spawn. Yield per beam second: ore 1.0 metal, plain 0.4 metal, ice 1.0 volatiles, husk shell 0.25 volatiles, planetoid 0.3 of one material picked by a hash of its spawn index. Crystal is harvested in 0.5 s cycles of 4 shards and bursts (the existing crystal blast, ship included) if the beam is held past three cycles; releasing resets the count.
 - Mining shrinks the radius as sqrt(ore / full) down to 14, where the rock crumbles into a pickup of its leftover and vanishes (recorded in `fallen`). It never shatters, so mining never multiplies rocks; shatter fragments from shooting split the parent's remaining ore, so shooting cannot create ore. Partial depletion persists in `mined` (by spawn, quantized upward) and is re-applied when a quadrant reloads; rocks without a spawn index are not persisted. Planetoids never shrink and give a 400 unit budget (tracked in `mined`), with no regrowth.
@@ -134,7 +134,7 @@ Stock pellets and tethers remain. Creatures and station turrets express their we
 
 Mines do no contact damage. Proximity arms a visible countdown with a blast-radius warning; leaving before detonation avoids damage. Shooting a hostile mine sets it off early. Friendly mines target enemies and spare the ship.
 
-Ship parts and timed surges offer missile pods, needle cannons, mine layers and nova emitters through the existing composable effects. Rotating spiral emitters and tether launchers remain enemy-only. Projectiles and creature hardpoints have distinct visual cues for their weapons.
+Ship parts and charges offer missile pods, needle cannons, mine layers and nova emitters as weapon profiles in the arsenal (owned for the run, fuelled from the cargo hold; see ROADMAP, Progression). Rotating spiral emitters and tether launchers remain enemy-only. Projectiles and creature hardpoints have distinct visual cues for their weapons.
 
 ## Tethers (built)
 

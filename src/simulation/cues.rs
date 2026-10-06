@@ -38,6 +38,12 @@ pub enum Cue {
     Mine {
         at: Vec2,
     },
+    /// The ship switched weapon profile (`dry`: the one it landed on has no fuel).
+    Switch {
+        dry: bool,
+    },
+    /// A profile or boost ran out of fuel.
+    Dry,
     /// The ship lost shield or hull this step.
     Hurt {
         hull: bool,

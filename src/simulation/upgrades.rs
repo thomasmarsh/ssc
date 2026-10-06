@@ -1,12 +1,19 @@
 //! Ship augmentation as a composable system. Nothing here is a fixed "upgrade": a ship's
 //! abilities are the sum of the `Effect`s carried by the parts bolted to it (permanent,
-//! limited by mounting slots) and the surges running on it (temporary). An effect either
-//! scales a `Stat` or grants levels of a `Trait`; parts and surges are assembled from a
-//! blueprint, a rarity, a grade (how deep the source was) and rolled affixes, so the same
-//! few ingredients yield a wide range of items. `Stats::compute` folds them into what the
-//! simulation reads. Pure data and deterministic rolls; no game state lives here.
+//! limited by mounting slots), the weapon profile it has switched to and the boosts running
+//! on its cargo (see `arsenal`). An effect either scales a `Stat` or grants levels of a
+//! `Trait`; parts and surges are assembled from a blueprint, a rarity, a grade (how deep the
+//! source was) and rolled affixes, so the same few ingredients yield a wide range of items.
+//! `Stats::compute` folds them into what the simulation reads. Pure data and deterministic
+//! rolls; no game state lives here.
+//!
+//! Weapon abilities are never lost: a part or surge that carries a weapon trait unlocks (or
+//! levels up) the matching `Profile` in the arsenal instead of occupying a slot, and finding
+//! gear can never lower the ship's firepower.
 
 use super::Material;
+pub use super::arsenal::Gain;
+use super::arsenal::{Arsenal, Boost, BoostGain, Need, Profile};
 use crate::genome::{Diet, Genome, Weapon};
 use crate::world::{QuadrantParams, Rng};
 
@@ -237,7 +244,7 @@ impl Effect {
         }
     }
 
-    fn rating(&self) -> f32 {
+    pub(super) fn rating(&self) -> f32 {
         match *self {
             Self::Stat(stat, amount) => amount * stat.worth(),
             Self::Trait(kind, level) => f32::from(level) * kind.worth(),
@@ -348,8 +355,8 @@ struct Blueprint {
     slot: Slot,
     effects: &'static [Effect],
     answers: Answers,
-    /// Seconds a surge runs; zero for permanent parts.
-    seconds: f32,
+    /// What a boost burns, per second, and when. None for parts and for weapon charges.
+    boost: Option<(Material, f32, Need)>,
 }
 
 const fn part(
@@ -363,14 +370,25 @@ const fn part(
         slot,
         effects,
         answers,
-        seconds: 0.0,
+        boost: None,
     }
 }
 
-const fn surge(
+/// A surge that carries a weapon trait: a charge that unlocks or levels up that profile.
+const fn charge(
     name: &'static str,
     slot: Slot,
-    seconds: f32,
+    answers: Answers,
+    effects: &'static [Effect],
+) -> Blueprint {
+    part(name, slot, answers, effects)
+}
+
+/// A surge that is a boost: it burns `drain` of `material` per second while `need` holds.
+const fn boost(
+    name: &'static str,
+    slot: Slot,
+    (material, drain, need): (Material, f32, Need),
     answers: Answers,
     effects: &'static [Effect],
 ) -> Blueprint {
@@ -379,7 +397,7 @@ const fn surge(
         slot,
         effects,
         answers,
-        seconds,
+        boost: Some((material, drain, need)),
     }
 }
 
@@ -545,116 +563,106 @@ const PARTS: &[Blueprint] = &[
     ),
 ];
 
+/// Seconds of running a boost pickup's fuel lasts, at common rarity.
+const BOOST_FUEL_SECONDS: f32 = 60.0;
+/// Fuel a weapon charge carries, at common rarity.
+const CHARGE_FUEL: f32 = 40.0;
+
 const SURGES: &[Blueprint] = &[
-    surge(
+    // Weapon charges: each unlocks or levels up its profile and brings fuel for it.
+    charge(
         "Missile Barrage",
         Cannon,
-        25.0,
         Answers::Danger,
         &[T(Trait::Missiles, 2)],
     ),
-    surge(
+    charge(
         "Needle Storm",
         Cannon,
-        22.0,
         Answers::Tech,
         &[T(Trait::Needles, 2)],
     ),
-    surge(
-        "Nova Pulse",
-        Core,
-        20.0,
-        Answers::Swarm,
-        &[T(Trait::Nova, 1)],
-    ),
-    surge(
-        "Minefield",
-        Aux,
-        30.0,
-        Answers::Aggression,
-        &[T(Trait::Mines, 2)],
-    ),
-    surge(
-        "Overdrive",
-        Cannon,
-        20.0,
-        Answers::Swarm,
-        &[S(Stat::FireRate, 0.7)],
-    ),
-    surge(
-        "Amplifier",
-        Cannon,
-        20.0,
-        Answers::Danger,
-        &[S(Stat::Damage, 0.9)],
-    ),
-    surge(
+    charge("Nova Pulse", Core, Answers::Swarm, &[T(Trait::Nova, 1)]),
+    charge("Minefield", Aux, Answers::Aggression, &[T(Trait::Mines, 2)]),
+    charge(
         "Scatter Burst",
         Cannon,
-        25.0,
         Answers::Swarm,
         &[T(Trait::Spread, 2)],
     ),
-    surge(
+    charge(
         "Needle Rounds",
         Cannon,
-        25.0,
         Answers::Danger,
-        &[T(Trait::Pierce, 2), S(Stat::ShotSpeed, 0.3)],
+        &[T(Trait::Pierce, 2)],
     ),
-    surge(
+    charge(
         "Hunter Swarm",
         Cannon,
-        25.0,
         Answers::Swarm,
         &[T(Trait::Homing, 2)],
     ),
-    surge(
+    // Boosts: owned for the run once found, they burn cargo while they are in use.
+    boost(
+        "Overdrive",
+        Cannon,
+        (Material::Metal, 1.2, Need::Firing),
+        Answers::Swarm,
+        &[S(Stat::FireRate, 0.7)],
+    ),
+    boost(
+        "Amplifier",
+        Cannon,
+        (Material::Metal, 1.2, Need::Firing),
+        Answers::Danger,
+        &[S(Stat::Damage, 0.9)],
+    ),
+    boost(
         "Afterglow",
         Engine,
-        18.0,
+        (Material::Volatiles, 1.5, Need::Thrusting),
         Answers::Aggression,
         &[S(Stat::TopSpeed, 0.45), S(Stat::Thrust, 0.6)],
     ),
-    surge(
+    boost(
         "Aegis Field",
         Plating,
-        15.0,
+        (Material::Crystal, 0.8, Need::Danger),
         Answers::Aggression,
         &[S(Stat::Armor, 1.0)],
     ),
-    surge(
+    boost(
         "Overshield",
         Core,
-        25.0,
+        (Material::Crystal, 0.8, Need::Danger),
         Answers::Anything,
         &[S(Stat::Shield, 1.5), S(Stat::Recharge, 1.5)],
     ),
-    surge(
+    boost(
         "Magnet Storm",
         Aux,
-        30.0,
+        (Material::Crystal, 0.6, Need::Loot),
         Answers::Anything,
         &[S(Stat::Magnet, 3.0)],
     ),
-    surge(
+    boost(
         "Lunatic Field",
         Aux,
-        15.0,
+        (Material::Crystal, 1.0, Need::Danger),
         Answers::Aggression,
         &[T(Trait::Aura, 2), S(Stat::Armor, 0.3)],
     ),
-    surge(
+    boost(
         "Gravity Boots",
         Aux,
-        40.0,
+        (Material::Volatiles, 0.5, Need::Wells),
         Answers::Distortion,
         &[T(Trait::Ballast, 1)],
     ),
-    surge(
+    boost(
         "Shear Pulse",
         Aux,
-        40.0,
+        (Material::Metal, 0.5, Need::Cords),
         Answers::Tech,
         &[T(Trait::Shears, 1)],
     ),
@@ -694,17 +702,34 @@ impl Surge {
     pub fn summary(&self) -> String {
         summarize(&self.effects)
     }
+
+    /// The weapon profiles this surge unlocks or levels up (empty for a boost).
+    pub fn profiles(&self) -> Vec<(Profile, u8)> {
+        self.effects
+            .iter()
+            .filter_map(|e| match *e {
+                Effect::Trait(kind, level) => Some((Profile::from_trait(kind)?, level)),
+                Effect::Stat(..) => None,
+            })
+            .collect()
+    }
 }
 
-/// A temporary boost that runs down.
+/// A pickup that charges the ship: weapon traits unlock or level up the matching profile,
+/// anything else becomes a boost the ship owns from then on. Either way it brings fuel.
+/// (Formerly a timed surge; nothing runs on a countdown any more.)
 #[derive(Clone, Debug, PartialEq)]
 pub struct Surge {
     pub name: String,
     pub slot: Slot,
     pub rarity: Rarity,
     pub effects: Vec<Effect>,
-    pub duration: f32,
-    pub remaining: f32,
+    /// The material it is fuel for, and how much comes aboard.
+    pub material: Material,
+    pub fuel: f32,
+    /// For a boost: material per second while running, and when.
+    pub drain: f32,
+    pub need: Need,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -747,29 +772,55 @@ impl Item {
 pub enum Install {
     Added,
     Replaced(Part),
-    /// The slot was full of better parts; the newcomer was broken down for scrap.
+    /// The slot was full of better parts, or the part would have lowered the ship's
+    /// firepower; the newcomer was broken down for scrap.
     Scrapped(Part),
+}
+
+/// What acquiring a part did: weapon profiles unlocked or leveled, and the slot outcome of
+/// whatever was left of the part (None when it was all weapon).
+#[derive(Debug, PartialEq)]
+pub struct Acquired {
+    pub profiles: Vec<(Profile, Gain)>,
+    pub installed: Option<Install>,
+}
+
+/// What a charged pickup did.
+#[derive(Debug, PartialEq)]
+pub enum Charged {
+    Profiles(Vec<(Profile, Gain)>),
+    Boost(BoostGain),
 }
 
 /// Everything attached to the ship.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Loadout {
     pub parts: Vec<Part>,
-    pub surges: Vec<Surge>,
+    pub arsenal: Arsenal,
 }
-
-/// Surges that can run at once.
-const MAX_SURGES: usize = 5;
 
 impl Loadout {
     pub fn in_slot(&self, slot: Slot) -> impl Iterator<Item = &Part> {
         self.parts.iter().filter(move |p| p.slot == slot)
     }
 
+    /// Stats from the bolted-on parts alone (no weapon profile, no boosts).
+    pub fn gear_stats(&self) -> Stats {
+        Stats::compute(self.parts.iter().flat_map(|p| p.effects.iter().copied()))
+    }
+
+    /// Bolts a part on. A part that would lower the ship's firepower is scrapped instead,
+    /// so no pickup can leave the ship weaker.
     pub fn install(&mut self, part: Part) -> Install {
+        let before = self.gear_stats().firepower();
         let held = self.in_slot(part.slot).count();
         if held < part.slot.capacity() {
             self.parts.push(part);
+            if self.gear_stats().firepower() + 1e-4 < before
+                && let Some(part) = self.parts.pop()
+            {
+                return Install::Scrapped(part);
+            }
             return Install::Added;
         }
         let weakest = self
@@ -781,40 +832,68 @@ impl Loadout {
             .map(|(i, _)| i);
         match weakest {
             Some(i) if self.parts[i].rating() < part.rating() => {
-                Install::Replaced(std::mem::replace(&mut self.parts[i], part))
+                let old = std::mem::replace(&mut self.parts[i], part);
+                if self.gear_stats().firepower() + 1e-4 < before {
+                    let part = std::mem::replace(&mut self.parts[i], old);
+                    return Install::Scrapped(part);
+                }
+                Install::Replaced(old)
             }
             _ => Install::Scrapped(part),
         }
     }
 
-    /// Starts a surge, or tops up a running one of the same kind.
-    pub fn start(&mut self, surge: Surge) {
-        if let Some(running) = self.surges.iter_mut().find(|s| s.name == surge.name) {
-            running.remaining = running.remaining.max(surge.duration);
-            running.duration = running.duration.max(surge.duration);
-            return;
+    /// Takes a part aboard. Its weapon traits go to the arsenal (unlocking or leveling the
+    /// profile, never losing anything) together with the penalties that came with them; what
+    /// is left, if anything, is bolted on as an ordinary part.
+    pub fn acquire(&mut self, mut part: Part) -> Acquired {
+        let mut profiles = Vec::new();
+        let mut stripped = false;
+        part.effects.retain(|effect| match *effect {
+            Effect::Trait(kind, level) => match Profile::from_trait(kind) {
+                Some(profile) => {
+                    profiles.push((profile, self.arsenal.acquire(profile, level)));
+                    stripped = true;
+                    false
+                }
+                None => true,
+            },
+            Effect::Stat(..) => true,
+        });
+        if stripped {
+            part.effects
+                .retain(|e| !matches!(e, Effect::Stat(_, amount) if *amount < 0.0));
         }
-        if self.surges.len() >= MAX_SURGES
-            && let Some(oldest) = self
-                .surges
-                .iter()
-                .enumerate()
-                .min_by(|a, b| a.1.remaining.total_cmp(&b.1.remaining))
-                .map(|(i, _)| i)
-        {
-            self.surges.remove(oldest);
+        let installed = (!part.effects.is_empty()).then(|| self.install(part));
+        Acquired {
+            profiles,
+            installed,
         }
-        self.surges.push(surge);
     }
 
-    /// Runs surges down; true when one has just ended.
-    pub fn tick(&mut self, dt: f32) -> bool {
-        let before = self.surges.len();
-        for surge in &mut self.surges {
-            surge.remaining -= dt;
+    /// Takes a charged pickup aboard: weapon traits level up profiles, anything else becomes
+    /// a boost (the stronger of two of the same name is kept). The fuel is the caller's.
+    pub fn charge(&mut self, surge: &Surge) -> Charged {
+        let profiles = surge.profiles();
+        if !profiles.is_empty() {
+            return Charged::Profiles(
+                profiles
+                    .into_iter()
+                    .map(|(profile, level)| (profile, self.arsenal.acquire(profile, level)))
+                    .collect(),
+            );
         }
-        self.surges.retain(|s| s.remaining > 0.0);
-        self.surges.len() != before
+        Charged::Boost(self.arsenal.add_boost(Boost {
+            name: surge.name.clone(),
+            slot: surge.slot,
+            rarity: surge.rarity,
+            effects: surge.effects.clone(),
+            material: surge.material,
+            drain: surge.drain,
+            need: surge.need,
+            running: false,
+            dry: false,
+        }))
     }
 
     /// The strongest part, the one a wrecked ship leaves behind.
@@ -830,11 +909,19 @@ impl Loadout {
         self.parts
             .iter()
             .flat_map(|p| &p.effects)
-            .chain(self.surges.iter().flat_map(|s| &s.effects))
+            .chain(self.arsenal.boost_effects())
     }
 
+    /// The ship as it is flying now: parts, the active profile and the running boosts.
     pub fn stats(&self) -> Stats {
-        Stats::compute(self.effects().copied())
+        Stats::compute(self.effects().copied().chain(self.arsenal.active_effect()))
+    }
+
+    /// Ship power for the HUD verdict: the stats' rating with the whole arsenal counted
+    /// rather than only the profile that happens to be active.
+    pub fn power(&self) -> f32 {
+        self.stats()
+            .power_with_volley(1.0 + self.arsenal.volley_bonus())
     }
 }
 
@@ -953,23 +1040,53 @@ impl Stats {
         }
     }
 
-    /// One number for how much ship this is; the bare starting ship rates 1. It is the
-    /// geometric mean of firepower and staying power, nudged by agility, so it can be set
-    /// against a quadrant's threat.
-    pub fn power(&self) -> f32 {
+    /// The level of a trait on this ship.
+    pub fn level(&self, kind: Trait) -> u8 {
+        match kind {
+            Trait::Spread => self.spread,
+            Trait::Pierce => self.pierce,
+            Trait::Homing => self.homing,
+            Trait::Broadside => self.broadside,
+            Trait::Tailgun => self.tailgun,
+            Trait::Blast => self.blast,
+            Trait::Ram => self.ram,
+            Trait::Shears => u8::from(self.shears),
+            Trait::Ballast => u8::from(self.ballast),
+            Trait::Siphon => self.siphon,
+            Trait::Aura => self.aura,
+            Trait::Missiles => self.missiles,
+            Trait::Mines => self.mines,
+            Trait::Needles => self.needles,
+            Trait::Nova => self.nova,
+        }
+    }
+
+    /// Volley rating of the traits this ship is firing with (1 for the stock gun).
+    pub fn volley(&self) -> f32 {
+        1.0 + Trait::ALL
+            .iter()
+            .map(|&t| t.volley_weight() * f32::from(self.level(t)))
+            .sum::<f32>()
+    }
+
+    /// Raw gun output of the stock fire: damage times rate, 1 for the bare ship. Parts and
+    /// pickups are never allowed to lower it.
+    pub fn firepower(&self) -> f32 {
         let base = Self::BASE;
-        let volley = 1.0
-            + 0.5 * f32::from(self.spread)
-            + 0.4 * f32::from(self.pierce)
-            + 0.3 * f32::from(self.homing)
-            + 0.5 * f32::from(self.broadside)
-            + 0.25 * f32::from(self.tailgun)
-            + 0.3 * f32::from(self.blast)
-            + 0.4 * f32::from(self.missiles)
-            + 0.25 * f32::from(self.mines)
-            + 0.5 * f32::from(self.needles)
-            + 0.35 * f32::from(self.nova);
-        let offense = self.damage / base.damage * base.fire_period / self.fire_period * volley;
+        self.damage / base.damage * base.fire_period / self.fire_period
+    }
+
+    /// One number for how much ship this is; the bare starting ship rates 1.
+    pub fn power(&self) -> f32 {
+        self.power_with_volley(self.volley())
+    }
+
+    /// Power with the volley rating given (so an arsenal can be counted as a whole). It is
+    /// the geometric mean of firepower and staying power, nudged by agility, so it can be
+    /// set against a quadrant's threat.
+    pub fn power_with_volley(&self, volley: f32) -> f32 {
+        let base = Self::BASE;
+        let offense = self.firepower() * volley;
         let staying = (self.max_hull + 0.8 * self.max_shield)
             / (base.max_hull + 0.8 * base.max_shield)
             / self.guard
@@ -1182,14 +1299,31 @@ pub fn roll_part(rng: &mut Rng, source: &Source) -> Part {
 pub fn roll_surge(rng: &mut Rng, source: &Source) -> Surge {
     let blueprint = choose(rng, SURGES, source);
     let rarity = roll_rarity(rng, source);
-    let duration = blueprint.seconds * (1.0 + 0.25 * rarity as usize as f32);
+    let richer = 1.0 + 0.25 * rarity as usize as f32;
+    let effects = scaled(blueprint.effects, rarity, 1.0 + (source.grade - 1.0) * 0.5);
+    let (material, drain, need, fuel) = match blueprint.boost {
+        Some((material, drain, need)) => (material, drain, need, drain * BOOST_FUEL_SECONDS),
+        None => {
+            // A weapon charge is fuel for the profile it unlocks.
+            let material = effects
+                .iter()
+                .find_map(|e| match *e {
+                    Effect::Trait(kind, _) => Profile::from_trait(kind)?.material(),
+                    Effect::Stat(..) => None,
+                })
+                .unwrap_or(Material::Metal);
+            (material, 0.0, Need::Firing, CHARGE_FUEL)
+        }
+    };
     Surge {
         name: blueprint.name.to_string(),
         slot: blueprint.slot,
         rarity,
-        effects: scaled(blueprint.effects, rarity, 1.0 + (source.grade - 1.0) * 0.5),
-        duration,
-        remaining: duration,
+        effects,
+        material,
+        fuel: fuel * richer,
+        drain,
+        need,
     }
 }
 
@@ -1234,6 +1368,25 @@ pub fn roll_salvage(rng: &mut Rng, source: &Source) -> Item {
             Material::Metal,
             ((10.0 * source.grade) as u32 / 5 * 5).max(10) as f32,
         ),
+    }
+}
+
+/// A plain surge for tests: one effect, 100 fuel, a drain of 1 a second while firing.
+#[cfg(test)]
+pub(crate) fn test_surge(effect: Effect) -> Surge {
+    let material = match effect {
+        Effect::Trait(kind, _) => Profile::from_trait(kind).and_then(Profile::material),
+        Effect::Stat(..) => None,
+    };
+    Surge {
+        name: "Test Surge".into(),
+        slot: Slot::Cannon,
+        rarity: Rarity::Common,
+        effects: vec![effect],
+        material: material.unwrap_or(Material::Metal),
+        fuel: 100.0,
+        drain: 1.0,
+        need: Need::Firing,
     }
 }
 
@@ -1292,27 +1445,6 @@ mod tests {
             loadout.best_part().map(|i| loadout.parts[i].name.as_str()),
             Some("c")
         );
-    }
-
-    #[test]
-    fn surges_expire_and_refresh_instead_of_stacking() {
-        let surge = |seconds| Surge {
-            name: "Overdrive".into(),
-            slot: Slot::Cannon,
-            rarity: Rarity::Common,
-            effects: vec![Effect::Stat(Stat::FireRate, 0.7)],
-            duration: seconds,
-            remaining: seconds,
-        };
-        let mut loadout = Loadout::default();
-        loadout.start(surge(10.0));
-        assert!(!loadout.tick(4.0));
-        loadout.start(surge(10.0));
-        assert_eq!(loadout.surges.len(), 1);
-        assert!((loadout.surges[0].remaining - 10.0).abs() < 1e-3);
-        assert!(loadout.stats().fire_period < Stats::BASE.fire_period);
-        assert!(loadout.tick(11.0));
-        assert_eq!(loadout.stats(), Stats::BASE);
     }
 
     #[test]
@@ -1375,9 +1507,9 @@ mod tests {
             let mut rng = Rng::new(77);
             let mut loadout = Loadout::default();
             for _ in 0..300 {
-                loadout.install(roll_part(&mut rng, &source(grade)));
+                loadout.acquire(roll_part(&mut rng, &source(grade)));
             }
-            loadout.stats().power()
+            loadout.power()
         };
         let (shallow, deep) = (build(1.0), build(5.0));
         assert!(shallow > 1.5, "{shallow}");
@@ -1394,8 +1526,19 @@ mod tests {
                     .is_nan()
             );
         }
-        assert!(PARTS.iter().all(|b| b.seconds == 0.0));
-        assert!(SURGES.iter().all(|b| b.seconds > 0.0));
+        assert!(PARTS.iter().all(|b| b.boost.is_none()));
+        // Every surge is either a weapon charge (it names a profile) or a boost with a
+        // positive drain, never both and never neither.
+        for b in SURGES {
+            let weapon = b
+                .effects
+                .iter()
+                .any(|e| matches!(e, Effect::Trait(t, _) if Profile::from_trait(*t).is_some()));
+            assert_eq!(weapon, b.boost.is_none(), "{}", b.name);
+            if let Some((_, drain, _)) = b.boost {
+                assert!(drain > 0.0);
+            }
+        }
         for slot in Slot::ALL {
             assert!(PARTS.iter().any(|b| b.slot == slot));
         }
