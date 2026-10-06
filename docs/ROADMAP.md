@@ -7,7 +7,7 @@ The universe and creatures are in place (see [UNIVERSE.md](UNIVERSE.md)). The ne
 - **Ship:** arrow-key thrust, rotate and brake, mouse aim. The bare ship has top speed 460, one gun (0.16 s, 26 damage), 100 hull, 60 shield. Every one of those numbers is a `Stats` value (`src/simulation/upgrades.rs`) folded from whatever is bolted on.
 - **Augmentation (built):** see "Progression" below.
 - **Defense:** shield that recharges after a quiet interval, hull, three lives (an extra life can drop, cap 6), a protected respawn near where you died.
-- **Difficulty (built):** `SectorParams::depth` is the distance from home in sectors; `world::threat(depth)` = 1 + 0.3 per sector. Creatures take damage divided by threat and hit for `1 + 0.6 (threat - 1)` times as much; bounty scales with it. The danger parameter and gene pools still shape *what* lives somewhere. Sector (0,0) is the calm, fixed start (threat 1).
+- **Difficulty (built):** `SectorParams::depth` is the distance from home in sectors; `world::threat(depth)` = 1 + 0.3 per sector. Creatures take damage divided by threat and hit for `1 + 0.6 (threat - 1)` times as much; bounty scales with it. The danger parameter and gene pools still shape *what* lives somewhere. Sector (0,0) is the peaceful, creature-free start (threat 1); rings 1 and 2 add Fatsos, then Bogeys and Smarties (see UNIVERSE.md, Ranges).
 - **Variety spacing (built):** lineage lattice 8 sectors (was 4) and biome noise at half frequency, so a different seed-flavored region takes twice the travel.
 - **HUD:** sector coordinates, parameters, SHIP POWER versus THREAT with a verdict (OUTCLASSED, UNDERPOWERED, EVEN, STRONG), the ship panel (five slots, the arsenal with the active profile highlighted and its fuel, owned boosts, the cargo hold), a switch banner, a pickup feed, radar, and edge arrows toward the nearest offscreen creatures and minerals (`T`; `simulation/guide.rs`), and a sonar ping (`X`; `simulation/ping.rs`) that echoes the nearest planetoids, civilization seats, fortresses and pads from generation alone, three sectors out.
 
@@ -38,7 +38,7 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 
 ## Constraints from the generator
 
-- New spawnable things (pickups, drops) must not disturb sector (0,0)'s golden test or the original RNG stream; give them their own salted stream, or derive them from kills at runtime.
+- New spawnable things (pickups, drops) must not disturb sector (0,0)'s golden test; give them their own salted stream, or derive them from kills at runtime.
 - Persistence is by stable spawn index per sector; kills persist, positions and damage do not. Pickups need the same treatment or they will respawn on reload.
 - Gameplay state lives in the headless simulation and is tested there; the renderer only draws it. Keep new systems deterministic.
 - Player balance changes ripple into creature tuning (hull, damage and fire rates in genomes), so retune together.
@@ -53,6 +53,6 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 
 - Tune `THREAT_PER_SECTOR`, drop chances, `Rarity::strength` and the `Stat::affix_bonus` values together; `Stats::power` versus `threat^0.8` (the HUD verdict) is a first guess at "fair".
 - Whether a part should be pickable (leave or take) instead of auto-installed, and whether wrecks should drop more than the best part.
-- Landmark caches and bosses: civilization elders (see UNIVERSE.md) are built, with a guaranteed epic and a lasting fall; caches and named routes are not. Tune raid timing, elder strength and the depth 6 to 8 start of territories by playing.
+- Landmark caches and bosses: civilization elders (see UNIVERSE.md) are built, with a guaranteed epic and a lasting fall; caches and named routes are not. Tune raid timing, elder strength, the depth 6 to 8 start of territories and the weak early outpost (nothing to do there yet: trade is the obvious next step) by playing. Also tune range density (`SLOTS_PER_CELL`) and the ring ramp.
 - Pickup labels in the world, audio and screen shake for pickups.
 - Fortified cities and civilization mining (see UNIVERSE.md) are built: tune wall hull, turret reach and the fortress tier curve by playing, and consider a breach reward, maze-aware raiders, and rival civilizations contesting rocks.
