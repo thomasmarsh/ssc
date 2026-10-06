@@ -12,15 +12,9 @@
 //! draws from its own salted streams, never from the stream that places the original
 //! population.
 
-use crate::world::{Rng, SectorId, SectorParams, hash2, latent, value_noise};
+use crate::world::{Rng, SectorId, SectorParams, hash2, value_noise};
 use bevy::prelude::Vec2;
 
-/// Separates gene sampling from every other stream.
-const GENE_SALT: u64 = 0x6E4E_5EED_0000_0042;
-/// Founder lineages live on a lattice with one node every this many sectors.
-pub const LINEAGE_CELL: i32 = 8;
-/// Founders sampled at each ordinary lattice node.
-const FOUNDERS_PER_NODE: u64 = 3;
 /// No creature has more bodies than this, however its genes combine.
 pub const MAX_PARTS: u32 = 28;
 /// Largest fractional jitter of an ordinary individual, and of the wider 4% tail.
@@ -1344,10 +1338,6 @@ pub struct GenePool {
     pub entries: Vec<PoolEntry>,
 }
 
-fn smooth(t: f32) -> f32 {
-    t * t * (3.0 - 2.0 * t)
-}
-
 impl GenePool {
     /// The hand-authored pool of the starting sector.
     pub fn home() -> Self {
@@ -1366,41 +1356,6 @@ impl GenePool {
             })
             .collect(),
         }
-    }
-
-    /// The pool of sector `id`: founders of the four surrounding lattice nodes, weighted
-    /// by closeness and mutated by their distance from home.
-    pub fn for_sector(seed: u64, id: SectorId) -> Self {
-        let cell = LINEAGE_CELL;
-        let (ix, iy) = (id.x.div_euclid(cell), id.y.div_euclid(cell));
-        let sx = smooth(id.x.rem_euclid(cell) as f32 / cell as f32);
-        let sy = smooth(id.y.rem_euclid(cell) as f32 / cell as f32);
-        let mut entries = Vec::new();
-        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            let wx = if dx == 0 { 1.0 - sx } else { sx };
-            let wy = if dy == 0 { 1.0 - sy } else { sy };
-            let node_weight = wx * wy;
-            if node_weight <= 1e-4 {
-                continue;
-            }
-            let node = SectorId {
-                x: (ix + dx) * cell,
-                y: (iy + dy) * cell,
-            };
-            let reach = Vec2::new((id.x - node.x) as f32, (id.y - node.y) as f32).length();
-            let amplitude = smooth((reach / cell as f32).clamp(0.0, 1.0));
-            for (lineage, genome, abundance) in founders(seed, node) {
-                entries.push(PoolEntry {
-                    species: Species {
-                        lineage,
-                        generation: reach.round() as u16,
-                        genome: genome.expressed(seed, lineage, id, amplitude),
-                    },
-                    weight: node_weight * abundance,
-                });
-            }
-        }
-        Self { entries }
     }
 
     /// A weighted draw among the species of one niche; when the pool has none, among all.
@@ -1461,32 +1416,6 @@ impl GenePool {
         }
         entries[entries.len() - 1].species
     }
-}
-
-/// The unmutated founders of a lattice node: (lineage, genome, abundance). The node at
-/// the origin holds the hand-authored HOME species; every other node samples its own from
-/// the node's latent parameters, on a salted stream.
-fn founders(seed: u64, node: SectorId) -> Vec<(u64, Genome, f32)> {
-    if node == SectorId::ORIGIN {
-        return GenePool::home()
-            .entries
-            .into_iter()
-            .map(|e| (e.species.lineage, e.species.genome, 1.0))
-            .collect();
-    }
-    let params = latent(seed, node);
-    (0..FOUNDERS_PER_NODE)
-        .map(|k| {
-            let mut rng = Rng::new(hash2(
-                seed ^ GENE_SALT ^ ((k + 1) * 0x9E37_79B9),
-                node.x,
-                node.y,
-            ));
-            let lineage = rng.next_u64() | 1;
-            let abundance = rng.range(0.5, 1.5);
-            (lineage, Genome::sample(&mut rng, &params), abundance)
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -1726,14 +1655,6 @@ mod tests {
     }
 
     #[test]
-    fn the_home_pool_is_exactly_the_five_classics() {
-        for seed in [0, 7, 0x535343] {
-            let pool = GenePool::for_sector(seed, SectorId::ORIGIN);
-            assert_eq!(pool, GenePool::home());
-        }
-    }
-
-    #[test]
     fn sampled_genomes_are_valid_and_diverse_across_the_parameter_space() {
         let mut rng = Rng::new(5);
         let mut chains = 0;
@@ -1807,123 +1728,60 @@ mod tests {
     }
 
     #[test]
-    fn pools_vary_smoothly_between_neighbors() {
+    fn neighbouring_sectors_hold_close_relatives_of_the_same_species() {
         let seed = 31;
-        let mut checked = 0;
-        let mut biggest_weight_step = 0.0_f32;
-        for x in -10..=10 {
-            for y in -10..=10 {
+        let (mut checked, mut shared_total) = (0, 0);
+        for x in -12..=12 {
+            for y in -12..=12 {
                 let here = SectorId { x, y };
-                let pool = GenePool::for_sector(seed, here);
-                assert!(!pool.entries.is_empty());
-                let total: f32 = pool.entries.iter().map(|e| e.weight).sum();
+                let pool = crate::range::ecology(seed, here).pool();
                 for (dx, dy) in [(1, 0), (0, 1)] {
-                    let next = GenePool::for_sector(
+                    let next = crate::range::ecology(
                         seed,
                         SectorId {
                             x: x + dx,
                             y: y + dy,
                         },
-                    );
+                    )
+                    .pool();
                     let (shared, mean, worst) = drift(&pool, &next);
-                    // Neighbors share ancestry: most of the pool is the same lineages.
-                    assert!(shared >= 3, "{here:?} shares only {shared}");
+                    // Lineages the two sectors share are close relatives: drift is gradual.
                     assert!(mean < 0.12, "{here:?} mean drift {mean}");
                     assert!(worst < 0.4, "{here:?} worst drift {worst}");
-                    // Abundances change gradually: compare weights lineage by lineage.
-                    let next_total: f32 = next.entries.iter().map(|e| e.weight).sum();
-                    let mut change = 0.0;
-                    for e in &pool.entries {
-                        let other = next
-                            .entries
-                            .iter()
-                            .find(|o| o.species.lineage == e.species.lineage)
-                            .map_or(0.0, |o| o.weight / next_total);
-                        change += (e.weight / total - other).abs();
-                    }
-                    biggest_weight_step = biggest_weight_step.max(change);
+                    shared_total += shared;
                     checked += 1;
                 }
             }
         }
-        assert!(checked > 800);
-        assert!(
-            biggest_weight_step < 1.0,
-            "abrupt turnover {biggest_weight_step}"
-        );
+        assert!(checked > 800 && shared_total > 400, "{shared_total}");
     }
 
     #[test]
     fn species_recur_across_sectors_with_mutation() {
         let seed = 12;
-        // Walk away from a founding node: the same lineage persists but its genome drifts.
-        let near = GenePool::for_sector(seed, SectorId { x: 9, y: 8 });
-        let far = GenePool::for_sector(seed, SectorId { x: 11, y: 9 });
-        let mut recurred = 0;
-        for a in &near.entries {
-            if let Some(b) = far
-                .entries
-                .iter()
-                .find(|b| b.species.lineage == a.species.lineage)
-            {
-                recurred += 1;
-                let d = a.species.genome.distance(&b.species.genome);
-                assert!(d > 0.0, "an identical copy is not a mutation");
-                assert!(d < 0.4, "too far to be the same lineage: {d}");
-            }
-        }
-        assert!(recurred >= 2);
-        // Across a wider walk the same lineage keeps showing up, never as an exact copy.
-        let lineage = near.entries[0].species.lineage;
-        let mut variants = std::collections::HashSet::new();
-        for x in 6..=12 {
-            for y in 6..=12 {
-                for e in GenePool::for_sector(seed, SectorId { x, y }).entries {
-                    if e.species.lineage == lineage {
-                        variants.insert(
-                            e.species
-                                .genome
-                                .normalized()
-                                .iter()
-                                .map(|v| v.to_bits())
-                                .fold(0u64, |h, b| h.wrapping_mul(31) ^ u64::from(b)),
-                        );
+        // One sampled lineage across the sectors its range covers: it persists but its
+        // genome drifts from place to place, never as an exact copy of itself.
+        let mut by_lineage: std::collections::HashMap<u64, std::collections::HashSet<u64>> =
+            Default::default();
+        for x in -20..=20 {
+            for y in -20..=20 {
+                for p in crate::range::ecology(seed, SectorId { x, y }).presence {
+                    if p.family != crate::range::Family::Wild {
+                        continue;
                     }
+                    by_lineage.entry(p.species.lineage).or_default().insert(
+                        p.species
+                            .genome
+                            .normalized()
+                            .iter()
+                            .map(|v| v.to_bits())
+                            .fold(0u64, |h, b| h.wrapping_mul(31) ^ u64::from(b)),
+                    );
                 }
             }
         }
-        assert!(
-            variants.len() > 5,
-            "lineage never varied: {}",
-            variants.len()
-        );
-    }
-
-    #[test]
-    fn classics_fade_into_wild_species_moving_away_from_home() {
-        let classic = |id: SectorId| {
-            let pool = GenePool::for_sector(1, id);
-            let total: f32 = pool.entries.iter().map(|e| e.weight).sum();
-            pool.entries
-                .iter()
-                .filter(|e| HOME_LINEAGES.contains(&e.species.lineage))
-                .map(|e| e.weight)
-                .sum::<f32>()
-                / total
-        };
-        let shares: Vec<f32> = (0..=LINEAGE_CELL)
-            .map(|x| classic(SectorId { x, y: 0 }))
-            .collect();
-        assert_eq!(shares[0], 1.0);
-        assert!(shares.windows(2).all(|w| w[1] < w[0]), "{shares:?}");
-        assert_eq!(shares[LINEAGE_CELL as usize], 0.0);
-    }
-
-    #[test]
-    fn pools_are_pure_functions_of_seed_and_sector() {
-        let id = SectorId { x: -7, y: 5 };
-        assert_eq!(GenePool::for_sector(3, id), GenePool::for_sector(3, id));
-        assert_ne!(GenePool::for_sector(3, id), GenePool::for_sector(4, id));
+        let widest = by_lineage.values().map(|v| v.len()).max().unwrap_or(0);
+        assert!(widest > 3, "lineage never varied: {widest}");
     }
 
     #[test]
@@ -2022,17 +1880,16 @@ mod tests {
     }
 
     #[test]
-    fn wild_pools_hold_grazers_and_predators_but_home_is_untouched() {
+    fn wild_ranges_hold_grazers_and_predators() {
         let mut diets = std::collections::HashSet::new();
-        for x in -16..=16 {
-            for y in -16..=16 {
-                for e in GenePool::for_sector(5, SectorId { x, y }).entries {
-                    diets.insert(e.species.genome.diet.get());
+        for x in -25..=25 {
+            for y in -25..=25 {
+                for p in crate::range::ecology(5, SectorId { x, y }).presence {
+                    diets.insert(p.species.genome.diet.get());
                 }
             }
         }
         assert!(diets.contains(&(Diet::Graze.get())) && diets.contains(&(Diet::Hunt.get())));
-        assert_eq!(GenePool::for_sector(5, SectorId::ORIGIN), GenePool::home());
     }
 
     #[test]

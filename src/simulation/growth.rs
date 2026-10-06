@@ -1305,6 +1305,18 @@ mod tests {
             let school = crate::range::start_sector(seed, Species::bogey());
             // The ship idles where no creature is near, so the school lives undisturbed.
             let spot = crate::range::calm_spot(seed, school);
+            // Fatsos next door may chase the idle ship and ram themselves to pieces; the
+            // school is what this follows.
+            let bogeys = |game: &Game| {
+                game.bodies
+                    .iter()
+                    .filter(|b| {
+                        b.kind == BodyKind::Creature
+                            && !b.follower
+                            && b.species == Species::bogey().lineage
+                    })
+                    .count()
+            };
             let mut start = 0;
             let mut peak = 0;
             let mut low = usize::MAX;
@@ -1313,18 +1325,18 @@ mod tests {
                 game.teleport(spot);
                 game.step(DT, Input::default());
                 if tick == 60 {
-                    start = game.active_enemies();
+                    start = bogeys(&game);
                 }
                 if tick % 60 == 0 {
-                    peak = peak.max(game.active_enemies());
+                    peak = peak.max(bogeys(&game));
                     if tick > 60 * 60 * 4 {
-                        low = low.min(game.active_enemies());
+                        low = low.min(bogeys(&game));
                     }
                     assert!(game.bodies.len() + game.food.len() + game.eggs.len() <= MAX_BODIES);
                     assert!(creatures(&game) < 2 * world::SECTOR_BODY_BUDGET as usize);
                 }
             }
-            assert!(start > 20, "the start opens populated: {start}");
+            assert!(start > 6, "the start opens populated: {start}");
             // Nothing collapses: the flocks keep most of their numbers, find food and stay fed.
             assert!(low * 5 >= start * 3, "the start dwindled: {start} -> {low}");
             let (n, fed) = fed(&game);

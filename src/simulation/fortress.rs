@@ -632,6 +632,7 @@ mod tests {
                         CivShape::Horde => 1.0,
                         CivShape::Elder => 1.15,
                         CivShape::Both => 1.3,
+                        CivShape::Outpost => 0.4,
                     }
         );
         let _ = plain;

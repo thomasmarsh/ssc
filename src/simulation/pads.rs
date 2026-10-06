@@ -95,6 +95,9 @@ pub struct Pad {
     pub stash: Cargo,
     /// Deployment order: the oldest is dismantled first.
     pub order: u64,
+    /// The home-base pad on HOME's planetoid, there from the start: never dismantled for a
+    /// new one, never counted against `MAX_PADS` and never a respawn point.
+    pub home: bool,
     reloads: u32,
 }
 
@@ -326,8 +329,46 @@ impl Game {
         self.pad.pads.values()
     }
 
+    /// Pads the player has built (the home pad is always there and is not counted).
     pub fn pad_count(&self) -> usize {
-        self.pad.pads.len()
+        self.pad.pads.values().filter(|p| !p.home).count()
+    }
+
+    /// The pad on HOME's planetoid, standing from the first tick: landing, repair and the
+    /// bench work at the start.
+    pub(super) fn seed_home_pad(&mut self) {
+        let Some(key) = self
+            .bodies
+            .iter()
+            .find(|b| {
+                b.rock == RockKind::Planetoid
+                    && b.origin.is_some_and(|(q, _)| q == SectorId::ORIGIN)
+            })
+            .and_then(|b| b.origin)
+        else {
+            return;
+        };
+        let Some(host) = self.pad_host(key) else {
+            return;
+        };
+        let (center, radius) = (host.position, host.radius);
+        // On the side facing the ship's starting place.
+        let anchor = (-center).to_angle() - host.angle;
+        self.pad.pads.insert(
+            key,
+            Pad {
+                key,
+                anchor,
+                center,
+                radius,
+                hp: PAD_HP,
+                stash: Cargo::default(),
+                order: 0,
+                home: true,
+                reloads: 0,
+            },
+        );
+        self.pad.next_order = 1;
     }
 
     /// The pad the ship is landed on.
@@ -607,11 +648,12 @@ impl Game {
         };
         let (center, radius, angle) = (host.position, host.radius, host.angle);
         let anchor = (at - center).to_angle() - angle;
-        if self.pad.pads.len() >= MAX_PADS {
+        if self.pad_count() >= MAX_PADS {
             let oldest = self
                 .pad
                 .pads
                 .values()
+                .filter(|p| !p.home)
                 .min_by_key(|p| p.order)
                 .map(|p| p.key);
             if let Some(oldest) = oldest {
@@ -632,6 +674,7 @@ impl Game {
                 hp: PAD_HP,
                 stash: Cargo::default(),
                 order,
+                home: false,
                 reloads: 0,
             },
         );
@@ -870,6 +913,10 @@ impl Game {
             if civ.is_none() && body.genome.learner <= 0.0 {
                 continue;
             }
+            // Settlers mind their own business and never learn to hunt a pad.
+            if civ.is_some_and(|t| self.civ_peaceful(t)) {
+                continue;
+            }
             let sight = body.genome.sight * body.genes.sensor_acuity;
             for &(key, at) in &pads {
                 if body.position.distance(at) < sight {
@@ -1075,7 +1122,7 @@ impl Game {
 
     /// Pays the insurance if it is on, a pad exists to come back to and the hold can cover it.
     pub(super) fn insurance_pays(&mut self) -> bool {
-        !self.pad.pads.is_empty()
+        self.has_return_pad()
             && self.pad.insured
             && self.cargo.spend(&[(Material::Metal, INSURANCE)])
     }
@@ -1087,8 +1134,15 @@ impl Game {
         self.pad
             .pads
             .keys()
+            .filter(|key| self.pad.pads.get(*key).is_some_and(|p| !p.home))
             .min_by_key(|key| (key.0.chebyshev_distance(here), **key))
             .copied()
+    }
+
+    /// Whether the player has a pad of their own to come back to (the home pad is not one:
+    /// a lost ship returns near where it fell unless a built pad is nearer).
+    pub(super) fn has_return_pad(&self) -> bool {
+        self.pad.pads.values().any(|p| !p.home)
     }
 
     /// Brings the ship back at the nearest pad, streaming its sector first. False when
@@ -1820,6 +1874,7 @@ mod tests {
                         ..Cargo::default()
                     },
                     order: u64::from(index),
+                    home: false,
                     reloads: 0,
                 },
             );
@@ -2530,6 +2585,7 @@ mod tests {
                 hp: PAD_HP,
                 stash: Cargo::default(),
                 order: u64::from(key.1),
+                home: false,
                 reloads: 0,
             },
         );
@@ -2640,7 +2696,9 @@ mod tests {
         world(&mut game, 7);
         deployed(&mut game);
         game.reset();
-        assert!(game.pad.pads.is_empty() && game.pad.kits == 0);
+        // A fresh run has only the home pad.
+        assert!(game.pad_count() == 0 && game.pad.pads.values().all(|p| p.home));
+        assert_eq!(game.pad.kits, 0);
         assert_eq!(game.cargo, Cargo::default());
     }
 
@@ -2878,6 +2936,31 @@ mod tests {
     }
 
     #[test]
+    fn peaceful_settlers_never_learn_of_a_pad() {
+        use crate::territory::CivRole;
+        let seed = 0x535343;
+        let t = crate::territory::outpost(seed);
+        let mut game = empty_game();
+        game.seed = seed;
+        game.player_invulnerability = 1e9;
+        game.civ_territories.insert(t.id, t);
+        let member = t.member(seed);
+        game.civ_lineages
+            .insert(member.lineage, (t.id, CivRole::Member));
+        world(&mut game, 7);
+        let key = deployed(&mut game);
+        let at = game.pad_position(&game.pad.pads[&key]);
+        set_player(&mut game, Vec2::new(0.0, -2400.0), Vec2::ZERO);
+        spawn(&mut game, &member, at + Vec2::new(-500.0, -200.0));
+        for _ in 0..30 {
+            game.step(DT, quiet());
+        }
+        assert!(game.civ_peaceful(t.id));
+        assert!(!game.pad.known_civ.contains_key(&t.id));
+        assert!(!game.pad_exposed(key));
+    }
+
+    #[test]
     fn a_raid_arrives_at_a_pad_its_territory_knows_not_at_the_ship() {
         let (mut game, t) = civ_game();
         world(&mut game, 7);
@@ -3040,5 +3123,59 @@ mod tests {
             }
             assert!(!part.upgrade(&mut forge), "the cap holds");
         }
+    }
+
+    #[test]
+    fn a_new_game_starts_with_a_home_pad_that_lands_repairs_and_opens_the_bench() {
+        let mut game = Game::new(42);
+        assert_eq!(game.pad_count(), 0, "no player-built pads");
+        let home: Vec<&Pad> = game.pads().collect();
+        assert_eq!(home.len(), 1);
+        assert!(home[0].home && home[0].key.0 == SectorId::ORIGIN);
+        // The pad is on HOME's planetoid, on the side that faces the start.
+        let key = home[0].key;
+        let host = game.pad_host(key).expect("the planetoid is loaded");
+        assert_eq!(host.rock, RockKind::Planetoid);
+        // Fly to it and land: no kit needed.
+        game.player_invulnerability = 1e9;
+        let at = game.pad_position(&game.pad.pads[&key]);
+        set_player(&mut game, at, Vec2::ZERO);
+        assert_eq!(game.pad_hint(), PadHint::Land);
+        game.pad_action();
+        assert_eq!(game.pad.landed, Some(key));
+        game.bench_toggle();
+        assert!(game.bench_open(), "the bench works at spawn");
+        game.bench_toggle();
+        game.pad_action();
+        assert!(game.pad.landed.is_none());
+    }
+
+    #[test]
+    fn the_home_pad_is_never_dismantled_or_counted_or_a_respawn_point() {
+        let mut game = Game::new(42);
+        let home = game.pads().next().unwrap().key;
+        for index in 0..MAX_PADS as u32 {
+            game.pad.pads.insert(
+                (SectorId { x: 4, y: 4 }, index),
+                Pad {
+                    key: (SectorId { x: 4, y: 4 }, index),
+                    anchor: 0.0,
+                    center: Vec2::ZERO,
+                    radius: 100.0,
+                    hp: PAD_HP,
+                    stash: Cargo::default(),
+                    order: 10 + u64::from(index),
+                    home: false,
+                    reloads: 0,
+                },
+            );
+        }
+        assert_eq!(game.pad_count(), MAX_PADS, "the home pad is not counted");
+        assert!(game.pad.pads.contains_key(&home));
+        // Death far from any built pad does not bring the ship back to HOME's.
+        assert_ne!(game.respawn_pad(Vec2::ZERO), Some(home));
+        game.pad.pads.retain(|_, p| p.home);
+        assert_eq!(game.respawn_pad(Vec2::ZERO), None);
+        assert!(!game.has_return_pad());
     }
 }

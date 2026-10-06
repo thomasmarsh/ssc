@@ -96,6 +96,10 @@ impl Game {
         // know of a pad go for it instead (see `pads`).
         let (hide, hidden_long) = (self.pad.sight_mult(), self.pad.lost_track());
         let hidden = hide > 1.0;
+        let sanctuary = self.sanctuary
+            && player.is_some_and(|(p, _)| {
+                crate::world::SectorId::containing(p) == crate::world::SectorId::ORIGIN
+            });
         let sieges = self.siege_targets();
         // A compact snapshot makes steering independent of body iteration order.
         let neighbors: Vec<_> =
@@ -293,6 +297,12 @@ impl Game {
             let siege = sieges.get(&body.id).copied();
             if siege.is_some() {
                 body.alert = true;
+            }
+            // HOME is a sanctuary: nothing there goes after the ship, whatever it saw or
+            // heard, unless it has been hurt (a creature from next door that wanders in
+            // calms down). Fire always has an answer.
+            if sanctuary {
+                body.alert = provoked || is_hurt(body);
             }
             if body.panic > 0.0 {
                 body.alert = false;

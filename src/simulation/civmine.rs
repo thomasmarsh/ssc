@@ -522,7 +522,13 @@ mod tests {
                 ..Mining::default()
             },
         );
-        hold(&mut game, spot, 20.0);
+        // (The capital would draw the stash down whenever it can build a guardian, so the
+        // fixture keeps it full.)
+        for _ in 0..400 {
+            game.civ_mining.get_mut(&t.id).unwrap().stock = [150.0, 0.0, 0.0];
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+        }
         assert!(game.civ_mining[&t.id].miners.is_empty());
         assert!(game.civ_mining[&t.id].total() <= STOCK_CAP + 1e-3);
         // A ship on top of the capital sends unescorted miners running, and nobody starts.

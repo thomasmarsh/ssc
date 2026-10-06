@@ -168,7 +168,8 @@ impl Game {
                             b.kind == BodyKind::Creature
                                 && !b.follower
                                 && b.species == state.guardian.lineage
-                                && b.position.distance(center) < LOCAL_RANGE
+                                && (b.position.distance(center) < LOCAL_RANGE
+                                    || b.home == Some(center))
                         })
                         .count()
                         < cap
@@ -208,7 +209,10 @@ impl Game {
                         b.kind == BodyKind::Creature
                             && !b.follower
                             && b.species == species.lineage
-                            && b.position.distance(center) < LOCAL_RANGE
+                            // Creatures the base raised count while they roam far from it too,
+                            // or a school that follows the ship would be replaced endlessly.
+                            && (b.position.distance(center) < LOCAL_RANGE
+                                || b.home == Some(center))
                     })
                     .count()
             };

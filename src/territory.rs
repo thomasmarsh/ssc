@@ -12,28 +12,48 @@
 //! recognizable name and color. See `docs/UNIVERSE.md`, "Civilizations".
 
 use crate::fortress::{self, Archetype, FortRole, Layout, PartKind};
-use crate::genome::{Diet, Fear, GenePool, Genome, Nest, Social, Species, Trigger, Weapon};
+use crate::genome::{Diet, Fear, Genome, Nest, Social, Species, Trigger, Weapon};
+use crate::range::{blob_reach, fields, ring};
 use crate::simulation::BodyKind;
 use crate::world::{
     BaseKind, Phenotype, Rng, RockKind, SECTOR_BODY_BUDGET, SECTOR_SIZE, SectorId, SectorParams,
-    Spawn, hash2, value_noise,
+    Spawn, hash2, latent_base,
 };
 use bevy::prelude::Vec2;
+use std::f32::consts::TAU;
 
 /// Separates every territory stream from the rest of generation.
 pub const TERRITORY_SALT: u64 = 0xC1B1_7E55_0000_0021;
 /// Sectors on a side of one territory cell: at most one territory per cell.
 pub const TERRITORY_CELL: i32 = 10;
-/// Members stay at least this many sectors from HOME, so the opening is unchanged and a
-/// territory near the start of the difficulty curve (depth 4 to 6) is still survivable.
-pub const TERRITORY_MIN_DEPTH: f32 = 4.0;
-/// Share of cells that hold a territory.
-pub const TERRITORY_CHANCE: f32 = 0.34;
+/// Ordinary territories keep at least this many sectors from HOME. The opening is a gentle
+/// ramp (see `range`): the only civilization nearer is the weak outpost below, so the first
+/// strong ones sit at depth 6 to 8 (threat 2.8 to 3.4) and are scaled by `STRENGTH_PER_DEPTH`.
+pub const TERRITORY_MIN_DEPTH: f32 = 6.0;
+/// Share of cells that may hold a territory, before life and rock bias them.
+pub const TERRITORY_CHANCE: f32 = 0.5;
 /// Radius of a territory, in sectors, before the noisy edge reshapes it.
 const RADIUS_RANGE: (f32, f32) = (2.0, 3.0);
 /// How far the noise pushes the edge in or out, as a share of the radius.
 const EDGE_NOISE: f32 = 0.7;
 const SHAPE_NOISE_CHANNEL: u64 = 0x7E22;
+/// A territory's strength is capped by depth: `STRENGTH_BASE + STRENGTH_PER_DEPTH * depth`.
+const STRENGTH_BASE: f32 = 0.45;
+const STRENGTH_PER_DEPTH: f32 = 0.1;
+/// Territories prefer medium-high life (`LIFE_TARGET`) beside rock-rich land (they mine): a
+/// cell's acceptance is `ACCEPT_FLOOR + (1 - ACCEPT_FLOOR) * fit`, `fit` being how close the
+/// capital's life is to the target times how rich its neighbourhood's rock is (up to
+/// `ROCK_WANTED`).
+const LIFE_TARGET: f32 = 0.7;
+const ROCK_WANTED: f32 = 0.55;
+const ACCEPT_FLOOR: f32 = 0.2;
+
+/// The early outpost: a small, weak and peaceful settlement guaranteed within reach of HOME,
+/// so the first civilization is findable. Its seat is `OUTPOST_DEPTH` sectors out (and at
+/// least ring 3), its blob `OUTPOST_RADIUS` across, its strength `OUTPOST_STRENGTH`.
+pub const OUTPOST_DEPTH: (f32, f32) = (3.4, 4.6);
+const OUTPOST_RADIUS: (f32, f32) = (1.1, 1.7);
+const OUTPOST_STRENGTH: f32 = 0.35;
 
 /// What a civilization fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +64,8 @@ pub enum CivShape {
     Elder,
     /// A horde with an elder at its head.
     Both,
+    /// A small, weak, peaceful settlement: its people only defend themselves when hurt.
+    Outpost,
 }
 
 impl CivShape {
@@ -56,6 +78,7 @@ impl CivShape {
             Self::Horde => "HORDE",
             Self::Elder => "COURT",
             Self::Both => "DOMINION",
+            Self::Outpost => "OUTPOST",
         }
     }
 }
@@ -105,13 +128,34 @@ fn cell_of(id: SectorId) -> SectorId {
     }
 }
 
-/// The territory a lattice cell holds, if any. The capital sits near the middle of the cell
-/// and the disc is small enough to stay inside it, so a sector only asks its own cell.
-fn in_cell(seed: u64, cell: SectorId) -> Option<Territory> {
-    let mut rng = Rng::new(hash2(seed ^ TERRITORY_SALT, cell.x, cell.y));
-    if !rng.chance(TERRITORY_CHANCE) {
-        return None;
+/// How well a capital suits a civilization, in [0, 1]: medium-high life in the sector, and
+/// rock-rich ground around it for the workers to mine.
+fn fit(seed: u64, capital: SectorId) -> f32 {
+    let (life, _) = fields(seed, capital);
+    let mut rock = 0.0;
+    for dx in -1..=1 {
+        for dy in -1..=1 {
+            rock += fields(
+                seed,
+                SectorId {
+                    x: capital.x + dx,
+                    y: capital.y + dy,
+                },
+            )
+            .1;
+        }
     }
+    let life_fit = (1.0 - (life - LIFE_TARGET).abs() / LIFE_TARGET).clamp(0.0, 1.0);
+    life_fit * (rock / 9.0 / ROCK_WANTED).clamp(0.0, 1.0)
+}
+
+/// The territory a lattice cell holds, if any. The capital sits near the middle of the cell
+/// and the disc is small enough to stay inside it, so a sector only asks its own cell. The
+/// capital's life and rock decide whether the cell takes a territory at all (the caller
+/// judges the returned acceptance roll against `fit`, which is dear, only when needed).
+fn in_cell(seed: u64, cell: SectorId) -> Option<(Territory, f32)> {
+    let mut rng = Rng::new(hash2(seed ^ TERRITORY_SALT, cell.x, cell.y));
+    let present = rng.chance(TERRITORY_CHANCE);
     let capital = SectorId {
         x: cell.x * TERRITORY_CELL + rng.int(4, 5) as i32,
         y: cell.y * TERRITORY_CELL + rng.int(4, 5) as i32,
@@ -126,28 +170,89 @@ fn in_cell(seed: u64, cell: SectorId) -> Option<Territory> {
     } else {
         CivShape::Both
     };
-    Some(Territory {
-        id: rng.next_u64() | 1,
+    let id = rng.next_u64() | 1;
+    let accept = rng.f32();
+    if !present {
+        return None;
+    }
+    // Deeper means stronger: the nearest ones are held to what the ramp allows.
+    let depth = Vec2::new(capital.x as f32, capital.y as f32).length();
+    let strength = strength.min(STRENGTH_BASE + STRENGTH_PER_DEPTH * depth);
+    let t = Territory {
+        id,
         capital,
         strength,
         shape,
         radius,
-    })
+    };
+    Some((t, accept))
+}
+
+/// The seed's early outpost (see `OUTPOST_DEPTH`): where it is is a pure function of the seed.
+pub fn outpost(seed: u64) -> Territory {
+    let mut rng = Rng::new(hash2(seed ^ TERRITORY_SALT ^ 0x0A57, 0, 0));
+    let angle = rng.range(0.0, TAU);
+    let mut depth = rng.range(OUTPOST_DEPTH.0, OUTPOST_DEPTH.1);
+    let capital = loop {
+        let at = Vec2::from_angle(angle) * depth;
+        let capital = SectorId {
+            x: at.x.round() as i32,
+            y: at.y.round() as i32,
+        };
+        if ring(capital) >= 3 {
+            break capital;
+        }
+        depth += 0.25;
+    };
+    Territory {
+        id: rng.next_u64() | 1,
+        capital,
+        strength: OUTPOST_STRENGTH,
+        shape: CivShape::Outpost,
+        radius: rng.range(OUTPOST_RADIUS.0, OUTPOST_RADIUS.1),
+    }
+}
+
+/// Whether the blob of `t` covers `sector`: a ragged disc (shared with species ranges).
+fn covers(seed: u64, t: &Territory, sector: SectorId) -> bool {
+    let at = Vec2::new(sector.x as f32, sector.y as f32);
+    let capital = Vec2::new(t.capital.x as f32, t.capital.y as f32);
+    let reach = blob_reach(
+        seed ^ TERRITORY_SALT,
+        SHAPE_NOISE_CHANNEL,
+        t.radius,
+        EDGE_NOISE,
+        at,
+    );
+    at.distance(capital) <= reach
 }
 
 /// The territory holding `sector`, if any. Pure: the same answer for a seed and sector,
-/// whenever it is asked. Sparse, ragged and contiguous-ish, and never within
-/// `TERRITORY_MIN_DEPTH` sectors of HOME.
+/// whenever it is asked. The early outpost comes first; ordinary territories are sparse,
+/// ragged, contiguous-ish, never within `TERRITORY_MIN_DEPTH` of HOME and cluster where life
+/// is medium-high beside rock-rich land.
 pub fn territory(seed: u64, sector: SectorId) -> Option<Territory> {
+    // HOME and its two rings of neighbours are the gentle opening: no civilization reaches in.
+    if ring(sector) <= 2 {
+        return None;
+    }
+    let early = outpost(seed);
+    if covers(seed, &early, sector) {
+        return Some(early);
+    }
     let at = Vec2::new(sector.x as f32, sector.y as f32);
     if at.length() < TERRITORY_MIN_DEPTH {
         return None;
     }
-    let t = in_cell(seed, cell_of(sector))?;
-    let capital = Vec2::new(t.capital.x as f32, t.capital.y as f32);
-    let noise = value_noise(seed ^ TERRITORY_SALT, SHAPE_NOISE_CHANNEL, at * 0.45) - 0.5;
-    let reach = t.radius * (1.0 + EDGE_NOISE * noise);
-    (at.distance(capital) <= reach).then_some(t)
+    let (t, accept) = in_cell(seed, cell_of(sector))?;
+    // A territory's whole disc is cheap to test; the life and rock fit is judged last.
+    if !covers(seed, &t, sector)
+        || accept >= ACCEPT_FLOOR + (1.0 - ACCEPT_FLOOR) * fit(seed, t.capital)
+    {
+        return None;
+    }
+    // The outpost's land is the outpost's: a capital inside it would have no seat.
+    (!covers(seed, &early, t.capital)).then_some(t)
 }
 
 /// Standing of a civilization, from its lasting fall flags.
@@ -172,7 +277,7 @@ impl Territory {
     /// elder court its elder killed, a dominion both.
     pub fn standing(&self, fall: Fall) -> Standing {
         let (needs_capital, needs_elder) = match self.shape {
-            CivShape::Horde => (true, false),
+            CivShape::Horde | CivShape::Outpost => (true, false),
             CivShape::Elder => (false, true),
             CivShape::Both => (true, true),
         };
@@ -183,6 +288,22 @@ impl Territory {
         } else {
             Standing::Thriving
         }
+    }
+
+    /// A settlement that never raids or attacks first: its people fight only when hurt.
+    pub fn peaceful(&self) -> bool {
+        self.shape == CivShape::Outpost
+    }
+
+    /// The genome the people descend from: a species sampled from the character of their
+    /// capital's sector, so a civilization keeps a recognizable name and color.
+    fn source(&self, seed: u64) -> Genome {
+        let mut rng = Rng::new(hash2(
+            seed ^ TERRITORY_SALT ^ 0x51,
+            self.capital.x,
+            self.capital.y,
+        ));
+        Genome::sample(&mut rng, &latent_base(seed, self.capital))
     }
 
     pub fn lineage_of(&self, role: CivRole) -> u64 {
@@ -200,6 +321,7 @@ impl Territory {
             CivShape::Horde => 1.0,
             CivShape::Elder => 1.15,
             CivShape::Both => 1.3,
+            CivShape::Outpost => 0.4,
         };
         (0.85 + 0.35 * self.strength) * shape * (1.0 + 0.1 * self.fortification())
     }
@@ -207,6 +329,9 @@ impl Territory {
     /// How deep and strong the capital is, as a fortress tier 0 to 3: small near the start
     /// of the difficulty curve, bigger deeper and for a stronger civilization.
     pub fn fort_tier(&self) -> u8 {
+        if self.peaceful() {
+            return 0;
+        }
         let depth = Vec2::new(self.capital.x as f32, self.capital.y as f32).length();
         let v = (depth - 5.0) / 5.0 + (self.strength - 0.7) * 0.7;
         ((v * 2.0) as i32).clamp(0, i32::from(fortress::MAX_TIER)) as u8
@@ -224,6 +349,7 @@ impl Territory {
             CivShape::Horde => Archetype::pick(self.id, &[Archetype::Grid, Archetype::Ring]),
             CivShape::Elder => Archetype::pick(self.id, &[Archetype::Star, Archetype::Spiral]),
             CivShape::Both => Archetype::pick(self.id, &Archetype::ALL),
+            CivShape::Outpost => Archetype::Ring,
         }
     }
 
@@ -231,23 +357,9 @@ impl Territory {
     /// sector's pool species the members come from, or the first armed relative), as a
     /// pattern a turret can hold (never a tether or a bare mine layer).
     pub fn turret_arms(&self, seed: u64) -> (Weapon, u8) {
-        let pool = GenePool::for_sector(seed, self.capital);
-        let mut rng = Rng::new(hash2(
-            seed ^ TERRITORY_SALT ^ 0x51,
-            self.capital.x,
-            self.capital.y,
-        ));
-        let own = pool.any(&mut rng).genome;
+        let own = self.source(seed);
         let armed = |g: &Genome| !matches!(g.weapon, Weapon::None | Weapon::Tether | Weapon::Mine);
-        let source = if armed(&own) {
-            own
-        } else {
-            pool.entries
-                .iter()
-                .map(|e| e.species.genome)
-                .find(armed)
-                .unwrap_or(own)
-        };
+        let source = if armed(&own) { own } else { Genome::bogey() };
         match source.weapon {
             Weapon::Missile => (Weapon::Missile, source.volley.clamp(1, 2)),
             Weapon::Needles => (Weapon::Needles, 10),
@@ -260,13 +372,12 @@ impl Territory {
     /// The rank-and-file species: a pool species of the capital sector turned into a
     /// learning, schooling forager, so its name and color are recognizably its own.
     pub fn member(&self, seed: u64) -> Species {
-        let pool = GenePool::for_sector(seed, self.capital);
         let mut rng = Rng::new(hash2(
-            seed ^ TERRITORY_SALT ^ 0x51,
+            seed ^ TERRITORY_SALT ^ 0x52,
             self.capital.x,
             self.capital.y,
         ));
-        let mut g = pool.any(&mut rng).genome;
+        let mut g = self.source(seed);
         g.segments = 1;
         g.limbs = 0;
         g.limb_len = 1;
@@ -301,6 +412,16 @@ impl Territory {
         g.weapon_range = g.weapon_range.max(650.0);
         g.contact_damage = g.contact_damage.min(10.0);
         g.bounty = g.bounty.clamp(50.0, 100.0);
+        if self.peaceful() {
+            // Settlers: touchy only when hurt, frail, slow and poorly armed.
+            g.trigger = Trigger::Harm;
+            g.hull = g.hull.min(30.0);
+            g.fire_period = g.fire_period.max(4.0);
+            g.weapon_range = g.weapon_range.min(450.0);
+            g.contact_damage = g.contact_damage.min(4.0);
+            g.rage = 0.15;
+            g.bounty = g.bounty.min(60.0);
+        }
         Species {
             lineage: self.id,
             generation: 0,
@@ -461,6 +582,7 @@ pub fn civ_spawns(
                 }
             }
             (CivRole::Capital, CivShape::Both) => BaseKind::ALL[rng.int(1, 3) as usize],
+            (CivRole::Capital, CivShape::Outpost) => BaseKind::Hive,
             _ => {
                 if rng.chance(0.6) {
                     BaseKind::Hive
@@ -479,7 +601,7 @@ pub fn civ_spawns(
             phenotype: wearing,
             index,
             brood: Some(member),
-            guardian: Some(warrior),
+            guardian: Some(if t.peaceful() { member } else { warrior }),
             base_kind: Some(kind),
             arms,
             civ: Some(CivTag {
@@ -494,6 +616,16 @@ pub fn civ_spawns(
         |rng: &mut Rng, at: Vec2, spread: f32| at + rng.direction() * rng.range(30.0, spread);
 
     let obstacles = fort_obstacles(out);
+    if capital && t.peaceful() {
+        // A settlement: a seat and a few settlers, no soldiers, no walls.
+        let seat = center + Vec2::new(rng.range(-700.0, 700.0), rng.range(-700.0, 700.0));
+        station(out, &mut rng, CivRole::Capital, seat);
+        for _ in 0..share(5.0) {
+            let at = scatter(&mut rng, seat, 420.0);
+            add(out, member, CivRole::Member, at);
+        }
+        return;
+    }
     if capital {
         let seat = center + Vec2::new(rng.range(-700.0, 700.0), rng.range(-700.0, 700.0));
         station(out, &mut rng, CivRole::Capital, seat);
@@ -518,6 +650,7 @@ pub fn civ_spawns(
             CivShape::Horde => (share(8.0), share(2.0)),
             CivShape::Elder => (share(2.0), share(4.0)),
             CivShape::Both => (share(6.0), share(3.0)),
+            CivShape::Outpost => (share(5.0), 0),
         };
         if t.shape.has_elder() {
             add(out, elder, CivRole::Elder, scatter(&mut rng, seat, 160.0));
@@ -540,7 +673,11 @@ pub fn civ_spawns(
     // Elsewhere in the territory: an outpost near the capital more often than at the rim,
     // and patrols everywhere.
     let near = Vec2::new((id.x - t.capital.x) as f32, (id.y - t.capital.y) as f32).length();
-    let outpost = (0.7 - 0.12 * near).clamp(0.15, 0.7);
+    let outpost = if t.peaceful() {
+        0.0
+    } else {
+        (0.7 - 0.12 * near).clamp(0.15, 0.7)
+    };
     let mut fortify = None;
     if rng.chance(outpost) {
         let seat = place(&mut rng);
@@ -667,17 +804,20 @@ mod tests {
         for seed in [1_u64, 42, SEED, 99] {
             let found = all_territories(seed, 40);
             assert_eq!(found, all_territories(seed, 40));
-            for (id, _) in &found {
+            // Ordinary territories keep to the depth ramp; the one exception is the weak
+            // outpost (see `outpost_is_early_weak_peaceful_and_findable`).
+            let early = outpost(seed);
+            for (id, t) in &found {
                 let depth = Vec2::new(id.x as f32, id.y as f32).length();
-                assert!(depth >= TERRITORY_MIN_DEPTH, "{id:?} too close at {depth}");
+                assert!(
+                    depth >= TERRITORY_MIN_DEPTH || t.id == early.id,
+                    "{id:?} too close at {depth}"
+                );
             }
-            assert!(territory(seed, SectorId::ORIGIN).is_none());
-            for x in -3..=3 {
-                for y in -3..=3 {
-                    let id = SectorId { x, y };
-                    if Vec2::new(x as f32, y as f32).length() < TERRITORY_MIN_DEPTH {
-                        assert!(territory(seed, id).is_none());
-                    }
+            // HOME and its two rings of neighbours hold no civilization at all.
+            for x in -2..=2 {
+                for y in -2..=2 {
+                    assert!(territory(seed, SectorId { x, y }).is_none());
                 }
             }
         }
@@ -767,5 +907,125 @@ mod tests {
         assert_eq!(t.standing(capital), Standing::Weakened);
         assert_eq!(t.standing(elder), Standing::Weakened);
         assert_eq!(t.standing(both), Standing::Fallen);
+    }
+
+    #[test]
+    fn outpost_is_early_weak_peaceful_and_findable() {
+        for seed in [1_u64, 2, 42, SEED, 99, 7, 12345, 777] {
+            let o = outpost(seed);
+            let depth = Vec2::new(o.capital.x as f32, o.capital.y as f32).length();
+            assert!(
+                (3.0..=5.5).contains(&depth),
+                "seed {seed}: {depth} sectors out"
+            );
+            assert!((3..=5).contains(&ring(o.capital)));
+            assert_eq!(o, outpost(seed), "pure");
+            assert_eq!(o.shape, CivShape::Outpost);
+            assert!(o.peaceful() && o.strength < 0.5 && o.menace() < 0.7);
+            assert_eq!(o.fort_tier(), 0);
+            assert_eq!(territory(seed, o.capital), Some(o));
+            // A blob a few sectors across, and nothing else on the way to HOME.
+            let held = all_territories(seed, 12)
+                .into_iter()
+                .filter(|(_, t)| t.id == o.id)
+                .count();
+            assert!((1..=14).contains(&held), "{held} sectors");
+            assert!(!o.name(seed).is_empty() && o.name(seed).ends_with("OUTPOST"));
+            // Its people are settlers: only touchy when hurt, frail and slow to shoot.
+            let m = o.member(seed);
+            assert!(m.genome.trigger == Trigger::Harm && m.genome.hull <= 30.0);
+            assert!(m.genome.fire_period >= 4.0 && m.genome.contact_damage <= 4.0);
+        }
+    }
+
+    #[test]
+    fn outpost_sectors_hold_settlers_and_no_soldiers_walls_or_hostile_stations() {
+        for seed in [SEED, 1, 42] {
+            let o = outpost(seed);
+            let spawns = crate::world::generate(seed, o.capital);
+            let tagged: Vec<_> = spawns
+                .iter()
+                .filter_map(|s| s.civ.map(|c| (c, s)))
+                .collect();
+            assert!(tagged.iter().all(|(c, _)| c.territory == o.id));
+            let count = |role| tagged.iter().filter(|(c, _)| c.role == role).count();
+            assert_eq!(count(CivRole::Capital), 1);
+            assert!(count(CivRole::Member) >= 3);
+            assert_eq!(count(CivRole::Elder) + count(CivRole::Warrior), 0);
+            assert_eq!(count(CivRole::Wall) + count(CivRole::Turret), 0);
+            let base = tagged
+                .iter()
+                .find(|(c, _)| c.role == CivRole::Capital)
+                .unwrap()
+                .1;
+            assert_eq!(base.base_kind, Some(BaseKind::Hive));
+            assert!(base.arms.is_none());
+            assert_eq!(spawns, crate::world::generate(seed, o.capital));
+            // The rest of the blob has patrols and nothing built.
+            for q in all_territories(seed, 8)
+                .into_iter()
+                .filter(|(q, t)| t.id == o.id && *q != o.capital)
+            {
+                let more = crate::world::generate(seed, q.0);
+                assert!(
+                    more.iter()
+                        .filter_map(|s| s.civ)
+                        .all(|c| c.role == CivRole::Member),
+                    "patrols only at {:?}",
+                    q.0
+                );
+            }
+        }
+    }
+
+    /// Ordinary territories prefer medium-high life beside rock-rich land.
+    #[test]
+    fn territories_cluster_where_life_is_medium_high_beside_rock() {
+        let (mut chosen, mut all) = (Vec::new(), Vec::new());
+        for seed in [SEED, 1, 42, 99] {
+            for cx in -5..5 {
+                for cy in -5..5 {
+                    let cell = SectorId { x: cx, y: cy };
+                    let Some((t, accept)) = in_cell(seed, cell) else {
+                        continue;
+                    };
+                    if Vec2::new(t.capital.x as f32, t.capital.y as f32).length()
+                        < TERRITORY_MIN_DEPTH
+                    {
+                        continue;
+                    }
+                    let f = fit(seed, t.capital);
+                    all.push(f);
+                    if accept < ACCEPT_FLOOR + (1.0 - ACCEPT_FLOOR) * f {
+                        chosen.push(f);
+                    }
+                }
+            }
+        }
+        let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+        assert!(chosen.len() > 30, "{}", chosen.len());
+        assert!(
+            mean(&chosen) > mean(&all) + 0.03,
+            "chosen {} vs all {}",
+            mean(&chosen),
+            mean(&all)
+        );
+    }
+
+    #[test]
+    fn strength_follows_the_depth_ramp() {
+        for seed in [SEED, 1, 42, 99] {
+            for (id, t) in all_territories(seed, 40) {
+                if t.id == outpost(seed).id {
+                    continue;
+                }
+                let depth = Vec2::new(t.capital.x as f32, t.capital.y as f32).length();
+                assert!(
+                    t.strength <= STRENGTH_BASE + STRENGTH_PER_DEPTH * depth + 1e-4,
+                    "{id:?} strength {} at depth {depth}",
+                    t.strength
+                );
+            }
+        }
     }
 }

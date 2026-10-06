@@ -15,8 +15,8 @@ A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (pr
 
 ## Decisions and invariants
 
-- Generation is a pure function of the master seed and sector coordinates. Sector (0,0) is the fixed HOME point and must keep reproducing the original population; a golden test in `src/world.rs` pins it. Do not reorder RNG draws on the original stream; new generators use their own salted streams.
-- Enemy kinds are expressions of genomes (Bogey, Lunatic, Smarty, Fatso and Leech are the HOME pool), not enum branches. Emergent weirdness comes first and balance is tamed afterwards, so far sectors may be unplayable for now.
+- Generation is a pure function of the master seed and sector coordinates. Sector (0,0) is HOME, a peaceful start: rocks, plankton and a planetoid with a free pad, no creatures, and a sanctuary where nothing hunts the ship. Ring 1 (Moore distance) holds Fatsos only, ring 2 adds Bogeys and Smarties, deeper rings phase in the rest. A golden test in `src/world.rs` pins HOME (a deliberate clean break from the C++ population; change it only on purpose). New generators use their own salted streams.
+- Enemy kinds are expressions of genomes, not enum branches (Bogey, Lunatic, Smarty, Fatso and Leech are the five classics). Species live in overlapping range blobs (`src/range.rs`) with abundance fading to the edge, not in every sector; a separate rock-belt field and civilization territories use the same blob technique. Emergent weirdness comes first and balance is tamed afterwards, so far sectors may be unplayable for now.
 - Bogeys school passively and only turn hostile when approached or hurt; Lunatics have negative mass and fling whatever touches them.
 - Only sectors near the player are simulated; enemies are not bound to their sector and may chase across borders.
 - Sectors are 6000 units wide (`SECTOR_SIZE`); an earlier design note said 1200. Unresolved, decide by playing.

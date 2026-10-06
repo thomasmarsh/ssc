@@ -451,21 +451,32 @@ pub(crate) fn start_sector(seed: u64, species: Species) -> SectorId {
         .unwrap()
 }
 
-/// Where to idle in sector `id` so nothing is agitated by the ship: the edge or corner of the
-/// sector farthest from every creature generated there.
+/// Where to idle in sector `id` so nothing is agitated by the ship: the point (on a coarse grid
+/// within 1900 of its center, so the whole sector is loaded around it) farthest from every creature generated in the sectors around.
 #[cfg(test)]
 pub(crate) fn calm_spot(seed: u64, id: SectorId) -> Vec2 {
-    let spawns = crate::world::generate(seed, id);
+    let creatures: Vec<Vec2> = (-1..=1)
+        .flat_map(|dx| (-1..=1).map(move |dy| (dx, dy)))
+        .flat_map(|(dx, dy)| {
+            crate::world::generate(
+                seed,
+                SectorId {
+                    x: id.x + dx,
+                    y: id.y + dy,
+                },
+            )
+        })
+        .filter(|s| s.species.is_some())
+        .map(|s| s.position)
+        .collect();
     let gap = |p: &Vec2| {
-        spawns
+        creatures
             .iter()
-            .filter(|s| s.species.is_some())
-            .map(|s| s.position.distance(*p))
+            .map(|c| c.distance(*p))
             .fold(f32::INFINITY, f32::min)
     };
-    [-2900.0, 0.0, 2900.0]
-        .into_iter()
-        .flat_map(|x| [-2900.0, 0.0, 2900.0].map(|y| id.center() + Vec2::new(x, y)))
+    (-2..=2)
+        .flat_map(|x| (-2..=2).map(move |y| id.center() + Vec2::new(x as f32, y as f32) * 950.0))
         .max_by(|a, b| gap(a).total_cmp(&gap(b)))
         .unwrap()
 }

@@ -558,8 +558,9 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
             ..Spawn::at(BodyKind::Asteroid, position)
         });
     }
-    // HOME has no gravity wells: nothing there is a hazard.
-    let wells = if ring > 0 && rng.chance((1.2 * distortion).min(1.0)) {
+    // The opening rings (HOME and its two rings of neighbours) hold rocks and plankton but no
+    // gravity wells: nothing there is a hazard beyond the creatures the ramp allows.
+    let wells = if ring > 2 && rng.chance((1.2 * distortion).min(1.0)) {
         rng.int(1, count(4.0 * distortion).max(1))
     } else {
         0
@@ -1588,5 +1589,96 @@ mod tests {
             }
         }
         assert!(slitherers > 20, "{slitherers}");
+    }
+
+    /// Every creature a sector generates, whatever route (clusters, nests, husk tenants,
+    /// brood and guardians of a base, rooted residents).
+    fn lineages(spawns: &[Spawn]) -> Vec<u64> {
+        let mut out = Vec::new();
+        for s in spawns {
+            out.extend(s.species.map(|sp| sp.lineage));
+            out.extend(s.brood.map(|sp| sp.lineage));
+            out.extend(s.guardian.map(|sp| sp.lineage));
+            out.extend(s.den.map(|(sp, _)| sp.lineage));
+        }
+        out
+    }
+
+    #[test]
+    fn ring_one_holds_only_fatsos_and_ring_two_only_the_allowed_kinds() {
+        let (fatso, bogey, smarty) = (
+            Species::fatso().lineage,
+            Species::bogey().lineage,
+            Species::smarty().lineage,
+        );
+        let (mut fatsos, mut bogeys, mut smarties) = (0, 0, 0);
+        for seed in [0x535343, 1, 42, 7, 99] {
+            for x in -2..=2 {
+                for y in -2..=2 {
+                    let id = SectorId { x, y };
+                    let spawns = generate(seed, id);
+                    let found = lineages(&spawns);
+                    match crate::range::ring(id) {
+                        0 => assert!(found.is_empty()),
+                        1 => {
+                            assert!(found.iter().all(|l| *l == fatso), "ring one is Fatsos");
+                            fatsos += found.len();
+                        }
+                        _ => {
+                            assert!(
+                                found.iter().all(|l| [fatso, bogey, smarty].contains(l)),
+                                "ring two admits Fatsos, Bogeys and Smarties only"
+                            );
+                            bogeys += found.iter().filter(|l| **l == bogey).count();
+                            smarties += found.iter().filter(|l| **l == smarty).count();
+                        }
+                    }
+                    // Just food and rocks: no structures, hazards or rooted life either.
+                    if crate::range::ring(id) <= 2 {
+                        assert!(spawns.iter().all(|s| {
+                            s.base_kind.is_none()
+                                && s.den.is_none()
+                                && s.rooted.is_none()
+                                && s.kind != BodyKind::BlackHole
+                                && !(s.pinned && s.rock != RockKind::Planetoid)
+                                && s.civ.is_none()
+                        }));
+                    }
+                }
+            }
+        }
+        assert!(
+            fatsos > 50 && bogeys > 50 && smarties > 5,
+            "{fatsos} {bogeys} {smarties}"
+        );
+    }
+
+    #[test]
+    fn the_ramp_adds_kinds_and_structures_with_depth() {
+        let kinds = |ring: i32| -> std::collections::HashSet<u64> {
+            let mut out = std::collections::HashSet::new();
+            for seed in 0..6 {
+                for x in -ring..=ring {
+                    for y in -ring..=ring {
+                        if crate::range::ring(SectorId { x, y }) == ring as u32 {
+                            out.extend(lineages(&generate(seed, SectorId { x, y })));
+                        }
+                    }
+                }
+            }
+            out
+        };
+        assert!(kinds(2).len() <= 3, "{:x?}", kinds(2));
+        assert!(kinds(6).len() > 10, "far rings hold many lineages");
+        // Structures and bases need depth.
+        let stations = (3..=12)
+            .flat_map(|x| (-6..=6).map(move |y| SectorId { x, y }))
+            .filter(|id| {
+                generate(5, *id)
+                    .iter()
+                    .any(|s| s.base_kind.is_some() && s.fort.is_none())
+            })
+            .count();
+        assert!(stations > 0);
     }
 }

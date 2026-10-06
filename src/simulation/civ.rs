@@ -225,6 +225,13 @@ impl Game {
         self.civ_brains.get(&territory).map(|b| &**b)
     }
 
+    /// Whether a civilization is a peaceful settlement: it never raids and never hunts a pad.
+    pub(super) fn civ_peaceful(&self, territory: u64) -> bool {
+        self.civ_territories
+            .get(&territory)
+            .is_some_and(|t| t.peaceful())
+    }
+
     /// Living creatures of one civilization in the loaded world.
     pub fn civ_strength(&self, territory: u64) -> usize {
         self.bodies
@@ -244,7 +251,7 @@ impl Game {
             ),
             _ => (
                 RaidStage::Patrol,
-                (standing != Standing::Fallen).then_some(WAR_AT),
+                (standing != Standing::Fallen && !t.peaceful()).then_some(WAR_AT),
             ),
         };
         let menace = if standing == Standing::Fallen {
@@ -264,7 +271,7 @@ impl Game {
             threat: self.threat() * menace,
             stage,
             next_in,
-            fort: (standing != Standing::Fallen)
+            fort: (standing != Standing::Fallen && !t.peaceful())
                 .then(|| (t.fort_archetype().label(), t.fort_tier() + 1)),
         })
     }
@@ -357,9 +364,10 @@ impl Game {
 
     fn update_raid(&mut self, dt: f32) {
         let alive = self.player().is_some();
+        // A peaceful settlement never raids, however long the ship lingers.
         let here = self
             .territory
-            .filter(|t| self.civ_standing(t.id) != Standing::Fallen);
+            .filter(|t| !t.peaceful() && self.civ_standing(t.id) != Standing::Fallen);
         match (here, self.raid.as_mut()) {
             (Some(t), Some(raid)) if raid.territory == t.id => {
                 if alive {
@@ -657,13 +665,28 @@ mod tests {
     }
 
     #[test]
-    fn home_and_its_neighborhood_have_no_civilization() {
+    fn home_and_its_two_rings_have_no_civilization() {
         for seed in [1, 42, SEED] {
-            for x in -3..=3 {
-                for y in -3..=3 {
+            for x in -2..=2 {
+                for y in -2..=2 {
                     let spawns = world::generate(seed, SectorId { x, y });
-                    if Vec2::new(x as f32, y as f32).length() < 4.0 {
-                        assert!(spawns.iter().all(|s| s.civ.is_none()));
+                    assert!(spawns.iter().all(|s| s.civ.is_none()), "{seed} {x},{y}");
+                }
+            }
+            // Beyond them only the weak outpost lives inside the ordinary territories' depth.
+            let outpost = crate::territory::outpost(seed);
+            for x in -5..=5 {
+                for y in -5..=5 {
+                    let spawns = world::generate(seed, SectorId { x, y });
+                    if Vec2::new(x as f32, y as f32).length()
+                        < crate::territory::TERRITORY_MIN_DEPTH
+                    {
+                        assert!(
+                            spawns
+                                .iter()
+                                .all(|s| s.civ.is_none_or(|c| c.territory == outpost.id)),
+                            "{seed} {x},{y}"
+                        );
                     }
                 }
             }
@@ -1001,5 +1024,44 @@ mod tests {
             }
             assert!(game.civ_strength(t.id) < 80);
         }
+    }
+
+    #[test]
+    fn the_early_outpost_is_peaceful_toward_a_quiet_ship_and_fights_only_when_hurt() {
+        let o = crate::territory::outpost(SEED);
+        let heart = o.capital.center();
+        let mut game = Game::new(SEED);
+        // (Ring three and beyond has its own wildlife and wells, so the ship is invulnerable
+        // here; what is checked is the settlers.)
+        game.player_invulnerability = 1e9;
+        game.teleport(heart);
+        game.step(DT, Input::default());
+        assert!(game.notices.iter().any(|n| n.text.contains("OUTPOST")));
+        let settlers = members(&game, o.id).len();
+        assert!(settlers >= 3, "settlers live here: {settlers}");
+        // Five minutes on top of the seat: nobody hunts, nobody raids, the ship is untouched.
+        for _ in 0..300 {
+            hold(&mut game, heart, 1.0);
+            assert!(game.raid.is_none(), "a settlement never raids");
+            assert!(
+                members(&game, o.id).iter().all(|b| !b.alert),
+                "settlers stay calm around a quiet ship"
+            );
+        }
+        let report = game.territory_report().unwrap();
+        assert!(report.next_in.is_none() && report.fort.is_none());
+        assert!(report.threat < game.threat());
+        // Hurting one makes it (and only the hurt one at first) fight back.
+        let victim = members(&game, o.id)[0];
+        let (victim_id, at) = (victim.id, victim.position);
+        let mut shot = Bullet::friendly(at + Vec2::X * 60.0, -Vec2::X * 2000.0, 1.0);
+        shot.damage = 3.0;
+        game.bullets.push(shot);
+        for _ in 0..4 {
+            game.step(DT, Input::default());
+        }
+        let hurt = game.body(victim_id).expect("a graze does not kill");
+        assert!(hurt.health < hurt.max_health);
+        assert!(hurt.alert, "a hurt settler fights back");
     }
 }

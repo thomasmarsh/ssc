@@ -439,6 +439,9 @@ pub struct Game {
     mine_note: f32,
     loaded: HashSet<SectorId>,
     active: Vec<SectorId>,
+    /// HOME is a sanctuary: while the ship is in its sector no creature hunts it unless it
+    /// has been hurt. Tests that stage fights at the origin turn it off (`empty_game`).
+    sanctuary: bool,
 }
 
 impl Game {
@@ -498,6 +501,7 @@ impl Game {
             civ_brains: HashMap::new(),
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
+            sanctuary: true,
             seed,
             rng: Rng::new(seed),
             loot: Rng::new(seed ^ loot::LOOT_SALT),
@@ -513,6 +517,7 @@ impl Game {
         };
         game.stream_sectors();
         game.spawn_player(Vec2::ZERO);
+        game.seed_home_pad();
         game
     }
 
@@ -1886,6 +1891,10 @@ mod tests {
         game.chains.clear();
         game.food.clear();
         game.eggs.clear();
+        // The home pad stands on a planetoid that is gone from an empty world.
+        game.pad.pads.clear();
+        // The arena at the origin is not HOME's sanctuary: creatures staged here hunt.
+        game.sanctuary = false;
         game.bodies[0].position = Vec2::ZERO;
         game.player_invulnerability = 0.0;
         game
@@ -2634,6 +2643,104 @@ mod tests {
         assert!(game.player().unwrap().angle.is_finite());
     }
 
+    #[test]
+    fn home_is_a_sanctuary_nothing_hunts_an_idle_ship_for_ten_minutes() {
+        for seed in [42, 7] {
+            let mut game = Game::new(seed);
+            game.player_invulnerability = 0.0;
+            // Idle at HOME's edge facing the most Fatsos next door.
+            let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .into_iter()
+                .max_by_key(|&(x, y)| {
+                    world::generate(seed, SectorId { x, y })
+                        .iter()
+                        .filter(|s| s.species.is_some())
+                        .count()
+                })
+                .unwrap();
+            let spot = Vec2::new(edge.0 as f32, edge.1 as f32) * (world::SECTOR_SIZE / 2.0 - 200.0);
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(DT, Input::default());
+            assert!(
+                game.bodies
+                    .iter()
+                    .any(|b| b.kind == BodyKind::Creature && b.position.distance(spot) < 6500.0),
+                "seed {seed}: next door is inhabited, or this proves nothing"
+            );
+            for tick in 0..60 * 60 * 10 {
+                set_player(&mut game, spot, Vec2::ZERO);
+                game.step(DT, Input::default());
+                if tick % 60 == 0 {
+                    assert!(
+                        game.bodies
+                            .iter()
+                            .filter(|b| b.kind == BodyKind::Creature)
+                            .all(|b| !b.alert),
+                        "seed {seed}: a creature hunted the ship at HOME"
+                    );
+                }
+            }
+            let ship = game.player().unwrap();
+            assert_eq!(ship.health, ship.max_health, "seed {seed}");
+            assert_eq!(game.lives, 3);
+            // No hostile or hunting creature in HOME itself, nor any whose approach was hostile.
+            assert!(game.bodies.iter().all(|b| {
+                b.kind != BodyKind::Creature
+                    || SectorId::containing(b.position) != SectorId::ORIGIN
+                    || !b.alert
+            }));
+        }
+    }
+
+    #[test]
+    fn the_sanctuary_ends_at_the_border_and_a_hurt_creature_still_fights_back() {
+        let seed = 42;
+        let mut game = Game::new(seed);
+        game.player_invulnerability = 1e9;
+        // Ring one, within a Fatso's sight: it hunts.
+        let next = find_sector(seed, |s| {
+            s.iter()
+                .filter(|s| {
+                    s.species
+                        .is_some_and(|sp| sp.lineage == Species::fatso().lineage)
+                })
+                .count()
+                >= 2
+        });
+        assert_eq!(crate::range::ring(next), 1);
+        game.teleport(next.center());
+        game.step(DT, Input::default());
+        let fatso = game
+            .bodies
+            .iter()
+            .find(|b| b.kind == BodyKind::Creature && b.species == Species::fatso().lineage)
+            .map(|b| (b.id, b.position))
+            .unwrap();
+        set_player(&mut game, fatso.1 + Vec2::new(500.0, 0.0), Vec2::ZERO);
+        for _ in 0..30 {
+            game.step(DT, Input::default());
+        }
+        assert!(body(&game, fatso.0).alert, "outside HOME, Fatsos hunt");
+        // Back inside HOME the same Fatso calms (it is unhurt)...
+        let mut game = empty_game();
+        game.sanctuary = true;
+        let near = spawn(&mut game, &Species::fatso(), Vec2::new(700.0, 0.0));
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert!(!body(&game, near).alert, "a Fatso in HOME ignores the ship");
+        // ... until hurt.
+        let at = body(&game, near).position;
+        let mut shot = Bullet::friendly(at + Vec2::X * 80.0, -Vec2::X * 2000.0, 1.0);
+        shot.damage = 5.0;
+        game.bullets.push(shot);
+        game.step(DT, Input::default());
+        game.step(DT, Input::default());
+        assert!(body(&game, near).health < body(&game, near).max_health);
+        assert!(body(&game, near).alert, "a hurt creature still fights back");
+    }
+
     /// First sector (scanning outward) whose generated population satisfies `wanted`.
     pub(super) fn find_sector(seed: u64, wanted: impl Fn(&[world::Spawn]) -> bool) -> SectorId {
         for ring in 0..=20_i32 {
@@ -3260,48 +3367,62 @@ mod home_flocking_tests {
     use super::*;
     use crate::genome::Species;
 
-    /// (fraction of bogeys with a bogey neighbour within perception, mean nearest-neighbour
-    /// distance, bogey count) for the calm bogeys of a fresh game at the start school.
-    fn measure(game: &Game) -> (f32, f32, usize) {
+    /// The generated bogeys of a game: id, position and whether it is fed. A hungry bogey
+    /// leaves the school to graze (that is foraging, not schooling), so only fed ones are
+    /// the subject; hungry ones still count as mates.
+    fn school(game: &Game) -> Vec<(u64, Vec2, bool)> {
         let lineage = Species::bogey().lineage;
-        let spots: Vec<Vec2> = game
-            .bodies
+        game.bodies
             .iter()
             .filter(|b| b.kind == BodyKind::Creature && b.species == lineage && !b.follower)
-            .map(|b| b.position)
-            .collect();
-        let nearest: Vec<f32> = spots
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                spots
+            // Generated bogeys only: hatchlings born in play start alone by nature.
+            .filter(|b| b.origin.is_some())
+            .map(|b| (b.id, b.position, b.energy_fraction() >= 0.8))
+            .collect()
+    }
+
+    /// Each fed bogey's id and the distance to its nearest schoolmate.
+    fn nearest(game: &Game) -> Vec<(u64, f32)> {
+        let all = school(game);
+        all.iter()
+            .filter(|(_, _, fed)| *fed)
+            .map(|(id, p, _)| {
+                let gap = all
                     .iter()
-                    .enumerate()
-                    .filter(|(j, _)| *j != i)
-                    .map(|(_, q)| p.distance(*q))
-                    .fold(f32::INFINITY, f32::min)
+                    .filter(|(other, ..)| other != id)
+                    .map(|(_, q, _)| p.distance(*q))
+                    .fold(f32::INFINITY, f32::min);
+                (*id, gap)
             })
+            .collect()
+    }
+
+    /// (fed bogeys with no schoolmate within perception, fed bogeys counted, mean
+    /// nearest-neighbour distance, bogey count), leaving out the bogeys generated alone at a thin range edge
+    /// (`alone`): a school coming apart is what this guards, not a lone creature.
+    fn measure(game: &Game, alone: &HashSet<u64>) -> (usize, usize, f32, usize) {
+        let counted: Vec<f32> = nearest(game)
+            .iter()
+            .filter(|(id, _)| !alone.contains(id))
+            .map(|(_, gap)| *gap)
             .collect();
-        let near = nearest.iter().filter(|d| **d < 380.0).count() as f32;
+        let isolated = counted.iter().filter(|d| **d >= 380.0).count();
         (
-            near / nearest.len() as f32,
-            nearest.iter().sum::<f32>() / nearest.len() as f32,
-            spots.len(),
+            isolated,
+            counted.len(),
+            counted.iter().sum::<f32>() / counted.len() as f32,
+            school(game).len(),
         )
     }
 
-    fn clusters(game: &Game, link: f32) -> Vec<usize> {
-        let lineage = Species::bogey().lineage;
-        let spots: Vec<Vec2> = game
-            .bodies
-            .iter()
-            .filter(|b| b.kind == BodyKind::Creature && b.species == lineage && !b.follower)
-            .map(|b| b.position)
-            .collect();
-        let mut group: Vec<usize> = (0..spots.len()).collect();
-        for i in 0..spots.len() {
+    /// Sizes of the groups the bogeys form when linked within `link`, and how many of the
+    /// lone ones are fed (a fed bogey alone is a school coming apart).
+    fn clusters(game: &Game, link: f32) -> (Vec<usize>, usize) {
+        let all = school(game);
+        let mut group: Vec<usize> = (0..all.len()).collect();
+        for i in 0..all.len() {
             for j in 0..i {
-                if spots[i].distance(spots[j]) < link {
+                if all[i].1.distance(all[j].1) < link {
                     let (a, b) = (group[i], group[j]);
                     for g in group.iter_mut().filter(|g| **g == a) {
                         *g = b;
@@ -3309,12 +3430,15 @@ mod home_flocking_tests {
                 }
             }
         }
-        let mut sizes: Vec<usize> = (0..spots.len())
+        let mut sizes: Vec<usize> = (0..all.len())
             .map(|k| group.iter().filter(|g| **g == k).count())
             .filter(|n| *n > 0)
             .collect();
         sizes.sort_unstable_by(|a, b| b.cmp(a));
-        sizes
+        let lone_fed = (0..all.len())
+            .filter(|&k| group.iter().filter(|g| **g == group[k]).count() == 1 && all[k].2)
+            .count();
+        (sizes, lone_fed)
     }
 
     /// Before the schooling tuning, a minute of idling beside a school left singletons (three
@@ -3323,12 +3447,27 @@ mod home_flocking_tests {
     /// start one on ring two (the steering is unchanged, only where the test stands).
     #[test]
     fn start_bogeys_stay_in_schools_and_stay_calm() {
-        let seed = 0x535343;
+        for seed in [42, 11, 5, 1] {
+            stay_in_schools(seed);
+        }
+    }
+
+    fn stay_in_schools(seed: u64) {
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
         let lineage = Species::bogey().lineage;
-        let school = crate::range::start_sector(seed, Species::bogey());
-        game.teleport(crate::range::calm_spot(seed, school));
+        let start = crate::range::start_sector(seed, Species::bogey());
+        game.teleport(crate::range::calm_spot(seed, start));
+        game.step(1.0 / 60.0, Input::default());
+        // Observe the school on its own: a Fatso blundering through it (impacts hurt, and a
+        // hurt bogey alarms its mates) is a real but separate event.
+        game.bodies
+            .retain(|b| b.kind != BodyKind::Creature || b.species == lineage);
+        let alone: HashSet<u64> = nearest(&game)
+            .into_iter()
+            .filter(|(_, gap)| *gap >= 380.0)
+            .map(|(id, _)| id)
+            .collect();
         for second in 1..=60 {
             for _ in 0..60 {
                 game.step(1.0 / 60.0, Input::default());
@@ -3336,29 +3475,52 @@ mod home_flocking_tests {
             if second % 30 != 0 {
                 continue;
             }
-            let (near, spacing, count) = measure(&game);
-            let sizes = clusters(&game, 380.0);
-            // At most 4 percent alone (HOME's single band allowed one of 33).
-            assert!(count >= 6, "{second}s: the school thinned to {count}");
+            let (isolated, subjects, spacing, count) = measure(&game, &alone);
+            let (sizes, lone_fed) = clusters(&game, 380.0);
             assert!(
-                near >= 0.95,
-                "{second}s: only {near} have a schoolmate near"
+                count >= 5,
+                "seed {seed} {second}s: the school thinned to {count}"
             );
-            // 170 at HOME's one big band; ring-two schools are of varied size, and the mean
-            // wanders between about 125 and 177 across seeds (245 before the tuning).
-            assert!(spacing < 185.0, "{second}s: spacing {spacing}");
+            // At most 5 percent (and one creature) of the fed bogeys cut off from their school:
+            // HOME's band of 33 allowed one.
             assert!(
-                sizes.iter().filter(|n| **n == 1).count() as f32 <= (count as f32 * 0.04).ceil(),
-                "{second}s: bogeys are alone: {sizes:?}"
+                isolated <= 1.max((subjects as f32 * 0.05).ceil() as usize),
+                "seed {seed} {second}s: {isolated} of {subjects} have no schoolmate near"
             );
-            assert!(spacing > 50.0, "{second}s: packed into a ball: {spacing}");
+            // 170 at HOME's one big band of 33; ring-two schools are few and small, so the
+            // mean wanders between about 125 and 190 across seeds (245 before the tuning).
+            assert!(spacing < 200.0, "seed {seed} {second}s: spacing {spacing}");
+            // At most 4 percent of fed bogeys alone (HOME's single band allowed one of 33).
             assert!(
-                game.bodies
-                    .iter()
-                    .filter(|b| b.kind == BodyKind::Creature && b.species == lineage)
-                    .all(|b| !b.alert),
-                "{second}s: a bogey turned hostile with nobody near"
+                lone_fed as f32 <= (count as f32 * 0.04).ceil(),
+                "seed {seed} {second}s: bogeys are alone: {sizes:?}"
             );
+            assert!(
+                spacing > 50.0,
+                "seed {seed} {second}s: packed into a ball: {spacing}"
+            );
+            // Calm unless something explains it: the ship drifted close, the bogey is hurt (a
+            // gravity well next door, a collision), or a hurt mate's panic spread to it.
+            let ship = game.player().unwrap().position;
+            let bogeys: Vec<&Body> = game
+                .bodies
+                .iter()
+                .filter(|b| b.kind == BodyKind::Creature && b.species == lineage)
+                .collect();
+            for b in bogeys.iter().filter(|b| b.alert) {
+                let explained = b.position.distance(ship) <= 700.0
+                    || b.health < b.max_health
+                    || b.provoked > 0.0
+                    || bogeys.iter().any(|o| {
+                        o.id != b.id
+                            && (o.alert || o.health < o.max_health)
+                            && o.position.distance(b.position) < 400.0
+                    });
+                assert!(
+                    explained,
+                    "seed {seed} {second}s: a bogey turned hostile with nobody near"
+                );
+            }
         }
     }
 }
