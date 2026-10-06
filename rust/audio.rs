@@ -13,7 +13,7 @@ use ssc::mixer::Mixer;
 use ssc::synth::{self, Sound};
 use std::collections::HashMap;
 
-const MASTER: f32 = 0.7;
+const MASTER: f32 = 1.0;
 
 #[derive(Resource)]
 pub struct Bank(HashMap<Sound, Handle<AudioSource>>);

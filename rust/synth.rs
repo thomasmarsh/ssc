@@ -63,7 +63,7 @@ impl Sound {
                 let mut noise = Noise::new(11);
                 let mut v = voice(0.32, |t, _| {
                     let rise = (t / 0.32).min(1.0);
-                    let thump = sine(sweep(rise, 140.0, 300.0), t) * decay(t, 0.12);
+                    let thump = sine(sweep(rise, 200.0, 420.0), t) * decay(t, 0.12);
                     thump + noise.next() * 0.35 * (1.0 - rise) * decay(t, 0.2)
                 });
                 lowpass(&mut v, 1800.0);
@@ -76,47 +76,58 @@ impl Sound {
             // Other ships sit lower and duller than ours, so the player's fire reads as
             // "mine" by ear even in a crowd.
             Sound::EnemyPellet => {
-                let mut v = voice(0.09, |t, _| {
-                    let f = sweep(t / 0.09, 240.0, 150.0);
-                    square(f, t) * decay(t, 0.04)
+                let mut v = voice(0.1, |t, _| {
+                    let f = sweep(t / 0.1, 560.0, 300.0);
+                    square(f, t) * decay(t, 0.05)
                 });
-                lowpass(&mut v, 900.0);
+                lowpass(&mut v, 3200.0);
+                crush(&mut v, 24.0, 2);
                 v
             }
             Sound::EnemyNeedle => {
-                let mut v = voice(0.07, |t, _| {
-                    tri(sweep(t / 0.07, 1100.0, 760.0), t) * decay(t, 0.025)
+                let mut v = voice(0.08, |t, _| {
+                    square(sweep(t / 0.08, 1500.0, 900.0), t) * decay(t, 0.03)
                 });
-                lowpass(&mut v, 2000.0);
+                lowpass(&mut v, 3600.0);
+                crush(&mut v, 24.0, 2);
                 v
             }
             Sound::EnemyMissile => {
                 let mut noise = Noise::new(23);
                 let mut v = voice(0.4, |t, _| {
-                    let w = sine(sweep(t / 0.4, 90.0, 180.0), t);
+                    let w = saw(sweep(t / 0.4, 220.0, 440.0), t);
                     (w * 0.6 + noise.next() * 0.5) * decay(t, 0.25)
                 });
-                lowpass(&mut v, 700.0);
+                lowpass(&mut v, 2200.0);
+                crush(&mut v, 24.0, 2);
                 v
             }
-            Sound::EnemyOrb => voice(0.2, |t, _| {
-                (sine(260.0, t) + sine(266.0, t)) * 0.5 * decay(t, 0.09)
-            }),
+            Sound::EnemyOrb => {
+                let mut v = voice(0.2, |t, _| {
+                    (square(380.0, t) + square(392.0, t)) * 0.5 * decay(t, 0.09)
+                });
+                lowpass(&mut v, 3000.0);
+                crush(&mut v, 24.0, 2);
+                v
+            }
             Sound::Impact => {
                 let mut noise = Noise::new(31);
-                let mut v = voice(0.07, |t, _| {
-                    (noise.next() * 0.6 + sine(190.0, t) * 0.7) * decay(t, 0.02)
+                let mut v = voice(0.08, |t, _| {
+                    (noise.next() * 0.6 + square(320.0, t) * 0.5) * decay(t, 0.025)
                 });
-                lowpass(&mut v, 2600.0);
+                lowpass(&mut v, 3600.0);
+                crush(&mut v, 20.0, 3);
                 v
             }
             Sound::Explosion => {
                 let mut noise = Noise::new(43);
-                let mut v = voice(0.8, |t, _| {
-                    let thump = sine(sweep((t / 0.5).min(1.0), 95.0, 34.0), t) * decay(t, 0.3);
-                    noise.next() * 0.9 * decay(t, 0.22) + thump * 1.3
+                let mut v = voice(0.9, |t, _| {
+                    // The thump starts high enough for laptop speakers to carry it.
+                    let thump = square(sweep((t / 0.6).min(1.0), 170.0, 55.0), t) * decay(t, 0.3);
+                    noise.next() * 0.9 * decay(t, 0.25) + thump * 0.9
                 });
-                lowpass_sweep(&mut v, 3200.0, 180.0);
+                lowpass_sweep(&mut v, 5000.0, 350.0);
+                crush(&mut v, 32.0, 4);
                 v
             }
             Sound::Respawn => voice(0.7, |t, _| {
@@ -141,10 +152,11 @@ impl Sound {
             Sound::HurtHull => {
                 let mut noise = Noise::new(61);
                 let mut v = voice(0.4, |t, _| {
-                    let thump = sine(sweep((t / 0.4).min(1.0), 100.0, 45.0), t);
+                    let thump = square(sweep((t / 0.4).min(1.0), 180.0, 80.0), t);
                     (thump + noise.next() * 0.7) * decay(t, 0.16)
                 });
-                lowpass(&mut v, 1400.0);
+                lowpass(&mut v, 2600.0);
+                crush(&mut v, 24.0, 3);
                 v
             }
         };
@@ -227,6 +239,17 @@ fn lowpass(samples: &mut [f32], cutoff: f32) {
     for s in samples {
         y += a * (*s - y);
         *s = y;
+    }
+}
+
+/// Sample-and-hold every `hold` samples and quantize to `levels` steps: the 8-bit grit.
+fn crush(samples: &mut [f32], levels: f32, hold: usize) {
+    let mut held = 0.0;
+    for (i, s) in samples.iter_mut().enumerate() {
+        if i % hold == 0 {
+            held = (*s * levels).round() / levels;
+        }
+        *s = held;
     }
 }
 
