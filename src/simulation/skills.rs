@@ -3,6 +3,7 @@
 
 use super::Material;
 use super::tuning as t;
+use super::upgrades::{Rarity, Slot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Skill {
@@ -16,15 +17,18 @@ pub enum Skill {
     Magnet,
     /// A bigger hold.
     Cargo,
+    /// A forward arc shield that turns hostile shots aside. Locked until bought.
+    Parry,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 5] = [
+    pub const ALL: [Skill; 6] = [
         Self::BeamPower,
         Self::BeamRange,
         Self::Yield,
         Self::Magnet,
         Self::Cargo,
+        Self::Parry,
     ];
 
     pub fn index(self) -> usize {
@@ -38,6 +42,7 @@ impl Skill {
             Self::Yield => "ORE YIELD",
             Self::Magnet => "MAGNET",
             Self::Cargo => "CARGO HOLD",
+            Self::Parry => "PARRY",
         }
     }
 
@@ -53,6 +58,11 @@ impl Skill {
             Self::Yield => format!("+{:.0}% per ore", t::YIELD_STEP * 100.0),
             Self::Magnet => format!("+{:.0} pickup pull", t::MAGNET_STEP),
             Self::Cargo => format!("+{:.0} hold each", t::CARGO_STEP),
+            Self::Parry => format!(
+                "arc shield, {:.0}% block (+{:.0}% a level)",
+                t::PARRY_CHANCE * 100.0,
+                t::PARRY_CHANCE_STEP * 100.0
+            ),
         }
     }
 
@@ -63,6 +73,20 @@ impl Skill {
             Self::Yield => &t::PRICE_YIELD,
             Self::Magnet => &t::PRICE_MAGNET,
             Self::Cargo => &t::PRICE_CARGO,
+            Self::Parry => &t::PRICE_PARRY,
+        }
+    }
+
+    /// Whether this is a locked upgrade: level zero means the ship cannot do it at all.
+    pub fn is_ability(self) -> bool {
+        matches!(self, Self::Parry)
+    }
+
+    /// The part the ship must already carry before the first purchase.
+    pub fn requirement(self) -> Option<(Slot, Rarity)> {
+        match self {
+            Self::Parry => Some((Slot::Plating, Rarity::Rare)),
+            _ => None,
         }
     }
 
@@ -122,6 +146,19 @@ impl Skills {
 
     pub fn magnet_bonus(&self) -> f32 {
         t::MAGNET_STEP * self.steps(Skill::Magnet)
+    }
+
+    /// Chance a hostile shot in the arc is stopped; zero while locked.
+    pub fn parry_chance(&self) -> f32 {
+        match self.level(Skill::Parry) {
+            0 => 0.0,
+            n => (t::PARRY_CHANCE + t::PARRY_CHANCE_STEP * f32::from(n - 1)).min(0.95),
+        }
+    }
+
+    pub fn parry_cooldown(&self) -> f32 {
+        let n = self.level(Skill::Parry).max(1);
+        t::PARRY_COOLDOWN - t::PARRY_COOLDOWN_STEP * f32::from(n - 1)
     }
 
     pub fn cargo_bonus(&self) -> f32 {

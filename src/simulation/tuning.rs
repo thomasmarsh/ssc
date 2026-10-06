@@ -71,3 +71,32 @@ pub const PRICE_MAGNET: [(Material, f32); 2] =
     [(Material::Volatiles, 20.0), (Material::Crystal, 4.0)];
 pub const PRICE_CARGO: [(Material, f32); 2] =
     [(Material::Metal, 40.0), (Material::Volatiles, 10.0)];
+
+// ---- parry (a locked upgrade: level 0 is not owned) ----------------------------------------
+
+/// Chance a hostile shot inside the arc is stopped at level 1, and the gain per level after.
+/// Some of a barrage always leaks through.
+pub const PARRY_CHANCE: f32 = 0.70;
+pub const PARRY_CHANCE_STEP: f32 = 0.06;
+/// Seconds the shield stays up, and the first part of that which is a "perfect" window: a
+/// shot stopped then is sent back harder and part of the cost is refunded.
+pub const PARRY_WINDOW: f32 = 0.35;
+pub const PARRY_PERFECT: f32 = 0.12;
+/// Seconds from raising the shield until it can be raised again, less per level.
+pub const PARRY_COOLDOWN: f32 = 1.6;
+pub const PARRY_COOLDOWN_STEP: f32 = 0.15;
+/// Shield energy a raise costs (it needs that much on hand), and what a perfect parry gives back.
+pub const PARRY_COST: f32 = 15.0;
+pub const PARRY_REFUND: f32 = 8.0;
+/// The arc: half-angle either side of the nose (radians) and reach from the ship's center.
+pub const PARRY_HALF_ARC: f32 = 1.0;
+pub const PARRY_RADIUS: f32 = 90.0;
+/// A reflected shot's damage as a multiple of what it carried.
+pub const PARRY_REFLECT: f32 = 1.5;
+/// Unlock and level prices (the first purchase unlocks it), and the part it needs on the
+/// ship: a Rare or better plating, so it arrives mid-game.
+pub const PRICE_PARRY: [(Material, f32); 3] = [
+    (Material::Metal, 120.0),
+    (Material::Crystal, 40.0),
+    (Material::Volatiles, 40.0),
+];

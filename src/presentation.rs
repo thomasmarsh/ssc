@@ -110,7 +110,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-6 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine    D  parry (locked until bought)\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-6 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  D-RIGHT  parry  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -462,6 +462,45 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
     lines.push(("\nRIG   bench tab 6\n".into(), CYAN));
     for skill in Skill::ALL {
         let level = game.loadout.skills.level(skill);
+        if skill == Skill::Parry {
+            let (text, color) = if level == 0 {
+                (
+                    format!(
+                        "{:<11}LOCKED  (bench: needs a rare plating)\n",
+                        skill.label()
+                    ),
+                    MUTED,
+                )
+            } else if game.parry_active() {
+                (
+                    format!("{:<11}{}/{}  UP\n", skill.label(), level, skill.max_level()),
+                    CYAN,
+                )
+            } else if game.parry_cooldown() > 0.0 {
+                (
+                    format!(
+                        "{:<11}{}/{}  {:.1}s\n",
+                        skill.label(),
+                        level,
+                        skill.max_level(),
+                        game.parry_cooldown()
+                    ),
+                    OWNED,
+                )
+            } else {
+                (
+                    format!(
+                        "{:<11}{}/{}  D ready\n",
+                        skill.label(),
+                        level,
+                        skill.max_level()
+                    ),
+                    CYAN,
+                )
+            };
+            lines.push((text, color));
+            continue;
+        }
         lines.push((
             format!("{:<11}{}/{}\n", skill.label(), level, skill.max_level()),
             if level > 0 { OWNED } else { MUTED },
@@ -1900,6 +1939,7 @@ pub fn draw(
             );
         }
     }
+    draw_parry(&mut gizmos, game);
     draw_echoes(&mut gizmos, game, camera, half);
     draw_guides(&mut gizmos, game, camera, half, session.arrows);
     if session.radar {
@@ -1993,6 +2033,28 @@ fn echo_color(kind: EchoKind, tint: Option<[f32; 3]>) -> Color {
         EchoKind::Planetoid => Color::srgb(0.95, 0.8, 0.5),
         EchoKind::Civilization | EchoKind::Fortress => lifted(tint),
         EchoKind::Pad => PAD_GREEN,
+    }
+}
+
+/// The parry shield: a bright forward arc that thins as the window closes, flaring gold while
+/// the perfect window is open.
+fn draw_parry(gizmos: &mut Gizmos, game: &Game) {
+    let Some((at, facing, half_arc, radius, perfect)) = game.parry_arc() else {
+        return;
+    };
+    let color = if perfect { AMBER } else { CYAN };
+    for (scale, alpha) in [(1.0, 0.9), (0.9, 0.35)] {
+        let points: Vec<Vec2> = (0..=24)
+            .map(|k| {
+                let angle = facing - half_arc + 2.0 * half_arc * k as f32 / 24.0;
+                at + Vec2::from_angle(angle) * radius * scale
+            })
+            .collect();
+        gizmos.linestrip_2d(points, color.with_alpha(alpha));
+    }
+    for sign in [-1.0, 1.0] {
+        let edge = Vec2::from_angle(facing + sign * half_arc);
+        gizmos.line_2d(at + edge * radius * 0.9, at + edge * radius, color);
     }
 }
 

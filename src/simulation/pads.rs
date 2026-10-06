@@ -1324,6 +1324,27 @@ impl Game {
         }
     }
 
+    /// What still stands between the ship and a locked upgrade's first purchase (a fitted part
+    /// of enough rarity), or None when it is open, owned or has no requirement.
+    pub fn skill_gate(&self, skill: Skill) -> Option<String> {
+        if self.loadout.skills.level(skill) > 0 {
+            return None;
+        }
+        let (slot, rarity) = skill.requirement()?;
+        let met = self
+            .loadout
+            .parts
+            .iter()
+            .any(|p| p.slot == slot && p.rarity >= rarity);
+        (!met).then(|| {
+            format!(
+                "{} {}",
+                rarity.label().to_uppercase(),
+                slot.label().to_uppercase()
+            )
+        })
+    }
+
     /// Buys the next level of a rig upgrade. Levels only go up.
     fn bench_skill(&mut self, index: usize) {
         let Some(&skill) = Skill::ALL.get(index) else {
@@ -1334,6 +1355,10 @@ impl Game {
             self.bench_failed(format!("{} IS AT MAX", skill.label()));
             return;
         };
+        if let Some(need) = self.skill_gate(skill) {
+            self.bench_failed(format!("{} IS LOCKED: NEEDS {need}", skill.label()));
+            return;
+        }
         if !self.cargo.spend(&price) {
             self.bench_failed(format!("{} NEEDS {}", skill.label(), price_text(&price)));
             return;
@@ -1484,7 +1509,26 @@ impl Game {
             BenchTab::Rig => {
                 for (i, skill) in Skill::ALL.into_iter().enumerate() {
                     let level = self.loadout.skills.level(skill);
+                    let gate = self.skill_gate(skill);
                     let (text, ok) = match skill.price(level) {
+                        Some(price) if gate.is_some() => (
+                            format!(
+                                "{}  LOCKED  needs a {} fitted  {}",
+                                skill.label(),
+                                gate.unwrap_or_default(),
+                                price_text(&price)
+                            ),
+                            false,
+                        ),
+                        Some(price) if level == 0 && skill.is_ability() => (
+                            format!(
+                                "{}  UNLOCK  {}  {}",
+                                skill.label(),
+                                skill.summary(),
+                                price_text(&price)
+                            ),
+                            can(&price),
+                        ),
                         Some(price) => (
                             format!(
                                 "{}  LEVEL {level}/{} > {}  {}  {}",
@@ -2267,6 +2311,44 @@ mod tests {
             Skill::Cargo.max_level()
         );
         assert_eq!(game.cargo.metal, 1000.0, "no charge at the cap");
+    }
+
+    #[test]
+    fn parry_is_locked_until_a_rare_plating_is_fitted_and_the_price_is_paid() {
+        let mut game = empty_game();
+        world(&mut game, 7);
+        landed(&mut game);
+        game.pad.cover_broken = COVER_BREAK;
+        bench(&mut game, 5);
+        for _ in 0..Skill::Parry.index() {
+            game.bench_move(1);
+        }
+        stock(&mut game, 500.0, 500.0, 500.0);
+        game.bench_confirm();
+        assert_eq!(
+            game.loadout.skills.level(Skill::Parry),
+            0,
+            "no plating fitted"
+        );
+        assert_eq!(game.cargo.metal, 500.0);
+        assert!(game.skill_gate(Skill::Parry).is_some());
+        assert!(!game.parry_unlocked() && !game.parry());
+        // A common plating is not enough; a rare one opens it.
+        game.loadout.parts.push(part("Plate", Rarity::Common, 0.05));
+        assert!(game.skill_gate(Skill::Parry).is_some());
+        game.loadout.parts.push(part("Plate", Rarity::Rare, 0.05));
+        assert!(game.skill_gate(Skill::Parry).is_none());
+        stock(&mut game, 100.0, 500.0, 500.0);
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::Parry), 0, "short of metal");
+        stock(&mut game, 500.0, 500.0, 500.0);
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::Parry), 1);
+        assert!(game.parry_unlocked());
+        assert_eq!(
+            game.cargo.metal,
+            500.0 - crate::simulation::tuning::PRICE_PARRY[0].1
+        );
     }
 
     #[test]

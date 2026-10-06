@@ -63,6 +63,13 @@ pub enum Cue {
     Echo {
         at: Vec2,
     },
+    /// The parry shield went up.
+    Parry,
+    /// A hostile shot was turned aside (`reflected`: sent back).
+    Deflect {
+        at: Vec2,
+        reflected: bool,
+    },
     /// A species-range was wiped out (see `run`).
     Extirpated,
 }

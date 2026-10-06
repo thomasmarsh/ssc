@@ -33,10 +33,13 @@ pub enum Sound {
     Extirpated,
     Ping,
     Echo,
+    /// The parry shield rising, and a shot turned aside by it.
+    Parry,
+    Deflect,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 24] = [
+    pub const ALL: [Sound; 26] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -61,6 +64,8 @@ impl Sound {
         Sound::Extirpated,
         Sound::Ping,
         Sound::Echo,
+        Sound::Parry,
+        Sound::Deflect,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -281,6 +286,24 @@ impl Sound {
                     a + b
                 });
                 lowpass(&mut v, 3000.0);
+                v
+            }
+            // A bright shimmer that swells and snaps shut: the shield coming up.
+            Sound::Parry => {
+                let mut v = voice(0.22, |t, _| {
+                    let f = sweep((t / 0.18).min(1.0), 700.0, 1900.0);
+                    (tri(f, t) * 0.6 + sine(f * 1.5, t) * 0.3) * decay(t, 0.09)
+                });
+                lowpass(&mut v, 4200.0);
+                v
+            }
+            // A short metallic clang: two inharmonic partials with a fast decay.
+            Sound::Deflect => {
+                let mut v = voice(0.2, |t, _| {
+                    (sine(1320.0, t) * 0.5 + sine(2110.0, t) * 0.35 + sine(3470.0, t) * 0.15)
+                        * decay(t, 0.05)
+                });
+                lowpass(&mut v, 5000.0);
                 v
             }
             Sound::HurtHull => {

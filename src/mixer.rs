@@ -128,6 +128,15 @@ fn spec(cue: &Cue) -> Spec {
         Cue::Hurt { hull: true } => ship(Sound::HurtHull, 0.95, 0.0),
         Cue::Extirpated => ship(Sound::Extirpated, 0.7, 0.0),
         Cue::Ping => ship(Sound::Ping, 0.55, 0.0),
+        Cue::Parry => ship(Sound::Parry, 0.5, 0.02),
+        Cue::Deflect { at, .. } => Spec {
+            sound: Sound::Deflect,
+            gain: 0.55,
+            reach: Some(900.0),
+            priority: Priority::Ship,
+            detune: 0.06,
+            at: Some(at),
+        },
         // Placed only to pan toward the thing that answered; it does not fade with distance.
         Cue::Echo { at } => Spec {
             sound: Sound::Echo,
@@ -160,6 +169,8 @@ fn interval(sound: Sound) -> f32 {
         Sound::Extirpated => 1.0,
         Sound::Ping => 1.0,
         Sound::Echo => 0.2,
+        Sound::Parry => 0.15,
+        Sound::Deflect => 0.05,
     }
 }
 

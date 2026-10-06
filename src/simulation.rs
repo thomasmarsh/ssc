@@ -21,6 +21,7 @@ mod guide;
 mod loot;
 mod mining;
 mod pads;
+mod parry;
 mod ping;
 mod root;
 pub mod run;
@@ -271,6 +272,8 @@ pub struct Bullet {
     pub fragile: bool,
     /// Bodies already pierced, so a shot inside one does not strike it every tick.
     struck: [u64; 4],
+    /// Already tested against the parry shield (it rolls once per shot).
+    parried: bool,
 }
 
 impl Bullet {
@@ -290,6 +293,7 @@ impl Bullet {
             burst: 0.0,
             fragile: false,
             struck: [0; 4],
+            parried: false,
         }
     }
 
@@ -345,6 +349,9 @@ pub struct Game {
     pub cargo: Cargo,
     /// Field repair, pad kits, landing pads, the bench and what the enemy knows of them.
     pad: PadState,
+    /// The parry shield's timers; its rolls have their own stream.
+    parry: parry::ParryState,
+    parry_rng: Rng,
     /// The sonar ring, its echoes and their cache; see `ping`.
     ping: ping::PingState,
     pub beam: Option<Beam>,
@@ -433,6 +440,8 @@ impl Game {
             notices: Vec::new(),
             cargo: Cargo::default(),
             pad: PadState::default(),
+            parry: parry::ParryState::default(),
+            parry_rng: Rng::new(seed ^ parry::PARRY_SALT),
             ping: ping::PingState::default(),
             beam: None,
             mined: HashMap::new(),
@@ -632,6 +641,7 @@ impl Game {
         self.sync_roots();
         // After contacts, so an impact cannot leave a joint stretched past its limit.
         self.constrain_chains();
+        self.update_parry(dt);
         self.move_bullets(dt);
         self.update_mines(dt);
         self.update_husks();

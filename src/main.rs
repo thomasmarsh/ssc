@@ -347,6 +347,13 @@ fn controls(
                 session.game.toggle_repair();
             }
         }
+        // Parry (a later upgrade, refused while locked): D, or d-pad right on a pad. With the
+        // bench open d-pad right steps its tabs instead.
+        if keys.just_pressed(KeyCode::KeyD)
+            || (!session.game.bench_open() && pad(GamepadButton::DPadRight))
+        {
+            session.game.parry();
+        }
         // Sonar ping: X (right stick click on a pad).
         if keys.just_pressed(KeyCode::KeyX) || pad(GamepadButton::RightThumb) {
             session.game.ping();
