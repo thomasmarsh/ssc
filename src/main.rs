@@ -818,6 +818,8 @@ fn smoke_summary(session: &mut Session, mode: &str) {
     run.shots = 450;
     run.damage_dealt = 3200.0;
     run.damage_taken = 410.0;
+    run.perfect_parries = 6;
+    run.dashes = 12;
     run.deaths = if mode == "over" { 3 } else { 1 };
     run.weapons = 3;
     run.parts = 6;

@@ -127,6 +127,7 @@ impl Game {
         }) {
             tether.health = 0.0;
         }
+        self.run.dashes += 1;
         self.cue(Cue::Dash { from, to });
         true
     }
@@ -431,6 +432,7 @@ mod tests {
         shot_on_path(&mut game, 100.0);
         shot_on_path(&mut game, 150.0);
         assert!(dash_up(&mut game));
+        assert_eq!(game.run.dashes, 1, "a dash is counted for the summary");
         let (stacks, left) = game.dash_boost();
         assert_eq!((stacks, left), (1, 1.0), "one stack per dash, not per shot");
         assert!((game.damage_boost() - (1.0 + t::DASH_BOOST_STEP)).abs() < 1e-6);

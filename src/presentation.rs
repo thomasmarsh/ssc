@@ -972,6 +972,7 @@ fn summary_lines(session: &Session) -> Vec<(String, Color, f32)> {
     if game.game_over {
         out.push(("SHIP LOST".into(), CYAN, 30.0));
         out.push(("RUN SUMMARY".into(), MUTED, 13.0));
+        out.push((report.title.to_uppercase(), AMBER, 20.0));
         out.push(blank());
         for line in &report.lines {
             out.push((line.clone(), light, 14.0));
@@ -1010,6 +1011,7 @@ fn summary_lines(session: &Session) -> Vec<(String, Color, f32)> {
             CYAN,
             22.0,
         ));
+        out.push((report.title.to_uppercase(), AMBER, 16.0));
         out.push((
             format!(
                 "SCORE {}   DESTROYED {}   SECTORS EXPLORED {}   REGIONS {}   MINED {:.0}",

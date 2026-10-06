@@ -35,6 +35,7 @@ mod root;
 pub mod run;
 pub mod skills;
 mod tether;
+mod titles;
 pub mod tuning;
 pub mod upgrades;
 mod weapons;
@@ -66,6 +67,7 @@ pub use ping::{ECHO_LIFE, Echo, EchoKind, PING_COOLDOWN, PING_RANGE, RING_SPEED}
 pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
+pub use titles::{TitleFacts, title, title_case};
 use upgrades::{Item, Loadout, Stats};
 pub use weapons::{Mine, Shape};
 

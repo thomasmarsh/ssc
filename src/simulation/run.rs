@@ -68,6 +68,11 @@ pub struct RunStats {
     pub elders: u32,
     pub bases: u32,
     pub civs_toppled: u32,
+    /// Perfect parries and dashes made, for the summary title.
+    pub perfect_parries: u32,
+    pub dashes: u32,
+    /// Seconds spent in each announced region, by key: (name, seconds).
+    pub region_time: BTreeMap<u64, (String, f32)>,
     /// Apex elders slain, by name, in order.
     pub apex_slain: Vec<String>,
     /// Offerings made at civilization seats, and the material they came to.
@@ -405,6 +410,7 @@ impl Game {
             })
             .collect();
         RunReport {
+            title: self.run_title(),
             lines,
             extirpated,
             quip: quip(r.extirpated.len()),
@@ -425,6 +431,8 @@ pub fn quip(count: usize) -> &'static str {
 /// What the summary panel shows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunReport {
+    /// The silly epithet of the run (see `titles`).
+    pub title: String,
     pub lines: Vec<String>,
     /// One entry per extirpated species-range, ready to print.
     pub extirpated: Vec<String>,

@@ -183,6 +183,7 @@ impl Game {
         }
         if turned > 0 && !self.parry.perfected {
             self.parry.perfected = true;
+            self.run.perfect_parries += 1;
             self.parry.cooldown = (self.parry.cooldown - t::PARRY_PERFECT_COOLDOWN_REFUND).max(0.0);
             self.parry.stop = t::PARRY_HITSTOP;
             self.parry.flash = t::PARRY_FLASH;
@@ -368,6 +369,7 @@ mod tests {
                 assert!(bullet.velocity.x > 0.0, "sent back");
                 assert!((bullet.damage - 10.0 * game.loadout.skills.parry_reflect()).abs() < 1e-4);
                 assert!(game.bodies[0].shield > after_cost);
+                assert_eq!(game.run.perfect_parries, 1, "counted for the summary");
                 assert!(game.cues.iter().any(|c| matches!(
                     c,
                     Cue::Deflect {

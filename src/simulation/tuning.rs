@@ -347,3 +347,21 @@ pub const APEX_SCORE: f32 = 2500.0;
 /// What a slain apex drops: this much of each material (halved for a lesser one), three parts
 /// (one epic in the slot of a still-locked ability, two rare) and two lucky rolls.
 pub const APEX_MATERIAL: f32 = 90.0;
+
+// ---- run summary titles --------------------------------------------------------------------
+
+/// Thresholds for the epithet on the summary panel (see `titles`). They are checked in the
+/// order the titles are listed there; the first that holds wins.
+pub const TITLE_SCOURGE_EXTIRPATIONS: usize = 2;
+pub const TITLE_PROSPECT_MINED: f32 = 150.0;
+pub const TITLE_TITHES: u32 = 5;
+pub const TITLE_PARRIES: u32 = 10;
+pub const TITLE_DASHES: u32 = 40;
+pub const TITLE_CARTOGRAPHER_SECTORS: usize = 12;
+pub const TITLE_CARTOGRAPHER_REGIONS: usize = 3;
+/// A gentle cartographer destroyed at most one creature per this many sectors explored.
+pub const TITLE_GENTLE_KILLS_PER_SECTOR: u32 = 3;
+pub const TITLE_RECKLESS_DEATHS: u32 = 3;
+pub const TITLE_RECKLESS_SECONDS: f32 = 360.0;
+pub const TITLE_HERMIT_MINED: f32 = 300.0;
+pub const TITLE_HERMIT_KILLS: u32 = 10;

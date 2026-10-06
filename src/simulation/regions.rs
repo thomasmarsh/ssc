@@ -32,6 +32,13 @@ impl Game {
             self.region.here = Some((sector, r));
         }
         self.region.since_banner += dt;
+        if let Some(current) = self.region.current.as_ref() {
+            self.run
+                .region_time
+                .entry(current.key)
+                .or_insert_with(|| (current.name.clone(), 0.0))
+                .1 += dt;
+        }
         let Some((_, here)) = self.region.here.clone() else {
             return;
         };
@@ -147,6 +154,10 @@ mod tests {
         assert_eq!(stay(&mut game, b.center(), REGION_COOLDOWN), 1);
         assert_eq!(game.region().unwrap().key, region(seed, b).key);
         assert_eq!(game.run.regions.len(), 3);
+        // The time in each region adds up to the time played.
+        let spent: f32 = game.run.region_time.values().map(|(_, s)| s).sum();
+        assert!((spent - game.time).abs() < 0.5, "{spent} of {}", game.time);
+        assert!(game.run.region_time.len() >= 3);
     }
 
     #[test]
