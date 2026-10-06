@@ -7,11 +7,11 @@ description = "A physics arena shooter rebuilt with Rust, Bevy, and WGPU"
 license = "GPL-2.0-only"
 
 [lib]
-path = "rust/lib.rs"
+path = "src/lib.rs"
 
 [[bin]]
 name = "ssc"
-path = "rust/main.rs"
+path = "src/main.rs"
 required-features = ["desktop"]
 
 [dependencies]

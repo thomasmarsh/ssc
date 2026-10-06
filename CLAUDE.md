@@ -1,11 +1,11 @@
 # SSC
 
-A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (kept in `src/` for reference only). The vision: an endless, procedurally generated, living universe of quadrants (flocks, ecosystems, strange creatures), tight handling, and a very subtle Lunatic Fringe frivolity. We capture ideas from the C++ version, not a faithful port.
+A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (preserved in git history only). The vision: an endless, procedurally generated, living universe of quadrants (flocks, ecosystems, strange creatures), tight handling, and a very subtle Lunatic Fringe frivolity. We capture ideas from the C++ version, not a faithful port.
 
 ## Orientation
 
 - Read `docs/UNIVERSE.md` (procedural universe, genomes, what is built), `docs/MIGRATION.md` (architecture and where to iterate) and `docs/ROADMAP.md` (gameplay and progression plan) before changing anything.
-- `rust/simulation.rs` (and `rust/simulation/`) is headless, deterministic gameplay; `rust/world.rs` and `rust/genome.rs` are generation; `rust/main.rs` and `rust/presentation.rs` are the Bevy adapter. Rendering never owns game rules.
+- `src/simulation.rs` (and `src/simulation/`) is headless, deterministic gameplay; `src/world.rs` and `src/genome.rs` are generation; `src/main.rs` and `src/presentation.rs` are the Bevy adapter. Rendering never owns game rules.
 
 ## Commands
 
@@ -15,7 +15,7 @@ A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (ke
 
 ## Decisions and invariants
 
-- Generation is a pure function of the master seed and quadrant coordinates. Quadrant (0,0) is the fixed HOME point and must keep reproducing the original population; a golden test in `rust/world.rs` pins it. Do not reorder RNG draws on the original stream; new generators use their own salted streams.
+- Generation is a pure function of the master seed and quadrant coordinates. Quadrant (0,0) is the fixed HOME point and must keep reproducing the original population; a golden test in `src/world.rs` pins it. Do not reorder RNG draws on the original stream; new generators use their own salted streams.
 - Enemy kinds are expressions of genomes (Bogey, Lunatic, Smarty, Fatso and Leech are the HOME pool), not enum branches. Emergent weirdness comes first and balance is tamed afterwards, so far quadrants may be unplayable for now.
 - Bogeys school passively and only turn hostile when approached or hurt; Lunatics have negative mass and fling whatever touches them.
 - Only quadrants near the player are simulated; enemies are not bound to their quadrant and may chase across borders.

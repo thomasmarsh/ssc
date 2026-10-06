@@ -19,7 +19,7 @@ A top-down space shooter with a deterministic, endless universe. Everyone can fo
 
 ## Gene pools and species (built)
 
-This section was written as the plan and then built as described (`rust/genome.rs`). Pipeline: seed -> quadrant -> latent params -> **gene pool** -> compose -> spawns. The code is the source of truth once built; this records the intent.
+This section was written as the plan and then built as described (`src/genome.rs`). Pipeline: seed -> quadrant -> latent params -> **gene pool** -> compose -> spawns. The code is the source of truth once built; this records the intent.
 
 **Genome** (`genome::Genome`, `Copy`, about 45 genes, each continuous, integer or categorical, each with a range so every genome is finite and bounded):
 - Body plan: segment count, limb count and length (a tree of bodies joined by damped springs), joint stiffness, wave strength, rhythm and lag, taper, outline sides and aspect.

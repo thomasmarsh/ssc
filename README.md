@@ -36,7 +36,7 @@ cargo test --no-default-features
 - **P / Pause**: pause
 - **S**: toggle slow motion
 - **R**: toggle radar
-- **V**: cycle render style: classic (thin vector lines), glow (HDR bloom) and neon (wide anamorphic bloom). Styles only change presentation; see `RenderStyle` in `rust/main.rs`.
+- **V**: cycle render style: classic (thin vector lines), glow (HDR bloom) and neon (wide anamorphic bloom). Styles only change presentation; see `RenderStyle` in `src/main.rs`.
 - **C**: cycle camera: close (original), wide (2×), far (4×), whole quadrant, then close again. Whole-quadrant view centers on the current quadrant; the other views follow the ship. The view preference survives a restart.
 - **Enter**: restart
 - **F1**: toggle fullscreen
@@ -44,8 +44,7 @@ cargo test --no-default-features
 
 ## Project layout
 
-- `rust/` contains the new Rust simulation and Bevy desktop app.
-- `src/` contains the original C++ prototype for reference.
+- `src/` contains the Rust simulation and Bevy desktop app. The original C++ prototype lives in git history (before the commit that removed it).
 - [docs/UNIVERSE.md](docs/UNIVERSE.md) describes the procedural universe design and what is built.
 - `docs/MIGRATION.md` records the reimplementation choices and current limits.
 - [docs/LEGACY_README.md](docs/LEGACY_README.md) preserves the original instructions and credits.

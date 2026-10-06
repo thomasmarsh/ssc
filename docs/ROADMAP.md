@@ -4,7 +4,7 @@ The universe and creatures are in place (see [UNIVERSE.md](UNIVERSE.md)). The ne
 
 ## Today
 
-- **Ship:** arrow-key thrust, rotate and brake, mouse aim. The bare ship has top speed 460, one gun (0.16 s, 26 damage), 100 hull, 60 shield. Every one of those numbers is a `Stats` value (`rust/simulation/upgrades.rs`) folded from whatever is bolted on.
+- **Ship:** arrow-key thrust, rotate and brake, mouse aim. The bare ship has top speed 460, one gun (0.16 s, 26 damage), 100 hull, 60 shield. Every one of those numbers is a `Stats` value (`src/simulation/upgrades.rs`) folded from whatever is bolted on.
 - **Augmentation (built):** see "Progression" below.
 - **Defense:** shield that recharges after a quiet interval, hull, three lives (an extra life can drop, cap 6), a protected respawn near where you died.
 - **Difficulty (built):** `QuadrantParams::depth` is the distance from home in quadrants; `world::threat(depth)` = 1 + 0.3 per quadrant. Creatures take damage divided by threat and hit for `1 + 0.6 (threat - 1)` times as much; bounty scales with it. The danger parameter and gene pools still shape *what* lives somewhere. Quadrant (0,0) is the calm, fixed start (threat 1).
