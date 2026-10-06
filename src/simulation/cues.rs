@@ -63,6 +63,11 @@ pub enum Cue {
     Echo {
         at: Vec2,
     },
+    /// The ship dashed from `from` to `to`.
+    Dash {
+        from: Vec2,
+        to: Vec2,
+    },
     /// The parry shield went up.
     Parry,
     /// A hostile shot was turned aside (`reflected`: sent back).

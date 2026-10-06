@@ -421,6 +421,17 @@ fn controls(
         pad_mine |= pad.pressed(GamepadButton::RightTrigger2);
     }
     let pad_fire = stick_aim.is_some();
+    // Dash (a later upgrade, refused while locked): Shift or L3, toward the left stick, else
+    // where the ship faces.
+    let dash_pressed = !session.paused
+        && (keys.just_pressed(KeyCode::ShiftLeft)
+            || keys.just_pressed(KeyCode::ShiftRight)
+            || gamepads
+                .iter()
+                .any(|pad| pad.just_pressed(GamepadButton::LeftThumb)));
+    if dash_pressed {
+        session.game.dash(stick_move);
+    }
     session.input = Input {
         thrust: if keys.pressed(KeyCode::ArrowUp) {
             1.0

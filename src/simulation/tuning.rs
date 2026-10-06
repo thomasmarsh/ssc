@@ -100,3 +100,24 @@ pub const PRICE_PARRY: [(Material, f32); 3] = [
     (Material::Crystal, 40.0),
     (Material::Volatiles, 40.0),
 ];
+
+// ---- dash (a locked upgrade: level 0 is not owned) -----------------------------------------
+
+/// How far a dash jumps at level 1, and the gain per level after.
+pub const DASH_DISTANCE: f32 = 240.0;
+pub const DASH_DISTANCE_STEP: f32 = 30.0;
+/// A dash that could cover less than this (hard against something solid) is refused free.
+pub const DASH_MIN: f32 = 24.0;
+/// Seconds before the next dash, less per level, and the shield energy one costs.
+pub const DASH_COOLDOWN: f32 = 1.2;
+pub const DASH_COOLDOWN_STEP: f32 = 0.15;
+pub const DASH_COST: f32 = 8.0;
+/// Seconds of invulnerability a dash grants, and how long its trail stays drawn.
+pub const DASH_INVULN: f32 = 0.3;
+pub const DASH_TRAIL: f32 = 0.35;
+/// Unlock and level prices, and the part the ship needs first: a Rare or better engine.
+pub const PRICE_DASH: [(Material, f32); 3] = [
+    (Material::Metal, 100.0),
+    (Material::Crystal, 30.0),
+    (Material::Volatiles, 30.0),
+];

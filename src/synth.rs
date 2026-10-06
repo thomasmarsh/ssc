@@ -36,10 +36,11 @@ pub enum Sound {
     /// The parry shield rising, and a shot turned aside by it.
     Parry,
     Deflect,
+    Dash,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 26] = [
+    pub const ALL: [Sound; 27] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -66,6 +67,7 @@ impl Sound {
         Sound::Echo,
         Sound::Parry,
         Sound::Deflect,
+        Sound::Dash,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -304,6 +306,16 @@ impl Sound {
                         * decay(t, 0.05)
                 });
                 lowpass(&mut v, 5000.0);
+                v
+            }
+            // A short airy whoosh: filtered noise that sweeps up and fades.
+            Sound::Dash => {
+                let mut noise = Noise::new(97);
+                let mut v = voice(0.2, |t, _| {
+                    let f = sweep((t / 0.2).min(1.0), 0.0, 1.0);
+                    (noise.next() * 0.55 + sine(sweep(f, 260.0, 900.0), t) * 0.3) * decay(t, 0.07)
+                });
+                lowpass(&mut v, 3800.0);
                 v
             }
             Sound::HurtHull => {

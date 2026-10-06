@@ -13,6 +13,7 @@ mod civ;
 mod civmine;
 mod creature;
 mod cues;
+mod dash;
 mod ecology;
 mod food;
 mod fortress;
@@ -351,6 +352,7 @@ pub struct Game {
     pad: PadState,
     /// The parry shield's timers; its rolls have their own stream.
     parry: parry::ParryState,
+    dash: dash::DashState,
     parry_rng: Rng,
     /// The sonar ring, its echoes and their cache; see `ping`.
     ping: ping::PingState,
@@ -441,6 +443,7 @@ impl Game {
             cargo: Cargo::default(),
             pad: PadState::default(),
             parry: parry::ParryState::default(),
+            dash: dash::DashState::default(),
             parry_rng: Rng::new(seed ^ parry::PARRY_SALT),
             ping: ping::PingState::default(),
             beam: None,
@@ -642,6 +645,7 @@ impl Game {
         // After contacts, so an impact cannot leave a joint stretched past its limit.
         self.constrain_chains();
         self.update_parry(dt);
+        self.update_dash(dt);
         self.move_bullets(dt);
         self.update_mines(dt);
         self.update_husks();

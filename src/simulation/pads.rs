@@ -2352,6 +2352,32 @@ mod tests {
     }
 
     #[test]
+    fn dash_needs_a_rare_engine_not_a_plating() {
+        let mut game = empty_game();
+        world(&mut game, 7);
+        landed(&mut game);
+        game.pad.cover_broken = COVER_BREAK;
+        bench(&mut game, 5);
+        for _ in 0..Skill::Dash.index() {
+            game.bench_move(1);
+        }
+        game.loadout.parts.push(part("Plate", Rarity::Epic, 0.05));
+        stock(&mut game, 500.0, 500.0, 500.0);
+        game.bench_confirm();
+        assert_eq!(
+            game.loadout.skills.level(Skill::Dash),
+            0,
+            "a plating is not an engine"
+        );
+        let mut engine = part("Thruster", Rarity::Rare, 0.05);
+        engine.slot = Slot::Engine;
+        game.loadout.parts.push(engine);
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::Dash), 1);
+        assert!(game.dash_unlocked());
+    }
+
+    #[test]
     fn the_stash_holds_a_hundred_of_each_and_conserves_everything() {
         let mut game = empty_game();
         world(&mut game, 7);

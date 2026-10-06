@@ -110,7 +110,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine    D  parry (locked until bought)\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-6 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  D-RIGHT  parry  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-6 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (both locked until bought at the bench, tab 6)\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -462,42 +462,27 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
     lines.push(("\nRIG   bench tab 6\n".into(), CYAN));
     for skill in Skill::ALL {
         let level = game.loadout.skills.level(skill);
-        if skill == Skill::Parry {
-            let (text, color) = if level == 0 {
+        if skill.is_ability() {
+            let (key, cooldown, up) = match skill {
+                Skill::Dash => ("SHIFT", game.dash_cooldown(), false),
+                _ => ("D", game.parry_cooldown(), game.parry_active()),
+            };
+            let need = skill.requirement().map_or(String::new(), |(slot, rarity)| {
+                format!("{} {}", rarity.label(), slot.label())
+            });
+            let (state, color) = if level == 0 {
+                (format!("LOCKED  (bench: needs a {need})"), MUTED)
+            } else if up {
+                (format!("{level}/{}  UP", skill.max_level()), CYAN)
+            } else if cooldown > 0.0 {
                 (
-                    format!(
-                        "{:<11}LOCKED  (bench: needs a rare plating)\n",
-                        skill.label()
-                    ),
-                    MUTED,
-                )
-            } else if game.parry_active() {
-                (
-                    format!("{:<11}{}/{}  UP\n", skill.label(), level, skill.max_level()),
-                    CYAN,
-                )
-            } else if game.parry_cooldown() > 0.0 {
-                (
-                    format!(
-                        "{:<11}{}/{}  {:.1}s\n",
-                        skill.label(),
-                        level,
-                        skill.max_level(),
-                        game.parry_cooldown()
-                    ),
+                    format!("{level}/{}  {cooldown:.1}s", skill.max_level()),
                     OWNED,
                 )
             } else {
-                (
-                    format!(
-                        "{:<11}{}/{}  D ready\n",
-                        skill.label(),
-                        level,
-                        skill.max_level()
-                    ),
-                    CYAN,
-                )
+                (format!("{level}/{}  {key} ready", skill.max_level()), CYAN)
             };
+            let text = format!("{:<11}{state}\n", skill.label());
             lines.push((text, color));
             continue;
         }
@@ -1940,6 +1925,7 @@ pub fn draw(
         }
     }
     draw_parry(&mut gizmos, game);
+    draw_dash(&mut gizmos, game);
     draw_echoes(&mut gizmos, game, camera, half);
     draw_guides(&mut gizmos, game, camera, half, session.arrows);
     if session.radar {
@@ -2034,6 +2020,27 @@ fn echo_color(kind: EchoKind, tint: Option<[f32; 3]>) -> Color {
         EchoKind::Civilization | EchoKind::Fortress => lifted(tint),
         EchoKind::Pad => PAD_GREEN,
     }
+}
+
+/// The dash trail: a streak from where the ship left to where it landed, and a flash ring at
+/// the end, both fading.
+fn draw_dash(gizmos: &mut Gizmos, game: &Game) {
+    let Some((from, to, bright)) = game.dash_trail() else {
+        return;
+    };
+    let side = (to - from).perp().normalize_or_zero() * 10.0;
+    for (offset, alpha) in [(0.0, 0.9), (1.0, 0.4), (-1.0, 0.4)] {
+        gizmos.line_2d(
+            from + side * offset,
+            to + side * offset * 0.3,
+            CYAN.with_alpha(alpha * bright),
+        );
+    }
+    gizmos.circle_2d(
+        to,
+        14.0 + 40.0 * (1.0 - bright),
+        CYAN.with_alpha(0.8 * bright),
+    );
 }
 
 /// The parry shield: a bright forward arc that thins as the window closes, flaring gold while
