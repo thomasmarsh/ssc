@@ -14,9 +14,9 @@ use crate::world::hash2;
 
 /// How much of each material the hold carries.
 pub const CAP: f32 = 200.0;
-/// Beam reach (from the ship's center to the rock's surface) and half-angle of its cone.
+/// Beam reach, from the ship's center to the rock's surface. There is no aiming: the beam
+/// takes the nearest minable rock in range.
 pub const BEAM_RANGE: f32 = 260.0;
-const BEAM_CONE: f32 = 12.0 * PI / 180.0;
 /// Shield the beam draws per second, and the shield below which it will not fire.
 pub const BEAM_DRAIN: f32 = 4.0;
 pub const SHIELD_FLOOR: f32 = 6.0;
@@ -307,20 +307,19 @@ impl Game {
         }
     }
 
-    /// The beam: finds the nearest minable rock in the cone, draws shield, yields material
+    /// The beam: finds the nearest minable rock in range, draws shield, yields material
     /// and shrinks the rock. Returns the shield spent, so damage cues can ignore it.
     pub(super) fn update_mining(&mut self, dt: f32, mining: bool) -> f32 {
         self.mine_note = (self.mine_note - dt).max(0.0);
-        let Some(ship) = self.player().map(|p| (p.position, p.angle, p.shield)) else {
+        let Some(ship) = self.player().map(|p| (p.position, p.shield)) else {
             self.stop_beam();
             return 0.0;
         };
-        let (origin, angle, shield) = ship;
+        let (origin, shield) = ship;
         if !mining || shield < SHIELD_FLOOR {
             self.stop_beam();
             return 0.0;
         }
-        let aim = Vec2::from_angle(angle);
         let seed = self.seed;
         let mut best: Option<(f32, usize)> = None;
         let mut blocked: Option<Material> = None;
@@ -332,18 +331,6 @@ impl Game {
             let distance = offset.length();
             let gap = distance - rock.radius;
             if gap > BEAM_RANGE {
-                continue;
-            }
-            // Inside the cone, widened by the rock's own angular size.
-            let slack = (rock.radius / distance.max(rock.radius))
-                .clamp(0.0, 1.0)
-                .asin();
-            let off_axis = if distance > 1e-3 {
-                aim.dot(offset / distance).clamp(-1.0, 1.0).acos()
-            } else {
-                0.0
-            };
-            if off_axis > BEAM_CONE + slack {
                 continue;
             }
             let material = rock.material(seed);
@@ -842,9 +829,8 @@ mod tests {
     }
 
     #[test]
-    fn the_beam_needs_a_rock_in_range_inside_its_cone_and_skips_nest_stones() {
+    fn the_beam_takes_the_nearest_rock_in_range_without_aiming_and_skips_nest_stones() {
         let mut game = rig();
-        rock(&mut game, RockKind::Ore, Vec2::new(0.0, 200.0), 40.0);
         rock(&mut game, RockKind::Ore, Vec2::new(700.0, 0.0), 40.0);
         let stone = rock(&mut game, RockKind::Ore, Vec2::new(100.0, 0.0), 40.0);
         game.bodies
@@ -853,9 +839,14 @@ mod tests {
             .unwrap()
             .pinned = true;
         hold(&mut game, 1.0);
-        assert_eq!(game.cargo.total(), 0.0);
+        assert_eq!(game.cargo.total(), 0.0, "out of range, or a nest stone");
         assert!(game.beam.is_none());
-        // Nearest wins when two are lined up.
+        // Behind the ship counts: no aiming needed.
+        let mut game = rig();
+        rock(&mut game, RockKind::Ore, Vec2::new(-150.0, 90.0), 40.0);
+        hold(&mut game, 1.0);
+        assert!(game.cargo.metal > 0.5);
+        // Nearest wins.
         let mut game = rig();
         let near = rock(&mut game, RockKind::Ore, Vec2::new(100.0, 0.0), 30.0);
         let far = rock(&mut game, RockKind::Ore, Vec2::new(200.0, 0.0), 30.0);

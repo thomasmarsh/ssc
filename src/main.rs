@@ -298,7 +298,7 @@ fn controls(
             stick_aim = Some(right);
         }
         pad_brake |= pad.pressed(GamepadButton::LeftTrigger2) || pad.pressed(GamepadButton::South);
-        // The right bumper holds the mining beam (the right stick aims it; the guns go quiet).
+        // The right bumper holds the mining beam (no aiming needed; the guns go quiet).
         pad_mine |= pad.pressed(GamepadButton::RightTrigger);
     }
     let pad_fire = stick_aim.is_some();
@@ -452,7 +452,6 @@ fn smoke_run(
             }
             session.input.mine = true;
             session.input.fire = false;
-            session.input.aim_direction = Some(toward);
         }
     }
     run.frames += 1;

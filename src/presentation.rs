@@ -78,7 +78,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    hold M  mine (no fire)\nC  camera    P  pause    S  slow motion    R  radar    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    hold M  mine nearest rock (no fire)\nC  camera    P  pause    S  slow motion    R  radar    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -1542,8 +1542,8 @@ fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
 fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Beam) {
     let [r, g, b] = beam.material.color();
     let tint = Color::srgb(r, g, b);
-    let direction = Vec2::from_angle(ship.angle);
-    let nose = ship.position + direction * ship.radius * 1.5;
+    let direction = (beam.end - ship.position).normalize_or_zero();
+    let nose = ship.position + direction * ship.radius * 1.2;
     let side = Vec2::new(-direction.y, direction.x);
     let wobble = (time * 40.0).sin() * 2.5;
     let mid = nose.lerp(beam.end, 0.5) + side * wobble;
