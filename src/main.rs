@@ -143,6 +143,8 @@ pub struct Session {
     pub paused: bool,
     pub slow: bool,
     pub radar: bool,
+    /// Edge arrows toward offscreen threats and minerals.
+    pub arrows: bool,
     pub camera_view: CameraView,
     pub style: RenderStyle,
     /// Best score this session (kept in memory only), whether the run just ended beat it,
@@ -160,6 +162,7 @@ impl Default for Session {
             paused: false,
             slow: false,
             radar: true,
+            arrows: true,
             camera_view: CameraView::default(),
             style: RenderStyle::default(),
             best: None,
@@ -278,6 +281,13 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::Tab) {
         session.radar = !session.radar;
+    }
+    if keys.just_pressed(KeyCode::KeyT)
+        || gamepads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::Start))
+    {
+        session.arrows = !session.arrows;
     }
     if keys.just_pressed(KeyCode::KeyC) {
         session.camera_view = session.camera_view.next();

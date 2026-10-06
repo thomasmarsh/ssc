@@ -35,7 +35,8 @@ cargo test --no-default-features
 - **Mouse**: aim at the cursor while holding the left button to fire
 - **P / Pause**: pause
 - **S**: toggle slow motion
-- **R**: toggle radar
+- **Tab**: toggle radar
+- **T / Start (pad)**: toggle edge arrows toward the nearest offscreen creatures (blue calm, red hunting, a ringed tint for a civilization's) and minable rocks and loose materials (diamonds in the material's color). At most four creature and three mineral arrows, nearest first, fading with distance; a flock shares one arrow.
 - **V**: cycle render style: classic (thin vector lines), glow (HDR bloom) and neon (wide anamorphic bloom). Styles only change presentation; see `RenderStyle` in `src/main.rs`.
 - **C**: cycle camera: close (original), wide (2×), far (4×), whole sector, then close again. Whole-sector view centers on the current sector; the other views follow the ship. The view preference survives a restart.
 - **Enter**: restart

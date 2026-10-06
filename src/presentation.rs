@@ -10,9 +10,9 @@ use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::arsenal::Profile;
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
-    Beam, Body, BodyKind, Cache, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, LAND_RANGE,
-    MAX_PADS, Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind, fertility,
-    price_text,
+    Beam, Body, BodyKind, Cache, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, GuideKind,
+    LAND_RANGE, MAX_PADS, Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind,
+    fertility, price_text,
 };
 use ssc::world::{BaseKind, RockKind, SECTOR_SIZE, hash2};
 
@@ -101,7 +101,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-5 tab, [ ] pick, F do, Q take    I  insure\nPAD  L / R weapon    Y  boosts    R2  mine    L2 / A  brake    X  repair    D-UP  kit    B  land    D-DN  insure    SELECT  bench\nC  camera    P  pause    S  slow motion    TAB  radar    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-5 tab, [ ] pick, F do, Q take    I  insure\nPAD  L / R weapon    Y  boosts    R2  mine    L2 / A  brake    X  repair    D-UP  kit    B  land    D-DN  insure    SELECT  bench    START  arrows\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -1883,6 +1883,9 @@ pub fn draw(
             );
         }
     }
+    if session.arrows {
+        draw_guides(&mut gizmos, game, camera, half);
+    }
     if session.radar {
         // The scope keeps its on-screen size as the world view zooms out.
         let ui_scale = half.y * 2.0 / VIEW_HEIGHT;
@@ -1896,6 +1899,64 @@ pub fn draw(
         );
     }
 }
+
+/// Edge arrows toward the nearest offscreen threats and minerals (see `Game::guide_bearings`).
+/// They sit just inside the screen edge at a constant on-screen size, fade with distance and
+/// leave the middle of the view alone.
+fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
+    let ui_scale = half.y * 2.0 / VIEW_HEIGHT;
+    let inset = Vec2::splat(26.0 * ui_scale);
+    let reach = (half - inset).max(Vec2::splat(1.0));
+    for bearing in game.guide_bearings(camera, half) {
+        let d = bearing.direction;
+        let t = (reach.x / d.x.abs().max(1e-4)).min(reach.y / d.y.abs().max(1e-4));
+        let at = camera + d * t;
+        let (color, size) = match bearing.kind {
+            GuideKind::Wildlife { alert } => (
+                if alert {
+                    Color::srgb(1.0, 0.3, 0.28)
+                } else {
+                    Color::srgb(0.55, 0.7, 1.0)
+                },
+                if alert { 9.0 } else { 7.0 },
+            ),
+            GuideKind::Civilization { tint, alert } => {
+                (lifted(Some(tint)), if alert { 9.0 } else { 7.0 })
+            }
+            GuideKind::Mineral(material) => (material_color(material), 6.0),
+        };
+        let color = color.with_alpha(ssc::simulation::proximity(bearing.distance, GUIDE_FADE));
+        let size = size * ui_scale;
+        let side = Vec2::new(-d.y, d.x);
+        let tip = at + d * size;
+        let back = at - d * size * 0.7;
+        match bearing.kind {
+            // A chevron for threats, a diamond for ore, so the two read apart in a glance.
+            GuideKind::Mineral(_) => gizmos.lineloop_2d(
+                [
+                    tip,
+                    at + side * size * 0.6,
+                    at - d * size * 0.8,
+                    at - side * size * 0.6,
+                ],
+                color,
+            ),
+            _ => gizmos.linestrip_2d(
+                [back + side * size * 0.8, tip, back - side * size * 0.8],
+                color,
+            ),
+        }
+        // A civilization's arrow carries a small ring behind the head, as its units do.
+        if matches!(bearing.kind, GuideKind::Civilization { .. }) {
+            gizmos
+                .circle_2d(at - d * size * 0.2, size * 1.35, color.with_alpha(0.45))
+                .resolution(10);
+        }
+    }
+}
+
+/// Distance at which an edge arrow has faded to its floor.
+const GUIDE_FADE: f32 = 4000.0;
 
 /// A landing pad on its planetoid's rim: a platform with legs sunk into the rock and a
 /// beacon mast, and a dashed landing dome that turns with the world. It reads green while

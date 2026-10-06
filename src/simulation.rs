@@ -17,6 +17,7 @@ mod ecology;
 mod food;
 mod fortress;
 mod growth;
+mod guide;
 mod loot;
 mod mining;
 mod pads;
@@ -34,6 +35,7 @@ pub use cues::Cue;
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
 pub use food::{FOOD_RADIUS, Food, fertility};
 pub use growth::Egg;
+pub use guide::{Bearing, GuideKind, MAX_MINERAL_ARROWS, MAX_THREAT_ARROWS, proximity};
 pub use loot::{Notice, Pickup};
 pub use mining::{Beam, Cargo, Lode, Material};
 pub use pads::{
