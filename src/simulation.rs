@@ -21,6 +21,7 @@ mod guide;
 mod loot;
 mod mining;
 mod pads;
+mod ping;
 mod root;
 pub mod run;
 mod tether;
@@ -42,6 +43,7 @@ pub use pads::{
     Bench, BenchPanel, BenchRow, BenchTab, HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP,
     Pad, PadHint, PadKey, PadState, STASH_CAP, price_text,
 };
+pub use ping::{ECHO_LIFE, Echo, EchoKind, PING_COOLDOWN, PING_RANGE, RING_SPEED};
 pub use root::{Root, STAND as ROOT_STAND};
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 use upgrades::{Item, Loadout, Stats};
@@ -341,6 +343,8 @@ pub struct Game {
     pub cargo: Cargo,
     /// Field repair, pad kits, landing pads, the bench and what the enemy knows of them.
     pad: PadState,
+    /// The sonar ring, its echoes and their cache; see `ping`.
+    ping: ping::PingState,
     pub beam: Option<Beam>,
     pub score: u64,
     /// Counters for this run, and the extirpations it caused; see `run`.
@@ -427,6 +431,7 @@ impl Game {
             notices: Vec::new(),
             cargo: Cargo::default(),
             pad: PadState::default(),
+            ping: ping::PingState::default(),
             beam: None,
             mined: HashMap::new(),
             mine_clock: 0.0,
@@ -535,6 +540,7 @@ impl Game {
             effect.remaining -= dt;
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
+        self.update_ping(dt);
         self.stream_sectors();
         self.note_sector();
         let start = self.player().map(|p| p.position);

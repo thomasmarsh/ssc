@@ -10,6 +10,7 @@ use bevy::prelude::Vec2;
 /// Most threat arrows and most mineral arrows shown at once.
 pub const MAX_THREAT_ARROWS: usize = 4;
 pub const MAX_MINERAL_ARROWS: usize = 3;
+pub const MAX_ECHO_ARROWS: usize = 4;
 /// Targets whose bearings differ by less than this (radians) share one arrow, the nearest.
 const MERGE_ANGLE: f32 = 0.35;
 /// Mineral arrows ignore rocks and loose materials farther than this from the ship.
@@ -24,6 +25,8 @@ pub enum GuideKind {
     Civilization { tint: [f32; 3], alert: bool },
     /// A minable rock or a dropped material.
     Mineral(Material),
+    /// A remembered ping echo.
+    Echo(super::ping::EchoKind, Option<[f32; 3]>),
 }
 
 /// One arrow: the unit direction from the view center, and the distance from the ship.
@@ -32,6 +35,8 @@ pub struct Bearing {
     pub kind: GuideKind,
     pub direction: Vec2,
     pub distance: f32,
+    /// Remaining brightness for a remembered target (echoes); one for live ones.
+    pub fade: f32,
 }
 
 /// Fade of an arrow: bright when close, a quiet floor when far.
@@ -63,6 +68,7 @@ impl Game {
                 kind,
                 direction,
                 distance: at.distance(ship),
+                fade: 1.0,
             });
         };
         for body in self.bodies.iter().filter(|b| b.active && !b.consumed) {
@@ -107,6 +113,30 @@ impl Game {
         let mut out = pick_nearest(threats, MAX_THREAT_ARROWS);
         out.extend(pick_nearest(minerals, MAX_MINERAL_ARROWS));
         out
+    }
+}
+
+impl Game {
+    /// Arrows toward echoes that are off screen, nearest first and capped. Bearings that
+    /// nearly coincide collapse to the nearest, as with the other guides.
+    pub fn echo_bearings(&self, center: Vec2, half: Vec2) -> Vec<Bearing> {
+        let Some(ship) = self.player().map(|p| p.position) else {
+            return Vec::new();
+        };
+        let found = self
+            .echoes()
+            .filter(|(e, _)| !extent_in_view(e.position, 0.0, center, half, 0.0))
+            .filter_map(|(e, fade)| {
+                let direction = (e.position - center).normalize_or_zero();
+                (direction != Vec2::ZERO).then_some(Bearing {
+                    kind: GuideKind::Echo(e.kind, e.tint),
+                    direction,
+                    distance: e.position.distance(ship),
+                    fade,
+                })
+            })
+            .collect();
+        pick_nearest(found, MAX_ECHO_ARROWS)
     }
 }
 

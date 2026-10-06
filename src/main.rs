@@ -347,6 +347,10 @@ fn controls(
                 session.game.toggle_repair();
             }
         }
+        // Sonar ping: X (right stick click on a pad).
+        if keys.just_pressed(KeyCode::KeyX) || pad(GamepadButton::RightThumb) {
+            session.game.ping();
+        }
         if keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::Select) {
             session.game.bench_toggle();
         }
@@ -530,6 +534,10 @@ fn smoke_run(
     {
         session.game.teleport(Vec2::new(x, y));
         session.game.player_invulnerability = 1e9;
+    }
+    // SSC_PING=1: ping once the world has settled, to check the ring and echo markers.
+    if run.frames == 20 && std::env::var_os("SSC_PING").is_some() {
+        session.game.ping();
     }
     // SSC_ARM=<threat>: kit the ship out and scatter samples of every kind of drop, so the
     // equipment art and pickups can be checked without playing for them.

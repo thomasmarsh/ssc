@@ -9,7 +9,7 @@ The universe and creatures are in place (see [UNIVERSE.md](UNIVERSE.md)). The ne
 - **Defense:** shield that recharges after a quiet interval, hull, three lives (an extra life can drop, cap 6), a protected respawn near where you died.
 - **Difficulty (built):** `SectorParams::depth` is the distance from home in sectors; `world::threat(depth)` = 1 + 0.3 per sector. Creatures take damage divided by threat and hit for `1 + 0.6 (threat - 1)` times as much; bounty scales with it. The danger parameter and gene pools still shape *what* lives somewhere. Sector (0,0) is the calm, fixed start (threat 1).
 - **Variety spacing (built):** lineage lattice 8 sectors (was 4) and biome noise at half frequency, so a different seed-flavored region takes twice the travel.
-- **HUD:** sector coordinates, parameters, SHIP POWER versus THREAT with a verdict (OUTCLASSED, UNDERPOWERED, EVEN, STRONG), the ship panel (five slots, the arsenal with the active profile highlighted and its fuel, owned boosts, the cargo hold), a switch banner, a pickup feed, radar, and edge arrows toward the nearest offscreen creatures and minerals (`T`; `simulation/guide.rs`).
+- **HUD:** sector coordinates, parameters, SHIP POWER versus THREAT with a verdict (OUTCLASSED, UNDERPOWERED, EVEN, STRONG), the ship panel (five slots, the arsenal with the active profile highlighted and its fuel, owned boosts, the cargo hold), a switch banner, a pickup feed, radar, and edge arrows toward the nearest offscreen creatures and minerals (`T`; `simulation/guide.rs`), and a sonar ping (`X`; `simulation/ping.rs`) that echoes the nearest planetoids, civilization seats, fortresses and pads from generation alone, three sectors out.
 
 ## Progression (built)
 

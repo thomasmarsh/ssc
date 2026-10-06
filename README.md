@@ -37,6 +37,7 @@ cargo test --no-default-features
 - **S**: toggle slow motion
 - **Tab**: toggle radar
 - **T / Start (pad)**: toggle edge arrows toward the nearest offscreen creatures (blue calm, red hunting, a ringed tint for a civilization's) and minable rocks and loose materials (diamonds in the material's color). At most four creature and three mineral arrows, nearest first, fading with distance; a flock shares one arrow.
+- **X / R3 (pad)**: sonar ping with a 5 second cooldown and no other cost. A ring sweeps out at 7000 units per second and, as it passes, the nearest planetoids (3), civilization outposts (2), capitals with their fortresses (2) and your landing pads (2) answer with echoes: a pulsing marker where they are, an edge arrow with a ring when offscreen, fading over 9 seconds, and a soft echo tone panned toward them. Reaches three sectors out, well past the simulated region.
 - **V**: cycle render style: classic (thin vector lines), glow (HDR bloom) and neon (wide anamorphic bloom). Styles only change presentation; see `RenderStyle` in `src/main.rs`.
 - **C**: cycle camera: close (original), wide (2×), far (4×), whole sector, then close again. Whole-sector view centers on the current sector; the other views follow the ship. The view preference survives a restart.
 - **Enter**: restart

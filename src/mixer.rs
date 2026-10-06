@@ -127,6 +127,16 @@ fn spec(cue: &Cue) -> Spec {
         Cue::Hurt { hull: false } => ship(Sound::HurtShield, 0.7, 0.0),
         Cue::Hurt { hull: true } => ship(Sound::HurtHull, 0.95, 0.0),
         Cue::Extirpated => ship(Sound::Extirpated, 0.7, 0.0),
+        Cue::Ping => ship(Sound::Ping, 0.55, 0.0),
+        // Placed only to pan toward the thing that answered; it does not fade with distance.
+        Cue::Echo { at } => Spec {
+            sound: Sound::Echo,
+            gain: 0.4,
+            reach: Some(1.0e6),
+            priority: Priority::Ship,
+            detune: 0.03,
+            at: Some(at),
+        },
         // Being caught is news: louder and a little lower the stronger the cord.
         Cue::Latch { strength, .. } => {
             ship(Sound::Latch, (0.55 + 0.08 * strength).clamp(0.55, 1.0), 0.0)
@@ -148,6 +158,8 @@ fn interval(sound: Sound) -> f32 {
         Sound::Switch | Sound::Dry => 0.06,
         Sound::Deploy | Sound::Land | Sound::Takeoff => 0.4,
         Sound::Extirpated => 1.0,
+        Sound::Ping => 1.0,
+        Sound::Echo => 0.2,
     }
 }
 

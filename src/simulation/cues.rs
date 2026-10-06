@@ -58,6 +58,11 @@ pub enum Cue {
     Hurt {
         hull: bool,
     },
+    /// The ship pinged, and an echo came back from `at`.
+    Ping,
+    Echo {
+        at: Vec2,
+    },
     /// A species-range was wiped out (see `run`).
     Extirpated,
 }

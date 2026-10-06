@@ -10,7 +10,7 @@ use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::arsenal::Profile;
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
-    Beam, Body, BodyKind, Cache, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, GuideKind,
+    Beam, Body, BodyKind, Cache, EchoKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, GuideKind,
     LAND_RANGE, MAX_PADS, Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind,
     fertility, price_text,
 };
@@ -101,7 +101,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-5 tab, [ ] pick, F do, Q take    I  insure\nPAD  L / R weapon    Y  boosts    R2  mine    L2 / A  brake    X  repair    D-UP  kit    B  land    D-DN  insure    SELECT  bench    START  arrows\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-5 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -1883,9 +1883,8 @@ pub fn draw(
             );
         }
     }
-    if session.arrows {
-        draw_guides(&mut gizmos, game, camera, half);
-    }
+    draw_echoes(&mut gizmos, game, camera, half);
+    draw_guides(&mut gizmos, game, camera, half, session.arrows);
     if session.radar {
         // The scope keeps its on-screen size as the world view zooms out.
         let ui_scale = half.y * 2.0 / VIEW_HEIGHT;
@@ -1903,11 +1902,18 @@ pub fn draw(
 /// Edge arrows toward the nearest offscreen threats and minerals (see `Game::guide_bearings`).
 /// They sit just inside the screen edge at a constant on-screen size, fade with distance and
 /// leave the middle of the view alone.
-fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
+fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrows: bool) {
     let ui_scale = half.y * 2.0 / VIEW_HEIGHT;
     let inset = Vec2::splat(26.0 * ui_scale);
     let reach = (half - inset).max(Vec2::splat(1.0));
-    for bearing in game.guide_bearings(camera, half) {
+    // Echo arrows stay on whatever the arrows toggle says: a ping is asked for.
+    let mut bearings = if arrows {
+        game.guide_bearings(camera, half)
+    } else {
+        Vec::new()
+    };
+    bearings.extend(game.echo_bearings(camera, half));
+    for bearing in bearings {
         let d = bearing.direction;
         let t = (reach.x / d.x.abs().max(1e-4)).min(reach.y / d.y.abs().max(1e-4));
         let at = camera + d * t;
@@ -1924,8 +1930,15 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
                 (lifted(Some(tint)), if alert { 9.0 } else { 7.0 })
             }
             GuideKind::Mineral(material) => (material_color(material), 6.0),
+            GuideKind::Echo(kind, tint) => (echo_color(kind, tint), 8.0),
         };
-        let color = color.with_alpha(ssc::simulation::proximity(bearing.distance, GUIDE_FADE));
+        let echo = matches!(bearing.kind, GuideKind::Echo(..));
+        let alpha = if echo {
+            0.3 + 0.7 * bearing.fade
+        } else {
+            ssc::simulation::proximity(bearing.distance, GUIDE_FADE)
+        };
+        let color = color.with_alpha(alpha);
         let size = size * ui_scale;
         let side = Vec2::new(-d.y, d.x);
         let tip = at + d * size;
@@ -1947,10 +1960,87 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
             ),
         }
         // A civilization's arrow carries a small ring behind the head, as its units do.
-        if matches!(bearing.kind, GuideKind::Civilization { .. }) {
+        if matches!(
+            bearing.kind,
+            GuideKind::Civilization { .. } | GuideKind::Echo(..)
+        ) {
             gizmos
                 .circle_2d(at - d * size * 0.2, size * 1.35, color.with_alpha(0.45))
                 .resolution(10);
+        }
+    }
+}
+
+fn echo_color(kind: EchoKind, tint: Option<[f32; 3]>) -> Color {
+    match kind {
+        EchoKind::Planetoid => Color::srgb(0.95, 0.8, 0.5),
+        EchoKind::Civilization | EchoKind::Fortress => lifted(tint),
+        EchoKind::Pad => PAD_GREEN,
+    }
+}
+
+/// The sonar ring, and the markers where echoes have sounded. A marker is a pulsing glyph by
+/// kind (circle for a planetoid, square for a civilization, a walled square for a fortress,
+/// a diamond for a pad) that fades as the echo does.
+fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
+    if let Some((origin, radius)) = game.ping_ring() {
+        let fade = (1.0 - radius / ssc::simulation::PING_RANGE).clamp(0.0, 1.0);
+        gizmos
+            .circle_2d(origin, radius, CYAN.with_alpha(0.1 + 0.4 * fade))
+            .resolution(96);
+        gizmos
+            .circle_2d(
+                origin,
+                (radius - 40.0).max(0.0),
+                CYAN.with_alpha(0.12 * fade),
+            )
+            .resolution(96);
+    }
+    let ui_scale = half.y * 2.0 / VIEW_HEIGHT;
+    for (echo, fade) in game.echoes() {
+        if !ssc::simulation::extent_in_view(echo.position, 80.0 * ui_scale, camera, half, 0.0) {
+            continue;
+        }
+        let color = echo_color(echo.kind, echo.tint);
+        let at = echo.position;
+        let size = 34.0 * ui_scale;
+        let pulse = 1.0 + 0.35 * (1.0 - fade) * 2.0;
+        gizmos
+            .circle_2d(at, size * 1.8 * pulse, color.with_alpha(0.35 * fade))
+            .resolution(32);
+        let square = |r: f32| {
+            [
+                at + Vec2::new(r, r),
+                at + Vec2::new(-r, r),
+                at + Vec2::new(-r, -r),
+                at + Vec2::new(r, -r),
+            ]
+        };
+        let c = color.with_alpha(0.3 + 0.7 * fade);
+        match echo.kind {
+            EchoKind::Planetoid => {
+                gizmos
+                    .circle_2d(at, (echo.radius * 1.12).max(size), c)
+                    .resolution(48);
+            }
+            EchoKind::Civilization => {
+                gizmos.lineloop_2d(square(size * 0.7), c);
+            }
+            EchoKind::Fortress => {
+                gizmos.lineloop_2d(square(size), c);
+                gizmos.lineloop_2d(square(size * 0.55), c);
+            }
+            EchoKind::Pad => {
+                gizmos.lineloop_2d(
+                    [
+                        at + Vec2::Y * size,
+                        at + Vec2::X * size,
+                        at - Vec2::Y * size,
+                        at - Vec2::X * size,
+                    ],
+                    c,
+                );
+            }
         }
     }
 }

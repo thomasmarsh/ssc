@@ -31,10 +31,12 @@ pub enum Sound {
     Land,
     Takeoff,
     Extirpated,
+    Ping,
+    Echo,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 22] = [
+    pub const ALL: [Sound; 24] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -57,6 +59,8 @@ impl Sound {
         Sound::Land,
         Sound::Takeoff,
         Sound::Extirpated,
+        Sound::Ping,
+        Sound::Echo,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -253,6 +257,30 @@ impl Sound {
                     (sine(notes[i], t) * 0.8 + sine(notes[i] * 0.5, t) * 0.4) * decay(local, 0.2)
                 });
                 lowpass(&mut v, 1800.0);
+                v
+            }
+            // A clean sonar blip: a quick upward chirp with a long, soft tail.
+            Sound::Ping => {
+                let mut v = voice(0.5, |t, _| {
+                    let f = sweep((t / 0.12).min(1.0), 520.0, 1250.0);
+                    (sine(f, t) * 0.8 + sine(f * 2.0, t) * 0.12) * decay(t, 0.17)
+                });
+                lowpass(&mut v, 3200.0);
+                v
+            }
+            // The answer: a softer, higher blip that does not rise, so it reads as a return.
+            Sound::Echo => {
+                let mut v = voice(0.34, |t, _| {
+                    let second = (t - 0.09).max(0.0);
+                    let a = sine(1480.0, t) * decay(t, 0.05);
+                    let b = if t > 0.09 {
+                        sine(1480.0, t) * decay(second, 0.07) * 0.5
+                    } else {
+                        0.0
+                    };
+                    a + b
+                });
+                lowpass(&mut v, 3000.0);
                 v
             }
             Sound::HurtHull => {
