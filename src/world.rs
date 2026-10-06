@@ -387,6 +387,8 @@ pub struct Spawn {
     pub civ: Option<CivTag>,
     /// A wall segment or turret of a fortified city (see `fortress`).
     pub fort: Option<crate::fortress::FortPart>,
+    /// An apex elder (see `apex`).
+    pub apex: Option<crate::apex::Rank>,
 }
 
 /// Where a creature spawns attached: its host's index in the sector's output, its angle
@@ -420,6 +422,7 @@ impl Spawn {
             rooted: None,
             civ: None,
             fort: None,
+            apex: None,
         }
     }
 
@@ -792,6 +795,8 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
     }
     // Civilizations come last of all, on their own stream, and only inside territories.
     crate::territory::civ_spawns(seed, id, params, &genes, &mut out);
+    // The apex elder, if the sector has one, is the very last spawn.
+    crate::apex::spawn(seed, id, pool, &genes, &mut out);
     out
 }
 
@@ -1501,7 +1506,7 @@ mod tests {
                     // residents follow it.
                     let originals = spawns
                         .iter()
-                        .filter(|s| s.rooted.is_none() && s.civ.is_none())
+                        .filter(|s| s.rooted.is_none() && s.civ.is_none() && s.apex.is_none())
                         .count();
                     assert_eq!(w.index as usize, originals - 1);
                     let half = SECTOR_SIZE / 2.0 - r - PLANETOID_MARGIN;

@@ -207,6 +207,7 @@ impl Game {
                         drops.push(upgrades::roll_item(&mut rng, &source));
                     }
                 }
+                drops.extend(self.apex_loot(body, &mut rng, params));
                 let bred = if body.origin.is_some() { 1.0 } else { 0.35 };
                 let chance = (0.08 + 0.4 * genome.bounty / 400.0) / genome.parts() as f32 * bred;
                 if rng.chance(chance) {

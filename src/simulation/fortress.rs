@@ -227,11 +227,10 @@ mod tests {
                             .iter()
                             .all(|s| s.civ.is_some_and(|c| c.territory == t.id))
                     );
-                    assert!(
-                        forts
-                            .iter()
-                            .all(|s| s.index as usize >= spawns.len() - forts.len())
-                    );
+                    assert!(forts.iter().all(|s| {
+                        s.index as usize
+                            >= spawns.iter().filter(|o| o.apex.is_none()).count() - forts.len()
+                    }));
                     assert!(
                         forts
                             .iter()

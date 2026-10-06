@@ -68,6 +68,8 @@ pub struct RunStats {
     pub elders: u32,
     pub bases: u32,
     pub civs_toppled: u32,
+    /// Apex elders slain, by name, in order.
+    pub apex_slain: Vec<String>,
     /// Offerings made at civilization seats, and the material they came to.
     pub tithes: u32,
     pub tithed: f32,
@@ -244,6 +246,8 @@ impl Game {
             return;
         }
         let name = body.genome.name();
+        // An apex is one named elder, not a species: its death is not an extirpation.
+        let apex = self.apex_of(body).is_some();
         if eaten {
             self.run.lost_to_nature += 1;
         } else if !body.follower {
@@ -260,7 +264,9 @@ impl Game {
         let sector = body
             .origin
             .map_or_else(|| SectorId::containing(body.position), |(q, _)| q);
-        self.check_extirpation(body.species, sector, &name);
+        if !apex {
+            self.check_extirpation(body.species, sector, &name);
+        }
     }
 
     /// An egg was broken or spoiled.
@@ -345,7 +351,7 @@ impl Game {
             .max_by_key(|s| s.2)
             .map(|(_, name, n)| format!("MOST DESTROYED {name} x{n}   "))
             .unwrap_or_default();
-        let lines = vec![
+        let mut lines = vec![
             format!(
                 "SCORE {}   TIME {minutes}:{seconds:02}   LIVES USED {}",
                 self.score, r.deaths
@@ -383,6 +389,9 @@ impl Game {
                 r.weapons, r.parts, r.pads
             ),
         ];
+        if !r.apex_slain.is_empty() {
+            lines.push(format!("APEX SLAIN: {}", r.apex_slain.join(", ")));
+        }
         // Nothing here changes the rules; it only reads.
         let extirpated = r
             .extirpated

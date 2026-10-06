@@ -479,6 +479,12 @@ impl Genome {
     /// the streams that place the population. Always passes through `limited()`.
     pub fn individual(self, rng: &mut Rng) -> Self {
         let roll = rng.f32();
+        self.individual_from(rng, roll)
+    }
+
+    /// `individual` for a roll already made: below 0.95 a tiny jitter, up to 0.99 a wide one,
+    /// above that one outlier gene. Apex elders force the wide end.
+    pub fn individual_from(self, rng: &mut Rng, roll: f32) -> Self {
         let outlier = roll >= 1.0 - OUTLIER_CHANCE;
         let spread = if (0.95..1.0 - OUTLIER_CHANCE).contains(&roll) {
             JITTER_WIDE

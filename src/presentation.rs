@@ -362,6 +362,26 @@ fn standing(power: f32, threat: f32) -> &'static str {
     ssc::simulation::verdict(power, threat)
 }
 
+/// Extra HUD lines under the ship status: the territory, then the nearest apex elder.
+fn hud_lines(game: &Game) -> String {
+    let mut text = territory_line(game);
+    if let Some(apex) = game.apex_report() {
+        let lesser = if apex.rank == ssc::apex::Rank::Lesser {
+            " (lesser)"
+        } else {
+            ""
+        };
+        text.push_str(&format!(
+            "\n* APEX  {}{lesser}   {:.1}K   HULL [{}]{}",
+            apex.name,
+            apex.distance / 1000.0,
+            bar(apex.health, 10),
+            if apex.alert { "   HUNTING YOU" } else { "" }
+        ));
+    }
+    text
+}
+
 /// The HUD line for the territory the ship is in: its name, what it asks of the ship and
 /// where its raid clock stands. Empty outside any territory.
 fn territory_line(game: &Game) -> String {
@@ -424,6 +444,8 @@ fn territory_line(game: &Game) -> String {
     )
 }
 
+/// The colour of everything apex: the world crown, the radar ring, the arrow and the HUD line.
+const APEX_GOLD: Color = Color::srgb(1.0, 0.82, 0.22);
 const DRY_RED: Color = Color::srgb(1.0, 0.42, 0.34);
 const OWNED: Color = Color::srgb(0.62, 0.72, 0.82);
 
@@ -876,7 +898,7 @@ pub fn update_hud(
         power,
         threat,
         standing(power, threat),
-        territory_line(game),
+        hud_lines(game),
         100.0 * params.danger,
         100.0 * params.aggression,
         100.0 * params.density,
@@ -1952,6 +1974,25 @@ pub fn draw(
                         .circle_2d(p, r * 1.3 + 9.0, Color::srgba(cr, cg, cb, 0.28))
                         .resolution(20);
                 }
+                if !body.follower && game.apex_of(body).is_some() {
+                    // An apex elder: two slow golden crowns and spokes, unmistakable.
+                    let spin = game.time * 0.4;
+                    for (k, grow) in [(0.0, 1.5), (1.0, 1.9)] {
+                        let ring = r * grow + 14.0 + 4.0 * (game.time * 1.6 + k).sin();
+                        gizmos
+                            .circle_2d(p, ring, APEX_GOLD.with_alpha(0.5 - 0.15 * k))
+                            .resolution(28);
+                    }
+                    for k in 0..6 {
+                        let a = spin + k as f32 * std::f32::consts::TAU / 6.0;
+                        let d = Vec2::from_angle(a);
+                        gizmos.line_2d(
+                            p + d * (r * 1.9 + 18.0),
+                            p + d * (r * 1.9 + 34.0),
+                            APEX_GOLD.with_alpha(0.7),
+                        );
+                    }
+                }
                 if let Some(root) = body.root
                     && let Some(host) = game.body(root.host)
                 {
@@ -2341,6 +2382,8 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
         Vec::new()
     };
     bearings.extend(game.echo_bearings(camera, half));
+    // An apex elder's arrow is always on, whatever the toggle says.
+    bearings.extend(game.apex_bearings(camera, half));
     if arrows {
         bearings.extend(game.beacon_bearings(camera, half));
         bearings.extend(game.wreck_bearings(camera, half));
@@ -2365,6 +2408,7 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
             GuideKind::Echo(kind, tint) => (echo_color(kind, tint), 8.0),
             GuideKind::Beacon => (CYAN, 9.0),
             GuideKind::Wreck => (DRY_RED, 9.0),
+            GuideKind::Apex { alert } => (APEX_GOLD, if alert { 13.0 } else { 11.0 }),
         };
         let echo = matches!(bearing.kind, GuideKind::Echo(..));
         let alpha = if echo {
@@ -2406,6 +2450,20 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
                 mid - (d - side) * size * 0.5,
                 color,
             );
+        }
+        // An apex's arrow is a double chevron inside a ring.
+        if matches!(bearing.kind, GuideKind::Apex { .. }) {
+            gizmos.linestrip_2d(
+                [
+                    back - d * size * 0.9 + side * size * 0.8,
+                    tip - d * size * 0.9,
+                    back - d * size * 0.9 - side * size * 0.8,
+                ],
+                color,
+            );
+            gizmos
+                .circle_2d(at - d * size * 0.2, size * 1.5, color.with_alpha(0.5))
+                .resolution(14);
         }
         // A beacon's arrow wears a bar across its tail, like a mast.
         if bearing.kind == GuideKind::Beacon {
@@ -3102,6 +3160,11 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
             gizmos
                 .circle_2d(center + offset, size * ui_scale, body_color(body))
                 .resolution(6);
+            if game.apex_of(body).is_some() {
+                gizmos
+                    .circle_2d(center + offset, (size + 4.5) * ui_scale, APEX_GOLD)
+                    .resolution(12);
+            }
             // A civilization's people and stations wear a ring in its own tint.
             if let Some([r, g, b]) = game.civ_tint(body) {
                 gizmos

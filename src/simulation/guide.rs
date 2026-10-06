@@ -24,6 +24,8 @@ pub enum GuideKind {
     Wildlife { alert: bool },
     /// A creature of a civilization, in its tint.
     Civilization { tint: [f32; 3], alert: bool },
+    /// An apex elder, always marked.
+    Apex { alert: bool },
     /// A minable rock or a dropped material.
     Mineral(Material),
     /// A remembered ping echo.
@@ -83,6 +85,10 @@ impl Game {
                     if body.root.is_some() && !body.alert {
                         continue;
                     }
+                    if self.apex_of(body).is_some() {
+                        // Apex arrows are drawn apart (`apex_bearings`).
+                        continue;
+                    }
                     let kind = match self.civ_tint(body) {
                         Some(tint) => GuideKind::Civilization {
                             tint,
@@ -122,6 +128,29 @@ impl Game {
 }
 
 impl Game {
+    /// An arrow toward the nearest apex elder when it is off screen. Apex arrows ignore the
+    /// arrows toggle and the cap on threat arrows: a boss is always worth knowing about.
+    pub fn apex_bearings(&self, center: Vec2, half: Vec2) -> Vec<Bearing> {
+        let Some(report) = self.apex_report() else {
+            return Vec::new();
+        };
+        if extent_in_view(report.position, 60.0, center, half, 0.0) {
+            return Vec::new();
+        }
+        let direction = (report.position - center).normalize_or_zero();
+        if direction == Vec2::ZERO {
+            return Vec::new();
+        }
+        vec![Bearing {
+            kind: GuideKind::Apex {
+                alert: report.alert,
+            },
+            direction,
+            distance: report.distance,
+            fade: 1.0,
+        }]
+    }
+
     /// Arrows toward echoes that are off screen, nearest first and capped. Bearings that
     /// nearly coincide collapse to the nearest, as with the other guides.
     pub fn echo_bearings(&self, center: Vec2, half: Vec2) -> Vec<Bearing> {

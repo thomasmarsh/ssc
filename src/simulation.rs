@@ -5,6 +5,7 @@
 //! player's active region are generated on demand and simulated; bodies elsewhere are
 //! frozen, and sectors far from the player are dropped and regenerated on return.
 
+mod apexes;
 mod arms;
 pub mod arsenal;
 mod brain;
@@ -38,6 +39,7 @@ pub mod tuning;
 pub mod upgrades;
 mod weapons;
 
+pub use apexes::{ApexInfo, ApexReport};
 pub use brain::Brain;
 pub use chain::{Chain, Part};
 pub use chart::{
@@ -417,6 +419,9 @@ pub struct Game {
     civ_struck: HashMap<u64, f32>,
     civ_clock: f32,
     civ_rng: Rng,
+    /// Apex elders generated in the sectors met, and which have been announced; see `apexes`.
+    apexes: BTreeMap<(SectorId, u32), ApexInfo>,
+    apex_seen: HashSet<(SectorId, u32)>,
     seed: u64,
     rng: Rng,
     /// Loot has its own stream, so drops never disturb the gameplay one.
@@ -514,6 +519,8 @@ impl Game {
             civ_regard: BTreeMap::new(),
             civ_hits: Vec::new(),
             civ_struck: HashMap::new(),
+            apexes: BTreeMap::new(),
+            apex_seen: HashSet::new(),
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
             sanctuary: true,
@@ -724,6 +731,7 @@ impl Game {
         self.note_step(dt, travelled, taken);
         self.chart_ship_damaged(taken);
         self.update_diplomacy(dt);
+        self.update_apex();
         self.remove_destroyed();
         self.cue_player_damage(ship_before);
     }
@@ -896,6 +904,9 @@ impl Game {
             body.genes = spawn.phenotype;
             body.pinned = spawn.pinned;
             body.origin = Some((id, spawn.index));
+            if let Some(rank) = spawn.apex {
+                self.register_apex(id, spawn.index, rank);
+            }
             self.apply_mined(&mut body);
             body.angle = self.rng.f32() * TAU;
             body.wander = body.angle;
@@ -1533,6 +1544,7 @@ impl Game {
             if kind != BodyKind::Player {
                 self.civ_destroyed(body);
                 self.civ_killed(body);
+                self.apex_slain(body);
                 self.drop_loot(body);
                 self.siphon(body);
             }

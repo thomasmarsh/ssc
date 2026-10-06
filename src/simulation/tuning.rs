@@ -335,3 +335,15 @@ pub const SHARE_MARGIN: i32 = 1;
 /// Doctrine tables learn from members at this multiple of `TABLE_PULL`, by tier (hostile,
 /// wary, ignores, friendly): a civilization at war drills faster than one at peace.
 pub const DOCTRINE_PULL: [f32; 4] = [1.5, 1.0, 0.5, 0.25];
+
+// ---- apex elders ---------------------------------------------------------------------------
+
+/// The banner "APEX: NAME stirs" posts once, when an apex first comes within this of the ship.
+pub const APEX_NOTICE_RANGE: f32 = 3600.0;
+/// The HUD line and edge arrow follow the nearest apex this far.
+pub const APEX_HUD_RANGE: f32 = 9000.0;
+/// Score for slaying one (times the place's threat), halved for a lesser one.
+pub const APEX_SCORE: f32 = 2500.0;
+/// What a slain apex drops: this much of each material (halved for a lesser one), three parts
+/// (one epic in the slot of a still-locked ability, two rare) and two lucky rolls.
+pub const APEX_MATERIAL: f32 = 90.0;
