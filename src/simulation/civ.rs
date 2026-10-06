@@ -99,6 +99,8 @@ pub struct TerritoryReport {
     pub stage: RaidStage,
     /// Seconds until the next party, if one is coming.
     pub next_in: Option<f32>,
+    /// The capital's fortress: its archetype and tier (1 to 4), if the civilization stands.
+    pub fort: Option<(&'static str, u8)>,
 }
 
 /// How a ship of `power` stands against a `threat`.
@@ -191,7 +193,13 @@ impl Game {
     /// The tint of the civilization a creature or station belongs to, if any.
     pub fn civ_tint(&self, body: &Body) -> Option<[f32; 3]> {
         let tid = match body.kind {
-            BodyKind::Base => body.origin.and_then(|o| self.civ_bases.get(&o))?.0,
+            BodyKind::Base | BodyKind::Asteroid => {
+                let key = body.origin?;
+                self.civ_bases
+                    .get(&key)
+                    .or_else(|| self.civ_works.get(&key))?
+                    .0
+            }
             _ => self.civ_of(body)?.0,
         };
         self.civ_colors.get(&tid).copied()
@@ -256,6 +264,8 @@ impl Game {
             threat: self.threat() * menace,
             stage,
             next_in,
+            fort: (standing != Standing::Fallen)
+                .then(|| (t.fort_archetype().label(), t.fort_tier() + 1)),
         })
     }
 
@@ -543,6 +553,9 @@ impl Game {
             fall.capital = true;
         }
         let after = t.standing(*fall);
+        if !elder {
+            self.spill_cache(tid, body.position);
+        }
         if elder {
             let bonus = (ELDER_SCORE * body.genes.threat) as u64;
             self.score = self.score.saturating_add(bonus);

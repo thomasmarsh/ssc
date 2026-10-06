@@ -284,6 +284,9 @@ pub enum BaseKind {
     Bastion,
     /// Seeds mines around itself and pulses rings of fire.
     Depot,
+    /// A single wall-mounted turret of a fortified city (see `fortress`). Not a station: it
+    /// never breeds or harvests and is not part of `ALL`.
+    Turret,
 }
 
 impl BaseKind {
@@ -295,6 +298,7 @@ impl BaseKind {
             Self::Foundry => 650.0,
             Self::Bastion => 800.0,
             Self::Depot => 550.0,
+            Self::Turret => 170.0,
         }
     }
 
@@ -304,6 +308,7 @@ impl BaseKind {
             Self::Foundry => "foundry",
             Self::Bastion => "bastion",
             Self::Depot => "depot",
+            Self::Turret => "turret",
         }
     }
 }
@@ -322,6 +327,8 @@ pub enum RockKind {
     Husk,
     /// A large, fixed, indestructible fertile body that blooms plankton around it.
     Planetoid,
+    /// A segment of a fortress wall: pinned, tough, destroyable, no loot and not minable.
+    Wall,
 }
 
 /// An entity to be placed when a quadrant is first loaded.
@@ -355,6 +362,8 @@ pub struct Spawn {
     pub rooted: Option<Rooting>,
     /// Belongs to a civilization (see `territory`).
     pub civ: Option<CivTag>,
+    /// A wall segment or turret of a fortified city (see `fortress`).
+    pub fort: Option<crate::fortress::FortPart>,
 }
 
 /// Where a creature spawns attached: its host's index in the quadrant's output, its angle
@@ -387,6 +396,7 @@ impl Spawn {
             den: None,
             rooted: None,
             civ: None,
+            fort: None,
         }
     }
 
@@ -775,7 +785,7 @@ fn root_residents(
         .filter(|(_, s)| match s.rock {
             RockKind::Planetoid => true,
             RockKind::Plain | RockKind::Ice | RockKind::Ore => !s.pinned,
-            RockKind::Crystal | RockKind::Husk => false,
+            RockKind::Crystal | RockKind::Husk | RockKind::Wall => false,
         })
         .map(|(i, s)| (i, s.position, s.radius.unwrap_or(35.0), s.rock))
         .collect();
@@ -1033,7 +1043,7 @@ fn station(seed: u64, id: QuadrantId, params: &QuadrantParams) -> (BaseKind, Opt
         }
     }
     let arms = match kind {
-        BaseKind::Hive | BaseKind::Foundry => None,
+        BaseKind::Hive | BaseKind::Foundry | BaseKind::Turret => None,
         BaseKind::Depot => Some((Weapon::Nova, rng.int(9, 15) as u8)),
         BaseKind::Bastion => {
             let options = [
@@ -1079,7 +1089,7 @@ mod tests {
                 let id = QuadrantId { x, y };
                 let spawns = generate(0x535343, id);
                 assert_eq!(spawns, generate(0x535343, id));
-                for spawn in spawns {
+                for spawn in spawns.into_iter().filter(|s| s.fort.is_none()) {
                     if let Some(kind) = spawn.base_kind {
                         stations[BaseKind::ALL.iter().position(|k| *k == kind).unwrap()] += 1;
                     }
@@ -1091,6 +1101,7 @@ mod tests {
                             RockKind::Crystal => 3,
                             RockKind::Husk => 4,
                             RockKind::Planetoid => 5,
+                            RockKind::Wall => unreachable!("fortress pieces are filtered out"),
                         };
                         rocks[index] += 1;
                     }

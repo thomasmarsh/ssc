@@ -217,6 +217,8 @@ impl Game {
                 let grade = world::threat(params.depth);
                 let mut source = Source::plain(grade, params);
                 match body.rock {
+                    // Wall segments are pinned and never get here; they leave nothing.
+                    RockKind::Wall => {}
                     RockKind::Plain | RockKind::Husk | RockKind::Planetoid => {
                         if rng.chance(0.07) {
                             drops.push(upgrades::roll_salvage(&mut rng, &source));
@@ -273,6 +275,12 @@ impl Game {
                     BaseKind::Depot => {
                         source.affinity[Slot::Aux.index()] += 3.0;
                         (0, 3)
+                    }
+                    // A wall turret leaves scrap metal and now and then a lucky find, no part.
+                    BaseKind::Turret => {
+                        let scrap = (12.0 * body.genes.threat).round().max(5.0);
+                        drops.push(Item::Material(Material::Metal, scrap));
+                        (-1, i32::from(rng.chance(0.3)))
                     }
                 };
                 if let Some((weapon, _)) = body.base.as_ref().and_then(|b| b.arms) {

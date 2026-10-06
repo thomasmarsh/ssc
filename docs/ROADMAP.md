@@ -49,3 +49,4 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 - Whether a part should be pickable (leave or take) instead of auto-installed, and whether wrecks should drop more than the best part.
 - Landmark caches and bosses: civilization elders (see UNIVERSE.md) are built, with a guaranteed epic and a lasting fall; caches and named routes are not. Tune raid timing, elder strength and the depth 6 to 8 start of territories by playing.
 - Pickup labels in the world, audio and screen shake for pickups.
+- Fortified cities and civilization mining (see UNIVERSE.md) are built: tune wall hull, turret reach and the fortress tier curve by playing, and consider a breach reward, maze-aware raiders, and rival civilizations contesting rocks.

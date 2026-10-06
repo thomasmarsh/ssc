@@ -61,6 +61,20 @@ impl BaseState {
         }
     }
 
+    /// A fortress turret: it only aims and fires (see `simulation/fortress.rs`). Its two
+    /// cooldowns are staggered by spawn index so a wall does not volley as one.
+    pub fn turret(arms: Option<(Weapon, u8)>, index: u32) -> Self {
+        let mut state =
+            Self::new(Species::bogey(), Species::bogey(), 0.0).of_kind(BaseKind::Turret, arms);
+        state.turrets = [
+            1.2 + (index % 7) as f32 * 0.45,
+            2.0 + (index % 5) as f32 * 0.8,
+            0.0,
+            0.0,
+        ];
+        state
+    }
+
     pub fn of_kind(mut self, kind: BaseKind, arms: Option<(Weapon, u8)>) -> Self {
         self.kind = kind;
         self.arms = arms;
@@ -89,7 +103,12 @@ impl Game {
         let ids: Vec<u64> = self
             .bodies
             .iter()
-            .filter(|b| b.active && b.base.is_some())
+            .filter(|b| {
+                b.active
+                    && b.base
+                        .as_ref()
+                        .is_some_and(|state| state.kind != BaseKind::Turret)
+            })
             .map(|b| b.id)
             .collect();
         for id in ids {
@@ -106,7 +125,7 @@ impl Game {
             let (harvest_range, harvest_pull, haul) = match kind {
                 BaseKind::Hive => (HARVEST_RANGE, HARVEST_PULL, 1.0),
                 BaseKind::Foundry => (HARVEST_RANGE * 1.7, HARVEST_PULL * 1.4, 1.8),
-                BaseKind::Bastion | BaseKind::Depot => (0.0, 0.0, 0.0),
+                BaseKind::Bastion | BaseKind::Depot | BaseKind::Turret => (0.0, 0.0, 0.0),
             };
             let mut absorbed = 0.0;
             let mut taken = Vec::new();
@@ -128,17 +147,50 @@ impl Game {
             let Some(index) = self.bodies.iter().position(|b| b.id == id) else {
                 continue;
             };
+            // The capital of a civilization that mines takes what its miners bring (while it
+            // can build a guardian; otherwise the stash piles up) instead of the trickle.
+            let capital = self.bodies[index]
+                .origin
+                .and_then(|o| self.civ_bases.get(&o))
+                .filter(|(_, role)| *role == crate::territory::CivRole::Capital)
+                .map(|(tid, _)| *tid);
+            let mining_on = capital.is_some_and(|t| self.civ_mining_active(t));
+            let can_build = match (capital, self.bodies[index].base.as_ref()) {
+                (Some(_), Some(state)) => {
+                    let cap = if kind == BaseKind::Foundry {
+                        GUARDIAN_CAP + 2
+                    } else {
+                        GUARDIAN_CAP
+                    };
+                    self.bodies
+                        .iter()
+                        .filter(|b| {
+                            b.kind == BodyKind::Creature
+                                && !b.follower
+                                && b.species == state.guardian.lineage
+                                && b.position.distance(center) < LOCAL_RANGE
+                        })
+                        .count()
+                        < cap
+                }
+                _ => false,
+            };
+            let feed = match capital.and_then(|t| self.civ_mining.get_mut(&t)) {
+                Some(mining) if can_build => mining.withdraw(civmine::FEED_RATE * dt),
+                _ => 0.0,
+            };
+            let trickle = if mining_on { 0.0 } else { PASSIVE_STOCK * dt };
             let Some(state) = self.bodies[index].base.as_mut() else {
                 continue;
             };
-            state.stock += absorbed * haul + PASSIVE_STOCK * dt;
+            state.stock += absorbed * haul + trickle + feed;
             state.timer -= dt;
             let (brood, guardian) = (state.brood, state.guardian);
             let breeds: f32 = match kind {
                 BaseKind::Hive => 1.0,
                 BaseKind::Foundry => 0.45,
                 BaseKind::Depot => 0.5,
-                BaseKind::Bastion => 0.0,
+                BaseKind::Bastion | BaseKind::Turret => 0.0,
             };
             let birth = state.timer <= 0.0 && breeds > 0.0;
             let build = state.stock >= GUARDIAN_COST;
@@ -223,7 +275,7 @@ impl Game {
                     shots.push((center, weapon, 0.0));
                 }
             }
-            BaseKind::Hive | BaseKind::Foundry => {}
+            BaseKind::Hive | BaseKind::Foundry | BaseKind::Turret => {}
         }
         for (origin, weapon, spin) in shots {
             let aim = (target - origin).normalize_or_zero();

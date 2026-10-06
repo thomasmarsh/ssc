@@ -94,7 +94,7 @@ pub fn fertility(rock: &Body) -> Option<(f32, usize, f32)> {
         RockKind::Plain => 1.0,
         RockKind::Ice => 1.6,
         RockKind::Ore => 0.4,
-        RockKind::Crystal | RockKind::Husk => return None,
+        RockKind::Crystal | RockKind::Husk | RockKind::Wall => return None,
     };
     (r >= 20.0).then_some((
         r * LICHEN_RATE * factor,

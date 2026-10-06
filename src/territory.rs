@@ -11,11 +11,12 @@
 //! are derived from a pool species of the capital quadrant, so the lineage keeps a
 //! recognizable name and color. See `docs/UNIVERSE.md`, "Civilizations".
 
+use crate::fortress::{self, Archetype, FortRole, Layout, PartKind};
 use crate::genome::{Diet, Fear, GenePool, Genome, Nest, Social, Species, Trigger, Weapon};
 use crate::simulation::BodyKind;
 use crate::world::{
     BaseKind, Phenotype, QUADRANT_BODY_BUDGET, QUADRANT_SIZE, QuadrantId, QuadrantParams, Rng,
-    Spawn, hash2, value_noise,
+    RockKind, Spawn, hash2, value_noise,
 };
 use bevy::prelude::Vec2;
 
@@ -72,6 +73,10 @@ pub enum CivRole {
     Capital,
     /// An outpost base.
     Outpost,
+    /// A wall segment of a fortified city (see `fortress`).
+    Wall,
+    /// A wall-mounted turret of a fortified city.
+    Turret,
 }
 
 /// Marks a generated spawn as belonging to a civilization.
@@ -196,7 +201,60 @@ impl Territory {
             CivShape::Elder => 1.15,
             CivShape::Both => 1.3,
         };
-        (0.85 + 0.35 * self.strength) * shape
+        (0.85 + 0.35 * self.strength) * shape * (1.0 + 0.1 * self.fortification())
+    }
+
+    /// How deep and strong the capital is, as a fortress tier 0 to 3: small near the start
+    /// of the difficulty curve, bigger deeper and for a stronger civilization.
+    pub fn fort_tier(&self) -> u8 {
+        let depth = Vec2::new(self.capital.x as f32, self.capital.y as f32).length();
+        let v = (depth - 5.0) / 5.0 + (self.strength - 0.7) * 0.7;
+        ((v * 2.0) as i32).clamp(0, i32::from(fortress::MAX_TIER)) as u8
+    }
+
+    /// The fortress's weight in the threat verdict: 1 to 4 steps of a tenth each.
+    pub fn fortification(&self) -> f32 {
+        f32::from(self.fort_tier()) + 1.0
+    }
+
+    /// The look and layout family of the capital's fortress: a court keeps a bastion or a
+    /// coil, a horde builds city blocks or rings, a dominion may build any.
+    pub fn fort_archetype(&self) -> Archetype {
+        match self.shape {
+            CivShape::Horde => Archetype::pick(self.id, &[Archetype::Grid, Archetype::Ring]),
+            CivShape::Elder => Archetype::pick(self.id, &[Archetype::Star, Archetype::Spiral]),
+            CivShape::Both => Archetype::pick(self.id, &Archetype::ALL),
+        }
+    }
+
+    /// What the fortress turrets fire: the weapon of the people's own genes (the capital
+    /// quadrant's pool species the members come from, or the first armed relative), as a
+    /// pattern a turret can hold (never a tether or a bare mine layer).
+    pub fn turret_arms(&self, seed: u64) -> (Weapon, u8) {
+        let pool = GenePool::for_quadrant(seed, self.capital);
+        let mut rng = Rng::new(hash2(
+            seed ^ TERRITORY_SALT ^ 0x51,
+            self.capital.x,
+            self.capital.y,
+        ));
+        let own = pool.any(&mut rng).genome;
+        let armed = |g: &Genome| !matches!(g.weapon, Weapon::None | Weapon::Tether | Weapon::Mine);
+        let source = if armed(&own) {
+            own
+        } else {
+            pool.entries
+                .iter()
+                .map(|e| e.species.genome)
+                .find(armed)
+                .unwrap_or(own)
+        };
+        match source.weapon {
+            Weapon::Missile => (Weapon::Missile, source.volley.clamp(1, 2)),
+            Weapon::Needles => (Weapon::Needles, 10),
+            Weapon::Nova => (Weapon::Nova, 8),
+            Weapon::Spiral => (Weapon::Spiral, source.volley.clamp(1, 3)),
+            _ => (Weapon::Projectile, source.volley.clamp(1, 3)),
+        }
     }
 
     /// The rank-and-file species: a pool species of the capital quadrant turned into a
@@ -412,7 +470,7 @@ pub fn civ_spawns(
             }
         };
         let arms = match kind {
-            BaseKind::Hive | BaseKind::Foundry => None,
+            BaseKind::Hive | BaseKind::Foundry | BaseKind::Turret => None,
             BaseKind::Depot => Some((Weapon::Nova, rng.int(9, 13) as u8)),
             BaseKind::Bastion => Some((Weapon::Projectile, rng.int(1, 3) as u8)),
         };
@@ -435,9 +493,27 @@ pub fn civ_spawns(
     let scatter =
         |rng: &mut Rng, at: Vec2, spread: f32| at + rng.direction() * rng.range(30.0, spread);
 
+    let obstacles = fort_obstacles(out);
     if capital {
         let seat = center + Vec2::new(rng.range(-700.0, 700.0), rng.range(-700.0, 700.0));
         station(out, &mut rng, CivRole::Capital, seat);
+        let fort = fortress::layout(
+            &fortress::Plan {
+                seed,
+                territory: t.id,
+                quadrant: id,
+                archetype: t.fort_archetype(),
+                tier: t.fort_tier(),
+                role: FortRole::Capital,
+                center: seat,
+            },
+            &obstacles,
+        );
+        // Guards stand at the ways in (the draws are the same, only the spot moves).
+        let post = |k: usize, at: Vec2| match fort.as_ref().filter(|f| !f.gates.is_empty()) {
+            Some(f) => f.gates[k % f.gates.len()] + (at - seat).clamp_length_max(120.0),
+            None => at,
+        };
         let (members, warriors) = match t.shape {
             CivShape::Horde => (share(8.0), share(2.0)),
             CivShape::Elder => (share(2.0), share(4.0)),
@@ -446,13 +522,17 @@ pub fn civ_spawns(
         if t.shape.has_elder() {
             add(out, elder, CivRole::Elder, scatter(&mut rng, seat, 160.0));
         }
-        for _ in 0..warriors {
+        for k in 0..warriors as usize {
             let at = scatter(&mut rng, seat, 320.0);
-            add(out, warrior, CivRole::Warrior, at);
+            add(out, warrior, CivRole::Warrior, post(k, at));
         }
-        for _ in 0..members {
+        for k in 0..members as usize {
             let at = scatter(&mut rng, seat, 480.0);
+            let at = if k % 3 == 2 { post(k / 3, at) } else { at };
             add(out, member, CivRole::Member, at);
+        }
+        if let Some(fort) = fort {
+            fort_spawns(&t, seed, &fort, &wearing, out);
         }
         return;
     }
@@ -461,6 +541,7 @@ pub fn civ_spawns(
     // and patrols everywhere.
     let near = Vec2::new((id.x - t.capital.x) as f32, (id.y - t.capital.y) as f32).length();
     let outpost = (0.7 - 0.12 * near).clamp(0.15, 0.7);
+    let mut fortify = None;
     if rng.chance(outpost) {
         let seat = place(&mut rng);
         station(out, &mut rng, CivRole::Outpost, seat);
@@ -472,6 +553,7 @@ pub fn civ_spawns(
             let at = scatter(&mut rng, seat, 260.0);
             add(out, warrior, CivRole::Warrior, at);
         }
+        fortify = Some(seat);
     }
     let patrols = rng.int(1, 2) as f32;
     for _ in 0..patrols as u32 {
@@ -480,6 +562,84 @@ pub fn civ_spawns(
             let at = scatter(&mut rng, heart, 200.0);
             add(out, member, CivRole::Member, at);
         }
+    }
+    // Some outposts are walled in, more often deeper in; the fortress is the last thing
+    // added, on its own stream.
+    if let Some(seat) = fortify {
+        let mut roll = Rng::new(hash2(seed ^ fortress::FORT_SALT ^ 0x0A, id.x, id.y));
+        let chance = 0.45 + 0.12 * f32::from(t.fort_tier());
+        if roll.chance(chance) {
+            let layout = fortress::layout(
+                &fortress::Plan {
+                    seed,
+                    territory: t.id,
+                    quadrant: id,
+                    archetype: t.fort_archetype(),
+                    tier: t.fort_tier().min(2),
+                    role: FortRole::Outpost,
+                    center: seat,
+                },
+                &obstacles,
+            );
+            if let Some(fort) = layout {
+                fort_spawns(&t, seed, &fort, &wearing, out);
+            }
+        }
+    }
+}
+
+/// What a fortress must keep clear of: pinned rocks (planetoids, nest stones), wells, and
+/// other stations already placed in the quadrant, as (center, radius).
+fn fort_obstacles(out: &[Spawn]) -> Vec<(Vec2, f32)> {
+    out.iter()
+        .filter(|s| s.pinned || matches!(s.kind, BodyKind::BlackHole | BodyKind::Base))
+        .map(|s| {
+            let fallback = match s.kind {
+                BodyKind::BlackHole => 300.0,
+                BodyKind::Base => 120.0,
+                _ => 50.0,
+            };
+            (s.position, s.radius.unwrap_or(fallback))
+        })
+        .collect()
+}
+
+/// Appends a fortress as spawns: pinned wall segments and turret mounts, in layout order.
+fn fort_spawns(t: &Territory, seed: u64, fort: &Layout, wearing: &Phenotype, out: &mut Vec<Spawn>) {
+    let arms = t.turret_arms(seed);
+    for piece in &fort.pieces {
+        let index = out.len() as u32;
+        let (role, base) = match piece.part.kind {
+            PartKind::Wall => (CivRole::Wall, false),
+            PartKind::Turret { .. } => (CivRole::Turret, true),
+        };
+        let tag = Some(CivTag {
+            territory: t.id,
+            role,
+        });
+        out.push(Spawn {
+            phenotype: *wearing,
+            index,
+            radius: Some(piece.radius),
+            civ: tag,
+            fort: Some(piece.part),
+            pinned: !base,
+            rock: if base {
+                RockKind::Plain
+            } else {
+                RockKind::Wall
+            },
+            base_kind: base.then_some(BaseKind::Turret),
+            arms: base.then_some(arms),
+            ..Spawn::at(
+                if base {
+                    BodyKind::Base
+                } else {
+                    BodyKind::Asteroid
+                },
+                piece.at,
+            )
+        });
     }
 }
 

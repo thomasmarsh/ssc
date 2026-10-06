@@ -10,10 +10,12 @@ pub mod arsenal;
 mod brain;
 mod chain;
 mod civ;
+mod civmine;
 mod creature;
 mod cues;
 mod ecology;
 mod food;
+mod fortress;
 mod growth;
 mod loot;
 mod mining;
@@ -27,6 +29,7 @@ mod weapons;
 pub use brain::Brain;
 pub use chain::{Chain, Part};
 pub use civ::{CIV_CAP, Raid, RaidStage, TerritoryReport, verdict};
+pub use civmine::Cache;
 pub use cues::Cue;
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
 pub use food::{FOOD_RADIUS, Food, fertility};
@@ -66,6 +69,8 @@ const HOME_LEASH: f32 = 800.0;
 /// Enemies this close to a destroyed base lose their bearings for a while.
 const ECOSYSTEM_RADIUS: f32 = 2200.0;
 const PLAYER_SPEED: f32 = 460.0;
+/// A wall segment's hull per unit of radius on top of a rock's 1.6, before depth.
+pub const WALL_HULL: f32 = 5.0;
 /// A destroyed crystal's burst.
 const CRYSTAL_BLAST: f32 = 150.0;
 const CRYSTAL_DAMAGE: f32 = 30.0;
@@ -217,6 +222,8 @@ pub struct Body {
     pub brain: Option<Box<Brain>>,
     /// Creatures: the host rock or planetoid this one clings to, if any; see `root`.
     pub root: Option<Root>,
+    /// Wall segments and turrets of a fortified city; see `fortress`.
+    pub fort: Option<crate::fortress::FortPart>,
     /// Seconds before a creature that let go of a host may cling again.
     unrooted: f32,
     /// Seconds until an adult may next try to reproduce.
@@ -357,6 +364,10 @@ pub struct Game {
     /// by spawn, the territories met, their lasting falls and their shared brains.
     civ_lineages: HashMap<u64, (u64, CivRole)>,
     civ_bases: HashMap<(QuadrantId, u32), (u64, CivRole)>,
+    /// Walls and turrets of fortified cities by spawn: (territory, role).
+    civ_works: HashMap<(QuadrantId, u32), (u64, CivRole)>,
+    /// Per-territory mining: miners, the stash at the capital and the ore budget.
+    civ_mining: BTreeMap<u64, civmine::Mining>,
     civ_colors: HashMap<u64, [f32; 3]>,
     civ_territories: HashMap<u64, Territory>,
     civ_fall: HashMap<u64, Fall>,
@@ -435,6 +446,8 @@ impl Game {
             territory_quadrant: None,
             civ_lineages: HashMap::new(),
             civ_bases: HashMap::new(),
+            civ_works: HashMap::new(),
+            civ_mining: BTreeMap::new(),
             civ_colors: HashMap::new(),
             civ_territories: HashMap::new(),
             civ_fall: HashMap::new(),
@@ -569,8 +582,10 @@ impl Game {
             }
         }
         self.steer_creatures(dt);
+        self.update_civ_mining(dt);
         self.update_roots(dt);
         self.update_bases(dt);
+        self.update_turrets(dt);
         self.tend_broods(dt);
         self.graze();
         self.update_food(dt);
@@ -732,9 +747,18 @@ impl Game {
             if fallen.contains(&spawn.index) || present.contains(&spawn.index) {
                 continue;
             }
-            // A ruined civilization does not come back.
+            // A ruined civilization does not come back, though its walls stand as ruins.
             if let Some(tag) = spawn.civ
+                && tag.role != CivRole::Wall
                 && self.civ_standing(tag.territory) == crate::territory::Standing::Fallen
+            {
+                continue;
+            }
+            // Fortresses give way before the body cap: pieces are left out (opening the
+            // wall, never closing it) once the world is nearly full.
+            if spawn.fort.is_some()
+                && self.bodies.len() + self.food.len() + self.eggs.len() + fortress::RESERVE
+                    >= MAX_BODIES
             {
                 continue;
             }
@@ -775,6 +799,8 @@ impl Game {
                     RockKind::Husk => (1.5, 1.2),
                     // Heavy enough to read as fixed; it never takes damage anyway.
                     RockKind::Planetoid => (1.0, 6.0),
+                    // Tough, and tougher deeper in; a breach takes real effort.
+                    RockKind::Wall => (WALL_HULL * spawn.phenotype.threat.max(1.0).sqrt(), 40.0),
                 };
                 body.health *= toughness;
                 body.max_health = body.health;
@@ -794,6 +820,18 @@ impl Game {
                 body.health = kind.hull();
                 body.max_health = body.health;
                 body.base = Some(BaseState::new(brood, guardian, timer).of_kind(kind, spawn.arms));
+            } else if spawn.base_kind == Some(BaseKind::Turret) {
+                body.health = BaseKind::Turret.hull();
+                body.max_health = body.health;
+                body.base = Some(BaseState::turret(spawn.arms, spawn.index));
+            }
+            body.fort = spawn.fort;
+            if let Some(crate::fortress::FortPart {
+                kind: crate::fortress::PartKind::Turret { facing, .. },
+                ..
+            }) = spawn.fort
+            {
+                body.angle = facing;
             }
             if body.kind == BodyKind::Creature
                 && (body.genome.social == crate::genome::Social::Dweller
@@ -807,7 +845,10 @@ impl Game {
                 self.root_body(&mut body, host, rooting.angle);
             }
             if let Some(tag) = spawn.civ {
-                if spawn.base_kind.is_some() {
+                if matches!(tag.role, CivRole::Wall | CivRole::Turret) {
+                    self.civ_works
+                        .insert((id, spawn.index), (tag.territory, tag.role));
+                } else if spawn.base_kind.is_some() {
                     self.civ_bases
                         .insert((id, spawn.index), (tag.territory, tag.role));
                 }
@@ -1165,7 +1206,12 @@ impl Game {
             }
             if let Some((index, fraction)) = hit {
                 let body = &mut self.bodies[index];
-                let dealt = damage(body, bullet.damage, self.player_invulnerability);
+                // Enemy fire is stopped by a fortress wall but never wears it down.
+                let dealt = if !bullet.friendly && body.rock == RockKind::Wall {
+                    0.0
+                } else {
+                    damage(body, bullet.damage, self.player_invulnerability)
+                };
                 if bullet.friendly && matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                     self.run.damage_dealt += dealt;
                 }
@@ -1193,8 +1239,8 @@ impl Game {
                     ));
                     bullet.burst = 0.0;
                 }
-                if bullet.pierce > 0 && body.rock != RockKind::Planetoid {
-                    // Passes through (but never through a planetoid: it swallows every shot), remembering what it struck.
+                if bullet.pierce > 0 && !matches!(body.rock, RockKind::Planetoid | RockKind::Wall) {
+                    // Passes through (but never through a planetoid or a wall: they swallow every shot), remembering what it struck.
                     if let Some(slot) = bullet.struck.iter_mut().find(|id| **id == 0) {
                         *slot = body.id;
                     }
@@ -1304,9 +1350,15 @@ impl Game {
                 continue;
             }
             self.effect(position, radius * 2.5, 0.65, EffectKind::Explosion);
+            let turret = body
+                .base
+                .as_ref()
+                .is_some_and(|b| b.kind == BaseKind::Turret);
             self.score = self.score.saturating_add(match kind {
                 BodyKind::Creature => (body.genome.bounty * body.genes.threat) as u64,
+                BodyKind::Asteroid if body.rock == RockKind::Wall => 0,
                 BodyKind::Asteroid => 25,
+                BodyKind::Base if turret => (60.0 * body.genes.threat) as u64,
                 BodyKind::Base => 500,
                 _ => 0,
             });
@@ -1317,10 +1369,13 @@ impl Game {
                     self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
                     self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, true);
                 }
+                // A wall segment just comes down: no shards, no loot.
+                BodyKind::Asteroid if body.rock == RockKind::Wall => {}
                 BodyKind::Asteroid => {
                     self.release_from(body);
                     self.shatter(body);
                 }
+                BodyKind::Base if turret => {}
                 BodyKind::Base => self.base_destroyed(position),
                 _ => {}
             }
@@ -1330,7 +1385,7 @@ impl Game {
                 self.siphon(body);
             }
             self.record_fallen(body);
-            if kind == BodyKind::Base {
+            if kind == BodyKind::Base && !turret {
                 self.run.bases += 1;
             }
             self.note_creature_lost(body, false);
@@ -1443,6 +1498,7 @@ impl Game {
             generation: 0,
             brain: None,
             root: None,
+            fort: None,
             unrooted: 0.0,
             breed_clock: 0.0,
             starving: 0.0,
@@ -1543,6 +1599,7 @@ fn contact_damage(body: &Body) -> f32 {
         BodyKind::Base => 15.0,
         // A planetoid is a gentle wall: ships and creatures simply bounce off it.
         BodyKind::Asteroid if body.rock == RockKind::Planetoid => 0.0,
+        BodyKind::Asteroid if body.rock == RockKind::Wall => 6.0,
         BodyKind::Asteroid => 12.0,
         BodyKind::Player => 0.0,
     }

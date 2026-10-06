@@ -22,8 +22,8 @@ const NEEDLE_DAMAGE: f32 = 2.2;
 const MISSILE_DAMAGE: f32 = 22.0;
 const ORB_DAMAGE: f32 = 12.0;
 const SPIRAL_DAMAGE: f32 = 9.0;
-const MINE_DAMAGE: f32 = 30.0;
-const MINE_BLAST: f32 = 125.0;
+pub(super) const MINE_DAMAGE: f32 = 30.0;
+pub(super) const MINE_BLAST: f32 = 125.0;
 
 /// How a shot is drawn and what it is: used by the renderer and by collision rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -281,7 +281,8 @@ impl Game {
                     BodyKind::Player => {
                         damage(body, amount, invulnerability);
                     }
-                    BodyKind::Asteroid => {
+                    // Enemy blasts shake rocks apart but never wear down a fortress wall.
+                    BodyKind::Asteroid if body.rock != RockKind::Wall => {
                         damage(body, amount * 0.5, 0.0);
                     }
                     _ => {}

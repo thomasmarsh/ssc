@@ -5,12 +5,14 @@ use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     prelude::*,
 };
+use ssc::fortress::{Archetype, FortPart, PartKind, SEG_SPACING};
 use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::arsenal::Profile;
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
-    Beam, Body, BodyKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, LAND_RANGE, MAX_PADS,
-    Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind, fertility, price_text,
+    Beam, Body, BodyKind, Cache, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, LAND_RANGE,
+    MAX_PADS, Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind, fertility,
+    price_text,
 };
 use ssc::world::{BaseKind, QUADRANT_SIZE, RockKind, hash2};
 
@@ -328,13 +330,18 @@ fn territory_line(game: &Game) -> String {
         (RaidStage::Raid, None) => "RAID".to_string(),
         (RaidStage::Patrol, None) => "PATROLS".to_string(),
     };
+    let fort = report
+        .fort
+        .map(|(kind, tier)| format!("   {} FORT {tier}", kind.to_uppercase()))
+        .unwrap_or_default();
     format!(
-        "\n{}   THREAT x{:.1}   {}   {}{}",
+        "\n{}   THREAT x{:.1}   {}   {}{}{}",
         report.name,
         report.threat,
         standing(game.power(), report.threat),
         clock,
-        weakened
+        weakened,
+        fort
     )
 }
 
@@ -921,6 +928,8 @@ fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
                 gizmos.line_2d(mount, mount + aim * r * 0.4, color);
             }
         }
+        // Fortress turrets are drawn by `draw_turret`.
+        BaseKind::Turret => return,
         BaseKind::Depot => {
             // A radial magazine of mine canisters and a slowly turning ring emitter.
             gizmos.circle_2d(p, r * 0.65, color).resolution(24);
@@ -950,6 +959,352 @@ fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
         left,
         left + Vec2::X * r * 2.0 * (body.health / body.max_health).clamp(0.0, 1.0),
         color,
+    );
+}
+
+/// A civilization's tint lifted a little so dark pigments still read on the dark backdrop.
+fn lifted(tint: Option<[f32; 3]>) -> Color {
+    match tint {
+        Some([r, g, b]) => {
+            let up = |c: f32| c + (1.0 - c) * 0.3;
+            Color::srgb(up(r), up(g), up(b))
+        }
+        None => Color::srgb(0.6, 0.62, 0.72),
+    }
+}
+
+/// A fortress turret: a plate whose shape follows the fortress's archetype, a faint fire
+/// arc, a barrel that tracks the target (one per volley shot, up to three) and a glyph
+/// that says what it fires. It flares just before it shoots.
+fn draw_turret(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
+    let (p, r) = (body.position, body.radius);
+    let Some(FortPart {
+        archetype,
+        kind: PartKind::Turret { facing, arc, .. },
+        ..
+    }) = body.fort
+    else {
+        return;
+    };
+    let arms = body.base.as_ref().and_then(|b| b.arms);
+    let soon = body
+        .base
+        .as_ref()
+        .is_some_and(|b| b.turrets[0] < 0.5 && b.turrets[0] > 0.0);
+    let bright = if soon {
+        color.with_alpha(1.0)
+    } else {
+        color.with_alpha(0.85)
+    };
+    let aim = Vec2::from_angle(body.angle);
+    let side = Vec2::new(-aim.y, aim.x);
+    match archetype {
+        Archetype::Ring => {
+            gizmos.lineloop_2d(
+                (0..8).map(|k| {
+                    p + Vec2::from_angle(0.39 + k as f32 * std::f32::consts::TAU / 8.0) * r
+                }),
+                bright,
+            );
+            gizmos
+                .circle_2d(p, r * 0.55, color.with_alpha(0.5))
+                .resolution(10);
+        }
+        Archetype::Spiral => {
+            gizmos.circle_2d(p, r, bright).resolution(14);
+            gizmos
+                .circle_2d(p, r * 0.5, color.with_alpha(0.5))
+                .resolution(10);
+        }
+        Archetype::Star => {
+            let out = Vec2::from_angle(facing);
+            let across = Vec2::new(-out.y, out.x);
+            gizmos.lineloop_2d(
+                [
+                    p + out * r * 1.25,
+                    p + across * r * 0.95,
+                    p - out * r * 0.8,
+                    p - across * r * 0.95,
+                ],
+                bright,
+            );
+        }
+        Archetype::Grid => {
+            gizmos.rect_2d(
+                Isometry2d::new(p, Rot2::radians(facing)),
+                Vec2::splat(r * 1.7),
+                bright,
+            );
+            gizmos.rect_2d(
+                Isometry2d::new(p, Rot2::radians(facing + std::f32::consts::FRAC_PI_4)),
+                Vec2::splat(r * 1.0),
+                color.with_alpha(0.45),
+            );
+        }
+    }
+    // The fire arc, faint, so a player can read where a turret can and cannot see.
+    for sign in [-1.0, 1.0] {
+        let edge = Vec2::from_angle(facing + sign * arc);
+        gizmos.line_2d(
+            p + edge * r * 1.4,
+            p + edge * r * 2.4,
+            color.with_alpha(0.16),
+        );
+    }
+    gizmos.linestrip_2d(
+        (0..=8).map(|k| p + Vec2::from_angle(facing - arc + 2.0 * arc * k as f32 / 8.0) * r * 2.4),
+        color.with_alpha(0.1),
+    );
+    let (weapon, volley) = arms.unwrap_or((Weapon::Projectile, 1));
+    match weapon {
+        Weapon::Missile => {
+            for sign in [-1.0, 1.0] {
+                let m = p + aim * r * 0.9 + side * sign * r * 0.35;
+                gizmos.lineloop_2d(
+                    [m + aim * r * 0.5, m + side * r * 0.2, m - side * r * 0.2],
+                    bright,
+                );
+            }
+        }
+        Weapon::Needles => {
+            for k in -1..=1 {
+                let s = side * k as f32 * r * 0.22;
+                gizmos.line_2d(p + aim * r * 0.4 + s, p + aim * r * 1.5 + s, bright);
+            }
+        }
+        Weapon::Nova => {
+            gizmos
+                .circle_2d(
+                    p,
+                    r * (1.2 + 0.1 * (time * 3.0).sin()),
+                    color.with_alpha(0.55),
+                )
+                .resolution(16);
+            gizmos.line_2d(p, p + aim * r * 1.0, bright);
+        }
+        Weapon::Spiral => {
+            for k in 0..3 {
+                let d = Vec2::from_angle(time * 1.6 + k as f32 * 2.09);
+                gizmos.line_2d(p + d * r * 0.3, p + d * r * 1.15, bright);
+            }
+        }
+        _ => {
+            for k in 0..volley.clamp(1, 3) {
+                let s = side * (k as f32 - (volley.clamp(1, 3) - 1) as f32 / 2.0) * r * 0.4;
+                gizmos.line_2d(p + aim * r * 0.4 + s, p + aim * r * 1.6 + s, bright);
+            }
+        }
+    }
+    if soon {
+        gizmos
+            .circle_2d(p, r * 1.5, color.with_alpha(0.5))
+            .resolution(14);
+    }
+    if body.health < body.max_health {
+        let left = p + Vec2::new(-r, r * 1.5);
+        gizmos.line_2d(left, left + Vec2::X * r * 2.0, color.with_alpha(0.2));
+        gizmos.line_2d(
+            left,
+            left + Vec2::X * r * 2.0 * (body.health / body.max_health).clamp(0.0, 1.0),
+            color,
+        );
+    }
+}
+
+/// Wall segments (and the turrets they carry) of every fortress in view: each archetype has
+/// its own vocabulary. Rings are masonry (octagon blocks with a parapet), spirals are coils
+/// (round pods on a single spine), stars are sharp bastions (long diamonds), grids are city
+/// blocks (squares joined into slabs). Wounded segments crack and fade.
+fn draw_walls(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
+    let pieces: Vec<&Body> = game
+        .bodies
+        .iter()
+        .filter(|b| b.fort.is_some())
+        .filter(|b| ssc::simulation::extent_in_view(b.position, b.radius, camera, half, 120.0))
+        .collect();
+    for (i, wall) in pieces.iter().enumerate() {
+        let (Some(part), true) = (wall.fort, wall.rock == RockKind::Wall) else {
+            continue;
+        };
+        let (p, r) = (wall.position, wall.radius);
+        let tint = lifted(game.civ_tint(wall));
+        let health = (wall.health / wall.max_health).clamp(0.0, 1.0);
+        let color = tint.with_alpha(0.5 + 0.5 * health);
+        // Neighbors along the wall decide how a segment is turned and joined.
+        let mut axis: Option<Vec2> = None;
+        for (j, other) in pieces.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let d = other.position - p;
+            if d.length() > SEG_SPACING * 1.3 {
+                continue;
+            }
+            axis.get_or_insert(d.normalize_or_zero());
+            if j < i {
+                continue;
+            }
+            let along = d.normalize_or_zero();
+            let across = Vec2::new(-along.y, along.x);
+            let (a, b) = (
+                p + along * r * 0.8,
+                other.position - along * other.radius * 0.8,
+            );
+            match part.archetype {
+                Archetype::Ring => {
+                    for sign in [-1.0, 1.0] {
+                        gizmos.line_2d(
+                            a + across * sign * r * 0.55,
+                            b + across * sign * r * 0.55,
+                            color,
+                        );
+                    }
+                }
+                Archetype::Spiral => gizmos.line_2d(a, b, color.with_alpha(0.55 * color.alpha())),
+                Archetype::Star => {
+                    gizmos.line_2d(a, b, color);
+                    for sign in [-1.0, 1.0] {
+                        gizmos.line_2d(
+                            a + across * sign * r * 0.3,
+                            b + across * sign * r * 0.3,
+                            color.with_alpha(0.3),
+                        );
+                    }
+                }
+                Archetype::Grid => {
+                    for sign in [-1.0, 1.0] {
+                        gizmos.line_2d(
+                            a + across * sign * r * 0.85,
+                            b + across * sign * r * 0.85,
+                            color,
+                        );
+                    }
+                }
+            }
+        }
+        let along = axis.unwrap_or(Vec2::X);
+        let across = Vec2::new(-along.y, along.x);
+        match part.archetype {
+            Archetype::Ring => {
+                gizmos.lineloop_2d(
+                    (0..8).map(|k| {
+                        p + Vec2::from_angle(0.39 + k as f32 * std::f32::consts::TAU / 8.0)
+                            * r
+                            * 0.92
+                    }),
+                    color,
+                );
+                gizmos
+                    .circle_2d(p, r * 0.26, color.with_alpha(0.4))
+                    .resolution(8);
+            }
+            Archetype::Spiral => {
+                gizmos.circle_2d(p, r * 0.88, color).resolution(14);
+                gizmos.linestrip_2d(
+                    (0..7).map(|k| {
+                        let t = k as f32 / 6.0;
+                        p + Vec2::from_angle(wall.id as f32 + t * 4.5) * r * (0.1 + 0.55 * t)
+                    }),
+                    color.with_alpha(0.45),
+                );
+            }
+            Archetype::Star => {
+                gizmos.lineloop_2d(
+                    [
+                        p + along * r * 1.1,
+                        p + across * r * 0.62,
+                        p - along * r * 1.1,
+                        p - across * r * 0.62,
+                    ],
+                    color,
+                );
+                gizmos.line_2d(
+                    p - along * r * 0.7,
+                    p + along * r * 0.7,
+                    color.with_alpha(0.4),
+                );
+            }
+            Archetype::Grid => {
+                let angle = along.to_angle();
+                gizmos.rect_2d(
+                    Isometry2d::new(p, Rot2::radians(angle)),
+                    Vec2::splat(r * 1.7),
+                    color,
+                );
+                gizmos.rect_2d(
+                    Isometry2d::new(p, Rot2::radians(angle)),
+                    Vec2::splat(r * 0.8),
+                    color.with_alpha(0.35),
+                );
+            }
+        }
+        if health < 0.7 {
+            let cracks = if health < 0.35 { 3 } else { 2 };
+            for k in 0..cracks {
+                let d = Vec2::from_angle(wall.id as f32 * 0.7 + k as f32 * 2.1);
+                let s = Vec2::new(-d.y, d.x);
+                gizmos.linestrip_2d(
+                    [
+                        p - d * r * 0.7,
+                        p - d * r * 0.1 + s * r * 0.25,
+                        p + d * r * 0.2 - s * r * 0.2,
+                        p + d * r * 0.7,
+                    ],
+                    Color::srgba(1.0, 0.8, 0.6, 0.6),
+                );
+            }
+        }
+    }
+}
+
+/// A capital's stash: a little heap of crates in the colors of what is in it, ringed in the
+/// civilization's tint and glinting; the fuller, the bigger the heap.
+fn draw_cache(gizmos: &mut Gizmos, time: f32, cache: &Cache) {
+    let tint = lifted(Some(cache.tint));
+    let mut mix = Vec3::ZERO;
+    for (k, kind) in [Material::Metal, Material::Volatiles, Material::Crystal]
+        .into_iter()
+        .enumerate()
+    {
+        let [r, g, b] = kind.color();
+        mix += Vec3::new(r, g, b) * cache.mix[k];
+    }
+    let goods = Color::srgb(mix.x, mix.y, mix.z);
+    let spots = [
+        Vec2::new(-12.0, 0.0),
+        Vec2::new(12.0, 0.0),
+        Vec2::new(0.0, 0.0),
+        Vec2::new(-6.0, 12.0),
+        Vec2::new(6.0, 12.0),
+        Vec2::new(0.0, 24.0),
+    ];
+    let count = 1 + (cache.fill * 5.0).round() as usize;
+    for spot in spots.iter().take(count.min(6)) {
+        gizmos.rect_2d(cache.at + *spot, Vec2::splat(10.0), goods);
+        gizmos.line_2d(
+            cache.at + *spot - Vec2::splat(4.0),
+            cache.at + *spot + Vec2::splat(4.0),
+            goods.with_alpha(0.4),
+        );
+    }
+    let pulse = 0.5 + 0.5 * (time * 2.0).sin();
+    gizmos
+        .circle_2d(
+            cache.at + Vec2::new(0.0, 10.0),
+            30.0 + 3.0 * pulse,
+            tint.with_alpha(0.35),
+        )
+        .resolution(20);
+    let glint = cache.at + Vec2::new(14.0, 30.0 + 2.0 * pulse);
+    gizmos.line_2d(
+        glint - Vec2::Y * 4.0,
+        glint + Vec2::Y * 4.0,
+        goods.with_alpha(0.7),
+    );
+    gizmos.line_2d(
+        glint - Vec2::X * 4.0,
+        glint + Vec2::X * 4.0,
+        goods.with_alpha(0.7),
     );
 }
 
@@ -1029,7 +1384,7 @@ fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
         RockKind::Ore => Color::srgb(0.8, 0.58, 0.3),
         RockKind::Crystal => Color::srgb(0.8, 0.4, 1.0),
         RockKind::Husk => Color::srgb(0.55, 0.85, 0.45),
-        RockKind::Planetoid => color,
+        RockKind::Planetoid | RockKind::Wall => color,
     };
     let sides = match body.rock {
         RockKind::Crystal => 6,
@@ -1094,7 +1449,7 @@ fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
                 );
             }
         }
-        RockKind::Planetoid => {}
+        RockKind::Planetoid | RockKind::Wall => {}
     }
     // A faint lichen film on rocks that sprout plankton: a few lime flecks on the rim.
     if fertility(body).is_some() {
@@ -1180,7 +1535,12 @@ pub fn draw(
                     draw_roots(&mut gizmos, game.time, body, host, color);
                 }
             }
+            BodyKind::Base if body.fort.is_some() => {
+                draw_turret(&mut gizmos, game.time, body, lifted(game.civ_tint(body)));
+            }
             BodyKind::Base => draw_station(&mut gizmos, game.time, body, color),
+            // Fortress walls are drawn together after the loop, with their joins.
+            BodyKind::Asteroid if body.rock == RockKind::Wall => {}
             BodyKind::Asteroid => draw_rock(&mut gizmos, game.time, body, color),
             BodyKind::BlackHole => {
                 for ring in 0..4 {
@@ -1229,6 +1589,25 @@ pub fn draw(
                 )
                 .resolution(24);
         }
+    }
+    draw_walls(&mut gizmos, game, camera, half);
+    for cache in game.caches() {
+        if (cache.at - camera)
+            .abs()
+            .cmplt(half + Vec2::splat(120.0))
+            .all()
+        {
+            draw_cache(&mut gizmos, game.time, &cache);
+        }
+    }
+    for (from, to, tint) in game.miner_beams() {
+        let c = lifted(Some(tint));
+        gizmos.line_2d(from, to, c.with_alpha(0.55));
+        let t = (game.time * 2.5).fract();
+        gizmos
+            .circle_2d(from.lerp(to, t), 3.0, c.with_alpha(0.8))
+            .resolution(6);
+        gizmos.circle_2d(to, 7.0, c.with_alpha(0.4)).resolution(8);
     }
     for pad in game.pads() {
         let at = game.pad_position(pad);
@@ -1885,6 +2264,7 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
         let offset = (body.position - origin) * scale;
         if offset.length() < radius - 2.0 * ui_scale {
             let size = match (body.kind, body.alert) {
+                (BodyKind::Base, _) if body.fort.is_some() => 2.0,
                 (BodyKind::Base, _) => 5.0,
                 (_, true) => 3.5,
                 _ => 2.5,

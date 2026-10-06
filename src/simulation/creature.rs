@@ -481,6 +481,7 @@ impl Game {
         let Some((target, ship_velocity)) = self.player().map(|p| (p.position, p.velocity)) else {
             return;
         };
+        let walled = self.bodies.iter().any(|b| b.rock == RockKind::Wall);
         for index in 0..self.bodies.len() {
             let body = &self.bodies[index];
             let g = body.genome;
@@ -515,6 +516,10 @@ impl Game {
                 && direction.dot((body.position - host.position).normalize_or_zero())
                     < root::FIRE_ARC
             {
+                continue;
+            }
+            // No shooting at a fortress wall: without a clear line to the ship, hold fire.
+            if walled && g.weapon != Weapon::Tether && !self.clear_shot(body.position, aim_at) {
                 continue;
             }
             let pace = if g.rage > 0.0 {

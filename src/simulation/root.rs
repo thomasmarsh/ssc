@@ -52,7 +52,7 @@ pub fn can_host(rock: &Body) -> bool {
         && match rock.rock {
             RockKind::Planetoid => true,
             RockKind::Plain | RockKind::Ice | RockKind::Ore => !rock.pinned,
-            RockKind::Crystal | RockKind::Husk => false,
+            RockKind::Crystal | RockKind::Husk | RockKind::Wall => false,
         }
 }
 

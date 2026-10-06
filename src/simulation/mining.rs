@@ -218,7 +218,7 @@ pub fn ore_for(rock: RockKind, radius: f32) -> f32 {
 }
 
 /// What a rock gives and how fast (units per second of beam), except crystal's cycles.
-fn rate(rock: RockKind) -> f32 {
+pub(super) fn rate(rock: RockKind) -> f32 {
     match rock {
         RockKind::Ore => 1.0,
         RockKind::Plain => 0.4,
@@ -226,10 +226,11 @@ fn rate(rock: RockKind) -> f32 {
         RockKind::Husk => 0.25,
         RockKind::Crystal => CYCLE_YIELD / CYCLE,
         RockKind::Planetoid => PLANETOID_RATE,
+        RockKind::Wall => 0.0,
     }
 }
 
-fn quantize(spent: f32) -> f32 {
+pub(super) fn quantize(spent: f32) -> f32 {
     (spent / GRAIN).ceil() * GRAIN
 }
 
@@ -256,7 +257,7 @@ impl Body {
     }
 
     /// Sets the ore left and resizes the rock to match (planetoids keep their size).
-    fn set_ore(&mut self, ore: f32) {
+    pub(super) fn set_ore(&mut self, ore: f32) {
         self.init_lode();
         self.lode.ore = ore.clamp(0.0, self.lode.full);
         if self.rock == RockKind::Planetoid {
@@ -272,9 +273,9 @@ impl Body {
     }
 
     /// The material a rock gives. Planetoids give one chosen from a hash of the spawn index.
-    fn material(&self, seed: u64) -> Material {
+    pub(super) fn material(&self, seed: u64) -> Material {
         match self.rock {
-            RockKind::Ore | RockKind::Plain => Material::Metal,
+            RockKind::Ore | RockKind::Plain | RockKind::Wall => Material::Metal,
             RockKind::Ice | RockKind::Husk => Material::Volatiles,
             RockKind::Crystal => Material::Crystal,
             RockKind::Planetoid => {
@@ -290,7 +291,7 @@ impl Body {
     }
 
     /// Whether the beam may work this body: free rocks and planetoids, not nest stones.
-    fn minable(&self) -> bool {
+    pub(super) fn minable(&self) -> bool {
         self.kind == BodyKind::Asteroid
             && self.active
             && self.health > 0.0
@@ -311,6 +312,35 @@ impl Game {
             let ore = body.lode.full - spent;
             body.set_ore(ore);
         }
+    }
+
+    /// Works `mined` ore out of the rock at `index` on someone else's behalf (a civilization's
+    /// miner), by the same rules as the beam: the rock shrinks toward its floor, the spent ore
+    /// is remembered per spawn, and at the floor it crumbles (recorded as fallen when removed).
+    /// Returns the leftover ore if it crumbled. A planetoid never shrinks or crumbles.
+    pub(super) fn drain_rock(&mut self, index: usize, mined: f32) -> Option<f32> {
+        let body = &mut self.bodies[index];
+        body.init_lode();
+        let ore = body.lode.ore - mined;
+        body.set_ore(ore);
+        let spent = body.lode.full - body.lode.ore;
+        if let Some(key) = body.origin {
+            self.mined.insert(key, quantize(spent));
+        }
+        let planetoid = body.rock == RockKind::Planetoid;
+        let floor = CRUMBLE_RADIUS.min(body.lode.radius);
+        if planetoid || !(body.radius <= floor + 1e-3 || body.lode.ore <= 1e-3) {
+            return None;
+        }
+        let rock = self.bodies[index].clone();
+        self.release_from(&rock);
+        let body = &mut self.bodies[index];
+        body.health = 0.0;
+        body.consumed = true;
+        if let Some(key) = rock.origin {
+            self.mined.remove(&key);
+        }
+        Some(rock.lode.ore)
     }
 
     /// Splits a shot rock's remaining ore among its `pieces` fragments.
