@@ -3,6 +3,7 @@ pub mod fortress;
 pub mod genome;
 pub mod mixer;
 pub mod range;
+pub mod region;
 pub mod simulation;
 pub mod synth;
 pub mod territory;

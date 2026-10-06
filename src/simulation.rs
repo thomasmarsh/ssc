@@ -27,6 +27,7 @@ mod mining;
 mod pads;
 mod parry;
 mod ping;
+mod regions;
 mod regrow;
 mod root;
 pub mod run;
@@ -58,6 +59,7 @@ pub use pads::{
     Pad, PadHint, PadKey, PadState, STASH_CAP, price_text,
 };
 pub use ping::{ECHO_LIFE, Echo, EchoKind, PING_COOLDOWN, PING_RANGE, RING_SPEED};
+pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 use upgrades::{Item, Loadout, Stats};
@@ -442,6 +444,8 @@ pub struct Game {
     /// HOME is a sanctuary: while the ship is in its sector no creature hunts it unless it
     /// has been hurt. Tests that stage fights at the origin turn it off (`empty_game`).
     sanctuary: bool,
+    /// The region the ship is in, announced with hysteresis (see `regions`).
+    region: regions::RegionState,
 }
 
 impl Game {
@@ -502,6 +506,7 @@ impl Game {
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
             sanctuary: true,
+            region: regions::RegionState::default(),
             seed,
             rng: Rng::new(seed),
             loot: Rng::new(seed ^ loot::LOOT_SALT),
@@ -601,6 +606,7 @@ impl Game {
         self.note_sector();
         let start = self.player().map(|p| p.position);
         self.update_civilizations(dt);
+        self.update_region(dt);
         self.update_loadout(dt, &input);
         let recharge = self.stats.recharge;
         let beaming = self.beam.is_some();

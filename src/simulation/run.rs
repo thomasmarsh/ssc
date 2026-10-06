@@ -73,6 +73,8 @@ pub struct RunStats {
     /// Creatures eaten by predators or starved, anywhere near the ship.
     pub lost_to_nature: u32,
     pub sectors: HashSet<SectorId>,
+    /// Regions entered (by key), after the hysteresis that keeps a border from flickering.
+    pub regions: HashSet<u64>,
     /// Farthest sector depth reached and the deepest threat multiplier faced.
     pub deepest: f32,
     pub threat: f32,
@@ -346,8 +348,9 @@ impl Game {
                 self.score, r.deaths
             ),
             format!(
-                "SECTORS EXPLORED {}   DEEPEST {:.0}   THREAT FACED x{:.1}   FLOWN {:.1}K",
+                "SECTORS EXPLORED {}   REGIONS {}   DEEPEST {:.0}   THREAT FACED x{:.1}   FLOWN {:.1}K",
                 r.sectors.len(),
+                r.regions.len(),
                 r.deepest,
                 r.threat.max(1.0),
                 r.distance / 1000.0

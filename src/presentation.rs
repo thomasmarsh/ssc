@@ -837,9 +837,11 @@ pub fn update_hud(
     .collect::<String>();
     let (power, threat) = (game.power(), game.threat());
     let status = format!(
-        "SECTOR ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}   STYLE {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}{}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
+        "SECTOR ({}, {}) {}   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}   STYLE {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}{}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
         sector.x,
         sector.y,
+        game.region()
+            .map_or(String::new(), |r| r.name.to_uppercase()),
         game.active_enemies(),
         game.score,
         session.camera_view.label(),
@@ -965,10 +967,11 @@ fn summary_lines(session: &Session) -> Vec<(String, Color, f32)> {
         ));
         out.push((
             format!(
-                "SCORE {}   DESTROYED {}   SECTORS EXPLORED {}   MINED {:.0}",
+                "SCORE {}   DESTROYED {}   SECTORS EXPLORED {}   REGIONS {}   MINED {:.0}",
                 game.score,
                 r.kills,
                 r.sectors.len(),
+                r.regions.len(),
                 r.total_mined()
             ),
             light,
@@ -1110,6 +1113,13 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
         ),
         light,
     ));
+    // A charted sector (visited or pinged) shows the name of the region it lies in.
+    if entry.is_some() {
+        detail.push((
+            format!("REGION  {}\n", game.region_of(cursor.sector).name),
+            light,
+        ));
+    }
     if let Some(e) = entry {
         if let Some(c) = e.civ {
             let what = if c.capital { "CAPITAL" } else { "OUTPOST" };

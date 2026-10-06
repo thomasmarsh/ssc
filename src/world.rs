@@ -974,6 +974,11 @@ pub fn planetoid_chance(params: &SectorParams) -> f32 {
         .clamp(0.03, 0.75)
 }
 
+/// Whether sector `id` holds a planetoid (HOME always does), without generating the rest.
+pub fn has_planetoid(seed: u64, id: SectorId) -> bool {
+    planetoid(seed, id, &latent(seed, id)).is_some()
+}
+
 /// A sector's planetoid, if it has one: a fixed, slowly turning world that blooms life
 /// around it. HOME always has one, near the start, the base the ship returns to.
 fn planetoid(seed: u64, id: SectorId, params: &SectorParams) -> Option<Spawn> {

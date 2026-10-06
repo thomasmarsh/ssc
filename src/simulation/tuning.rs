@@ -266,3 +266,11 @@ pub const MAX_WRECKS: usize = 3;
 /// a deterministic share of the jitter (chosen by a hash of the seed, sector and wreck).
 pub const LOOT_AFTER: f32 = 240.0;
 pub const LOOT_JITTER: f32 = 240.0;
+
+// ---- regions -------------------------------------------------------------------------------
+
+/// A new region must hold the ship this many seconds before it is announced, and at least
+/// `REGION_COOLDOWN` seconds must have passed since the last banner, so flying along a border
+/// does not flicker the ENTERING notice.
+pub const REGION_HOLD: f32 = 3.0;
+pub const REGION_COOLDOWN: f32 = 12.0;

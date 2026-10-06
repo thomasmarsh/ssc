@@ -495,13 +495,10 @@ impl Territory {
         }
     }
 
-    /// A display name from the members' genes, with the shape's title.
-    pub fn name(&self, seed: u64) -> String {
-        format!(
-            "{} {}",
-            self.member(seed).name().to_uppercase(),
-            self.shape.label()
-        )
+    /// A display name: harsh syllables spelled from the territory's identity (the tables
+    /// regions share, see `region`), then the shape's title.
+    pub fn name(&self, _seed: u64) -> String {
+        crate::region::civ_name(self.id, self.shape.label()).to_uppercase()
     }
 
     /// Display tint from the members' pigments.
