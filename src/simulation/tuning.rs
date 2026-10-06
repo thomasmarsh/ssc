@@ -166,3 +166,49 @@ pub const PRICE_DASH: [(Material, f32); 3] = [
     (Material::Crystal, 30.0),
     (Material::Volatiles, 30.0),
 ];
+
+// ---- sonar upgrades (bench SONAR tab; the base ping is unchanged at level 0) -----------------
+
+/// Per level: extra reach (units), extra ring speed, seconds off the cooldown and extra echoes
+/// of every kind. The cooldown never drops below `PING_COOLDOWN_FLOOR`.
+pub const PING_REACH_STEP: f32 = 4_000.0;
+pub const PING_SPEED_STEP: f32 = 1_500.0;
+pub const PING_COOLDOWN_STEP: f32 = 0.8;
+pub const PING_COOLDOWN_FLOOR: f32 = 1.5;
+pub const PING_TARGETS_STEP: usize = 1;
+/// Reveal tiers (bought once each, level 0 shows nothing of that kind): how many echoes of
+/// each new kind one ping may return before the targets upgrade.
+pub const CAP_PAD_ALERT: usize = 3;
+pub const CAP_LODE: usize = 3;
+pub const CAP_NEST: usize = 2;
+pub const CAP_EGGS: usize = 2;
+pub const CAP_PREDATORS: usize = 3;
+/// A free rock holding at least this much ore counts as a rich lode to the sonar.
+pub const LODE_MIN_ORE: f32 = 60.0;
+pub const PRICE_PING_REACH: [(Material, f32); 2] =
+    [(Material::Metal, 20.0), (Material::Crystal, 6.0)];
+pub const PRICE_PING_SPEED: [(Material, f32); 2] =
+    [(Material::Volatiles, 15.0), (Material::Crystal, 4.0)];
+pub const PRICE_PING_COOLDOWN: [(Material, f32); 2] =
+    [(Material::Volatiles, 20.0), (Material::Crystal, 6.0)];
+pub const PRICE_PING_TARGETS: [(Material, f32); 2] =
+    [(Material::Metal, 20.0), (Material::Volatiles, 15.0)];
+pub const PRICE_ECHO_PADS: [(Material, f32); 2] =
+    [(Material::Metal, 25.0), (Material::Crystal, 5.0)];
+pub const PRICE_ECHO_LODES: [(Material, f32); 2] =
+    [(Material::Metal, 30.0), (Material::Crystal, 10.0)];
+pub const PRICE_ECHO_NESTS: [(Material, f32); 2] =
+    [(Material::Volatiles, 40.0), (Material::Crystal, 15.0)];
+pub const PRICE_ECHO_PREDATORS: [(Material, f32); 3] = [
+    (Material::Metal, 40.0),
+    (Material::Volatiles, 40.0),
+    (Material::Crystal, 20.0),
+];
+
+// ---- renewable planetoids ------------------------------------------------------------------
+
+/// Share of planetoids that regrow what the beam takes (chosen by a hash of the spawn key),
+/// and how fast: ore per second, so a spent one is whole again after
+/// `PLANETOID_BUDGET / REGROW_RATE` seconds.
+pub const RENEWABLE_SHARE: f32 = 0.34;
+pub const REGROW_RATE: f32 = 0.5;

@@ -300,7 +300,7 @@ fn controls(
     }
     // Weapon profiles: ] next, [ previous, 1-9 pick directly; L and R shoulders on a pad.
     // B toggles the boosts (Y on a pad). Switching is instant and ignored while paused.
-    // With the bench open the same keys drive it instead: 1-6 pick a tab (d-pad left/right on
+    // With the bench open the same keys drive it instead: 1-7 pick a tab (d-pad left/right on
     // a pad), [ ] (shoulders) pick a target, F (A) does the thing, Q (X) takes from the stash.
     // E (Select) opens and closes the bench while landed.
     if !session.paused {
@@ -314,7 +314,7 @@ fn controls(
             if previous {
                 session.game.bench_move(-1);
             }
-            for (n, key) in DIGITS.into_iter().take(6).enumerate() {
+            for (n, key) in DIGITS.into_iter().take(7).enumerate() {
                 if keys.just_pressed(key) {
                     session.game.bench_tab(n);
                 }

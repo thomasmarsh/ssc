@@ -43,6 +43,10 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 - Gameplay state lives in the headless simulation and is tested there; the renderer only draws it. Keep new systems deterministic.
 - Player balance changes ripple into creature tuning (hull, damage and fire rates in genomes), so retune together.
 
+## Sonar, chart and legacy (built)
+
+- **Sonar upgrades.** The bench's SONAR tab (`simulation/skills.rs`, numbers in `tuning.rs`) sells reach, ring speed, recharge and targets in four levels each, and four one-time reveal tiers (pad watch, lodes, nests and eggs, predator density) that add echo kinds to `simulation/ping.rs`. All start locked; the base ping is unchanged. Echoes still come from generation alone.
+
 ## Open questions for playtesting
 
 - Tune `THREAT_PER_SECTOR`, drop chances, `Rarity::strength` and the `Stat::affix_bonus` values together; `Stats::power` versus `threat^0.8` (the HUD verdict) is a first guess at "fair".

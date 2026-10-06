@@ -8,7 +8,7 @@ use bevy::{
 use ssc::fortress::{Archetype, FortPart, PartKind, SEG_SPACING};
 use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::arsenal::Profile;
-use ssc::simulation::skills::Skill;
+use ssc::simulation::skills::{Skill, SkillTab};
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
     Beam, Body, BodyKind, Cache, EchoKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, GuideKind,
@@ -110,7 +110,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-6 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (both locked until bought at the bench, tab 6)\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (both locked until bought at the bench, tab 6; sonar upgrades tab 7)\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -459,8 +459,8 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             None => (String::new(), MUTED),
         });
     }
-    lines.push(("\nRIG   bench tab 6\n".into(), CYAN));
-    for skill in Skill::ALL {
+    lines.push(("\nRIG   bench tabs 6, 7\n".into(), CYAN));
+    for skill in Skill::of_tab(SkillTab::Rig) {
         let level = game.loadout.skills.level(skill);
         if skill.is_ability() {
             let (key, cooldown, up) = match skill {
@@ -507,6 +507,28 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             if level > 0 { OWNED } else { MUTED },
         ));
     }
+    let sonar = Skill::of_tab(SkillTab::Sonar);
+    let tiers = sonar.iter().filter(|s| s.starts_locked()).count();
+    let tiers_owned = sonar
+        .iter()
+        .filter(|s| s.starts_locked() && game.loadout.skills.level(**s) > 0)
+        .count();
+    let upgrades: u32 = sonar
+        .iter()
+        .filter(|s| !s.starts_locked())
+        .map(|s| u32::from(game.loadout.skills.level(*s)))
+        .sum();
+    lines.push((
+        format!(
+            "{:<11}tiers {tiers_owned}/{tiers}  upgrades {upgrades}  X pings\n",
+            "SONAR"
+        ),
+        if tiers_owned + upgrades as usize > 0 {
+            OWNED
+        } else {
+            MUTED
+        },
+    ));
     lines.push(("\nCARGO\n".into(), CYAN));
     for kind in Material::ALL {
         lines.push((
@@ -2036,6 +2058,13 @@ fn echo_color(kind: EchoKind, tint: Option<[f32; 3]>) -> Color {
         EchoKind::Planetoid => Color::srgb(0.95, 0.8, 0.5),
         EchoKind::Civilization | EchoKind::Fortress => lifted(tint),
         EchoKind::Pad => PAD_GREEN,
+        EchoKind::PadAlert => PAD_AMBER,
+        EchoKind::Lode => tint.map_or(Color::srgb(0.95, 0.8, 0.5), |[r, g, b]| {
+            Color::srgb(r, g, b)
+        }),
+        EchoKind::Nest => Color::srgb(0.6, 0.9, 0.55),
+        EchoKind::Eggs => Color::srgb(0.95, 0.9, 0.62),
+        EchoKind::Predators => DRY_RED,
     }
 }
 
@@ -2119,7 +2148,7 @@ fn draw_parry(gizmos: &mut Gizmos, game: &Game) {
 /// a diamond for a pad) that fades as the echo does.
 fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
     if let Some((origin, radius)) = game.ping_ring() {
-        let fade = (1.0 - radius / ssc::simulation::PING_RANGE).clamp(0.0, 1.0);
+        let fade = (1.0 - radius / game.ping_ring_range()).clamp(0.0, 1.0);
         gizmos
             .circle_2d(origin, radius, CYAN.with_alpha(0.1 + 0.4 * fade))
             .resolution(96);
@@ -2165,7 +2194,7 @@ fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
                 gizmos.lineloop_2d(square(size), c);
                 gizmos.lineloop_2d(square(size * 0.55), c);
             }
-            EchoKind::Pad => {
+            EchoKind::Pad | EchoKind::PadAlert => {
                 gizmos.lineloop_2d(
                     [
                         at + Vec2::Y * size,
@@ -2175,6 +2204,72 @@ fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
                     ],
                     c,
                 );
+                if echo.kind == EchoKind::PadAlert {
+                    // A crossed diamond: the enemy knows this pad.
+                    gizmos.line_2d(
+                        at + Vec2::new(-size, -size) * 0.5,
+                        at + Vec2::new(size, size) * 0.5,
+                        c,
+                    );
+                    gizmos.line_2d(
+                        at + Vec2::new(-size, size) * 0.5,
+                        at + Vec2::new(size, -size) * 0.5,
+                        c,
+                    );
+                }
+            }
+            EchoKind::Lode => {
+                // A faceted gem: a diamond with a smaller one inside, in the material's color.
+                let gem = |r: f32| {
+                    [
+                        at + Vec2::Y * r * 1.2,
+                        at + Vec2::X * r * 0.8,
+                        at - Vec2::Y * r * 1.2,
+                        at - Vec2::X * r * 0.8,
+                    ]
+                };
+                gizmos.lineloop_2d(gem(size), c);
+                gizmos.lineloop_2d(gem(size * 0.45), c);
+            }
+            EchoKind::Nest => {
+                // Open ring of stones: a dashed circle with a gap.
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::TAU / 9.0;
+                    gizmos
+                        .circle_2d(at + Vec2::from_angle(a) * size, size * 0.18, c)
+                        .resolution(6);
+                }
+                gizmos.circle_2d(at, size * 0.25, c).resolution(8);
+            }
+            EchoKind::Eggs => {
+                // Eggs: a cluster of small ovals.
+                for offset in [
+                    Vec2::new(-0.5, -0.3),
+                    Vec2::new(0.5, -0.3),
+                    Vec2::new(0.0, 0.5),
+                ] {
+                    gizmos
+                        .ellipse_2d(
+                            Isometry2d::from_translation(at + offset * size),
+                            Vec2::new(size * 0.28, size * 0.38),
+                            c,
+                        )
+                        .resolution(10);
+                }
+            }
+            EchoKind::Predators => {
+                // A heat marker: rings that grow with how many roam there, with a core.
+                let rings = (echo.weight as usize).clamp(1, 6);
+                for k in 1..=rings {
+                    gizmos
+                        .circle_2d(
+                            at,
+                            size * (0.4 + 0.3 * k as f32),
+                            c.with_alpha(c.alpha() * 0.8),
+                        )
+                        .resolution(20);
+                }
+                gizmos.circle_2d(at, size * 0.25, c).resolution(8);
             }
         }
     }

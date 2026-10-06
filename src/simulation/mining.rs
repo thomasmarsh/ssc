@@ -20,6 +20,7 @@ pub use super::tuning::{
 /// Fraction of each material lost when the ship is destroyed.
 pub const DEATH_LOSS: f32 = 0.25;
 const MINE_SALT: u64 = 0x31A3_0000_0000_00FE;
+const REGROW_SALT: u64 = 0x6E6B_0000_0000_0A11;
 const NOTE_EVERY: f32 = 3.0;
 /// Spent ore is remembered to this grain, rounded up so reloading never refreshes a rock.
 const GRAIN: f32 = 0.25;
@@ -220,6 +221,37 @@ pub(super) fn rate(rock: RockKind) -> f32 {
     }
 }
 
+/// The material a rock kind gives; a planetoid's is chosen by a hash of its spawn key. Pure,
+/// so the sonar and the chart can name it without a body.
+pub fn material_of(seed: u64, rock: RockKind, origin: Option<(SectorId, u32)>) -> Material {
+    match rock {
+        RockKind::Ore | RockKind::Plain | RockKind::Wall => Material::Metal,
+        RockKind::Ice | RockKind::Husk => Material::Volatiles,
+        RockKind::Crystal => Material::Crystal,
+        RockKind::Planetoid => {
+            let (sector, index) = origin.unwrap_or((SectorId { x: 0, y: 0 }, 0));
+            let key = u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            match hash2(seed ^ MINE_SALT ^ key, sector.x, sector.y) % 3 {
+                0 => Material::Metal,
+                1 => Material::Volatiles,
+                _ => Material::Crystal,
+            }
+        }
+    }
+}
+
+/// Whether the planetoid at `key` regrows what is mined from it (see `regrow`). Pure, so the
+/// sonar and the chart can mark it from generation alone.
+pub fn renewable(seed: u64, key: (SectorId, u32)) -> bool {
+    let (sector, index) = key;
+    let h = hash2(
+        seed ^ REGROW_SALT ^ u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+        sector.x,
+        sector.y,
+    );
+    (h % 10_000) as f32 / 10_000.0 < t::RENEWABLE_SHARE
+}
+
 pub(super) fn quantize(spent: f32) -> f32 {
     (spent / GRAIN).ceil() * GRAIN
 }
@@ -264,20 +296,7 @@ impl Body {
 
     /// The material a rock gives. Planetoids give one chosen from a hash of the spawn index.
     pub(super) fn material(&self, seed: u64) -> Material {
-        match self.rock {
-            RockKind::Ore | RockKind::Plain | RockKind::Wall => Material::Metal,
-            RockKind::Ice | RockKind::Husk => Material::Volatiles,
-            RockKind::Crystal => Material::Crystal,
-            RockKind::Planetoid => {
-                let (sector, index) = self.origin.unwrap_or((SectorId { x: 0, y: 0 }, 0));
-                let key = u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-                match hash2(seed ^ MINE_SALT ^ key, sector.x, sector.y) % 3 {
-                    0 => Material::Metal,
-                    1 => Material::Volatiles,
-                    _ => Material::Crystal,
-                }
-            }
-        }
+        material_of(seed, self.rock, self.origin)
     }
 
     /// Whether the beam may work this body: free rocks and planetoids, not nest stones.

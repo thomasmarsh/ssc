@@ -23,7 +23,7 @@
 //!   enemy suffers one seeded raid roll when its sector reloads.
 
 use super::arsenal::Profile;
-use super::skills::Skill;
+use super::skills::{Skill, SkillTab};
 use super::upgrades::Rarity;
 use super::*;
 use crate::genome::ROOT_ARMED;
@@ -106,16 +106,18 @@ pub enum BenchTab {
     Arms,
     Stash,
     Rig,
+    Sonar,
 }
 
 impl BenchTab {
-    pub const ALL: [BenchTab; 6] = [
+    pub const ALL: [BenchTab; 7] = [
         Self::Repair,
         Self::Reforge,
         Self::Upgrade,
         Self::Arms,
         Self::Stash,
         Self::Rig,
+        Self::Sonar,
     ];
 
     pub fn label(self) -> &'static str {
@@ -126,6 +128,7 @@ impl BenchTab {
             Self::Arms => "ARMS",
             Self::Stash => "STASH",
             Self::Rig => "RIG",
+            Self::Sonar => "SONAR",
         }
     }
 }
@@ -1130,7 +1133,7 @@ impl Game {
         self.pad.bench.is_some() && self.pad.landed.is_some()
     }
 
-    /// Picks a tab (0 to 5).
+    /// Picks a tab (0 to 6).
     pub fn bench_tab(&mut self, n: usize) {
         if let (Some(bench), Some(&tab)) = (self.pad.bench.as_mut(), BenchTab::ALL.get(n)) {
             bench.tab = tab;
@@ -1156,7 +1159,8 @@ impl Game {
             BenchTab::Reforge | BenchTab::Upgrade => self.loadout.parts.len(),
             BenchTab::Arms => self.bench_profiles().len(),
             BenchTab::Stash => Material::ALL.len(),
-            BenchTab::Rig => Skill::ALL.len(),
+            BenchTab::Rig => Skill::of_tab(SkillTab::Rig).len(),
+            BenchTab::Sonar => Skill::of_tab(SkillTab::Sonar).len(),
         }
     }
 
@@ -1208,7 +1212,8 @@ impl Game {
             BenchTab::Upgrade => self.bench_upgrade(cursor),
             BenchTab::Arms => self.bench_level(cursor),
             BenchTab::Stash => self.bench_stash(cursor, true),
-            BenchTab::Rig => self.bench_skill(cursor),
+            BenchTab::Rig => self.bench_skill(SkillTab::Rig, cursor),
+            BenchTab::Sonar => self.bench_skill(SkillTab::Sonar, cursor),
         }
     }
 
@@ -1346,8 +1351,8 @@ impl Game {
     }
 
     /// Buys the next level of a rig upgrade. Levels only go up.
-    fn bench_skill(&mut self, index: usize) {
-        let Some(&skill) = Skill::ALL.get(index) else {
+    fn bench_skill(&mut self, tab: SkillTab, index: usize) {
+        let Some(&skill) = Skill::of_tab(tab).get(index) else {
             return;
         };
         let level = self.loadout.skills.level(skill);
@@ -1506,8 +1511,13 @@ impl Game {
                 }
                 footer = "F raises the weapon one level".into();
             }
-            BenchTab::Rig => {
-                for (i, skill) in Skill::ALL.into_iter().enumerate() {
+            BenchTab::Rig | BenchTab::Sonar => {
+                let tab = if bench.tab == BenchTab::Rig {
+                    SkillTab::Rig
+                } else {
+                    SkillTab::Sonar
+                };
+                for (i, skill) in Skill::of_tab(tab).into_iter().enumerate() {
                     let level = self.loadout.skills.level(skill);
                     let gate = self.skill_gate(skill);
                     let (text, ok) = match skill.price(level) {
@@ -1520,7 +1530,7 @@ impl Game {
                             ),
                             false,
                         ),
-                        Some(price) if level == 0 && skill.is_ability() => (
+                        Some(price) if level == 0 && skill.starts_locked() => (
                             format!(
                                 "{}  UNLOCK  {}  {}",
                                 skill.label(),
@@ -1548,7 +1558,11 @@ impl Game {
                         ok,
                     });
                 }
-                footer = "F buys the next level; upgrades are kept for the run".into();
+                footer = if tab == SkillTab::Sonar {
+                    "F buys the next level; X pings; upgrades are kept for the run".into()
+                } else {
+                    "F buys the next level; upgrades are kept for the run".into()
+                };
             }
             BenchTab::Stash => {
                 let stash = self.landed_pad().map(|p| p.stash).unwrap_or_default();
@@ -2270,6 +2284,67 @@ mod tests {
     }
 
     #[test]
+    fn the_sonar_tab_sells_ping_upgrades_locked_at_the_start() {
+        let mut game = empty_game();
+        world(&mut game, 7);
+        landed(&mut game);
+        game.pad.cover_broken = COVER_BREAK;
+        bench(&mut game, 6);
+        let panel = game.bench_panel().unwrap();
+        assert_eq!(panel.tab, BenchTab::Sonar);
+        assert_eq!(panel.rows.len(), Skill::of_tab(SkillTab::Sonar).len());
+        assert!(panel.rows.iter().any(|r| r.text.contains("UNLOCK")));
+        for skill in Skill::of_tab(SkillTab::Sonar) {
+            assert_eq!(game.loadout.skills.level(skill), 0, "nothing starts owned");
+        }
+        // Short of the price: nothing bought.
+        stock(&mut game, 1.0, 0.0, 0.0);
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::PingReach), 0);
+        // Reach is first on the tab: buy it, and it costs what the price said.
+        stock(&mut game, 100.0, 100.0, 100.0);
+        let price = Skill::PingReach.price(0).unwrap();
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::PingReach), 1);
+        assert_eq!(game.cargo.metal, 100.0 - price[0].1);
+        // A reveal tier is bought once and then reads MAX.
+        let tier = Skill::of_tab(SkillTab::Sonar)
+            .iter()
+            .position(|&s| s == Skill::EchoLodes)
+            .unwrap();
+        for _ in 0..tier {
+            game.bench_move(1);
+        }
+        stock(&mut game, 100.0, 100.0, 100.0);
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::EchoLodes), 1);
+        game.bench_confirm();
+        assert_eq!(game.loadout.skills.level(Skill::EchoLodes), 1, "once");
+    }
+
+    #[test]
+    fn pad_watch_marks_a_pad_the_enemy_found_as_an_alert() {
+        use super::super::ping::EchoKind;
+        let mut game = empty_game();
+        world(&mut game, 7);
+        let key = deployed(&mut game);
+        let kinds = |game: &mut Game| {
+            game.ping.cooldown = 0.0;
+            game.ping();
+            game.ping.echoes.iter().map(|e| e.kind).collect::<Vec<_>>()
+        };
+        assert!(kinds(&mut game).contains(&EchoKind::Pad));
+        game.pad.known_wild.insert(key);
+        let before = kinds(&mut game);
+        assert!(before.contains(&EchoKind::Pad), "locked: still a plain pad");
+        assert!(!before.contains(&EchoKind::PadAlert));
+        game.loadout.skills.raise(Skill::EchoPads);
+        let after = kinds(&mut game);
+        assert!(after.contains(&EchoKind::PadAlert));
+        assert!(!after.contains(&EchoKind::Pad));
+    }
+
+    #[test]
     fn the_rig_tab_sells_mining_upgrades_for_materials_and_never_takes_them_back() {
         let mut game = empty_game();
         world(&mut game, 7);
@@ -2278,7 +2353,7 @@ mod tests {
         bench(&mut game, 5);
         let panel = game.bench_panel().unwrap();
         assert_eq!(panel.tab, BenchTab::Rig);
-        assert_eq!(panel.rows.len(), Skill::ALL.len());
+        assert_eq!(panel.rows.len(), Skill::of_tab(SkillTab::Rig).len());
         // Short of the price: nothing bought, nothing spent.
         stock(&mut game, 5.0, 0.0, 0.0);
         game.bench_confirm();

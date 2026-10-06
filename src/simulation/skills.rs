@@ -21,10 +21,33 @@ pub enum Skill {
     Parry,
     /// A quick short jump that stops at the first obstruction. Locked until bought.
     Dash,
+    /// Sonar: the ring reaches farther.
+    PingReach,
+    /// Sonar: the ring sweeps faster.
+    PingSpeed,
+    /// Sonar: a shorter cooldown.
+    PingCooldown,
+    /// Sonar: more echoes of every kind.
+    PingTargets,
+    /// Sonar tier: pads the enemy has found answer as alerts. Locked until bought.
+    EchoPads,
+    /// Sonar tier: rich mining spots and renewable planetoids. Locked until bought.
+    EchoLodes,
+    /// Sonar tier: nests and egg clusters. Locked until bought.
+    EchoNests,
+    /// Sonar tier: predator density of a sector. Locked until bought.
+    EchoPredators,
+}
+
+/// Which bench tab sells a skill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkillTab {
+    Rig,
+    Sonar,
 }
 
 impl Skill {
-    pub const ALL: [Skill; 7] = [
+    pub const ALL: [Skill; 15] = [
         Self::BeamPower,
         Self::BeamRange,
         Self::Yield,
@@ -32,7 +55,45 @@ impl Skill {
         Self::Cargo,
         Self::Parry,
         Self::Dash,
+        Self::PingReach,
+        Self::PingSpeed,
+        Self::PingCooldown,
+        Self::PingTargets,
+        Self::EchoPads,
+        Self::EchoLodes,
+        Self::EchoNests,
+        Self::EchoPredators,
     ];
+
+    /// The bench tab that sells this skill.
+    pub fn tab(self) -> SkillTab {
+        match self {
+            Self::PingReach
+            | Self::PingSpeed
+            | Self::PingCooldown
+            | Self::PingTargets
+            | Self::EchoPads
+            | Self::EchoLodes
+            | Self::EchoNests
+            | Self::EchoPredators => SkillTab::Sonar,
+            _ => SkillTab::Rig,
+        }
+    }
+
+    /// The skills of one bench tab, in order.
+    pub fn of_tab(tab: SkillTab) -> Vec<Skill> {
+        Self::ALL.into_iter().filter(|s| s.tab() == tab).collect()
+    }
+
+    /// Skills that do nothing at level zero and are bought once or climbed from a first
+    /// purchase (as opposed to mining upgrades, which also work at level zero).
+    pub fn starts_locked(self) -> bool {
+        self.is_ability()
+            || matches!(
+                self,
+                Self::EchoPads | Self::EchoLodes | Self::EchoNests | Self::EchoPredators
+            )
+    }
 
     pub fn index(self) -> usize {
         Self::ALL.iter().position(|&s| s == self).unwrap_or(0)
@@ -47,11 +108,22 @@ impl Skill {
             Self::Cargo => "CARGO HOLD",
             Self::Parry => "PARRY",
             Self::Dash => "DASH",
+            Self::PingReach => "PING REACH",
+            Self::PingSpeed => "PING SPEED",
+            Self::PingCooldown => "PING RECHARGE",
+            Self::PingTargets => "PING TARGETS",
+            Self::EchoPads => "PAD WATCH",
+            Self::EchoLodes => "LODE ECHO",
+            Self::EchoNests => "NEST ECHO",
+            Self::EchoPredators => "PREDATOR ECHO",
         }
     }
 
     pub fn max_level(self) -> u8 {
-        t::SKILL_MAX
+        match self {
+            Self::EchoPads | Self::EchoLodes | Self::EchoNests | Self::EchoPredators => 1,
+            _ => t::SKILL_MAX,
+        }
     }
 
     /// What one level gives, for the bench.
@@ -72,6 +144,14 @@ impl Skill {
                 t::PARRY_CHANCE * 100.0,
                 t::PARRY_CHANCE_STEP * 100.0
             ),
+            Self::PingReach => format!("+{:.0} reach", t::PING_REACH_STEP),
+            Self::PingSpeed => format!("+{:.0} ring speed", t::PING_SPEED_STEP),
+            Self::PingCooldown => format!("-{:.1}s recharge", t::PING_COOLDOWN_STEP),
+            Self::PingTargets => format!("+{} echo of every kind", t::PING_TARGETS_STEP),
+            Self::EchoPads => "pads the enemy has found ping as alerts".to_string(),
+            Self::EchoLodes => "rich lodes and renewable planetoids".to_string(),
+            Self::EchoNests => "nests and egg clusters".to_string(),
+            Self::EchoPredators => "how many predators roam a sector".to_string(),
         }
     }
 
@@ -84,6 +164,14 @@ impl Skill {
             Self::Cargo => &t::PRICE_CARGO,
             Self::Parry => &t::PRICE_PARRY,
             Self::Dash => &t::PRICE_DASH,
+            Self::PingReach => &t::PRICE_PING_REACH,
+            Self::PingSpeed => &t::PRICE_PING_SPEED,
+            Self::PingCooldown => &t::PRICE_PING_COOLDOWN,
+            Self::PingTargets => &t::PRICE_PING_TARGETS,
+            Self::EchoPads => &t::PRICE_ECHO_PADS,
+            Self::EchoLodes => &t::PRICE_ECHO_LODES,
+            Self::EchoNests => &t::PRICE_ECHO_NESTS,
+            Self::EchoPredators => &t::PRICE_ECHO_PREDATORS,
         }
     }
 
@@ -204,6 +292,24 @@ impl Skills {
     pub fn cargo_bonus(&self) -> f32 {
         t::CARGO_STEP * self.steps(Skill::Cargo)
     }
+
+    /// Sonar reach, ring speed, recharge and echoes per kind beyond the base ping.
+    pub fn ping_range(&self, base: f32) -> f32 {
+        base + t::PING_REACH_STEP * self.steps(Skill::PingReach)
+    }
+
+    pub fn ping_speed(&self, base: f32) -> f32 {
+        base + t::PING_SPEED_STEP * self.steps(Skill::PingSpeed)
+    }
+
+    pub fn ping_cooldown(&self, base: f32) -> f32 {
+        (base - t::PING_COOLDOWN_STEP * self.steps(Skill::PingCooldown))
+            .max(t::PING_COOLDOWN_FLOOR.min(base))
+    }
+
+    pub fn ping_extra_targets(&self) -> usize {
+        t::PING_TARGETS_STEP * usize::from(self.level(Skill::PingTargets))
+    }
 }
 
 #[cfg(test)]
@@ -245,7 +351,9 @@ mod tests {
                 .iter()
                 .map(|p| p.1)
                 .sum();
-            assert!(last > first);
+            if skill.max_level() > 1 {
+                assert!(last > first);
+            }
             assert!(skill.price(skill.max_level()).is_none());
         }
     }
