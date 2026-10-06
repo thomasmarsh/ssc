@@ -83,6 +83,9 @@ pub struct Input {
     pub fire: bool,
     /// Optional heading vector, allowing pointer/controller aiming without input APIs.
     pub aim_direction: Option<Vec2>,
+    /// Optional thrust vector (length 0..1) independent of heading, for twin-stick play.
+    /// When present it replaces `thrust`, which only pushes along the heading.
+    pub move_direction: Option<Vec2>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -656,7 +659,11 @@ impl Game {
         } else {
             0.0
         };
-        player.velocity += direction * thrust * stats.thrust * dt;
+        let push = match input.move_direction.filter(|m| m.is_finite()) {
+            Some(m) => m.clamp_length_max(1.0),
+            None => direction * thrust,
+        };
+        player.velocity += push * stats.thrust * dt;
         player.velocity *= (-dt * if input.brake { 5.0 } else { 0.07 }).exp();
         // Thrust cannot exceed top speed, but a fling is allowed to carry the ship past it
         // and bleeds off smoothly instead of snapping back.
@@ -1878,6 +1885,24 @@ mod tests {
             assert_eq!(left.position, right.position);
             assert_eq!(left.health, right.health);
         }
+    }
+
+    #[test]
+    fn move_direction_thrusts_independently_of_heading() {
+        let mut game = Game::new(1);
+        game.bodies[0].angle = 0.0;
+        game.bodies[0].velocity = Vec2::ZERO;
+        game.step(
+            DT,
+            Input {
+                move_direction: Some(Vec2::Y),
+                aim_direction: Some(Vec2::X),
+                ..Default::default()
+            },
+        );
+        let player = game.player().unwrap();
+        assert!(player.velocity.y > 0.0);
+        assert!(player.velocity.y > player.velocity.x.abs() * 10.0);
     }
 
     #[test]

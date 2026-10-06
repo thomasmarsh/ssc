@@ -22,7 +22,7 @@ default = ["desktop"]
 desktop = [
     "bevy/default_app", "bevy/bevy_winit", "bevy/multi_threaded",
     "bevy/2d_bevy_render", "bevy/ui_bevy_render", "bevy/default_font",
-    "bevy/keyboard", "bevy/mouse", "bevy/bevy_audio", "bevy/wav", "bevy/x11", "bevy/wayland",
+    "bevy/keyboard", "bevy/mouse", "bevy/bevy_gilrs", "bevy/bevy_audio", "bevy/wav", "bevy/x11", "bevy/wayland",
 ]
 
 [profile.dev]
@@ -36,3 +36,7 @@ opt-level = 2
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# gilrs-core on macOS drops virtual HID gamepads that lack a LocationID (e.g. the Switch 2 bridge).
+[patch.crates-io]
+gilrs-core = { path = "vendor/gilrs-core" }

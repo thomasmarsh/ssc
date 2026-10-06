@@ -18,6 +18,10 @@ use ssc::simulation::upgrades::{self, Item, Source};
 use ssc::simulation::{Game, Input};
 use ssc::world::{QUADRANT_SIZE, Rng};
 
+/// Left stick deadzone for thrust; the right stick aims and fires past a larger push.
+const STICK_DEADZONE: f32 = 0.15;
+const FIRE_STICK_THRESHOLD: f32 = 0.3;
+
 /// Camera preferences belong to the desktop adapter, independent of simulation rules.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum CameraView {
@@ -144,7 +148,19 @@ impl Default for Session {
     }
 }
 
+/// SDL mapping for the Switch 2 bridge's virtual gamepad (see switch2mac VirtualHID.swift for the
+/// report layout). gilrs has no built-in entry for it, so without this the sticks stay unmapped.
+/// Axes sort by usage (X, Y, Z, Rx, Ry, Rz) and buttons by usage, as in the report.
+const SWITCH2_BRIDGE_MAPPING: &str = "030000007e0500006920000000000000,Pro Controller 2 (Finally),\
+platform:Mac OS X,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,\
+leftshoulder:b9,rightshoulder:b10,misc1:b15,leftx:a0,lefty:a1,rightx:a2,righty:a5,\
+lefttrigger:a3,righttrigger:a4,dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,";
+
 fn main() {
+    if std::env::var_os("SDL_GAMECONTROLLERCONFIG").is_none() {
+        // SAFETY: set before any threads are spawned.
+        unsafe { std::env::set_var("SDL_GAMECONTROLLERCONFIG", SWITCH2_BRIDGE_MAPPING) };
+    }
     let mut settings = WgpuSettings {
         power_preference: PowerPreference::LowPower,
         ..default()
@@ -202,15 +218,27 @@ fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>) {
     session.game.step(dt, input);
 }
 
+/// Every physical input device the player can use.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Devices<'w, 's> {
+    keys: Res<'w, ButtonInput<KeyCode>>,
+    mouse: Res<'w, ButtonInput<MouseButton>>,
+    gamepads: Query<'w, 's, &'static Gamepad>,
+}
+
 fn controls(
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    devices: Devices,
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     view: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
     mut session: ResMut<Session>,
     mut audio: ResMut<audio::Audio>,
     mut exit: MessageWriter<AppExit>,
 ) {
+    let Devices {
+        keys,
+        mouse,
+        gamepads,
+    } = devices;
     if keys.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
     }
@@ -255,6 +283,22 @@ fn controls(
     } else {
         None
     };
+    // Twin-stick: left stick thrusts in any direction, right stick aims and fires.
+    let mut stick_move = None;
+    let mut stick_aim = None;
+    let mut pad_brake = false;
+    for pad in &gamepads {
+        let left = pad.left_stick();
+        if left.length() > STICK_DEADZONE {
+            stick_move = Some(left);
+        }
+        let right = pad.right_stick();
+        if right.length() > FIRE_STICK_THRESHOLD {
+            stick_aim = Some(right);
+        }
+        pad_brake |= pad.pressed(GamepadButton::LeftTrigger2) || pad.pressed(GamepadButton::South);
+    }
+    let pad_fire = stick_aim.is_some();
     session.input = Input {
         thrust: if keys.pressed(KeyCode::ArrowUp) {
             1.0
@@ -263,11 +307,13 @@ fn controls(
         },
         turn: keys.pressed(KeyCode::ArrowLeft) as u8 as f32
             - keys.pressed(KeyCode::ArrowRight) as u8 as f32,
-        brake: keys.pressed(KeyCode::ArrowDown),
+        brake: keys.pressed(KeyCode::ArrowDown) || pad_brake,
         fire: keys.pressed(KeyCode::KeyA)
             || keys.pressed(KeyCode::Space)
-            || mouse.pressed(MouseButton::Left),
-        aim_direction,
+            || mouse.pressed(MouseButton::Left)
+            || pad_fire,
+        aim_direction: stick_aim.or(aim_direction),
+        move_direction: stick_move,
     };
 }
 
