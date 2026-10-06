@@ -461,6 +461,7 @@ impl Game {
         let mined = units.min(rock.ore()).min(self.cargo.room(material) / gain);
         let stored = self.cargo.add(material, mined * gain);
         self.run.mined[material as usize] += stored;
+        self.civ_mined(mined);
 
         let body = &mut self.bodies[index];
         body.init_lode();

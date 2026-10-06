@@ -702,6 +702,7 @@ mod tests {
             let mut game = empty_game();
             game.player_invulnerability = 1e9;
             game.civ_territories.insert(t.id, t);
+            game.set_regard(t.id, -80.0);
             game.civ_lineages.insert(t.id, (t.id, CivRole::Member));
             let shooter = spawn(&mut game, &species, Vec2::new(0.0, 500.0));
             if wall {

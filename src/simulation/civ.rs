@@ -15,6 +15,7 @@
 //! - **Falls.** Destroying the capital base and killing the elder are recorded for good per
 //!   territory (`Game::civ_fall`), beside the destroyed-spawn memory.
 
+use super::Tier;
 use super::*;
 use crate::territory::{CivRole, CivTag, Fall, Standing, Territory, civ_phenotype};
 
@@ -94,6 +95,9 @@ pub struct TerritoryReport {
     pub name: String,
     pub color: [f32; 3],
     pub standing: Standing,
+    /// What it thinks of the ship, as a tier and a number from -100 to 100.
+    pub tier: Tier,
+    pub regard: f32,
     /// The territory's threat: the depth's threat times the civilization's menace.
     pub threat: f32,
     pub stage: RaidStage,
@@ -123,6 +127,8 @@ pub(super) struct Snapshot {
     pub domain: Option<u64>,
     pub raid: Option<(u64, RaidStage)>,
     pub ended: Vec<u64>,
+    /// Territories that do not hunt the ship (see `diplomacy`).
+    pub calm: Vec<u64>,
     /// Alert members: (territory, id, position).
     pub alarms: Vec<(u64, u64, Vec2)>,
 }
@@ -133,6 +139,8 @@ pub(super) struct Posture {
     pub reach: f32,
     /// Raised alert from comrades or a call to arms.
     pub rallied: bool,
+    /// The civilization leaves the ship be: no attack on sight, no joining an alarm.
+    pub calm: bool,
 }
 
 impl Snapshot {
@@ -147,6 +155,7 @@ impl Snapshot {
         let neutral = Posture {
             reach: 1.0,
             rallied: false,
+            calm: false,
         };
         let Some((tid, role)) = civ.filter(|(t, _)| !self.ended.contains(t)) else {
             return neutral;
@@ -166,9 +175,11 @@ impl Snapshot {
                     RaidStage::Raid => true,
                 }
         });
+        let calm = self.calm.contains(&tid);
         Posture {
             reach: if in_domain { DOMAIN_SIGHT } else { 1.0 },
-            rallied: comrades || called,
+            rallied: !calm && (comrades || called),
+            calm,
         }
     }
 }
@@ -251,7 +262,8 @@ impl Game {
             ),
             _ => (
                 RaidStage::Patrol,
-                (standing != Standing::Fallen && !t.peaceful()).then_some(WAR_AT),
+                (standing != Standing::Fallen && !t.peaceful() && self.civ_hostile(t.id))
+                    .then_some(WAR_AT),
             ),
         };
         let menace = if standing == Standing::Fallen {
@@ -268,6 +280,8 @@ impl Game {
             name: self.territory_name.clone(),
             color: t.color(self.seed),
             standing,
+            tier: self.civ_tier(t.id),
+            regard: self.civ_regard(t.id),
             threat: self.threat() * menace,
             stage,
             next_in,
@@ -286,6 +300,12 @@ impl Game {
                 .values()
                 .filter(|t| t.standing(self.civ_fall(t.id)) == Standing::Fallen)
                 .map(|t| t.id)
+                .collect(),
+            calm: self
+                .civ_territories
+                .keys()
+                .copied()
+                .filter(|t| self.civ_calm(*t))
                 .collect(),
             alarms: self
                 .bodies
@@ -331,6 +351,7 @@ impl Game {
                 }
                 if let Some(t) = now {
                     self.register_territory(t);
+                    self.regard_mut(t.id);
                     self.territory_name = t.name(self.seed);
                 }
                 self.territory = now;
@@ -343,10 +364,11 @@ impl Game {
                         _ => {
                             let threat = self.threat() * t.menace();
                             format!(
-                                "ENTERING  {}  THREAT x{:.1}  {}",
+                                "ENTERING  {}  THREAT x{:.1}  {}  - {}",
                                 self.territory_name,
                                 threat,
-                                verdict(self.power(), threat)
+                                verdict(self.power(), threat),
+                                self.civ_tier(t.id).label()
                             )
                         }
                     };
@@ -365,9 +387,9 @@ impl Game {
     fn update_raid(&mut self, dt: f32) {
         let alive = self.player().is_some();
         // A peaceful settlement never raids, however long the ship lingers.
-        let here = self
-            .territory
-            .filter(|t| !t.peaceful() && self.civ_standing(t.id) != Standing::Fallen);
+        let here = self.territory.filter(|t| {
+            !t.peaceful() && self.civ_standing(t.id) != Standing::Fallen && self.civ_hostile(t.id)
+        });
         match (here, self.raid.as_mut()) {
             (Some(t), Some(raid)) if raid.territory == t.id => {
                 if alive {
@@ -497,6 +519,7 @@ impl Game {
             }
         }
         for tid in territories {
+            let pull = TABLE_PULL * self.doctrine_pull(tid);
             let mut table = self.civ_brains.remove(&tid);
             for body in self.bodies.iter().filter(|b| b.active) {
                 let Some(brain) = body.brain.as_deref() else {
@@ -509,7 +532,7 @@ impl Game {
                 }
                 match table.as_mut() {
                     Some(table) => {
-                        table.blend_toward(brain, TABLE_PULL);
+                        table.blend_toward(brain, pull);
                         table.steps = table.steps.max(brain.steps);
                     }
                     None => table = Some(Box::new(brain.learned_copy())),
@@ -721,6 +744,7 @@ mod tests {
             let mut game = empty_game();
             game.player_invulnerability = 1e9;
             game.civ_territories.insert(t.id, t);
+            game.set_regard(t.id, -80.0);
             game.civ_lineages.insert(t.id, (t.id, CivRole::Member));
             game.territory_sector = Some(SectorId::ORIGIN);
             game.territory = inside.then_some(t);
@@ -744,6 +768,7 @@ mod tests {
         let t = find(SEED, CivShape::Horde);
         let spot = t.capital.center() + Vec2::new(0.0, 2500.0);
         let mut game = visit(SEED, spot);
+        game.provoke_all();
         assert!(!members(&game, t.id).is_empty());
         hold(&mut game, spot, WAR_AT - 5.0);
         assert_eq!(game.raid.as_ref().unwrap().stage(), RaidStage::Patrol);

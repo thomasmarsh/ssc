@@ -389,8 +389,13 @@ fn controls(
         if keys.just_pressed(KeyCode::KeyX) || pad(GamepadButton::RightThumb) {
             session.game.ping();
         }
+        // E (Select) opens the bench while landed and otherwise tithes at a seat in reach.
         if keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::Select) {
-            session.game.bench_toggle();
+            session.game.interact();
+        }
+        // Tithe (offering to a civilization's seat): O, or the guide button on a pad.
+        if keys.just_pressed(KeyCode::KeyO) || pad(GamepadButton::Mode) {
+            let _ = session.game.tithe();
         }
         if keys.just_pressed(KeyCode::KeyB) || pad(GamepadButton::North) {
             session.game.toggle_boosts();

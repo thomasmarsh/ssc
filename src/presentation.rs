@@ -120,7 +120,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (locked until bought at the bench, tab 6)\nG / D-LEFT  star map    H  beacon (bench)    bench tab 7  sonar upgrades\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine    O  tithe at a seat\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench/tithe  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (locked until bought at the bench, tab 6)\nG / D-LEFT  star map    H  beacon (bench)    bench tab 7  sonar upgrades\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -365,7 +365,7 @@ fn standing(power: f32, threat: f32) -> &'static str {
 /// The HUD line for the territory the ship is in: its name, what it asks of the ship and
 /// where its raid clock stands. Empty outside any territory.
 fn territory_line(game: &Game) -> String {
-    use ssc::simulation::RaidStage;
+    use ssc::simulation::{RaidStage, Tier};
     use ssc::world::Standing;
     let Some(report) = game.territory_report() else {
         return String::new();
@@ -378,6 +378,29 @@ fn territory_line(game: &Game) -> String {
     } else {
         ""
     };
+    // How the civilization regards the ship: its tier, a meter from hostile to friendly, and a
+    // tithe prompt when a seat is within reach.
+    let meter = bar((report.regard + 100.0) / 200.0, 10);
+    let tithe = match game.tithe_hint() {
+        Some(hint) => match hint.material {
+            Some(kind) => format!("   O  TITHE {}", kind.label()),
+            None => "   O  TITHE (need 20 of one material)".to_string(),
+        },
+        None => String::new(),
+    };
+    let regard = format!(
+        "{} [{meter}] {:+.0}{tithe}",
+        report.tier.label(),
+        report.regard
+    );
+    if report.tier != Tier::Hostile {
+        return format!(
+            "\n{}   {regard}   THREAT x{:.1}   {}{weakened}",
+            report.name,
+            report.threat,
+            standing(game.power(), report.threat)
+        );
+    }
     let clock = match (report.stage, report.next_in) {
         (RaidStage::Patrol, Some(s)) => format!("PATROLS   war party in {s:.0}s"),
         (RaidStage::WarParty, Some(s)) => format!("WAR PARTY OUT   raid in {s:.0}s"),
@@ -391,7 +414,7 @@ fn territory_line(game: &Game) -> String {
         .map(|(kind, tier)| format!("   {} FORT {tier}", kind.to_uppercase()))
         .unwrap_or_default();
     format!(
-        "\n{}   THREAT x{:.1}   {}   {}{}{}",
+        "\n{}   {regard}   THREAT x{:.1}   {}   {}{}{}",
         report.name,
         report.threat,
         standing(game.power(), report.threat),
@@ -1124,9 +1147,14 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
         if let Some(c) = e.civ {
             let what = if c.capital { "CAPITAL" } else { "OUTPOST" };
             let fallen = if c.fallen { "  FALLEN" } else { "" };
+            let regard = match c.regard {
+                Some(tier) if !c.fallen => format!("  regard {}", tier.label()),
+                None if !c.fallen => "  regard UNMET".to_string(),
+                _ => String::new(),
+            };
             detail.push((
                 format!(
-                    "C/F civilization {what}  threat {}{fallen}\n",
+                    "C/F civilization {what}  threat {}{regard}{fallen}\n",
                     c.threat.label()
                 ),
                 lifted(Some(c.tint)),

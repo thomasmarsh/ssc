@@ -284,11 +284,12 @@ impl Game {
             // Sight and proximity creatures notice the player by distance, with hysteresis;
             // touchy ones (anything but sight) also fly up when hurt, and rage pursues.
             let by_distance = g.trigger != Trigger::Harm
+                && !posture.calm
                 && player_distance < if body.alert && !hidden { lose } else { sight };
             let provoked = (g.trigger != Trigger::Sight && is_hurt(body))
                 || body.provoked > 0.0
                 || (body.enraged && player_distance < RAGE_PURSUIT_RANGE);
-            body.alert = by_distance || warned || provoked || posture.rallied;
+            body.alert = by_distance || (warned && !posture.calm) || provoked || posture.rallied;
             if hidden_long {
                 // Out of sight long enough: only a harm done to it keeps a creature on the hunt.
                 body.alert = provoked;

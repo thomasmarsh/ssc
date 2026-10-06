@@ -72,7 +72,9 @@ impl Game {
             let live = body
                 .origin
                 .and_then(|o| self.civ_works.get(&o))
-                .is_none_or(|(tid, _)| self.civ_standing(*tid) != Standing::Fallen);
+                .is_none_or(|(tid, _)| {
+                    self.civ_standing(*tid) != Standing::Fallen && self.civ_hostile(*tid)
+                });
             let aggression = genes.aggression.max(0.3);
             // The barrel follows the ship inside its arc and rests facing out otherwise.
             let aim_at = ship.filter(|s| s.distance(position) < TURRET_REACH);
@@ -191,6 +193,8 @@ mod tests {
         game.player_invulnerability = 1e9;
         game.teleport(at);
         game.step(DT, Input::default());
+        // Fortress guns fire only at an enemy (a civilization that ignores the ship holds fire).
+        game.provoke_all();
         game
     }
 

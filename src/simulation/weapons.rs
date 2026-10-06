@@ -275,6 +275,9 @@ impl Game {
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
                     }
+                    if dealt > 0.0 && diplomacy::civil_target(body) {
+                        self.civ_hits.push((body.id, dealt));
+                    }
                 }
             } else {
                 match body.kind {

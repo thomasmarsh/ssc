@@ -15,6 +15,7 @@ mod civmine;
 mod creature;
 mod cues;
 mod dash;
+mod diplomacy;
 mod ecology;
 mod food;
 mod fortress;
@@ -45,6 +46,7 @@ pub use chart::{
 pub use civ::{CIV_CAP, Raid, RaidStage, TerritoryReport, verdict};
 pub use civmine::Cache;
 pub use cues::Cue;
+pub use diplomacy::{Regard, Tier, TitheError, TitheHint};
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
 pub use food::{FOOD_RADIUS, Food, fertility};
 pub use growth::Egg;
@@ -407,6 +409,12 @@ pub struct Game {
     civ_territories: HashMap<u64, Territory>,
     civ_fall: HashMap<u64, Fall>,
     civ_brains: HashMap<u64, Box<Brain>>,
+    /// What each civilization met thinks of the ship, the ship's recent hits on civil bodies
+    /// (body, damage) awaiting the end of the step, and when each body was last struck; see
+    /// `diplomacy`.
+    civ_regard: BTreeMap<u64, Regard>,
+    civ_hits: Vec<(u64, f32)>,
+    civ_struck: HashMap<u64, f32>,
     civ_clock: f32,
     civ_rng: Rng,
     seed: u64,
@@ -503,6 +511,9 @@ impl Game {
             civ_territories: HashMap::new(),
             civ_fall: HashMap::new(),
             civ_brains: HashMap::new(),
+            civ_regard: BTreeMap::new(),
+            civ_hits: Vec::new(),
+            civ_struck: HashMap::new(),
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
             sanctuary: true,
@@ -712,6 +723,7 @@ impl Game {
         };
         self.note_step(dt, travelled, taken);
         self.chart_ship_damaged(taken);
+        self.update_diplomacy(dt);
         self.remove_destroyed();
         self.cue_player_damage(ship_before);
     }
@@ -1204,10 +1216,18 @@ impl Game {
                     }
                 }
                 if a.kind == BodyKind::Player && a.contact_cooldown <= 0.0 {
-                    rammed += ram_contact(a, b, closing_speed, invulnerability);
+                    let dealt = ram_contact(a, b, closing_speed, invulnerability);
+                    rammed += dealt;
+                    if dealt > 0.0 && diplomacy::civil_target(b) {
+                        self.civ_hits.push((b.id, dealt));
+                    }
                 }
                 if b.kind == BodyKind::Player && b.contact_cooldown <= 0.0 {
-                    rammed += ram_contact(b, a, closing_speed, invulnerability);
+                    let dealt = ram_contact(b, a, closing_speed, invulnerability);
+                    rammed += dealt;
+                    if dealt > 0.0 && diplomacy::civil_target(a) {
+                        self.civ_hits.push((a.id, dealt));
+                    }
                 }
             }
         }
@@ -1337,6 +1357,9 @@ impl Game {
                 if bullet.friendly && matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                     self.run.damage_dealt += dealt;
                 }
+                if bullet.friendly && dealt > 0.0 && diplomacy::civil_target(body) {
+                    self.civ_hits.push((body.id, dealt));
+                }
                 if !is_fixed(body) {
                     body.velocity +=
                         bullet.velocity.normalize_or_zero() * (180.0 / body.mass) * mass_sign(body);
@@ -1442,6 +1465,9 @@ impl Game {
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
                     }
+                    if dealt > 0.0 && diplomacy::civil_target(body) {
+                        self.civ_hits.push((body.id, dealt));
+                    }
                 } else if !friendly && body.kind == BodyKind::Player {
                     damage(body, amount, invulnerability);
                 }
@@ -1506,6 +1532,7 @@ impl Game {
             }
             if kind != BodyKind::Player {
                 self.civ_destroyed(body);
+                self.civ_killed(body);
                 self.drop_loot(body);
                 self.siphon(body);
             }

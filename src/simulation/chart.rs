@@ -129,6 +129,8 @@ pub struct CivReading {
     pub threat: Threat,
     pub fallen: bool,
     pub tint: [f32; 3],
+    /// How it stands toward the ship, once the ship has dealt with it.
+    pub regard: Option<super::Tier>,
 }
 
 /// Everything known about one sector, for drawing and the detail panel.
@@ -320,10 +322,17 @@ impl Game {
 
     /// Entering a sector teaches the chart everything in it except the predator count.
     fn chart_visit(&mut self, id: SectorId) {
+        self.chart_reveal(id, true);
+    }
+
+    /// Teaches the chart a sector's sites; `visited` also marks it as flown through (a friend's
+    /// shared chart does not).
+    pub(super) fn chart_reveal(&mut self, id: SectorId, visited: bool) {
         let seed = self.seed;
         let fallen = self.fallen.get(&id).cloned().unwrap_or_default();
         let sites: Vec<_> = self.ping.sites(seed, id).to_vec();
-        self.chart.known.entry(id).or_default().visited = true;
+        let known = self.chart.known.entry(id).or_default();
+        known.visited |= visited;
         for site in sites {
             if site.kind == EchoKind::Predators || site.members.iter().all(|i| fallen.contains(i)) {
                 continue;
@@ -354,6 +363,7 @@ impl Game {
             threat: Threat::of(t.strength, depth),
             fallen: self.civ_standing(territory) == Standing::Fallen,
             tint: t.color(self.seed),
+            regard: self.civ_met(territory),
         })
     }
 

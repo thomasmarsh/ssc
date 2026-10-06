@@ -68,6 +68,9 @@ pub struct RunStats {
     pub elders: u32,
     pub bases: u32,
     pub civs_toppled: u32,
+    /// Offerings made at civilization seats, and the material they came to.
+    pub tithes: u32,
+    pub tithed: f32,
     pub juveniles: u32,
     pub eggs: u32,
     /// Creatures eaten by predators or starved, anywhere near the ship.

@@ -885,11 +885,14 @@ impl Game {
     /// memory, a learner by the wild one.
     fn knows_pad(&self, body: &Body, key: PadKey) -> bool {
         match self.civ_of(body) {
-            Some((territory, _)) => self
-                .pad
-                .known_civ
-                .get(&territory)
-                .is_some_and(|set| set.contains(&key)),
+            Some((territory, _)) => {
+                self.civ_hostile(territory)
+                    && self
+                        .pad
+                        .known_civ
+                        .get(&territory)
+                        .is_some_and(|set| set.contains(&key))
+            }
             None => body.genome.learner > 0.0 && self.pad.known_wild.contains(&key),
         }
     }
@@ -913,8 +916,8 @@ impl Game {
             if civ.is_none() && body.genome.learner <= 0.0 {
                 continue;
             }
-            // Settlers mind their own business and never learn to hunt a pad.
-            if civ.is_some_and(|t| self.civ_peaceful(t)) {
+            // Settlers, and anyone who is not at war with the ship, never learn to hunt a pad.
+            if civ.is_some_and(|t| self.civ_calm(t)) {
                 continue;
             }
             let sight = body.genome.sight * body.genes.sensor_acuity;
@@ -2901,6 +2904,7 @@ mod tests {
         game.seed = seed;
         game.player_invulnerability = 1e9;
         game.civ_territories.insert(t.id, t);
+        game.set_regard(t.id, -80.0);
         let species = t.member(seed);
         game.civ_lineages
             .insert(species.lineage, (t.id, CivRole::Member));

@@ -247,6 +247,14 @@ impl Game {
         );
         let aggression = self.bodies[index].genes.aggression.max(0.3);
         self.bodies[index].angle = (target - center).to_angle();
+        // A civilization's station that is not at war with the ship holds its fire.
+        if let Some(&(tid, _)) = self.bodies[index]
+            .origin
+            .and_then(|o| self.civ_bases.get(&o))
+            && !self.civ_hostile(tid)
+        {
+            return;
+        }
         let Some(state) = self.bodies[index].base.as_mut() else {
             return;
         };

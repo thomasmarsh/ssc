@@ -274,3 +274,64 @@ pub const LOOT_JITTER: f32 = 240.0;
 /// does not flicker the ENTERING notice.
 pub const REGION_HOLD: f32 = 3.0;
 pub const REGION_COOLDOWN: f32 = 12.0;
+
+// ---- diplomacy -----------------------------------------------------------------------------
+
+/// What a civilization thinks of the ship is one number, `REGARD_MIN` to `REGARD_MAX`, read as a
+/// tier (see `diplomacy`): hostile at or below `HOSTILE_AT`, wary at or below `WARY_AT`, friendly
+/// at or above `FRIENDLY_AT`, otherwise it ignores the ship. Rising across a line needs
+/// `TIER_HYSTERESIS` more, so a border does not flicker its banner.
+pub const REGARD_MIN: f32 = -100.0;
+pub const REGARD_MAX: f32 = 100.0;
+pub const HOSTILE_AT: f32 = -40.0;
+pub const WARY_AT: f32 = -12.0;
+pub const FRIENDLY_AT: f32 = 40.0;
+pub const TIER_HYSTERESIS: f32 = 3.0;
+/// Where a civilization starts (the early outpost starts kinder), and how far leaving it alone
+/// can raise it (only gifts take an ordinary civilization to friendly; the outpost's settlers
+/// warm to a quiet neighbour on their own).
+pub const REGARD_START: f32 = 0.0;
+pub const REGARD_START_OUTPOST: f32 = 15.0;
+pub const REST_CAP: f32 = 25.0;
+pub const REST_CAP_OUTPOST: f32 = 60.0;
+/// Regard recovered per second while the ship lingers inside a claim, once `REST_DELAY` seconds
+/// have passed since the last offence. Away from the claim old grudges fade at `AWAY_RATE`, never
+/// past where the civilization started.
+pub const REST_RATE: f32 = 0.1;
+pub const REST_DELAY: f32 = 20.0;
+pub const AWAY_RATE: f32 = 0.01;
+/// Regard lost per point of damage the ship deals to a member, and to a structure (station,
+/// turret or wall piece); and for a kill, by role. A wall piece barely counts.
+pub const HURT_MEMBER: f32 = 0.08;
+pub const HURT_STRUCTURE: f32 = 0.02;
+pub const KILL_MEMBER: f32 = 5.0;
+pub const KILL_WARRIOR: f32 = 7.0;
+pub const KILL_ELDER: f32 = 30.0;
+pub const KILL_TURRET: f32 = 8.0;
+pub const KILL_WALL: f32 = 0.4;
+pub const KILL_OUTPOST_BASE: f32 = 30.0;
+pub const KILL_CAPITAL: f32 = 45.0;
+/// A kill counts against the ship if it struck the victim within this many seconds.
+pub const KILL_WINDOW: f32 = 8.0;
+/// Regard lost per unit of ore the beam takes inside a claim (a friend minds a quarter as much),
+/// and the seconds between the warnings the beam earns.
+pub const MINE_COST: f32 = 0.12;
+pub const MINE_COST_FRIEND: f32 = 0.25;
+pub const MINE_WARN_EVERY: f32 = 15.0;
+/// The tithe: fly within `TITHE_RANGE` of a seat (past its hull) and press the key. It takes
+/// `TITHE_AMOUNT` of the material the hold has most of, raises regard by `TITHE_GAIN` and may be
+/// repeated after `TITHE_COOLDOWN` seconds. A friend gives something back instead: a repair if
+/// the hull is below `TRADE_REPAIR_BELOW` of full, else `TRADE_RATE` of the amount in the material
+/// the hold has least of.
+pub const TITHE_RANGE: f32 = 420.0;
+pub const TITHE_AMOUNT: f32 = 20.0;
+pub const TITHE_GAIN: f32 = 9.0;
+pub const TITHE_COOLDOWN: f32 = 2.0;
+pub const TRADE_GAIN: f32 = 1.5;
+pub const TRADE_RATE: f32 = 0.75;
+pub const TRADE_REPAIR_BELOW: f32 = 0.75;
+/// How far a friendly civilization's shared charts reach past its claim, in sectors.
+pub const SHARE_MARGIN: i32 = 1;
+/// Doctrine tables learn from members at this multiple of `TABLE_PULL`, by tier (hostile,
+/// wary, ignores, friendly): a civilization at war drills faster than one at peace.
+pub const DOCTRINE_PULL: [f32; 4] = [1.5, 1.0, 0.5, 0.25];
