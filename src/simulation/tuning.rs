@@ -244,3 +244,25 @@ pub const TRAVEL_COOLDOWN: f32 = 180.0;
 pub const TRAVEL_CANCEL_COOLDOWN: f32 = 8.0;
 pub const TRAVEL_CANCEL_REFUND: f32 = 0.5;
 pub const TRAVEL_EXPOSED: f32 = 3.0;
+
+// ---- legacy and wrecks ---------------------------------------------------------------------
+
+/// When the run ends, this share of what it mined (per material) is carried into the next, up
+/// to a cap per material. With insurance on the share and cap are larger and one weapon
+/// profile (the highest level owned) is carried too, at most `LEGACY_WEAPON_LEVEL_CAP`.
+pub const LEGACY_FRACTION: f32 = 0.25;
+pub const LEGACY_CAP: f32 = 120.0;
+pub const LEGACY_FRACTION_BARE: f32 = 0.10;
+pub const LEGACY_CAP_BARE: f32 = 40.0;
+pub const LEGACY_WEAPON_LEVEL_CAP: u8 = 2;
+/// Seconds of a new run the HUD shows what the legacy brought.
+pub const LEGACY_HUD_SECONDS: f32 = 25.0;
+/// The wreck a lost ship leaves: what it held of each material (up to this), and the best part.
+/// Flying within `WRECK_RADIUS` recovers it. At most `MAX_WRECKS` wait; the oldest is lost.
+pub const WRECK_CAP: f32 = 150.0;
+pub const WRECK_RADIUS: f32 = 140.0;
+pub const MAX_WRECKS: usize = 3;
+/// A wreck in a living civilization's territory is looted after this many seconds of play, plus
+/// a deterministic share of the jitter (chosen by a hash of the seed, sector and wreck).
+pub const LOOT_AFTER: f32 = 240.0;
+pub const LOOT_JITTER: f32 = 240.0;

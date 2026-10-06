@@ -839,6 +839,13 @@ fn smoke_summary(session: &mut Session, mode: &str) {
     if mode == "over" {
         game.lives = 0;
         game.game_over = true;
+        game.cargo = Cargo {
+            metal: 90.0,
+            volatiles: 40.0,
+            crystal: 12.0,
+            ..Default::default()
+        };
+        game.seal_bequest(Vec2::new(5.0 * SECTOR_SIZE, 2.0 * SECTOR_SIZE), None);
     } else {
         game.lives = 2;
         game.run.recap = 1e6;

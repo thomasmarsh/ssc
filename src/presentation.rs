@@ -53,7 +53,7 @@ pub struct RigLine(usize);
 pub struct SummaryPanel;
 #[derive(Component)]
 pub struct SummaryLine(usize);
-const SUMMARY_LINES: usize = 24;
+const SUMMARY_LINES: usize = 30;
 
 /// The star map: a panel with a title, a grid of sectors (one span each) and a detail block.
 #[derive(Component)]
@@ -80,7 +80,7 @@ const RIG_LINES: usize = Slot::ALL.len()
     + Skill::ALL.len()
     + 1
     + Material::ALL.len()
-    + 2;
+    + 3;
 
 pub fn setup(mut commands: Commands) {
     commands.spawn((
@@ -120,7 +120,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping  D-LEFT  star map\nD / D-RIGHT  parry    SHIFT / L3  dash    (both locked until bought at the bench, tab 6; sonar upgrades tab 7)\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    G  star map    H  beacon    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (locked until bought at the bench, tab 6)\nG / D-LEFT  star map    H  beacon (bench)    bench tab 7  sonar upgrades\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -576,6 +576,9 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             MUTED
         },
     ));
+    if let Some(legacy) = game.legacy_hud() {
+        lines.push((format!("{legacy}\n"), AMBER));
+    }
     lines.push(("\nCARGO\n".into(), CYAN));
     for kind in Material::ALL {
         lines.push((
@@ -927,6 +930,14 @@ fn summary_lines(session: &Session) -> Vec<(String, Color, f32)> {
             out.push((line.clone(), light, 14.0));
         }
         list(&mut out);
+        let legacy = game.legacy_report();
+        if !legacy.is_empty() {
+            out.push(blank());
+            out.push(("LEGACY".into(), AMBER, 18.0));
+            for line in legacy {
+                out.push((line, AMBER, 14.0));
+            }
+        }
         if report.extirpated.is_empty() {
             out.push(blank());
             out.push((report.quip.into(), MUTED, 13.0));
@@ -2262,6 +2273,7 @@ pub fn draw(
     draw_boost(&mut gizmos, game);
     draw_echoes(&mut gizmos, game, camera, half);
     draw_beacons(&mut gizmos, game, camera, half);
+    draw_wrecks(&mut gizmos, game, camera, half);
     draw_guides(&mut gizmos, game, camera, half, session.arrows);
     if session.radar {
         // The scope keeps its on-screen size as the world view zooms out.
@@ -2293,6 +2305,7 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
     bearings.extend(game.echo_bearings(camera, half));
     if arrows {
         bearings.extend(game.beacon_bearings(camera, half));
+        bearings.extend(game.wreck_bearings(camera, half));
     }
     for bearing in bearings {
         let d = bearing.direction;
@@ -2313,6 +2326,7 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
             GuideKind::Mineral(material) => (material_color(material), 6.0),
             GuideKind::Echo(kind, tint) => (echo_color(kind, tint), 8.0),
             GuideKind::Beacon => (CYAN, 9.0),
+            GuideKind::Wreck => (DRY_RED, 9.0),
         };
         let echo = matches!(bearing.kind, GuideKind::Echo(..));
         let alpha = if echo {
@@ -2340,6 +2354,20 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
                 [back + side * size * 0.8, tip, back - side * size * 0.8],
                 color,
             ),
+        }
+        // A wreck's arrow wears a cross behind its head.
+        if bearing.kind == GuideKind::Wreck {
+            let mid = back - d * size * 0.4;
+            gizmos.line_2d(
+                mid + (d + side) * size * 0.5,
+                mid - (d + side) * size * 0.5,
+                color,
+            );
+            gizmos.line_2d(
+                mid + (d - side) * size * 0.5,
+                mid - (d - side) * size * 0.5,
+                color,
+            );
         }
         // A beacon's arrow wears a bar across its tail, like a mast.
         if bearing.kind == GuideKind::Beacon {
@@ -2580,6 +2608,48 @@ fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
                 gizmos.circle_2d(at, size * 0.25, c).resolution(8);
             }
         }
+    }
+}
+
+/// The wrecks of earlier ships: a broken hull and a slow red pulse, with the recovery radius.
+fn draw_wrecks(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
+    for wreck in game.wrecks() {
+        if !ssc::simulation::extent_in_view(wreck.position, 200.0, camera, half, 0.0) {
+            continue;
+        }
+        let at = wreck.position;
+        let pulse = (game.time * 0.8).fract();
+        let color = DRY_RED.with_alpha(0.85);
+        gizmos.linestrip_2d(
+            [
+                at + Vec2::new(18.0, 0.0),
+                at + Vec2::new(-10.0, 12.0),
+                at + Vec2::new(-4.0, 3.0),
+            ],
+            color,
+        );
+        gizmos.linestrip_2d(
+            [
+                at + Vec2::new(-4.0, -3.0),
+                at + Vec2::new(-10.0, -12.0),
+                at + Vec2::new(8.0, -2.0),
+            ],
+            color,
+        );
+        gizmos
+            .circle_2d(
+                at,
+                ssc::simulation::tuning::WRECK_RADIUS,
+                DRY_RED.with_alpha(0.25),
+            )
+            .resolution(32);
+        gizmos
+            .circle_2d(
+                at,
+                20.0 + 90.0 * pulse,
+                DRY_RED.with_alpha(0.4 * (1.0 - pulse)),
+            )
+            .resolution(24);
     }
 }
 
@@ -3030,6 +3100,26 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
                 p - Vec2::X * size,
             ],
             tint.with_alpha(alpha),
+        );
+    }
+    for wreck in game.wrecks() {
+        let offset = (wreck.position - origin) * scale;
+        let (at, alpha) = if offset.length() < radius - 4.0 * ui_scale {
+            (offset, 1.0)
+        } else {
+            (offset.normalize_or_zero() * (radius - 2.0 * ui_scale), 0.55)
+        };
+        let size = 3.0 * ui_scale;
+        let p = center + at;
+        gizmos.line_2d(
+            p + Vec2::new(-size, -size),
+            p + Vec2::new(size, size),
+            DRY_RED.with_alpha(alpha),
+        );
+        gizmos.line_2d(
+            p + Vec2::new(-size, size),
+            p + Vec2::new(size, -size),
+            DRY_RED.with_alpha(alpha),
         );
     }
     // Beacons: a cross in cyan, on the rim when out of range.

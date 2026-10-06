@@ -411,6 +411,9 @@ impl Game {
         for (&id, &pin) in &self.chart.pins {
             out.entry(id).or_insert_with(|| ChartEntry::new(id)).pin = Some(pin);
         }
+        for id in self.legacy_wreck_sectors() {
+            out.entry(id).or_insert_with(|| ChartEntry::new(id)).wreck = true;
+        }
         out.into_values().collect()
     }
 

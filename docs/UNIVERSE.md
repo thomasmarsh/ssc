@@ -240,3 +240,7 @@ Code: `src/simulation/run.rs`; counters bumped at the existing event sites (`rem
 
 - Which planetoids regrow is a pure hash of the spawn key (`mining::renewable`, about a third); the sonar's lode tier and the star map mark them, so a place worth returning to is readable from generation alone. Regrowth is game-time driven and persists through unloading (`Game::mined` plus a timestamp).
 - The chart keeps what the ship has learned (a visit reveals everything but the predator count, a ping reveals what answered); beacons are the player's own persistent points and the only fast-travel targets. Neither changes generation.
+
+## Legacy and wrecks (built)
+
+- The legacy is the only thing that crosses runs besides the seed (and so the universe): a capped share of mined ore, one weapon at a low level, and wrecks. A wreck's looter is the civilization whose territory (`world::territory`) holds its sector, if it still stands; the delay is a hash of seed, sector and wreck id, counted in play time.

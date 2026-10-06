@@ -1053,10 +1053,22 @@ impl Game {
     /// I: whether a death pays `INSURANCE` metal to keep the best part.
     pub fn toggle_insurance(&mut self) {
         self.pad.insured = !self.pad.insured;
-        let text = if self.pad.insured {
-            format!("PART INSURANCE ON  {INSURANCE:.0}M on death")
+        let (share, cap, weapon) = super::legacy::terms(self.pad.insured);
+        let weapon = if weapon > 0 {
+            format!(" + best weapon to level {weapon}")
         } else {
-            "PART INSURANCE OFF".to_string()
+            String::new()
+        };
+        let text = if self.pad.insured {
+            format!(
+                "INSURANCE ON  part {INSURANCE:.0}M with a pad; legacy {:.0}% of ore (max {cap:.0}){weapon}",
+                share * 100.0
+            )
+        } else {
+            format!(
+                "INSURANCE OFF  legacy {:.0}% of ore (max {cap:.0})",
+                share * 100.0
+            )
         };
         self.notify(text, Rarity::Common);
     }

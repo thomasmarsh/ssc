@@ -30,6 +30,8 @@ pub enum GuideKind {
     Echo(super::ping::EchoKind, Option<[f32; 3]>),
     /// One of the player's own beacons.
     Beacon,
+    /// What an earlier ship left, waiting to be recovered.
+    Wreck,
 }
 
 /// One arrow: the unit direction from the view center, and the distance from the ship.
@@ -164,6 +166,30 @@ impl Game {
             })
             .collect();
         pick_nearest(found, MAX_BEACON_ARROWS)
+    }
+}
+
+impl Game {
+    /// An arrow toward the nearest wreck of an earlier ship, when it is off screen.
+    pub fn wreck_bearings(&self, center: Vec2, half: Vec2) -> Vec<Bearing> {
+        let Some(ship) = self.player().map(|p| p.position) else {
+            return Vec::new();
+        };
+        let found = self
+            .wrecks()
+            .iter()
+            .filter(|w| !extent_in_view(w.position, 0.0, center, half, 0.0))
+            .filter_map(|w| {
+                let direction = (w.position - center).normalize_or_zero();
+                (direction != Vec2::ZERO).then_some(Bearing {
+                    kind: GuideKind::Wreck,
+                    direction,
+                    distance: w.position.distance(ship),
+                    fade: 1.0,
+                })
+            })
+            .collect();
+        pick_nearest(found, 1)
     }
 }
 

@@ -21,6 +21,7 @@ mod fortress;
 mod growth;
 mod guide;
 mod impact;
+mod legacy;
 mod loot;
 mod mining;
 mod pads;
@@ -49,6 +50,7 @@ pub use growth::Egg;
 pub use guide::{
     Bearing, GuideKind, MAX_BEACON_ARROWS, MAX_MINERAL_ARROWS, MAX_THREAT_ARROWS, proximity,
 };
+pub use legacy::{Bequest, Legacy, Wreck};
 pub use loot::{Notice, Pickup};
 pub use mining::{Beam, Cargo, Lode, Material};
 pub use pads::{
@@ -367,6 +369,9 @@ pub struct Game {
     ping: ping::PingState,
     /// What the ship has charted, its pins and beacons, and fast travel; see `chart`.
     chart: chart::ChartState,
+    /// What earlier runs left this one, and what this one will leave; see `legacy`.
+    legacy: legacy::Legacy,
+    bequest: Option<legacy::Bequest>,
     pub beam: Option<Beam>,
     pub score: u64,
     /// Counters for this run, and the extirpations it caused; see `run`.
@@ -461,6 +466,8 @@ impl Game {
             parry_rng: Rng::new(seed ^ parry::PARRY_SALT),
             ping: ping::PingState::default(),
             chart: chart::ChartState::default(),
+            legacy: legacy::Legacy::default(),
+            bequest: None,
             beam: None,
             mined: HashMap::new(),
             regrow_stamp: HashMap::new(),
@@ -511,7 +518,7 @@ impl Game {
 
     /// Replays the initial seed so a restart is useful for comparing tuning changes.
     pub fn reset(&mut self) {
-        *self = Self::new(self.seed);
+        *self = self.next_run();
     }
 
     /// The world seed.
@@ -580,6 +587,7 @@ impl Game {
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
         self.update_ping(dt);
+        self.update_legacy(dt);
         let jumped = self.update_chart(dt);
         if let Some(before) = ship_before.as_mut() {
             before.0 -= jumped;
@@ -1502,10 +1510,15 @@ impl Game {
             self.lives = self.lives.saturating_sub(1);
             self.bullets.retain(|bullet| bullet.friendly);
             self.tethers.retain(|t| t.kind != TetherKind::Latch);
+            let best = self
+                .loadout
+                .best_part()
+                .map(|i| self.loadout.parts[i].clone());
             let insured = self.insurance_pays();
             self.shed_on_death(position, insured);
             if self.lives == 0 {
                 self.game_over = true;
+                self.seal_bequest(position, best);
             } else if !self.respawn_at_pad(position) {
                 self.spawn_player(position);
             }
