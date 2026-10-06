@@ -212,3 +212,35 @@ pub const PRICE_ECHO_PREDATORS: [(Material, f32); 3] = [
 /// `PLANETOID_BUDGET / REGROW_RATE` seconds.
 pub const RENEWABLE_SHARE: f32 = 0.34;
 pub const REGROW_RATE: f32 = 0.5;
+
+// ---- chart, beacons and fast travel --------------------------------------------------------
+
+/// Most pins the player may keep on the chart.
+pub const MAX_PINS: usize = 24;
+/// Beacons the rig may have standing at once: one per upgrade level.
+pub const BEACONS_PER_LEVEL: usize = 1;
+/// A beacon's price at its first level (the unlock), growing with `PRICE_GROWTH`.
+pub const PRICE_BEACON: [(Material, f32); 3] = [
+    (Material::Metal, 60.0),
+    (Material::Crystal, 20.0),
+    (Material::Volatiles, 20.0),
+];
+/// Fast travel to a beacon. The jump costs volatiles and crystal that grow with the distance in
+/// sectors (rounded up), is refused beyond `TRAVEL_MAX_SECTORS`, and takes a charge-up that
+/// grows with distance and shortens by `TRAVEL_CHARGE_LEVEL_CUT` of itself for each beacon
+/// level after the first. Any damage to the ship during the charge breaks it: half the cost is
+/// refunded and a short cooldown follows. A completed jump starts the long cooldown and leaves
+/// the ship exposed on arrival: shield held at zero and no protection for a few seconds.
+pub const TRAVEL_VOLATILES_BASE: f32 = 8.0;
+pub const TRAVEL_VOLATILES_PER_SECTOR: f32 = 3.0;
+pub const TRAVEL_CRYSTAL_BASE: f32 = 2.0;
+pub const TRAVEL_CRYSTAL_PER_SECTOR: f32 = 0.75;
+pub const TRAVEL_MAX_SECTORS: f32 = 40.0;
+pub const TRAVEL_CHARGE_BASE: f32 = 4.0;
+pub const TRAVEL_CHARGE_PER_SECTOR: f32 = 0.4;
+pub const TRAVEL_CHARGE_MAX: f32 = 14.0;
+pub const TRAVEL_CHARGE_LEVEL_CUT: f32 = 0.08;
+pub const TRAVEL_COOLDOWN: f32 = 180.0;
+pub const TRAVEL_CANCEL_COOLDOWN: f32 = 8.0;
+pub const TRAVEL_CANCEL_REFUND: f32 = 0.5;
+pub const TRAVEL_EXPOSED: f32 = 3.0;

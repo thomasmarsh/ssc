@@ -318,7 +318,14 @@ impl Game {
         }
         body.init_lode();
         if let Some(&spent) = body.origin.and_then(|o| self.mined.get(&o)) {
-            let ore = body.lode.full - spent;
+            let regrown = match (body.origin, body.rock) {
+                (Some(key), RockKind::Planetoid) => self
+                    .regrow_stamp
+                    .get(&key)
+                    .map_or(0.0, |&since| self.regrown_since(key, since)),
+                _ => 0.0,
+            };
+            let ore = body.lode.full - (spent - regrown).max(0.0);
             body.set_ore(ore);
         }
     }

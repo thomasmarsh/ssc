@@ -35,7 +35,7 @@ const CAP_PAD: usize = 2;
 /// A nest's stones lie within this of its heart; dwellers are counted inside it.
 const NEST_REACH: f32 = 180.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EchoKind {
     Planetoid,
     /// An outpost of a civilization.
@@ -94,6 +94,8 @@ pub struct Echo {
     /// How much there is: predators in a sector, creatures in a nest, eggs in a husk, ore in
     /// a lode. Zero when it does not apply.
     pub weight: f32,
+    /// A lode that regrows (a renewable planetoid).
+    pub renewable: bool,
     /// Game time at which the ring reaches it and it sounds.
     pub born: f32,
     sounded: bool,
@@ -110,17 +112,17 @@ pub struct Ring {
 
 /// A generated site that could answer a ping, cached per sector (generation is pure).
 #[derive(Clone, Debug)]
-struct Site {
-    kind: EchoKind,
-    position: Vec2,
-    radius: f32,
-    tint: Option<[f32; 3]>,
-    weight: f32,
+pub(super) struct Site {
+    pub(super) kind: EchoKind,
+    pub(super) position: Vec2,
+    pub(super) radius: f32,
+    pub(super) tint: Option<[f32; 3]>,
+    pub(super) weight: f32,
     /// Spawn indices that make up the site; it is gone when all of them are destroyed.
-    members: Vec<u32>,
-    territory: Option<u64>,
+    pub(super) members: Vec<u32>,
+    pub(super) territory: Option<u64>,
     /// A planetoid that regrows: it answers as a lode once that tier is owned.
-    renewable: bool,
+    pub(super) renewable: bool,
 }
 
 #[derive(Default)]
@@ -129,6 +131,13 @@ pub struct PingState {
     pub(super) ring: Option<Ring>,
     pub(super) echoes: Vec<Echo>,
     cache: HashMap<SectorId, Vec<Site>>,
+}
+
+impl PingState {
+    /// The sites of a sector, generated once.
+    pub(super) fn sites(&mut self, seed: u64, id: SectorId) -> &[Site] {
+        self.cache.entry(id).or_insert_with(|| sites_of(seed, id))
+    }
 }
 
 fn is_stone(spawn: &Spawn) -> bool {
@@ -142,7 +151,7 @@ fn material_tint(material: Material) -> Option<[f32; 3]> {
     Some(material.color())
 }
 
-fn sites_of(seed: u64, id: SectorId) -> Vec<Site> {
+pub(super) fn sites_of(seed: u64, id: SectorId) -> Vec<Site> {
     let territory = world::territory(seed, id);
     let tint = territory.map(|t| t.color(seed));
     let spawns = world::generate(seed, id);
@@ -325,6 +334,7 @@ impl Game {
                         radius: site.radius,
                         tint: site.tint,
                         weight,
+                        renewable: site.renewable,
                         born: self.time + distance / speed,
                         sounded: false,
                     });
@@ -346,6 +356,7 @@ impl Game {
                     radius: 0.0,
                     tint: None,
                     weight: 0.0,
+                    renewable: false,
                     born: self.time + distance / speed,
                     sounded: false,
                 });
@@ -378,12 +389,13 @@ impl Game {
         for echo in &mut self.ping.echoes {
             if !echo.sounded && time >= echo.born {
                 echo.sounded = true;
-                sounded.push(echo.position);
+                sounded.push(*echo);
             }
         }
         self.ping.echoes.retain(|e| time < e.born + ECHO_LIFE);
-        for at in sounded {
-            self.cue(Cue::Echo { at });
+        for echo in sounded {
+            self.chart_learn_echo(&echo);
+            self.cue(Cue::Echo { at: echo.position });
         }
     }
 

@@ -15,7 +15,7 @@ use ssc::simulation::{
     LAND_RANGE, MAX_PADS, Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind,
     fertility, price_text,
 };
-use ssc::world::{BaseKind, RockKind, SECTOR_SIZE, hash2};
+use ssc::world::{BaseKind, RockKind, SECTOR_SIZE, SectorId, hash2};
 
 /// World units visible top to bottom. Width follows the window's aspect ratio.
 pub const VIEW_HEIGHT: f32 = 900.0;
@@ -54,6 +54,16 @@ pub struct SummaryPanel;
 #[derive(Component)]
 pub struct SummaryLine(usize);
 const SUMMARY_LINES: usize = 24;
+
+/// The star map: a panel with a title, a grid of sectors (one span each) and a detail block.
+#[derive(Component)]
+pub struct ChartPanel;
+#[derive(Component)]
+pub struct ChartSpan(usize);
+const CHART_COLS: i32 = 11;
+const CHART_ROWS: i32 = 9;
+const CHART_DETAIL: usize = 12;
+const CHART_SPANS: usize = 1 + (CHART_COLS * CHART_ROWS) as usize + CHART_DETAIL;
 const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
 const FEED_LINES: usize = 5;
@@ -110,7 +120,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (both locked until bought at the bench, tab 6; sonar upgrades tab 7)\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench  START  arrows  R3  ping  D-LEFT  star map\nD / D-RIGHT  parry    SHIFT / L3  dash    (both locked until bought at the bench, tab 6; sonar upgrades tab 7)\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    G  star map    H  beacon    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -253,6 +263,43 @@ pub fn setup(mut commands: Commands) {
                         SummaryLine(line),
                         TextSpan::new(""),
                         TextFont::from_font_size(14.0),
+                        TextColor(MUTED),
+                    ));
+                }
+            });
+        });
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(70),
+                justify_content: JustifyContent::Center,
+                display: Display::None,
+                ..default()
+            },
+            ChartPanel,
+            GlobalZIndex(20),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Node {
+                    padding: UiRect::axes(px(26), px(16)),
+                    border: UiRect::all(px(1)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.012, 0.022, 0.045)),
+                BorderColor::all(Color::srgba(0.28, 0.94, 0.92, 0.45)),
+                Text::new(""),
+                TextFont::from_font_size(15.0),
+            ))
+            .with_children(|panel| {
+                for n in 0..CHART_SPANS {
+                    panel.spawn((
+                        ChartSpan(n),
+                        TextSpan::new(""),
+                        TextFont::from_font_size(15.0),
                         TextColor(MUTED),
                     ));
                 }
@@ -601,6 +648,22 @@ fn pad_banner(game: &Game) -> (String, Color) {
     if game.game_over {
         return (String::new(), CYAN);
     }
+    if let Some((fraction, left)) = game.travel_progress() {
+        return (
+            format!(
+                "JUMP CHARGING  [{}]  {:.0}s\ndamage breaks it",
+                bar(fraction, 12),
+                left.ceil()
+            ),
+            CYAN,
+        );
+    }
+    if game.exposed_for() > 0.0 {
+        return (
+            format!("ARRIVED  EXPOSED  {:.0}s", game.exposed_for().ceil()),
+            DRY_RED,
+        );
+    }
     match game.pad_hint() {
         PadHint::None => (String::new(), CYAN),
         PadHint::Landed => {
@@ -944,6 +1007,238 @@ pub fn update_summary(
                 if font.font_size != size {
                     font.font_size = size;
                 }
+            }
+            None => {
+                if !span.0.is_empty() {
+                    span.0.clear();
+                }
+            }
+        }
+    }
+}
+
+/// The star map's lines: a title, the grid (a span per sector, a line break after each row's
+/// last) and the details of the cursor's sector.
+fn chart_lines(session: &Session) -> Vec<(String, Color)> {
+    let game = &session.game;
+    let Some(cursor) = session.chart else {
+        return Vec::new();
+    };
+    let entries = game.chart_entries();
+    let find = |id: SectorId| entries.iter().find(|e| e.sector == id);
+    let here = game.sector();
+    let light = Color::srgb(0.82, 0.88, 0.95);
+    let mut out: Vec<(String, Color)> = Vec::with_capacity(CHART_SPANS);
+    out.push((
+        format!(
+            "STAR MAP   sector ({}, {})   north is up\n\n",
+            cursor.sector.x, cursor.sector.y
+        ),
+        CYAN,
+    ));
+    let half = (CHART_COLS / 2, CHART_ROWS / 2);
+    for row in 0..CHART_ROWS {
+        for col in 0..CHART_COLS {
+            let id = SectorId {
+                x: cursor.sector.x + col - half.0,
+                y: cursor.sector.y + half.1 - row,
+            };
+            let entry = find(id);
+            let ship = id == here;
+            let glyphs = match entry {
+                Some(e) => {
+                    let g = e.glyphs(ship);
+                    if g.trim().is_empty() {
+                        "  :  ".to_string()
+                    } else {
+                        g
+                    }
+                }
+                None if ship => "    @".to_string(),
+                None => "  .  ".to_string(),
+            };
+            let at_cursor = id == cursor.sector;
+            let text = if at_cursor {
+                format!("[{glyphs}]")
+            } else {
+                format!(" {glyphs} ")
+            };
+            let color = if at_cursor {
+                CYAN
+            } else if let Some(c) = entry.and_then(|e| e.civ) {
+                lifted(Some(c.tint))
+            } else if entry.is_some_and(|e| e.wreck) {
+                DRY_RED
+            } else if entry.is_some_and(|e| e.pin.is_some()) {
+                AMBER
+            } else if entry.is_some_and(|e| e.renewable > 0 || e.lodes > 0) {
+                Color::srgb(0.95, 0.8, 0.5)
+            } else if ship {
+                PAD_GREEN
+            } else if entry.is_some() {
+                light
+            } else {
+                MUTED
+            };
+            let tail = if col == CHART_COLS - 1 { "\n" } else { "" };
+            out.push((format!("{text}{tail}"), color));
+        }
+    }
+    let mut detail: Vec<(String, Color)> = Vec::new();
+    let depth = ssc::world::latent(game.seed(), cursor.sector).depth;
+    let entry = find(cursor.sector);
+    let state = match entry {
+        Some(e) if e.visited => "VISITED",
+        Some(_) => "PINGED",
+        None => "UNCHARTED",
+    };
+    detail.push((
+        format!(
+            "\nSECTOR ({}, {})   {state}   depth {depth:.1}\n",
+            cursor.sector.x, cursor.sector.y
+        ),
+        light,
+    ));
+    if let Some(e) = entry {
+        if let Some(c) = e.civ {
+            let what = if c.capital { "CAPITAL" } else { "OUTPOST" };
+            let fallen = if c.fallen { "  FALLEN" } else { "" };
+            detail.push((
+                format!(
+                    "C/F civilization {what}  threat {}{fallen}\n",
+                    c.threat.label()
+                ),
+                lifted(Some(c.tint)),
+            ));
+        }
+        let mut res = Vec::new();
+        if e.planetoids > 0 {
+            res.push(format!("o planetoids {}", e.planetoids));
+        }
+        if e.renewable > 0 {
+            res.push(format!("R regrowing {}", e.renewable));
+        }
+        if e.lodes > 0 {
+            res.push(format!("* rich lodes {}", e.lodes));
+        }
+        if !res.is_empty() {
+            detail.push((
+                format!("{}\n", res.join("   ")),
+                Color::srgb(0.95, 0.8, 0.5),
+            ));
+        }
+        let mut life = Vec::new();
+        if let Some(n) = e.predators {
+            life.push(format!("1-9 predators {n}"));
+        }
+        if e.nests > 0 {
+            life.push(format!("n nests {}", e.nests));
+        }
+        if e.eggs > 0 {
+            life.push(format!("e eggs {}", e.eggs));
+        }
+        if !life.is_empty() {
+            detail.push((format!("{}\n", life.join("   ")), DRY_RED));
+        }
+        let mut works = Vec::new();
+        if e.pads > 0 {
+            works.push(format!("^ pads {}", e.pads));
+        }
+        if e.beacons > 0 {
+            works.push(format!("B beacons {}", e.beacons));
+        }
+        if e.wreck {
+            works.push("W your wreck".to_string());
+        }
+        if let Some(pin) = e.pin {
+            works.push(format!("! {}", pin.label()));
+        }
+        if !works.is_empty() {
+            detail.push((format!("{}\n", works.join("   ")), PAD_GREEN));
+        }
+    }
+    // The jump from the ship to a beacon in this sector.
+    if let Some(id) = game.beacon_in(cursor.sector) {
+        if let Some(q) = game.travel_quote(id) {
+            let cool = game.travel_cooldown();
+            let text = if cool > 0.0 {
+                format!(
+                    "J jump  {:.0} sectors  recharging {:.0}s\n",
+                    q.sectors,
+                    cool.ceil()
+                )
+            } else {
+                format!(
+                    "J jump  {:.0} sectors  {}  charge {:.0}s\n",
+                    q.sectors,
+                    price_text(&q.price()),
+                    q.charge.ceil()
+                )
+            };
+            detail.push((
+                text,
+                if cool > 0.0 || !game.cargo.can_afford(&q.price()) {
+                    DRY_RED
+                } else {
+                    CYAN
+                },
+            ));
+        }
+    } else if game.beacon_limit() > 0 || !game.beacons().is_empty() {
+        detail.push((
+            format!(
+                "BEACONS {}/{}   H deploys one here\n",
+                game.beacons().len(),
+                game.beacon_limit()
+            ),
+            MUTED,
+        ));
+    }
+    detail.push((
+        format!(
+            "\nNOTE  < {} >    [ ] pick   F pin   BACKSPACE clear\n",
+            cursor.label.label()
+        ),
+        MUTED,
+    ));
+    detail.push((
+        "Z ship   R recall beacon   H deploy beacon   J jump   G closes\n".into(),
+        MUTED,
+    ));
+    detail.push((
+        "C civ  o planetoid  R regrowing  * lode  n nest  e eggs  1-9 predators\n".into(),
+        MUTED,
+    ));
+    detail.push((
+        "^ pad  B beacon  ! pin  W wreck  @ ship  . unknown  : empty\n".into(),
+        MUTED,
+    ));
+    detail.truncate(CHART_DETAIL);
+    out.extend(detail);
+    out
+}
+
+pub fn update_chart(
+    session: Res<Session>,
+    mut panel: Single<&mut Node, With<ChartPanel>>,
+    mut spans: Query<(&mut TextSpan, &mut TextColor, &ChartSpan)>,
+) {
+    let lines = chart_lines(&session);
+    let display = if lines.is_empty() {
+        Display::None
+    } else {
+        Display::Flex
+    };
+    if panel.display != display {
+        panel.display = display;
+    }
+    for (mut span, mut color, line) in &mut spans {
+        match lines.get(line.0) {
+            Some((text, tint)) => {
+                if span.0 != *text {
+                    span.0 = text.clone();
+                }
+                color.0 = *tint;
             }
             None => {
                 if !span.0.is_empty() {
@@ -1966,6 +2261,7 @@ pub fn draw(
     draw_dash(&mut gizmos, game);
     draw_boost(&mut gizmos, game);
     draw_echoes(&mut gizmos, game, camera, half);
+    draw_beacons(&mut gizmos, game, camera, half);
     draw_guides(&mut gizmos, game, camera, half, session.arrows);
     if session.radar {
         // The scope keeps its on-screen size as the world view zooms out.
@@ -1995,6 +2291,9 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
         Vec::new()
     };
     bearings.extend(game.echo_bearings(camera, half));
+    if arrows {
+        bearings.extend(game.beacon_bearings(camera, half));
+    }
     for bearing in bearings {
         let d = bearing.direction;
         let t = (reach.x / d.x.abs().max(1e-4)).min(reach.y / d.y.abs().max(1e-4));
@@ -2013,6 +2312,7 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
             }
             GuideKind::Mineral(material) => (material_color(material), 6.0),
             GuideKind::Echo(kind, tint) => (echo_color(kind, tint), 8.0),
+            GuideKind::Beacon => (CYAN, 9.0),
         };
         let echo = matches!(bearing.kind, GuideKind::Echo(..));
         let alpha = if echo {
@@ -2040,6 +2340,14 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
                 [back + side * size * 0.8, tip, back - side * size * 0.8],
                 color,
             ),
+        }
+        // A beacon's arrow wears a bar across its tail, like a mast.
+        if bearing.kind == GuideKind::Beacon {
+            gizmos.line_2d(
+                back - d * size * 0.5 + side * size * 0.8,
+                back - d * size * 0.5 - side * size * 0.8,
+                color,
+            );
         }
         // A civilization's arrow carries a small ring behind the head, as its units do.
         if matches!(
@@ -2272,6 +2580,39 @@ fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
                 gizmos.circle_2d(at, size * 0.25, c).resolution(8);
             }
         }
+    }
+}
+
+/// Standing beacons: a mast with a pulsing ring, brighter and wider while a jump to it charges.
+fn draw_beacons(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
+    let target = game.travel_target();
+    for beacon in game.beacons() {
+        if !ssc::simulation::extent_in_view(beacon.position, 90.0, camera, half, 0.0) {
+            continue;
+        }
+        let at = beacon.position;
+        let charging = target == Some(beacon.id);
+        let pulse = (game.time * if charging { 3.0 } else { 1.2 }).fract();
+        let color = CYAN.with_alpha(if charging { 0.95 } else { 0.7 });
+        gizmos.line_2d(at - Vec2::Y * 16.0, at + Vec2::Y * 22.0, color);
+        gizmos.linestrip_2d(
+            [
+                at + Vec2::new(-9.0, -16.0),
+                at + Vec2::new(0.0, -6.0),
+                at + Vec2::new(9.0, -16.0),
+            ],
+            color,
+        );
+        gizmos
+            .circle_2d(at + Vec2::Y * 22.0, 4.0, color)
+            .resolution(10);
+        gizmos
+            .circle_2d(
+                at + Vec2::Y * 22.0,
+                10.0 + 60.0 * pulse,
+                CYAN.with_alpha(0.5 * (1.0 - pulse)),
+            )
+            .resolution(24);
     }
 }
 
@@ -2689,6 +3030,27 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
                 p - Vec2::X * size,
             ],
             tint.with_alpha(alpha),
+        );
+    }
+    // Beacons: a cross in cyan, on the rim when out of range.
+    for beacon in game.beacons() {
+        let offset = (beacon.position - origin) * scale;
+        let (at, alpha) = if offset.length() < radius - 4.0 * ui_scale {
+            (offset, 1.0)
+        } else {
+            (offset.normalize_or_zero() * (radius - 2.0 * ui_scale), 0.55)
+        };
+        let size = 3.5 * ui_scale;
+        let p = center + at;
+        gizmos.line_2d(
+            p - Vec2::X * size,
+            p + Vec2::X * size,
+            CYAN.with_alpha(alpha),
+        );
+        gizmos.line_2d(
+            p - Vec2::Y * size,
+            p + Vec2::Y * size,
+            CYAN.with_alpha(alpha),
         );
     }
     gizmos.circle_2d(center, 2.5 * ui_scale, CYAN).resolution(6);

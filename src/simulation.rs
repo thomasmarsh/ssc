@@ -9,6 +9,7 @@ mod arms;
 pub mod arsenal;
 mod brain;
 mod chain;
+mod chart;
 mod civ;
 mod civmine;
 mod creature;
@@ -25,6 +26,7 @@ mod mining;
 mod pads;
 mod parry;
 mod ping;
+mod regrow;
 mod root;
 pub mod run;
 pub mod skills;
@@ -35,13 +37,18 @@ mod weapons;
 
 pub use brain::Brain;
 pub use chain::{Chain, Part};
+pub use chart::{
+    Beacon, BeaconError, ChartEntry, CivReading, PinLabel, Threat, Travel, TravelError, TravelQuote,
+};
 pub use civ::{CIV_CAP, Raid, RaidStage, TerritoryReport, verdict};
 pub use civmine::Cache;
 pub use cues::Cue;
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
 pub use food::{FOOD_RADIUS, Food, fertility};
 pub use growth::Egg;
-pub use guide::{Bearing, GuideKind, MAX_MINERAL_ARROWS, MAX_THREAT_ARROWS, proximity};
+pub use guide::{
+    Bearing, GuideKind, MAX_BEACON_ARROWS, MAX_MINERAL_ARROWS, MAX_THREAT_ARROWS, proximity,
+};
 pub use loot::{Notice, Pickup};
 pub use mining::{Beam, Cargo, Lode, Material};
 pub use pads::{
@@ -358,6 +365,8 @@ pub struct Game {
     parry_rng: Rng,
     /// The sonar ring, its echoes and their cache; see `ping`.
     ping: ping::PingState,
+    /// What the ship has charted, its pins and beacons, and fast travel; see `chart`.
+    chart: chart::ChartState,
     pub beam: Option<Beam>,
     pub score: u64,
     /// Counters for this run, and the extirpations it caused; see `run`.
@@ -417,6 +426,8 @@ pub struct Game {
     fallen: HashMap<SectorId, HashSet<u32>>,
     /// Ore taken from rocks (planetoid budget spent), by spawn, quantized; see `mining`.
     mined: HashMap<(SectorId, u32), f32>,
+    /// Game time a renewable planetoid's `mined` entry was last current, to catch up on reload.
+    regrow_stamp: HashMap<(SectorId, u32), f32>,
     /// Seconds the beam has held its target, the target, and the throttle on full-hold notes.
     mine_clock: f32,
     mine_target: Option<u64>,
@@ -449,8 +460,10 @@ impl Game {
             impact_gap: HashMap::new(),
             parry_rng: Rng::new(seed ^ parry::PARRY_SALT),
             ping: ping::PingState::default(),
+            chart: chart::ChartState::default(),
             beam: None,
             mined: HashMap::new(),
+            regrow_stamp: HashMap::new(),
             mine_clock: 0.0,
             mine_target: None,
             mine_note: 0.0,
@@ -499,6 +512,11 @@ impl Game {
     /// Replays the initial seed so a restart is useful for comparing tuning changes.
     pub fn reset(&mut self) {
         *self = Self::new(self.seed);
+    }
+
+    /// The world seed.
+    pub fn seed(&self) -> u64 {
+        self.seed
     }
 
     pub fn player(&self) -> Option<&Body> {
@@ -562,6 +580,10 @@ impl Game {
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
         self.update_ping(dt);
+        let jumped = self.update_chart(dt);
+        if let Some(before) = ship_before.as_mut() {
+            before.0 -= jumped;
+        }
         self.stream_sectors();
         self.note_sector();
         let start = self.player().map(|p| p.position);
@@ -591,6 +613,7 @@ impl Game {
         let shots = (self.bullets.len(), self.mines.len());
         self.control_player(dt, input);
         let drained = self.update_mining(dt, input.mine);
+        self.update_regrowth(dt);
         if let Some(before) = ship_before.as_mut() {
             before.0 -= drained;
         }
@@ -669,6 +692,7 @@ impl Game {
             _ => 0.0,
         };
         self.note_step(dt, travelled, taken);
+        self.chart_ship_damaged(taken);
         self.remove_destroyed();
         self.cue_player_damage(ship_before);
     }

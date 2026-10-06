@@ -37,6 +37,9 @@ pub enum Skill {
     EchoNests,
     /// Sonar tier: predator density of a sector. Locked until bought.
     EchoPredators,
+    /// A deployable beacon, one more standing per level; fast travel needs one. Locked until
+    /// bought.
+    Beacon,
 }
 
 /// Which bench tab sells a skill.
@@ -47,7 +50,7 @@ pub enum SkillTab {
 }
 
 impl Skill {
-    pub const ALL: [Skill; 15] = [
+    pub const ALL: [Skill; 16] = [
         Self::BeamPower,
         Self::BeamRange,
         Self::Yield,
@@ -63,6 +66,7 @@ impl Skill {
         Self::EchoLodes,
         Self::EchoNests,
         Self::EchoPredators,
+        Self::Beacon,
     ];
 
     /// The bench tab that sells this skill.
@@ -91,7 +95,11 @@ impl Skill {
         self.is_ability()
             || matches!(
                 self,
-                Self::EchoPads | Self::EchoLodes | Self::EchoNests | Self::EchoPredators
+                Self::EchoPads
+                    | Self::EchoLodes
+                    | Self::EchoNests
+                    | Self::EchoPredators
+                    | Self::Beacon
             )
     }
 
@@ -116,6 +124,7 @@ impl Skill {
             Self::EchoLodes => "LODE ECHO",
             Self::EchoNests => "NEST ECHO",
             Self::EchoPredators => "PREDATOR ECHO",
+            Self::Beacon => "BEACON",
         }
     }
 
@@ -152,6 +161,10 @@ impl Skill {
             Self::EchoLodes => "rich lodes and renewable planetoids".to_string(),
             Self::EchoNests => "nests and egg clusters".to_string(),
             Self::EchoPredators => "how many predators roam a sector".to_string(),
+            Self::Beacon => format!(
+                "deploy beacons (H) and jump back to one from the chart; {} more standing a level",
+                t::BEACONS_PER_LEVEL
+            ),
         }
     }
 
@@ -172,6 +185,7 @@ impl Skill {
             Self::EchoLodes => &t::PRICE_ECHO_LODES,
             Self::EchoNests => &t::PRICE_ECHO_NESTS,
             Self::EchoPredators => &t::PRICE_ECHO_PREDATORS,
+            Self::Beacon => &t::PRICE_BEACON,
         }
     }
 
@@ -305,6 +319,17 @@ impl Skills {
     pub fn ping_cooldown(&self, base: f32) -> f32 {
         (base - t::PING_COOLDOWN_STEP * self.steps(Skill::PingCooldown))
             .max(t::PING_COOLDOWN_FLOOR.min(base))
+    }
+
+    /// Beacons that may stand at once; zero while locked.
+    pub fn beacon_limit(&self) -> usize {
+        t::BEACONS_PER_LEVEL * usize::from(self.level(Skill::Beacon))
+    }
+
+    /// Share of the charge-up that remains at this beacon level (one at level 1).
+    pub fn travel_charge_factor(&self) -> f32 {
+        let n = self.level(Skill::Beacon).max(1);
+        1.0 - t::TRAVEL_CHARGE_LEVEL_CUT * f32::from(n - 1)
     }
 
     pub fn ping_extra_targets(&self) -> usize {

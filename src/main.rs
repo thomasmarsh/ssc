@@ -15,9 +15,9 @@ use bevy::{
     window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode},
 };
 use ssc::simulation::upgrades::{self, Item, Source};
-use ssc::simulation::{BodyKind, Cargo, Game, Input, Material};
+use ssc::simulation::{BodyKind, Cargo, Game, Input, Material, PinLabel};
 use ssc::world::RockKind;
-use ssc::world::{Rng, SECTOR_SIZE};
+use ssc::world::{Rng, SECTOR_SIZE, SectorId};
 
 /// Left stick deadzone for thrust; the right stick aims and fires past a larger push.
 const STICK_DEADZONE: f32 = 0.15;
@@ -136,6 +136,13 @@ impl RenderStyle {
     }
 }
 
+/// Where the star map's cursor is and which preset note a new pin would carry.
+#[derive(Clone, Copy, Debug)]
+pub struct ChartCursor {
+    pub sector: SectorId,
+    pub label: PinLabel,
+}
+
 #[derive(Resource)]
 pub struct Session {
     pub game: Game,
@@ -147,6 +154,8 @@ pub struct Session {
     pub arrows: bool,
     pub camera_view: CameraView,
     pub style: RenderStyle,
+    /// The star map, while it is open (the simulation waits), with its cursor and note preset.
+    pub chart: Option<ChartCursor>,
     /// Best score this session (kept in memory only), whether the run just ended beat it,
     /// and whether the ended run has been entered yet.
     pub best: Option<u64>,
@@ -165,6 +174,7 @@ impl Default for Session {
             arrows: true,
             camera_view: CameraView::default(),
             style: RenderStyle::default(),
+            chart: None,
             best: None,
             new_best: false,
             recorded: false,
@@ -227,6 +237,7 @@ fn main() {
                 presentation::draw,
                 presentation::update_hud,
                 presentation::update_summary,
+                presentation::update_chart,
                 smoke_run,
             )
                 .chain(),
@@ -235,7 +246,7 @@ fn main() {
 }
 
 fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>) {
-    if session.paused {
+    if session.paused || session.chart.is_some() {
         return;
     }
     let input = session.input;
@@ -264,6 +275,7 @@ fn controls(
     mut session: ResMut<Session>,
     mut audio: ResMut<audio::Audio>,
     mut exit: MessageWriter<AppExit>,
+    mut stick_latch: Local<bool>,
 ) {
     let Devices {
         keys,
@@ -297,6 +309,25 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::KeyV) {
         session.style = session.style.next();
+    }
+    // The star map: G (d-pad left), while flying. It pauses the simulation; see `chart_controls`.
+    let pad_pressed = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
+    if !session.game.game_over
+        && !session.game.bench_open()
+        && (keys.just_pressed(KeyCode::KeyG) || pad_pressed(GamepadButton::DPadLeft))
+    {
+        session.chart = match session.chart {
+            Some(_) => None,
+            None => Some(ChartCursor {
+                sector: session.game.sector(),
+                label: PinLabel::Danger,
+            }),
+        };
+    }
+    if session.chart.is_some() {
+        chart_controls(&keys, &gamepads, &mut session, &mut stick_latch);
+        session.input = Input::default();
+        return;
     }
     // Weapon profiles: ] next, [ previous, 1-9 pick directly; L and R shoulders on a pad.
     // B toggles the boosts (Y on a pad). Switching is instant and ignored while paused.
@@ -375,6 +406,10 @@ fn controls(
         if keys.just_pressed(KeyCode::KeyI) || pad(GamepadButton::DPadDown) {
             session.game.toggle_insurance();
         }
+        // Beacon (locked until bought at the bench's RIG tab): H, or Y on the star map.
+        if keys.just_pressed(KeyCode::KeyH) {
+            let _ = session.game.deploy_beacon();
+        }
     }
     if keys.just_pressed(KeyCode::Enter) {
         session.game.reset();
@@ -449,6 +484,92 @@ fn controls(
         aim_direction: stick_aim.or(aim_direction),
         move_direction: stick_move,
     };
+}
+
+/// The star map's keys. Arrows (or the left stick, d-pad up, down and right) move the cursor,
+/// [ ] (triggers) pick the note preset, F (A) pins the cursor's sector with it, Backspace (X)
+/// removes the pin, H (Y) deploys a beacon at the ship, J (B) starts a jump to the beacon in
+/// the cursor's sector, R recalls it, Z returns the cursor to the ship. G (d-pad left) closes.
+fn chart_controls(
+    keys: &ButtonInput<KeyCode>,
+    gamepads: &Query<&Gamepad>,
+    session: &mut Session,
+    stick_latch: &mut bool,
+) {
+    let Some(mut cursor) = session.chart else {
+        return;
+    };
+    let pad = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
+    let (mut dx, mut dy) = (0, 0);
+    if keys.just_pressed(KeyCode::ArrowLeft) {
+        dx -= 1;
+    }
+    if keys.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight) {
+        dx += 1;
+    }
+    if keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
+        dy += 1;
+    }
+    if keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown) {
+        dy -= 1;
+    }
+    let stick = gamepads
+        .iter()
+        .map(|pad| pad.left_stick())
+        .find(|s| s.length() > 0.6);
+    match (stick, *stick_latch) {
+        (Some(s), false) => {
+            *stick_latch = true;
+            if s.x.abs() >= s.y.abs() {
+                dx += s.x.signum() as i32;
+            } else {
+                dy += s.y.signum() as i32;
+            }
+        }
+        (None, true) => *stick_latch = false,
+        _ => {}
+    }
+    cursor.sector.x += dx;
+    cursor.sector.y += dy;
+    if keys.just_pressed(KeyCode::KeyZ) {
+        cursor.sector = session.game.sector();
+    }
+    if keys.just_pressed(KeyCode::BracketRight) || pad(GamepadButton::RightTrigger) {
+        cursor.label = cursor.label.step(1);
+    }
+    if keys.just_pressed(KeyCode::BracketLeft) || pad(GamepadButton::LeftTrigger) {
+        cursor.label = cursor.label.step(-1);
+    }
+    if keys.just_pressed(KeyCode::KeyF) || pad(GamepadButton::South) {
+        session.game.chart_pin(cursor.sector, cursor.label);
+    }
+    if keys.just_pressed(KeyCode::Backspace)
+        || keys.just_pressed(KeyCode::Delete)
+        || pad(GamepadButton::West)
+    {
+        session.game.chart_unpin(cursor.sector);
+    }
+    if keys.just_pressed(KeyCode::KeyH) || pad(GamepadButton::North) {
+        let _ = session.game.deploy_beacon();
+    }
+    if keys.just_pressed(KeyCode::KeyR)
+        && let Some(id) = session.game.beacon_in(cursor.sector)
+    {
+        session.game.recall_beacon(id);
+    }
+    let jump = keys.just_pressed(KeyCode::KeyJ) || pad(GamepadButton::East);
+    session.chart = Some(cursor);
+    if jump {
+        match session.game.beacon_in(cursor.sector) {
+            Some(id) => {
+                // A started charge-up needs the world to run: leave the map.
+                if session.game.begin_travel(id).is_ok() {
+                    session.chart = None;
+                }
+            }
+            None => session.game.chart_note("NO BEACON IN THIS SECTOR"),
+        }
+    }
 }
 
 /// The camera trails the ship with a little look-ahead so fast flight shows what is coming.
@@ -557,6 +678,11 @@ fn smoke_run(
     if run.frames == 20 && std::env::var_os("SSC_PING").is_some() {
         session.game.ping();
     }
+    // SSC_CHART=1: buy the sonar tiers and a beacon, drop a beacon and a pin, ping, and open
+    // the star map once the echoes are in (frame 90), to check the chart panel.
+    if std::env::var_os("SSC_CHART").is_some() {
+        smoke_chart(&mut session, run.frames);
+    }
     // SSC_ARM=<threat>: kit the ship out and scatter samples of every kind of drop, so the
     // equipment art and pickups can be checked without playing for them.
     if run.frames == 0
@@ -617,6 +743,51 @@ fn smoke_run(
             );
     } else {
         exit.write(AppExit::Success);
+    }
+}
+
+fn smoke_chart(session: &mut Session, frame: u32) {
+    use ssc::simulation::skills::Skill;
+    let game = &mut session.game;
+    match frame {
+        0 => {
+            for skill in [
+                Skill::EchoLodes,
+                Skill::EchoNests,
+                Skill::EchoPredators,
+                Skill::EchoPads,
+                Skill::PingReach,
+                Skill::PingReach,
+                Skill::PingTargets,
+                Skill::PingTargets,
+                Skill::Beacon,
+                Skill::Beacon,
+            ] {
+                game.loadout.skills.raise(skill);
+            }
+            game.cargo = Cargo {
+                metal: 200.0,
+                volatiles: 200.0,
+                crystal: 200.0,
+                ..Default::default()
+            };
+        }
+        4 => {
+            let _ = game.deploy_beacon();
+            game.chart_pin(ssc::world::SectorId { x: 1, y: 1 }, PinLabel::Camp);
+            game.chart_pin(ssc::world::SectorId { x: -2, y: 0 }, PinLabel::Danger);
+            game.teleport(Vec2::new(4.0 * SECTOR_SIZE, 2.0 * SECTOR_SIZE));
+        }
+        20 => {
+            game.ping();
+        }
+        90 => {
+            session.chart = Some(ChartCursor {
+                sector: ssc::world::SectorId { x: 2, y: 1 },
+                label: PinLabel::Camp,
+            });
+        }
+        _ => {}
     }
 }
 

@@ -11,6 +11,7 @@ use bevy::prelude::Vec2;
 pub const MAX_THREAT_ARROWS: usize = 4;
 pub const MAX_MINERAL_ARROWS: usize = 3;
 pub const MAX_ECHO_ARROWS: usize = 4;
+pub const MAX_BEACON_ARROWS: usize = 2;
 /// Targets whose bearings differ by less than this (radians) share one arrow, the nearest.
 const MERGE_ANGLE: f32 = 0.35;
 /// Mineral arrows ignore rocks and loose materials farther than this from the ship.
@@ -27,6 +28,8 @@ pub enum GuideKind {
     Mineral(Material),
     /// A remembered ping echo.
     Echo(super::ping::EchoKind, Option<[f32; 3]>),
+    /// One of the player's own beacons.
+    Beacon,
 }
 
 /// One arrow: the unit direction from the view center, and the distance from the ship.
@@ -140,6 +143,30 @@ impl Game {
     }
 }
 
+impl Game {
+    /// Arrows toward the ship's standing beacons that are off screen, nearest first.
+    pub fn beacon_bearings(&self, center: Vec2, half: Vec2) -> Vec<Bearing> {
+        let Some(ship) = self.player().map(|p| p.position) else {
+            return Vec::new();
+        };
+        let found = self
+            .beacons()
+            .iter()
+            .filter(|b| !extent_in_view(b.position, 0.0, center, half, 0.0))
+            .filter_map(|b| {
+                let direction = (b.position - center).normalize_or_zero();
+                (direction != Vec2::ZERO).then_some(Bearing {
+                    kind: GuideKind::Beacon,
+                    direction,
+                    distance: b.position.distance(ship),
+                    fade: 1.0,
+                })
+            })
+            .collect();
+        pick_nearest(found, MAX_BEACON_ARROWS)
+    }
+}
+
 /// The `cap` nearest bearings, skipping any that nearly coincides with one already kept.
 pub(super) fn pick_nearest(mut found: Vec<Bearing>, cap: usize) -> Vec<Bearing> {
     found.sort_by(|a, b| a.distance.total_cmp(&b.distance));
@@ -231,5 +258,31 @@ mod tests {
         let arrows = game.guide_bearings(Vec2::new(0.0, -1000.0), HALF);
         assert_eq!(arrows.len(), 1);
         assert!((arrows[0].distance - 2000.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn beacons_get_edge_arrows_only_when_offscreen_and_capped() {
+        let mut game = empty_game();
+        for _ in 0..3 {
+            game.loadout
+                .skills
+                .raise(crate::simulation::skills::Skill::Beacon);
+        }
+        game.teleport(Vec2::new(300.0, 0.0));
+        game.deploy_beacon().unwrap();
+        assert!(game.beacon_bearings(Vec2::new(300.0, 0.0), HALF).is_empty());
+        game.teleport(Vec2::new(0.0, 4000.0));
+        game.deploy_beacon().unwrap();
+        game.teleport(Vec2::new(-4000.0, 0.0));
+        game.deploy_beacon().unwrap();
+        game.teleport(Vec2::ZERO);
+        let arrows = game.beacon_bearings(Vec2::ZERO, HALF);
+        assert_eq!(
+            arrows.len(),
+            2,
+            "the on-screen beacon is hidden; the two far ones point"
+        );
+        assert!(arrows.iter().all(|a| a.kind == GuideKind::Beacon));
+        assert!(arrows[0].distance <= arrows[1].distance);
     }
 }

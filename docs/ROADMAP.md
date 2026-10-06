@@ -46,6 +46,7 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 ## Sonar, chart and legacy (built)
 
 - **Sonar upgrades.** The bench's SONAR tab (`simulation/skills.rs`, numbers in `tuning.rs`) sells reach, ring speed, recharge and targets in four levels each, and four one-time reveal tiers (pad watch, lodes, nests and eggs, predator density) that add echo kinds to `simulation/ping.rs`. All start locked; the base ping is unchanged. Echoes still come from generation alone.
+- **Chart, renewables and beacons.** `simulation/chart.rs` remembers visited sectors and sounded echoes (marks are generated sites, never invented), pins and beacons, and runs the fast-travel charge (`tuning.rs`: cost, charge, cooldowns, exposure). `simulation/regrow.rs` makes a hash-chosen third of planetoids (`mining::renewable`) regrow ore at 0.5 a second, loaded or not (caught up from a timestamp on reload). The star map is a pausing text panel in `presentation.rs`; the state it edits lives in the simulation.
 
 ## Open questions for playtesting
 
