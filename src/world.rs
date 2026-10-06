@@ -3,6 +3,7 @@
 
 use crate::genome::{GenePool, Habit, INDIVIDUAL_SALT, Niche, Species, Weapon};
 use crate::simulation::BodyKind;
+pub use crate::territory::{CivRole, CivShape, CivTag, Fall, Standing, Territory, territory};
 use bevy::prelude::Vec2;
 use std::f32::consts::TAU;
 
@@ -119,6 +120,17 @@ impl Phenotype {
     /// Damage multiplier for what a creature fires or rams with.
     pub fn sharpness(&self) -> f32 {
         1.0 + 0.6 * (self.threat - 1.0).max(0.0)
+    }
+}
+
+/// The phenotype `compose` gives a quadrant's fauna, for creatures born there in play.
+pub fn phenotype_of(params: &QuadrantParams) -> Phenotype {
+    Phenotype {
+        flocking: 0.5 + params.swarm,
+        sensor_acuity: 0.5 + params.tech,
+        aggression: 0.5 + params.aggression,
+        mass_affinity: (params.distortion - 0.5) * 2.0,
+        threat: threat(params.depth),
     }
 }
 
@@ -341,6 +353,8 @@ pub struct Spawn {
     pub den: Option<(Species, u8)>,
     /// Creatures only: clings to an earlier spawn (a rock or planetoid) from the start.
     pub rooted: Option<Rooting>,
+    /// Belongs to a civilization (see `territory`).
+    pub civ: Option<CivTag>,
 }
 
 /// Where a creature spawns attached: its host's index in the quadrant's output, its angle
@@ -372,6 +386,7 @@ impl Spawn {
             rock: RockKind::Plain,
             den: None,
             rooted: None,
+            civ: None,
         }
     }
 
@@ -416,7 +431,7 @@ const MAX_CLUSTER_PARTS: u32 = 24;
 /// Most creature bodies one quadrant generates, however its pool is composed.
 pub const QUADRANT_BODY_BUDGET: u32 = 220;
 
-fn bodies_used(out: &[Spawn]) -> u32 {
+pub(crate) fn bodies_used(out: &[Spawn]) -> u32 {
     out.iter()
         .filter_map(|s| s.species)
         .map(|sp| sp.genome.parts())
@@ -713,6 +728,8 @@ pub fn compose_with(
     // original spawn count changes. HOME's rocks stay ordinary.
     if id != QuadrantId::ORIGIN {
         root_residents(seed, id, params, pool, &genes, &mut out);
+        // Civilizations come last of all, on their own stream, and only inside territories.
+        crate::territory::civ_spawns(seed, id, params, &genes, &mut out);
     }
     out
 }

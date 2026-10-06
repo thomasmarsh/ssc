@@ -2,6 +2,7 @@
 //! nothing here asks what species a creature is. Tuning constants that used to belong to
 //! one kind of enemy are now genes (sight, standoff, rage, fire period, ...).
 
+use super::civ as civil;
 use super::*;
 use crate::genome::{Diet, Fear, Social, Trigger, Weapon};
 
@@ -81,6 +82,8 @@ impl Game {
             mass: f32,
             raising_alarm: bool,
             alarm_range: f32,
+            /// Belongs to a civilization: wildlife gives it room.
+            civil: bool,
         }
         let player = self.player().map(|p| (p.position, p.velocity));
         // A compact snapshot makes steering independent of body iteration order.
@@ -115,6 +118,7 @@ impl Game {
                             _ => b.enraged || is_hurt(b),
                         },
                     alarm_range: g.alarm,
+                    civil: creature && self.civ_lineages.contains_key(&b.species),
                 }
             })
             .collect();
@@ -133,6 +137,7 @@ impl Game {
         } else {
             Vec::new()
         };
+        let civs = self.civ_snapshot();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if body.kind != BodyKind::Creature {
                 continue;
@@ -170,6 +175,8 @@ impl Game {
             let mut perch: Option<(f32, Vec2)> = None;
             let seeking = body.wants_host();
             let mut prey: Option<(f32, Vec2)> = None;
+            let civ = self.civ_lineages.get(&body.species).copied();
+            let mut civil_near: Option<(f32, Vec2)> = None;
             let hunting = body.hunts_prey();
             let prey_sight = (g.sight * phenotype.sensor_acuity).clamp(250.0, 900.0);
             for other in neighbors
@@ -220,6 +227,13 @@ impl Game {
                 {
                     prey = Some((distance_squared, -offset));
                 }
+                if other.civil
+                    && civ.is_none()
+                    && distance_squared < civil::SHOO_RANGE * civil::SHOO_RANGE
+                    && civil_near.is_none_or(|(best, _)| distance_squared < best)
+                {
+                    civil_near = Some((distance_squared, -offset));
+                }
                 if other.species != body.species || distance_squared > perception * perception {
                     continue;
                 }
@@ -233,11 +247,20 @@ impl Game {
                 warned |= other.raising_alarm && distance < other.alarm_range;
             }
 
-            let (sight, lose) = (
-                g.sight * phenotype.sensor_acuity,
+            let player_distance = player.map_or(f32::INFINITY, |(p, _)| p.distance(body.position));
+            // A civilization's members see further inside their own territory and are
+            // rallied by comrades and calls to arms (see `civ`).
+            let posture = civs.posture(
+                civ,
+                body.id,
+                body.position,
+                player_distance,
                 g.lose * phenotype.sensor_acuity,
             );
-            let player_distance = player.map_or(f32::INFINITY, |(p, _)| p.distance(body.position));
+            let (sight, lose) = (
+                g.sight * phenotype.sensor_acuity * posture.reach,
+                g.lose * phenotype.sensor_acuity * posture.reach,
+            );
             body.enraged =
                 g.rage > 0.0 && body.health < body.max_health * g.rage * phenotype.aggression;
             // Sight and proximity creatures notice the player by distance, with hysteresis;
@@ -246,7 +269,7 @@ impl Game {
                 && player_distance < if body.alert { lose } else { sight };
             let provoked = (g.trigger != Trigger::Sight && is_hurt(body))
                 || (body.enraged && player_distance < RAGE_PURSUIT_RANGE);
-            body.alert = by_distance || warned || provoked;
+            body.alert = by_distance || warned || provoked || posture.rallied;
             if body.panic > 0.0 {
                 body.alert = false;
             }
@@ -374,6 +397,10 @@ impl Game {
                     }
                 }
                 _ => {}
+            }
+            // Wildlife gives a civilization's creatures room, and is edged off its ground.
+            if let Some((_, toward)) = civil_near {
+                desired -= toward.normalize_or_zero() * cruise * 1.6;
             }
             if let (Diet::Rocks, Some((_, toward)), false) = (g.diet, meal, body.alert) {
                 desired += toward.normalize_or_zero() * cruise * 1.2;

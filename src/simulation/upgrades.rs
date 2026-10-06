@@ -992,6 +992,8 @@ pub struct Source {
     /// What the source shoots: gear that echoes it is likelier.
     pub weapon: Weapon,
     pub params: QuadrantParams,
+    /// Items rolled from this source are at least this rare (bosses).
+    pub min_rarity: Rarity,
 }
 
 impl Source {
@@ -1002,6 +1004,7 @@ impl Source {
             affinity: [1.0; Slot::ALL.len()],
             weapon: Weapon::None,
             params,
+            min_rarity: Rarity::Common,
         }
     }
 
@@ -1070,7 +1073,7 @@ fn roll_rarity(rng: &mut Rng, source: &Source) -> Rarity {
         10.0 * (1.0 + 0.35 * depth) * luck * luck,
         2.0 * (1.0 + 0.6 * depth) * luck * luck * luck,
     ];
-    Rarity::ALL[pick(rng, &weights)]
+    Rarity::ALL[pick(rng, &weights)].max(source.min_rarity)
 }
 
 /// Magnitude of a blueprint's effects for this rarity and grade. Deeper sources roll

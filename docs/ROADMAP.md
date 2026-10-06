@@ -45,5 +45,5 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 
 - Tune `THREAT_PER_QUADRANT`, drop chances, `Rarity::strength` and the `Stat::affix_bonus` values together; `Stats::power` versus `threat^0.8` (the HUD verdict) is a first guess at "fair".
 - Whether a part should be pickable (leave or take) instead of auto-installed, and whether wrecks should drop more than the best part.
-- Landmark caches and bosses (a base guarded by heavies) that carry a guaranteed epic, placed from the seed.
+- Landmark caches and bosses: civilization elders (see UNIVERSE.md) are built, with a guaranteed epic and a lasting fall; caches and named routes are not. Tune raid timing, elder strength and the depth 6 to 8 start of territories by playing.
 - Pickup labels in the world, audio and screen shake for pickups.

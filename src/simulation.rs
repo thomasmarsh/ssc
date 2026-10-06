@@ -7,6 +7,7 @@
 
 mod brain;
 mod chain;
+mod civ;
 mod creature;
 mod cues;
 mod ecology;
@@ -20,6 +21,7 @@ mod weapons;
 
 pub use brain::Brain;
 pub use chain::{Chain, Part};
+pub use civ::{CIV_CAP, Raid, RaidStage, TerritoryReport, verdict};
 pub use cues::Cue;
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
 pub use food::{FOOD_RADIUS, Food, fertility};
@@ -31,6 +33,7 @@ use upgrades::{Item, Loadout, Stats};
 pub use weapons::{Mine, Shape};
 
 use crate::genome::{Diet, Genome, Species};
+use crate::territory::{CivRole, Fall, Territory};
 use crate::world::{self, Phenotype, QuadrantId, QuadrantParams, Rng};
 use crate::world::{BaseKind, RockKind};
 use bevy::prelude::Vec2;
@@ -321,6 +324,21 @@ pub struct Game {
     /// Eggs waiting to hatch. Not bodies: they drift, can be shot, unload with their
     /// quadrant and count against the body budget.
     pub eggs: Vec<Egg>,
+    /// The territory the ship is in, its display name and its raid clock; see `civ`.
+    pub territory: Option<Territory>,
+    pub territory_name: String,
+    pub raid: Option<Raid>,
+    territory_quadrant: Option<QuadrantId>,
+    /// Lineage -> (territory, role) of every civilization lineage met, and the capital bases
+    /// by spawn, the territories met, their lasting falls and their shared brains.
+    civ_lineages: HashMap<u64, (u64, CivRole)>,
+    civ_bases: HashMap<(QuadrantId, u32), (u64, CivRole)>,
+    civ_colors: HashMap<u64, [f32; 3]>,
+    civ_territories: HashMap<u64, Territory>,
+    civ_fall: HashMap<u64, Fall>,
+    civ_brains: HashMap<u64, Box<Brain>>,
+    civ_clock: f32,
+    civ_rng: Rng,
     seed: u64,
     rng: Rng,
     /// Loot has its own stream, so drops never disturb the gameplay one.
@@ -366,6 +384,18 @@ impl Game {
             focus: Vec2::ZERO,
             food: Vec::new(),
             eggs: Vec::new(),
+            territory: None,
+            territory_name: String::new(),
+            raid: None,
+            territory_quadrant: None,
+            civ_lineages: HashMap::new(),
+            civ_bases: HashMap::new(),
+            civ_colors: HashMap::new(),
+            civ_territories: HashMap::new(),
+            civ_fall: HashMap::new(),
+            civ_brains: HashMap::new(),
+            civ_clock: 0.0,
+            civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
             seed,
             rng: Rng::new(seed),
             loot: Rng::new(seed ^ loot::LOOT_SALT),
@@ -441,6 +471,7 @@ impl Game {
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
         self.stream_quadrants();
+        self.update_civilizations(dt);
         self.update_loadout(dt);
         let recharge = self.stats.recharge;
         for body in self.bodies.iter_mut().filter(|b| b.active) {
@@ -621,8 +652,17 @@ impl Game {
             .filter_map(|b| b.origin.filter(|(q, _)| *q == id).map(|(_, i)| i))
             .collect();
         let mut made: HashMap<u32, u64> = HashMap::new();
+        if let Some(t) = world::territory(self.seed, id) {
+            self.register_territory(t);
+        }
         for spawn in world::generate(self.seed, id) {
             if fallen.contains(&spawn.index) || present.contains(&spawn.index) {
+                continue;
+            }
+            // A ruined civilization does not come back.
+            if let Some(tag) = spawn.civ
+                && self.civ_standing(tag.territory) == crate::territory::Standing::Fallen
+            {
                 continue;
             }
             let mut body = match &spawn.species {
@@ -691,6 +731,13 @@ impl Game {
                 (spawn.rooted, spawn.rooted.and_then(|r| made.get(&r.host)))
             {
                 self.root_body(&mut body, host, rooting.angle);
+            }
+            if let Some(tag) = spawn.civ {
+                if spawn.base_kind.is_some() {
+                    self.civ_bases
+                        .insert((id, spawn.index), (tag.territory, tag.role));
+                }
+                self.civ_dress(&mut body, tag, spawn.species.as_ref());
             }
             let head = self.add_body(body);
             made.insert(spawn.index, head);
@@ -1185,6 +1232,7 @@ impl Game {
                 _ => {}
             }
             if kind != BodyKind::Player {
+                self.civ_destroyed(body);
                 self.drop_loot(body);
                 self.siphon(body);
             }

@@ -88,7 +88,7 @@ impl Game {
         self.notices.retain(|n| n.remaining > 0.0);
     }
 
-    fn notify(&mut self, text: String, rarity: upgrades::Rarity) {
+    pub(super) fn notify(&mut self, text: String, rarity: upgrades::Rarity) {
         if self.notices.len() >= MAX_NOTICES {
             self.notices.remove(0);
         }
@@ -185,6 +185,20 @@ impl Game {
                 let genome = &body.genome;
                 // Better bounties drop more; a jointed creature shares one drop's worth among
                 // its parts, and creatures bred by bases are poor farming.
+                if self.is_elder(body) {
+                    // A boss always pays: two parts (the first epic, the second at least
+                    // rare) and two lucky rolls, graded a notch above the place, for any
+                    // elder that was generated (raised ones are not farmable bosses).
+                    let mut source = Source::of_creature(genome, body.genes.threat * 1.25, params);
+                    source.bias = 1.0;
+                    source.min_rarity = upgrades::Rarity::Epic;
+                    drops.push(Item::Part(upgrades::roll_part(&mut rng, &source)));
+                    source.min_rarity = upgrades::Rarity::Rare;
+                    drops.push(Item::Part(upgrades::roll_part(&mut rng, &source)));
+                    for _ in 0..2 {
+                        drops.push(upgrades::roll_item(&mut rng, &source));
+                    }
+                }
                 let bred = if body.origin.is_some() { 1.0 } else { 0.35 };
                 let chance = (0.08 + 0.4 * genome.bounty / 400.0) / genome.parts() as f32 * bred;
                 if rng.chance(chance) {

@@ -135,6 +135,41 @@ impl Brain {
         child
     }
 
+    /// Moves every weight a fraction `t` of the way toward `other`'s. A civilization's shared
+    /// table is built and handed back out this way; running statistics are left alone.
+    pub fn blend_toward(&mut self, other: &Brain, t: f32) {
+        let t = t.clamp(0.0, 1.0);
+        let pull = |a: &mut f32, b: f32| *a += (b - *a) * t;
+        for i in 0..HIDDEN {
+            for j in 0..INPUTS {
+                pull(&mut self.w1[i][j], other.w1[i][j]);
+            }
+            pull(&mut self.b1[i], other.b1[i]);
+        }
+        for o in 0..OUTPUTS {
+            for i in 0..HIDDEN {
+                pull(&mut self.w2[o][i], other.w2[o][i]);
+            }
+            pull(&mut self.b2[o], other.b2[o]);
+        }
+    }
+
+    /// A fresh brain with these weights and none of the running state, for a newcomer that
+    /// joins a civilization.
+    pub fn learned_copy(&self) -> Self {
+        let mut copy = Self::blank();
+        copy.blend_toward(self, 1.0);
+        copy.steps = self.steps.min(WARMUP);
+        copy.error = self.error;
+        copy.baseline = self.baseline;
+        copy
+    }
+
+    /// True once it has trained enough for its accuracy to mean something.
+    pub fn is_trained(&self) -> bool {
+        self.steps >= WARMUP
+    }
+
     /// Every weight, in a fixed order (for tests and diagnostics).
     pub fn weights(&self) -> Vec<f32> {
         let mut all: Vec<f32> = self.w1.iter().flatten().copied().collect();

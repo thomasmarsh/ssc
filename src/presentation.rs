@@ -160,16 +160,41 @@ fn rarity_color(rarity: Rarity) -> Color {
 
 /// How the ship's power compares with what the quadrant's fauna asks of it.
 fn standing(power: f32, threat: f32) -> &'static str {
-    let ratio = power / threat.powf(0.8);
-    if ratio < 0.6 {
-        "OUTCLASSED - turn back"
-    } else if ratio < 0.85 {
-        "UNDERPOWERED"
-    } else if ratio < 1.3 {
-        "EVEN"
-    } else {
-        "STRONG"
+    ssc::simulation::verdict(power, threat)
+}
+
+/// The HUD line for the territory the ship is in: its name, what it asks of the ship and
+/// where its raid clock stands. Empty outside any territory.
+fn territory_line(game: &Game) -> String {
+    use ssc::simulation::RaidStage;
+    use ssc::world::Standing;
+    let Some(report) = game.territory_report() else {
+        return String::new();
+    };
+    if report.standing == Standing::Fallen {
+        return format!("\n{}   FALLEN - quiet", report.name);
     }
+    let weakened = if report.standing == Standing::Weakened {
+        "   WEAKENED"
+    } else {
+        ""
+    };
+    let clock = match (report.stage, report.next_in) {
+        (RaidStage::Patrol, Some(s)) => format!("PATROLS   war party in {s:.0}s"),
+        (RaidStage::WarParty, Some(s)) => format!("WAR PARTY OUT   raid in {s:.0}s"),
+        (RaidStage::WarParty, None) => "WAR PARTY OUT".to_string(),
+        (RaidStage::Raid, Some(s)) => format!("RAID   next in {s:.0}s"),
+        (RaidStage::Raid, None) => "RAID".to_string(),
+        (RaidStage::Patrol, None) => "PATROLS".to_string(),
+    };
+    format!(
+        "\n{}   THREAT x{:.1}   {}   {}{}",
+        report.name,
+        report.threat,
+        standing(game.power(), report.threat),
+        clock,
+        weakened
+    )
 }
 
 /// Text for the ship panel lines: slot contents, then running surges.
@@ -262,7 +287,7 @@ pub fn update_hud(
     .collect::<String>();
     let (power, threat) = (game.power(), game.threat());
     let status = format!(
-        "QUADRANT ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}   STYLE {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
+        "QUADRANT ({}, {})   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}   STYLE {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}{}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
         quadrant.x,
         quadrant.y,
         game.active_enemies(),
@@ -276,6 +301,7 @@ pub fn update_hud(
         power,
         threat,
         standing(power, threat),
+        territory_line(game),
         100.0 * params.danger,
         100.0 * params.aggression,
         100.0 * params.density,
@@ -620,6 +646,14 @@ pub fn draw(
             }
             BodyKind::Creature => {
                 draw_creature(&mut gizmos, game.time, body, color);
+                if !body.follower
+                    && let Some([cr, cg, cb]) = game.civ_tint(body)
+                {
+                    // A faint banner ring: this one belongs to a civilization.
+                    gizmos
+                        .circle_2d(p, r * 1.3 + 9.0, Color::srgba(cr, cg, cb, 0.28))
+                        .resolution(20);
+                }
                 if let Some(root) = body.root
                     && let Some(host) = game.body(root.host)
                 {
@@ -1226,6 +1260,16 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
             gizmos
                 .circle_2d(center + offset, size * ui_scale, body_color(body))
                 .resolution(6);
+            // A civilization's people and stations wear a ring in its own tint.
+            if let Some([r, g, b]) = game.civ_tint(body) {
+                gizmos
+                    .circle_2d(
+                        center + offset,
+                        (size + 2.2) * ui_scale,
+                        Color::srgb(r, g, b),
+                    )
+                    .resolution(10);
+            }
         }
     }
     gizmos.circle_2d(center, 2.5 * ui_scale, CYAN).resolution(6);
