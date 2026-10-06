@@ -75,6 +75,14 @@ pub enum Cue {
         at: Vec2,
         reflected: bool,
     },
+    /// A shot was turned in the perfect window: the freeze-frame moment.
+    PerfectParry {
+        at: Vec2,
+    },
+    /// The ship passed through fire or a flinger while dashing (a graze).
+    Graze {
+        at: Vec2,
+    },
     /// A species-range was wiped out (see `run`).
     Extirpated,
 }

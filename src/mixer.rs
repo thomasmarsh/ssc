@@ -130,6 +130,8 @@ fn spec(cue: &Cue) -> Spec {
         Cue::Ping => ship(Sound::Ping, 0.55, 0.0),
         Cue::Dash { .. } => ship(Sound::Dash, 0.5, 0.04),
         Cue::Parry => ship(Sound::Parry, 0.5, 0.02),
+        Cue::PerfectParry { .. } => ship(Sound::PerfectParry, 0.8, 0.0),
+        Cue::Graze { .. } => ship(Sound::Graze, 0.5, 0.03),
         Cue::Deflect { at, .. } => Spec {
             sound: Sound::Deflect,
             gain: 0.55,
@@ -173,6 +175,8 @@ fn interval(sound: Sound) -> f32 {
         Sound::Parry => 0.15,
         Sound::Deflect => 0.05,
         Sound::Dash => 0.1,
+        Sound::PerfectParry => 0.3,
+        Sound::Graze => 0.15,
     }
 }
 

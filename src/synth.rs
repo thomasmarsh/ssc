@@ -37,10 +37,14 @@ pub enum Sound {
     Parry,
     Deflect,
     Dash,
+    /// A shot turned in the perfect window: a bright rising chime over a low thump.
+    PerfectParry,
+    /// Dashing through fire: a quick rising zip.
+    Graze,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 27] = [
+    pub const ALL: [Sound; 29] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -68,6 +72,8 @@ impl Sound {
         Sound::Parry,
         Sound::Deflect,
         Sound::Dash,
+        Sound::PerfectParry,
+        Sound::Graze,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -304,6 +310,26 @@ impl Sound {
                 let mut v = voice(0.2, |t, _| {
                     (sine(1320.0, t) * 0.5 + sine(2110.0, t) * 0.35 + sine(3470.0, t) * 0.15)
                         * decay(t, 0.05)
+                });
+                lowpass(&mut v, 5000.0);
+                v
+            }
+            Sound::PerfectParry => {
+                let mut v = voice(0.45, |t, _| {
+                    let thump =
+                        sine(sweep((t / 0.12).min(1.0), 140.0, 60.0), t) * decay(t, 0.09) * 0.9;
+                    let chime =
+                        (sine(1760.0, t) * 0.5 + sine(2637.0, t) * 0.35 + sine(3520.0, t) * 0.2)
+                            * decay(t, 0.16);
+                    thump + chime
+                });
+                lowpass(&mut v, 6000.0);
+                v
+            }
+            Sound::Graze => {
+                let mut v = voice(0.16, |t, _| {
+                    let f = sweep((t / 0.16).min(1.0), 500.0, 2400.0);
+                    (tri(f, t) * 0.6 + sine(f * 2.0, t) * 0.2) * decay(t, 0.06)
                 });
                 lowpass(&mut v, 5000.0);
                 v

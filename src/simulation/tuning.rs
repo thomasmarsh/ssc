@@ -91,8 +91,24 @@ pub const PARRY_REFUND: f32 = 8.0;
 /// The arc: half-angle either side of the nose (radians) and reach from the ship's center.
 pub const PARRY_HALF_ARC: f32 = 1.0;
 pub const PARRY_RADIUS: f32 = 90.0;
-/// A reflected shot's damage as a multiple of what it carried.
+/// A reflected shot's damage as a multiple of what it carried, and the gain per level after
+/// the first. The perfect window also widens a little per level.
 pub const PARRY_REFLECT: f32 = 1.5;
+pub const PARRY_REFLECT_STEP: f32 = 0.25;
+pub const PARRY_PERFECT_STEP: f32 = 0.02;
+/// What a perfect parry earns, once per raise however many shots it turns: seconds off the
+/// cooldown, a freeze of the whole simulation (hit-stop), and how long the flash lasts. The
+/// shield it gives back is capped per raise at what the raise cost, so a perfect parry is at
+/// best free. A raise during the cooldown is refused and earns nothing.
+pub const PARRY_PERFECT_COOLDOWN_REFUND: f32 = 0.6;
+pub const PARRY_HITSTOP: f32 = 0.06;
+pub const PARRY_FLASH: f32 = 0.3;
+pub const PARRY_REFUND_CAP: f32 = PARRY_COST;
+/// A reflected shot is re-aimed at the nearest creature or base within `PARRY_AIM_RANGE` that
+/// lies within `PARRY_AIM_CONE` radians of the mirrored heading, and seeks at this level.
+pub const PARRY_AIM_RANGE: f32 = 1100.0;
+pub const PARRY_AIM_CONE: f32 = 1.1;
+pub const PARRY_REFLECT_HOMING: u8 = 2;
 /// Unlock and level prices (the first purchase unlocks it), and the part it needs on the
 /// ship: a Rare or better plating, so it arrives mid-game.
 pub const PRICE_PARRY: [(Material, f32); 3] = [
@@ -115,6 +131,20 @@ pub const DASH_COST: f32 = 8.0;
 /// Seconds of invulnerability a dash grants, and how long its trail stays drawn.
 pub const DASH_INVULN: f32 = 0.3;
 pub const DASH_TRAIL: f32 = 0.35;
+/// Passing through a hostile shot or a flinger's touch during the invulnerable window is a
+/// graze. The first graze of a dash adds one stack of damage (`DASH_BOOST_STEP` each, up to
+/// `DASH_BOOST_STACKS`) for `DASH_BOOST_TIME` seconds (each new graze refreshes it) and gives
+/// back some shield (less than a dash costs, so dashing is never free profit).
+pub const DASH_BOOST_TIME: f32 = 4.0;
+pub const DASH_BOOST_STEP: f32 = 0.25;
+pub const DASH_BOOST_STACKS: u8 = 3;
+pub const DASH_GRAZE_REFUND: f32 = 5.0;
+/// A creature the ship dashes through staggers: its speed is damped, and it can neither
+/// strike, fling nor shoot for this long.
+pub const DASH_STAGGER: f32 = 0.8;
+pub const DASH_STAGGER_DAMP: f32 = 0.3;
+/// Reach beyond the ship's radius and the target's that counts as passing through.
+pub const DASH_GRAZE_MARGIN: f32 = 6.0;
 /// Unlock and level prices, and the part the ship needs first: a Rare or better engine.
 pub const PRICE_DASH: [(Material, f32); 3] = [
     (Material::Metal, 100.0),

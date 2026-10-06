@@ -482,8 +482,24 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             } else {
                 (format!("{level}/{}  {key} ready", skill.max_level()), CYAN)
             };
-            let text = format!("{:<11}{state}\n", skill.label());
-            lines.push((text, color));
+            let mut text = format!("{:<11}{state}", skill.label());
+            let (stacks, left) = game.dash_boost();
+            if skill == Skill::Dash && stacks > 0 {
+                text.push_str(&format!(
+                    "  BOOST x{:.2} {:.1}s",
+                    game.damage_boost(),
+                    left * ssc::simulation::tuning::DASH_BOOST_TIME
+                ));
+            }
+            text.push('\n');
+            lines.push((
+                text,
+                if skill == Skill::Dash && stacks > 0 {
+                    AMBER
+                } else {
+                    color
+                },
+            ));
             continue;
         }
         lines.push((
@@ -1926,6 +1942,7 @@ pub fn draw(
     }
     draw_parry(&mut gizmos, game);
     draw_dash(&mut gizmos, game);
+    draw_boost(&mut gizmos, game);
     draw_echoes(&mut gizmos, game, camera, half);
     draw_guides(&mut gizmos, game, camera, half, session.arrows);
     if session.radar {
@@ -2041,6 +2058,38 @@ fn draw_dash(gizmos: &mut Gizmos, game: &Game) {
         14.0 + 40.0 * (1.0 - bright),
         CYAN.with_alpha(0.8 * bright),
     );
+}
+
+/// The graze boost: one orbiting orange ring segment per stack around the ship, dimming as the
+/// boost runs out, and the perfect parry's expanding gold flash.
+fn draw_boost(gizmos: &mut Gizmos, game: &Game) {
+    let Some(ship) = game.player() else {
+        return;
+    };
+    let (stacks, left) = game.dash_boost();
+    for k in 0..stacks {
+        let r = ship.radius + 9.0 + 4.0 * f32::from(k);
+        let spin = game.time * 3.0 + f32::from(k);
+        let points: Vec<Vec2> = (0..=10)
+            .map(|i| ship.position + Vec2::from_angle(spin + i as f32 * 0.12) * r)
+            .collect();
+        gizmos.linestrip_2d(points, AMBER.with_alpha(0.35 + 0.6 * left));
+    }
+    let flash = game.parry_flash();
+    if flash > 0.0 {
+        gizmos
+            .circle_2d(
+                ship.position,
+                ship.radius + 20.0 + 90.0 * (1.0 - flash),
+                AMBER.with_alpha(flash),
+            )
+            .resolution(48);
+        gizmos.circle_2d(
+            ship.position,
+            ship.radius + 8.0 + 40.0 * (1.0 - flash),
+            Color::WHITE.with_alpha(0.7 * flash),
+        );
+    }
 }
 
 /// The parry shield: a bright forward arc that thins as the window closes, flaring gold while

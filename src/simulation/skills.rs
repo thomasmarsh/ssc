@@ -63,12 +63,12 @@ impl Skill {
             Self::Magnet => format!("+{:.0} pickup pull", t::MAGNET_STEP),
             Self::Cargo => format!("+{:.0} hold each", t::CARGO_STEP),
             Self::Dash => format!(
-                "{:.0} unit jump, brief invulnerability (+{:.0} a level)",
+                "{:.0} unit jump, brief invulnerability; dashing through fire or a flinger boosts damage (+{:.0} a level)",
                 t::DASH_DISTANCE,
                 t::DASH_DISTANCE_STEP
             ),
             Self::Parry => format!(
-                "arc shield, {:.0}% block (+{:.0}% a level)",
+                "arc shield, {:.0}% block, perfect timing reflects (+{:.0}% block, longer perfect window, harder reflect a level)",
                 t::PARRY_CHANCE * 100.0,
                 t::PARRY_CHANCE_STEP * 100.0
             ),
@@ -183,6 +183,22 @@ impl Skills {
     pub fn parry_cooldown(&self) -> f32 {
         let n = self.level(Skill::Parry).max(1);
         t::PARRY_COOLDOWN - t::PARRY_COOLDOWN_STEP * f32::from(n - 1)
+    }
+
+    /// Seconds of the parry's opening that count as perfect (zero while locked).
+    pub fn parry_perfect(&self) -> f32 {
+        match self.level(Skill::Parry) {
+            0 => 0.0,
+            n => t::PARRY_PERFECT + t::PARRY_PERFECT_STEP * f32::from(n - 1),
+        }
+    }
+
+    /// Damage multiple of a reflected shot (one while locked).
+    pub fn parry_reflect(&self) -> f32 {
+        match self.level(Skill::Parry) {
+            0 => 1.0,
+            n => t::PARRY_REFLECT + t::PARRY_REFLECT_STEP * f32::from(n - 1),
+        }
     }
 
     pub fn cargo_bonus(&self) -> f32 {

@@ -541,6 +541,10 @@ impl Game {
             return;
         }
         let dt = dt.min(0.05);
+        // A perfect parry freezes everything for a few ticks.
+        if self.hold_hit_stop(dt) {
+            return;
+        }
         // Mining and firing exclude each other: the beam wins while it is held.
         let input = Input {
             fire: input.fire && !input.mine,
@@ -1046,6 +1050,9 @@ impl Game {
         let invulnerability = self.player_invulnerability;
         let mut flings = Vec::new();
         let mut rammed = 0.0;
+        // A dashing ship staggers what it touches; a flinger's touch is a graze.
+        let dashing = self.dashing();
+        let mut grazes = Vec::new();
         for i in 0..self.bodies.len() {
             let (before, after) = self.bodies.split_at_mut(i + 1);
             let a = &mut before[i];
@@ -1077,6 +1084,19 @@ impl Game {
                 let inverse_sum = inverse_a + inverse_b;
                 if inverse_sum <= 0.0 {
                     continue;
+                }
+                if dashing {
+                    let creature = match (a.kind, b.kind) {
+                        (BodyKind::Player, BodyKind::Creature) => Some(&mut *b),
+                        (BodyKind::Creature, BodyKind::Player) => Some(&mut *a),
+                        _ => None,
+                    };
+                    if let Some(creature) = creature {
+                        let flinger = fling_strength(creature) > 0.0;
+                        if dash::stagger(creature) && flinger {
+                            grazes.push(creature.position);
+                        }
+                    }
                 }
                 let separation = normal * (radius - distance + 0.01) / inverse_sum;
                 a.position -= separation * inverse_a;
@@ -1135,6 +1155,9 @@ impl Game {
             }
         }
         self.run.damage_dealt += rammed;
+        for at in grazes {
+            self.dash_graze(at);
+        }
         for position in flings {
             self.effect(position, 30.0, 0.3, EffectKind::Impact);
         }
@@ -1147,6 +1170,9 @@ impl Game {
         let mut blasts: Vec<(Vec2, f32, f32, u64, bool)> = Vec::new();
         let cords = self.cord_segments();
         let ship = self.player().map(|p| p.position);
+        let boost = self.damage_boost();
+        let dashing = self.dashing();
+        let mut grazes = Vec::new();
         // Seekers home on hostile creatures and bases; gather them only if any are in flight.
         let targets: Vec<Vec2> = if self.bullets.iter().any(|b| b.friendly && b.homing > 0) {
             self.bodies
@@ -1230,13 +1256,20 @@ impl Game {
             }
             if let Some((index, fraction)) = hit {
                 let body = &mut self.bodies[index];
+                if dashing && !bullet.friendly && body.kind == BodyKind::Player {
+                    grazes.push(bullet.position);
+                }
                 // Enemy fire is stopped by a fortress wall but never wears it down.
                 let dealt = if !bullet.friendly && body.rock == RockKind::Wall {
                     0.0
                 } else {
                     damage(
                         body,
-                        armored(body, bullet.damage, bullet.friendly),
+                        armored(
+                            body,
+                            bullet.damage * if bullet.friendly { boost } else { 1.0 },
+                            bullet.friendly,
+                        ),
                         self.player_invulnerability,
                     )
                 };
@@ -1330,6 +1363,9 @@ impl Game {
             }
         }
         self.bullets.retain(|b| b.remaining > 0.0);
+        for at in grazes {
+            self.dash_graze(at);
+        }
         let invulnerability = self.player_invulnerability;
         for (at, radius, amount, direct, friendly) in blasts {
             for body in self
@@ -1341,7 +1377,7 @@ impl Game {
                     continue;
                 }
                 if friendly && body.kind != BodyKind::Player {
-                    let dealt = damage(body, armored(body, amount, true), 0.0);
+                    let dealt = damage(body, armored(body, amount * boost, true), 0.0);
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
                     }
