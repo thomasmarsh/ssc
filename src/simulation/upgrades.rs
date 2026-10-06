@@ -677,6 +677,11 @@ pub struct Part {
     /// The threat of the place it came from; deeper parts are stronger.
     pub grade: f32,
     pub effects: Vec<Effect>,
+    /// The blueprint's name without rolled adjectives (empty: use `name`), and how many of
+    /// the leading effects are the blueprint's own (the rest are rolled affixes the bench
+    /// may reforge). `usize::MAX` means every effect is the blueprint's.
+    pub stem: String,
+    pub core: usize,
 }
 
 /// "pierce, +24% damage": what a set of effects does, for display.
@@ -1252,14 +1257,18 @@ fn choose<'a>(rng: &mut Rng, table: &'a [Blueprint], source: &Source) -> &'a Blu
     &table[pick(rng, &weights)]
 }
 
-pub fn roll_part(rng: &mut Rng, source: &Source) -> Part {
-    let blueprint = choose(rng, PARTS, source);
-    let rarity = roll_rarity(rng, source);
-    let mut effects = scaled(blueprint.effects, rarity, source.grade);
-    let scale = rarity.strength() * (1.0 + 0.35 * (source.grade - 1.0).max(0.0));
-    let mut adjectives: Vec<&str> = Vec::new();
-    for _ in 0..rarity.affixes() {
-        let pool = affix_pool(blueprint.slot);
+/// Rolls up to `count` bonus affixes onto `effects` (never repeating a stat already there)
+/// and returns the adjectives of the ones that landed.
+fn add_affixes(
+    rng: &mut Rng,
+    slot: Slot,
+    effects: &mut Vec<Effect>,
+    count: usize,
+    scale: f32,
+) -> Vec<&'static str> {
+    let mut adjectives = Vec::new();
+    for _ in 0..count {
+        let pool = affix_pool(slot);
         // Mostly slot-themed, now and then anything at all.
         let stat = if rng.chance(0.25) {
             Stat::ALL[rng.int(0, Stat::ALL.len() as u32 - 1) as usize]
@@ -1278,21 +1287,120 @@ pub fn roll_part(rng: &mut Rng, source: &Source) -> Part {
         ));
         adjectives.push(stat.adjective());
     }
+    adjectives
+}
+
+/// "Stout Warded Hull Plating Mk3": up to two adjectives, the stem, a mark from the grade.
+fn part_name(stem: &str, adjectives: &[&str], grade: f32) -> String {
     let mut name = adjectives
         .iter()
         .take(2)
         .map(|a| format!("{a} "))
         .collect::<String>();
-    name.push_str(blueprint.name);
-    if source.grade >= 2.0 {
-        name.push_str(&format!(" Mk{}", source.grade.floor() as u32));
+    name.push_str(stem);
+    if grade >= 2.0 {
+        name.push_str(&format!(" Mk{}", grade.floor() as u32));
     }
+    name
+}
+
+pub fn roll_part(rng: &mut Rng, source: &Source) -> Part {
+    let blueprint = choose(rng, PARTS, source);
+    let rarity = roll_rarity(rng, source);
+    let mut effects = scaled(blueprint.effects, rarity, source.grade);
+    let core = effects.len();
+    let scale = rarity.strength() * (1.0 + 0.35 * (source.grade - 1.0).max(0.0));
+    let adjectives = add_affixes(rng, blueprint.slot, &mut effects, rarity.affixes(), scale);
     Part {
-        name,
+        name: part_name(blueprint.name, &adjectives, source.grade),
         slot: blueprint.slot,
         rarity,
         grade: source.grade,
+        core,
         effects,
+        stem: blueprint.name.to_string(),
+    }
+}
+
+impl Part {
+    /// Strength multiplier of the part's rarity at its grade (what rolled affixes scale by).
+    fn scale(&self) -> f32 {
+        self.rarity.strength() * (1.0 + 0.35 * (self.grade - 1.0).max(0.0))
+    }
+
+    /// Adjectives of the rolled affixes, for the name.
+    fn adjectives(&self) -> Vec<&'static str> {
+        let core = self.core.min(self.effects.len());
+        self.effects[core..]
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Stat(stat, _) => Some(stat.adjective()),
+                Effect::Trait(..) => None,
+            })
+            .collect()
+    }
+
+    fn rename(&mut self) {
+        if !self.stem.is_empty() {
+            self.name = part_name(&self.stem, &self.adjectives(), self.grade);
+        }
+    }
+
+    /// The next rarity step, or None at the cap.
+    pub fn next_rarity(&self) -> Option<Rarity> {
+        Rarity::ALL.get(self.rarity as usize + 1).copied()
+    }
+
+    /// Rerolls the rolled affixes: three fresh sets are drawn and the best of them and the
+    /// current set is kept, so a reforge never makes a part worse. True if it changed.
+    pub fn reforge(&mut self, rng: &mut Rng) -> bool {
+        let core = self.core.min(self.effects.len());
+        let scale = self.scale();
+        let mut best: Option<Vec<Effect>> = None;
+        let mut best_rating = self.rating();
+        for _ in 0..3 {
+            let mut candidate = self.effects[..core].to_vec();
+            add_affixes(rng, self.slot, &mut candidate, self.rarity.affixes(), scale);
+            let rating: f32 = candidate.iter().map(Effect::rating).sum();
+            if rating > best_rating + 1e-4 {
+                best_rating = rating;
+                best = Some(candidate);
+            }
+        }
+        match best {
+            Some(effects) => {
+                self.effects = effects;
+                self.rename();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Raises the part one rarity step: gains of the new rarity scale every beneficial stat
+    /// (penalties stay as they are), a Rare part gains a trait level, and one more affix is
+    /// rolled. Nothing gets worse. False at the cap.
+    pub fn upgrade(&mut self, rng: &mut Rng) -> bool {
+        let Some(next) = self.next_rarity() else {
+            return false;
+        };
+        let ratio = next.strength() / self.rarity.strength();
+        let level_up = next >= Rarity::Rare && self.rarity < Rarity::Rare;
+        for effect in &mut self.effects {
+            *effect = match *effect {
+                Effect::Stat(stat, amount) if amount > 0.0 => Effect::Stat(stat, amount * ratio),
+                Effect::Trait(kind, level) if level_up => {
+                    Effect::Trait(kind, (level + 1).min(kind.cap()))
+                }
+                other => other,
+            };
+        }
+        self.core = self.core.min(self.effects.len());
+        self.rarity = next;
+        let scale = self.scale();
+        add_affixes(rng, self.slot, &mut self.effects, 1, scale);
+        self.rename();
+        true
     }
 }
 
@@ -1433,6 +1541,8 @@ mod tests {
             slot: Slot::Plating,
             rarity: Rarity::Common,
             grade: 1.0,
+            stem: String::new(),
+            core: usize::MAX,
             effects: vec![Effect::Stat(Stat::Hull, bonus)],
         };
         let mut loadout = Loadout::default();

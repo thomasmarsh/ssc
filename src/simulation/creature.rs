@@ -86,42 +86,47 @@ impl Game {
             civil: bool,
         }
         let player = self.player().map(|p| (p.position, p.velocity));
+        // A ship landed on a pad and unseen is noticed at a fraction of the distance, and
+        // creatures lose it for good once it has stayed hidden long enough; creatures that
+        // know of a pad go for it instead (see `pads`).
+        let (hide, hidden_long) = (self.pad.sight_mult(), self.pad.lost_track());
+        let hidden = hide > 1.0;
+        let sieges = self.siege_targets();
         // A compact snapshot makes steering independent of body iteration order.
-        let neighbors: Vec<_> = self
-            .bodies
-            .iter()
-            .filter(|b| b.active && b.kind != BodyKind::Player)
-            .map(|b| {
-                let g = &b.genome;
-                let creature = b.kind == BodyKind::Creature;
-                Neighbor {
-                    id: b.id,
-                    species: if creature { b.species } else { 0 },
-                    position: b.position,
-                    radius: b.radius,
-                    heading: Vec2::from_angle(b.wander),
-                    chain: b.chain,
-                    heavy: matches!(b.kind, BodyKind::Asteroid | BodyKind::BlackHole),
-                    rock: root::can_host(b),
-                    well: b.kind == BodyKind::BlackHole,
-                    grazable: ecology::edible(b),
-                    huntable: food::huntable(b),
-                    mass: b.mass,
-                    raising_alarm: creature
-                        && match g.trigger {
-                            // Hunters raise the alarm on seeing the player (packs, on
-                            // being alert themselves); touchy creatures only when hurt.
-                            Trigger::Sight if g.social == Social::Pack => b.alert,
-                            Trigger::Sight => {
-                                player.is_some_and(|(p, _)| p.distance(b.position) < g.sight)
-                            }
-                            _ => b.enraged || is_hurt(b),
-                        },
-                    alarm_range: g.alarm,
-                    civil: creature && self.civ_lineages.contains_key(&b.species),
-                }
-            })
-            .collect();
+        let neighbors: Vec<_> =
+            self.bodies
+                .iter()
+                .filter(|b| b.active && b.kind != BodyKind::Player)
+                .map(|b| {
+                    let g = &b.genome;
+                    let creature = b.kind == BodyKind::Creature;
+                    Neighbor {
+                        id: b.id,
+                        species: if creature { b.species } else { 0 },
+                        position: b.position,
+                        radius: b.radius,
+                        heading: Vec2::from_angle(b.wander),
+                        chain: b.chain,
+                        heavy: matches!(b.kind, BodyKind::Asteroid | BodyKind::BlackHole),
+                        rock: root::can_host(b),
+                        well: b.kind == BodyKind::BlackHole,
+                        grazable: ecology::edible(b),
+                        huntable: food::huntable(b),
+                        mass: b.mass,
+                        raising_alarm: creature
+                            && match g.trigger {
+                                // Hunters raise the alarm on seeing the player (packs, on
+                                // being alert themselves); touchy creatures only when hurt.
+                                Trigger::Sight if g.social == Social::Pack => b.alert,
+                                Trigger::Sight => player
+                                    .is_some_and(|(p, _)| p.distance(b.position) * hide < g.sight),
+                                _ => b.enraged || is_hurt(b),
+                            },
+                        alarm_range: g.alarm,
+                        civil: creature && self.civ_lineages.contains_key(&b.species),
+                    }
+                })
+                .collect();
         let shots: Vec<(Vec2, Vec2)> = self
             .bullets
             .iter()
@@ -247,7 +252,9 @@ impl Game {
                 warned |= other.raising_alarm && distance < other.alarm_range;
             }
 
-            let player_distance = player.map_or(f32::INFINITY, |(p, _)| p.distance(body.position));
+            // What the creature perceives: far, when the ship is hiding.
+            let player_distance =
+                player.map_or(f32::INFINITY, |(p, _)| p.distance(body.position)) * hide;
             // A civilization's members see further inside their own territory and are
             // rallied by comrades and calls to arms (see `civ`).
             let posture = civs.posture(
@@ -266,11 +273,20 @@ impl Game {
             // Sight and proximity creatures notice the player by distance, with hysteresis;
             // touchy ones (anything but sight) also fly up when hurt, and rage pursues.
             let by_distance = g.trigger != Trigger::Harm
-                && player_distance < if body.alert { lose } else { sight };
+                && player_distance < if body.alert && !hidden { lose } else { sight };
             let provoked = (g.trigger != Trigger::Sight && is_hurt(body))
                 || body.provoked > 0.0
                 || (body.enraged && player_distance < RAGE_PURSUIT_RANGE);
             body.alert = by_distance || warned || provoked || posture.rallied;
+            if hidden_long {
+                // Out of sight long enough: only a harm done to it keeps a creature on the hunt.
+                body.alert = provoked;
+            }
+            // A creature that knows of a pad goes for it.
+            let siege = sieges.get(&body.id).copied();
+            if siege.is_some() {
+                body.alert = true;
+            }
             if body.panic > 0.0 {
                 body.alert = false;
             }
@@ -303,6 +319,14 @@ impl Game {
                     Some(p + brain.aim_offset(v, lead, learner) - body.position)
                 }
                 _ => player.map(|(p, v)| p + v * lead - body.position),
+            };
+
+            // The pad is the target when it is nearer than the ship (or the ship is hidden).
+            let to_player = match siege {
+                Some(pad) if (pad - body.position).length() <= player_distance => {
+                    Some(pad - body.position)
+                }
+                _ => to_player,
             };
 
             // The wander heading doubles as the shared heading that neighbors align to.

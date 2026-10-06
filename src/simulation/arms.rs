@@ -326,6 +326,8 @@ mod tests {
             rarity: Rarity::Common,
             grade: 1.0,
             effects,
+            stem: String::new(),
+            core: usize::MAX,
         }
     }
 

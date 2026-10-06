@@ -44,6 +44,16 @@ pub enum Cue {
     },
     /// A profile or boost ran out of fuel.
     Dry,
+    /// A landing pad was set down, the ship docked at one, or lifted off.
+    Deploy {
+        at: Vec2,
+    },
+    Land {
+        at: Vec2,
+    },
+    Takeoff {
+        at: Vec2,
+    },
     /// The ship lost shield or hull this step.
     Hurt {
         hull: bool,

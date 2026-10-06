@@ -323,10 +323,14 @@ impl Game {
     /// it died for the respawned ship to recover. The arsenal stays: owned weapon profiles
     /// (and their levels) and owned boosts are never lost, only the fuel in the hold is at
     /// risk (see `shed_cargo`). Boosts stop; nothing runs through the wreck.
-    pub(super) fn shed_on_death(&mut self, position: Vec2) {
+    pub(super) fn shed_on_death(&mut self, position: Vec2, insured: bool) {
         self.loadout.arsenal.stop_boosts();
         self.shed_cargo(position);
-        if let Some(best) = self.loadout.best_part() {
+        if insured && let Some(best) = self.loadout.best_part() {
+            let name = self.loadout.parts[best].name.to_uppercase();
+            let rarity = self.loadout.parts[best].rarity;
+            self.notify(format!("INSURED  {name} kept"), rarity);
+        } else if let Some(best) = self.loadout.best_part() {
             let part = self.loadout.parts.remove(best);
             self.notify(
                 format!("LOST  {}  - recover it", part.name.to_uppercase()),
@@ -388,6 +392,8 @@ mod tests {
             slot: Slot::Plating,
             rarity: Rarity::Rare,
             grade: 1.0,
+            stem: String::new(),
+            core: usize::MAX,
             effects: vec![Effect::Stat(Stat::Hull, bonus)],
         }
     }

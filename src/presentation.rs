@@ -9,8 +9,8 @@ use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::arsenal::Profile;
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
-    Beam, Body, BodyKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, Material, Pickup,
-    STRONG_CORD, Shape, TetherKind, fertility,
+    Beam, Body, BodyKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, LAND_RANGE, MAX_PADS,
+    Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind, fertility, price_text,
 };
 use ssc::world::{BaseKind, QUADRANT_SIZE, RockKind, hash2};
 
@@ -34,14 +34,23 @@ pub struct ArsenalFlash;
 /// One line of the pickup feed (newest last), a span so each can take its rarity's color.
 #[derive(Component)]
 pub struct FeedLine(usize);
+/// The landing prompt and the hidden or exposed banner above the ship.
+#[derive(Component)]
+pub struct PadBanner;
+/// One line of the bench panel: the tab strip, then its rows, then a hint.
+#[derive(Component)]
+pub struct BenchLine(usize);
 /// One line of the ship panel: the five slots, the arsenal, the boosts, then the cargo hold.
 #[derive(Component)]
 pub struct RigLine(usize);
 
 const FEED_LINES: usize = 5;
+/// Bench panel rows: the tab strip, up to nine rows and the footer hint.
+const BENCH_LINES: usize = 11;
 /// Panel rows: five slots, a header and up to eleven profiles, a header and up to nine
 /// boosts, a header and three materials. Rows with nothing to say are empty (no height).
-const RIG_LINES: usize = Slot::ALL.len() + 1 + Profile::ALL.len() + 1 + 9 + 1 + Material::ALL.len();
+const RIG_LINES: usize =
+    Slot::ALL.len() + 1 + Profile::ALL.len() + 1 + 9 + 1 + Material::ALL.len() + 2;
 
 pub fn setup(mut commands: Commands) {
     commands.spawn((
@@ -81,7 +90,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts\nhold M  mine nearest rock (no fire)    PAD  L / R switch weapon    Y  boosts    R2  mine    L2 / A  brake\nC  camera    P  pause    S  slow motion    R  radar    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-5 tab, [ ] pick, F do, Q take    I  insure\nPAD  L / R weapon    Y  boosts    R2  mine    L2 / A  brake    X  repair    D-UP  kit    B  land    D-DN  insure    SELECT  bench\nC  camera    P  pause    S  slow motion    TAB  radar    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -107,7 +116,7 @@ pub fn setup(mut commands: Commands) {
             Node {
                 position_type: PositionType::Absolute,
                 width: percent(100),
-                bottom: px(70),
+                bottom: px(92),
                 ..default()
             },
         ))
@@ -151,10 +160,47 @@ pub fn setup(mut commands: Commands) {
         Node {
             position_type: PositionType::Absolute,
             width: percent(100),
-            bottom: px(190),
+            bottom: px(205),
             ..default()
         },
     ));
+    // The landing prompt and the hidden/exposed banner: above the ship, clear of the HUD.
+    commands.spawn((
+        PadBanner,
+        Text::new(""),
+        TextFont::from_font_size(20.0),
+        TextColor(CYAN),
+        TextLayout::justify(Justify::Center),
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            top: percent(30),
+            ..default()
+        },
+    ));
+    // The bench: a panel on the right, under the species legend.
+    commands
+        .spawn((
+            Text::new(""),
+            TextFont::from_font_size(14.0),
+            Node {
+                position_type: PositionType::Absolute,
+                right: px(28),
+                top: px(150),
+                max_width: px(440),
+                ..default()
+            },
+        ))
+        .with_children(|panel| {
+            for line in 0..BENCH_LINES {
+                panel.spawn((
+                    BenchLine(line),
+                    TextSpan::new(""),
+                    TextFont::from_font_size(14.0),
+                    TextColor(MUTED),
+                ));
+            }
+        });
     commands.spawn((
         Legend,
         Text::new(""),
@@ -174,6 +220,23 @@ type FlashOnly = (
     With<ArsenalFlash>,
     Without<RigLine>,
     Without<FeedLine>,
+    Without<BenchLine>,
+    Without<Hud>,
+    Without<Overlay>,
+    Without<Legend>,
+);
+type BenchSpan = (
+    &'static mut TextSpan,
+    &'static mut TextColor,
+    &'static BenchLine,
+);
+type BenchOnly = (Without<RigLine>, Without<FeedLine>);
+type BannerOnly = (
+    With<PadBanner>,
+    Without<BenchLine>,
+    Without<RigLine>,
+    Without<FeedLine>,
+    Without<ArsenalFlash>,
     Without<Hud>,
     Without<Overlay>,
     Without<Legend>,
@@ -347,6 +410,126 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             material_color(kind),
         ));
     }
+    lines.extend(pad_lines(game));
+    lines
+}
+
+const PAD_GREEN: Color = Color::srgb(0.4, 1.0, 0.65);
+const PAD_AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
+
+/// The pad rows of the ship panel: how many pads stand and kits wait, and the state of the
+/// landing or the repair.
+fn pad_lines(game: &Game) -> [(String, Color); 2] {
+    let insured = if game.is_insured() {
+        "INSURED"
+    } else {
+        "UNINSURED"
+    };
+    let first = (
+        format!(
+            "\nPADS {}/{}   KITS {}   {insured}\n",
+            game.pad_count(),
+            MAX_PADS,
+            game.pad_kits()
+        ),
+        PAD_GREEN,
+    );
+    let second = if let Some(pad) = game.landed_pad() {
+        let stash: Vec<String> = Material::ALL
+            .into_iter()
+            .map(|kind| format!("{:.0}{}", pad.stash.amount(kind), kind.letter()))
+            .collect();
+        (
+            format!(
+                "LANDED  PAD {:.0}/{:.0}  STASH {}\n",
+                pad.hp,
+                ssc::simulation::PAD_HP,
+                stash.join(" ")
+            ),
+            PAD_GREEN,
+        )
+    } else if game.is_repairing() {
+        ("FIELD REPAIR  damage stops it\n".to_string(), PAD_GREEN)
+    } else if game.pad_kits() == 0 && game.pad_count() == 0 {
+        (
+            format!(
+                "K crafts a pad kit  {}\n",
+                price_text(&ssc::simulation::KIT_PRICE)
+            ),
+            MUTED,
+        )
+    } else {
+        (String::new(), MUTED)
+    };
+    [first, second]
+}
+
+/// The banner above the ship: hidden or exposed while landed, else the landing prompt.
+fn pad_banner(game: &Game) -> (String, Color) {
+    if game.game_over {
+        return (String::new(), CYAN);
+    }
+    match game.pad_hint() {
+        PadHint::None => (String::new(), CYAN),
+        PadHint::Landed => {
+            if game.is_hidden() {
+                (
+                    format!(
+                        "HIDDEN  x{:.0}\nthrust / L lifts off",
+                        ssc::simulation::HIDE_SIGHT
+                    ),
+                    PAD_GREEN,
+                )
+            } else {
+                (
+                    format!(
+                        "EXPOSED  cover back in {:.0}s\nthrust / L lifts off",
+                        game.cover_broken_for().ceil()
+                    ),
+                    PAD_AMBER,
+                )
+            }
+        }
+        PadHint::Land => ("L to land".into(), PAD_GREEN),
+        PadHint::Deploy => (
+            format!("L to deploy a pad  (within {LAND_RANGE:.0} to land after)"),
+            PAD_GREEN,
+        ),
+        PadHint::TooFast => ("slow down to land or deploy".into(), PAD_AMBER),
+        PadHint::Unsafe => ("pad unsafe - a hostile is close".into(), DRY_RED),
+        PadHint::Closer => ("a pad stands here - move closer".into(), PAD_AMBER),
+    }
+}
+
+/// The bench panel's lines: tab strip, rows, hint. Empty when the bench is closed.
+fn bench_lines(game: &Game) -> Vec<(String, Color)> {
+    let Some(panel) = game.bench_panel() else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    let tabs: Vec<String> = ssc::simulation::BenchTab::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(n, tab)| {
+            if tab == panel.tab {
+                format!("[{} {}]", n + 1, tab.label())
+            } else {
+                format!("{} {}", n + 1, tab.label())
+            }
+        })
+        .collect();
+    lines.push((format!("{}\n", tabs.join("  ")), PAD_GREEN));
+    for row in panel.rows.iter().take(BENCH_LINES - 2) {
+        let marker = if row.selected { ">" } else { " " };
+        let color = match (row.selected, row.ok) {
+            (true, true) => CYAN,
+            (true, false) => DRY_RED,
+            (false, true) => OWNED,
+            (false, false) => MUTED,
+        };
+        lines.push((format!("{marker} {}\n", row.text), color));
+    }
+    lines.push((format!("{}   E closes\n", panel.footer), MUTED));
     lines
 }
 
@@ -372,11 +555,14 @@ fn arsenal_banner(game: &Game) -> (String, Color) {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_hud(
     session: Res<Session>,
     mut flash: Single<(&mut Text, &mut TextColor), FlashOnly>,
     mut feed: Query<(&mut TextSpan, &mut TextColor, &FeedLine), Without<RigLine>>,
     mut rig: Query<(&mut TextSpan, &mut TextColor, &RigLine), Without<FeedLine>>,
+    mut pad_text: Single<(&mut Text, &mut TextColor), BannerOnly>,
+    mut bench: Query<BenchSpan, BenchOnly>,
     mut hud: Single<&mut Text, (With<Hud>, Without<Overlay>)>,
     mut overlay: Single<&mut Text, (With<Overlay>, Without<Hud>)>,
     mut legend: Single<&mut Text, LegendOnly>,
@@ -387,6 +573,27 @@ pub fn update_hud(
         flash.0.0 = banner;
     }
     flash.1.0 = tint;
+    let (text, tint) = pad_banner(game);
+    if pad_text.0.0 != text {
+        pad_text.0.0 = text;
+    }
+    pad_text.1.0 = tint;
+    let panel = bench_lines(game);
+    for (mut span, mut color, line) in &mut bench {
+        match panel.get(line.0) {
+            Some((text, tint)) => {
+                if span.0 != *text {
+                    span.0 = text.clone();
+                }
+                color.0 = *tint;
+            }
+            None => {
+                if !span.0.is_empty() {
+                    span.0.clear();
+                }
+            }
+        }
+    }
     // Species have no fixed names: list the most common ones nearby, as their genes spell them.
     let mut census: Vec<(u64, String, usize)> = Vec::new();
     for body in game
@@ -864,6 +1071,25 @@ pub fn draw(
                 .resolution(24);
         }
     }
+    for pad in game.pads() {
+        let at = game.pad_position(pad);
+        if (at - camera).abs().cmplt(half + Vec2::splat(200.0)).all() {
+            draw_pad(&mut gizmos, game, pad, at);
+        }
+    }
+    if game.is_landed()
+        && let Some(ship) = game.player()
+    {
+        // Cover: a calm green shimmer while hidden, a restless amber flicker once exposed.
+        let (shimmer, color) = if game.is_hidden() {
+            (0.3 + 0.12 * (game.time * 2.0).sin(), PAD_GREEN)
+        } else {
+            (0.25 + 0.3 * (game.time * 16.0).sin().abs(), PAD_AMBER)
+        };
+        gizmos
+            .circle_2d(ship.position, ship.radius * 2.3, color.with_alpha(shimmer))
+            .resolution(28);
+    }
     // Plankton: tiny pale-lime motes (distinct from the green gravity wells) that swell in when they bud and breathe gently.
     for food in game.food.iter().filter(|f| {
         (f.position - camera)
@@ -1130,6 +1356,72 @@ pub fn draw(
                 + Vec2::new(-1.0, 1.0) * (RADAR_RADIUS + 24.0) * ui_scale,
             ui_scale,
         );
+    }
+}
+
+/// A landing pad on its planetoid's rim: a platform with legs sunk into the rock and a
+/// beacon mast, and a dashed landing dome that turns with the world. It reads green while
+/// private and amber once the enemy has seen it, and wears its damage as a bar.
+fn draw_pad(gizmos: &mut Gizmos, game: &Game, pad: &Pad, at: Vec2) {
+    let n = (at - pad.center).normalize_or_zero();
+    let t = Vec2::new(-n.y, n.x);
+    let exposed = game.pad_exposed(pad.key);
+    let tint = if exposed { PAD_AMBER } else { PAD_GREEN };
+    let landed = game.landed_pad().is_some_and(|p| p.key == pad.key);
+    let near = game
+        .player()
+        .is_some_and(|ship| ship.position.distance(at) < LAND_RANGE * 2.0);
+    // Platform, its lower deck and the legs.
+    gizmos.line_2d(at + n * 3.0 - t * 26.0, at + n * 3.0 + t * 26.0, tint);
+    gizmos.line_2d(
+        at + n * 7.0 - t * 17.0,
+        at + n * 7.0 + t * 17.0,
+        tint.with_alpha(0.55),
+    );
+    for side in [-1.0, 1.0] {
+        gizmos.line_2d(
+            at + n * 3.0 + t * 26.0 * side,
+            at - n * 7.0 + t * 21.0 * side,
+            tint.with_alpha(0.8),
+        );
+    }
+    // Beacon: a mast with a lamp that pulses, faster when the enemy knows of it.
+    let pulse = 0.5 + 0.5 * (game.time * if exposed { 6.0 } else { 2.2 }).sin();
+    gizmos.line_2d(at + n * 7.0, at + n * 16.0, tint.with_alpha(0.7));
+    gizmos
+        .circle_2d(
+            at + n * 19.0,
+            2.5 + 1.8 * pulse,
+            tint.with_alpha(0.5 + 0.5 * pulse),
+        )
+        .resolution(8);
+    // Landing dome: dashes above the surface, turning with the planetoid.
+    let phase = n.to_angle();
+    let alpha = if landed {
+        0.15
+    } else if near {
+        0.6
+    } else {
+        0.2
+    };
+    let dashes = 16;
+    for k in 0..dashes {
+        let a0 = phase + k as f32 * std::f32::consts::TAU / dashes as f32;
+        let mid = Vec2::from_angle(a0 + 0.12);
+        if mid.dot(n) < 0.05 {
+            continue;
+        }
+        gizmos.line_2d(
+            at + Vec2::from_angle(a0) * LAND_RANGE,
+            at + Vec2::from_angle(a0 + 0.24) * LAND_RANGE,
+            tint.with_alpha(alpha),
+        );
+    }
+    if pad.hp < ssc::simulation::PAD_HP {
+        let fraction = (pad.hp / ssc::simulation::PAD_HP).clamp(0.0, 1.0);
+        let from = at + n * 34.0 - t * 20.0;
+        gizmos.line_2d(from, at + n * 34.0 + t * 20.0, DRY_RED.with_alpha(0.4));
+        gizmos.line_2d(from, from + t * 40.0 * fraction, tint);
     }
 }
 
@@ -1452,6 +1744,32 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
                     .resolution(10);
             }
         }
+    }
+    // Pads: a diamond, green while private and amber once the enemy has seen it. One out of
+    // range sits on the rim, pointing the way.
+    for pad in game.pads() {
+        let offset = (game.pad_position(pad) - origin) * scale;
+        let tint = if game.pad_exposed(pad.key) {
+            PAD_AMBER
+        } else {
+            PAD_GREEN
+        };
+        let (at, alpha) = if offset.length() < radius - 4.0 * ui_scale {
+            (offset, 1.0)
+        } else {
+            (offset.normalize_or_zero() * (radius - 2.0 * ui_scale), 0.55)
+        };
+        let size = 4.5 * ui_scale;
+        let p = center + at;
+        gizmos.lineloop_2d(
+            [
+                p + Vec2::Y * size,
+                p + Vec2::X * size,
+                p - Vec2::Y * size,
+                p - Vec2::X * size,
+            ],
+            tint.with_alpha(alpha),
+        );
     }
     gizmos.circle_2d(center, 2.5 * ui_scale, CYAN).resolution(6);
 }

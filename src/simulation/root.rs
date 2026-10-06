@@ -147,6 +147,7 @@ impl Game {
             return;
         }
         let hosts = self.hosts();
+        let steering = self.pad.aiming();
         for body in self.bodies.iter_mut().filter(|b| b.root.is_some()) {
             let Some(root) = body.root else { continue };
             let Some(host) = hosts.get(&root.host) else {
@@ -156,7 +157,9 @@ impl Game {
             body.position =
                 host.position + Vec2::from_angle(outward) * (host.radius + body.radius * STAND);
             body.velocity = host.velocity;
-            if !body.alert {
+            // A landed ship faces outward and turns with its world unless its pilot steers.
+            let own = body.alert || (body.kind == BodyKind::Player && steering);
+            if !own {
                 body.angle = outward;
             }
         }
@@ -191,7 +194,8 @@ impl Game {
         let mut released: Vec<(usize, bool)> = Vec::new();
         for (index, body) in self.bodies.iter_mut().enumerate() {
             let Some(root) = body.root else { continue };
-            if !body.active {
+            // A landed ship is held by its pad (see `pads`), not by a creature's habits.
+            if !body.active || body.kind != BodyKind::Creature {
                 continue;
             }
             let Some(host) = hosts.get(&root.host) else {

@@ -124,6 +124,22 @@ impl Cargo {
         taken
     }
 
+    /// Stores up to `amount` but never past `cap` (a pad stash is smaller than the hold),
+    /// and returns what fit.
+    pub fn add_capped(&mut self, kind: Material, amount: f32, cap: f32) -> f32 {
+        let room = (cap - self.amount(kind)).max(0.0);
+        let taken = amount.max(0.0).min(room);
+        *self.slot(kind) += taken;
+        taken
+    }
+
+    /// Removes up to `amount` of one material and returns what came out.
+    pub fn take(&mut self, kind: Material, amount: f32) -> f32 {
+        let taken = amount.max(0.0).min(self.amount(kind));
+        *self.slot(kind) -= taken;
+        taken
+    }
+
     /// Whether every part of a price is on board.
     pub fn can_afford(&self, price: &[(Material, f32)]) -> bool {
         Material::ALL.into_iter().all(|kind| {
@@ -994,6 +1010,8 @@ mod tests {
             slot: Slot::Plating,
             rarity: Rarity::Common,
             grade: 1.0,
+            stem: String::new(),
+            core: usize::MAX,
             effects: vec![Effect::Stat(Stat::Hull, bonus)],
         };
         let mut game = empty_game();

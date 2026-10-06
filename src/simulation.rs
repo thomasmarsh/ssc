@@ -17,6 +17,7 @@ mod food;
 mod growth;
 mod loot;
 mod mining;
+mod pads;
 mod root;
 mod tether;
 pub mod upgrades;
@@ -31,6 +32,10 @@ pub use food::{FOOD_RADIUS, Food, fertility};
 pub use growth::Egg;
 pub use loot::{Notice, Pickup};
 pub use mining::{Beam, Cargo, Lode, Material};
+pub use pads::{
+    Bench, BenchPanel, BenchRow, BenchTab, HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP,
+    Pad, PadHint, PadKey, PadState, STASH_CAP, price_text,
+};
 pub use root::{Root, STAND as ROOT_STAND};
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 use upgrades::{Item, Loadout, Stats};
@@ -324,6 +329,8 @@ pub struct Game {
     pub notices: Vec<Notice>,
     /// What the ship carries, and the mining beam if it is on.
     pub cargo: Cargo,
+    /// Field repair, pad kits, landing pads, the bench and what the enemy knows of them.
+    pad: PadState,
     pub beam: Option<Beam>,
     pub score: u64,
     pub lives: u32,
@@ -402,6 +409,7 @@ impl Game {
             stats: Stats::BASE,
             notices: Vec::new(),
             cargo: Cargo::default(),
+            pad: PadState::default(),
             beam: None,
             mined: HashMap::new(),
             mine_clock: 0.0,
@@ -529,12 +537,15 @@ impl Game {
                 body.health = (body.health + dt * DUST_HEAL).min(body.max_health);
             }
         }
+        self.update_pads(dt, &input);
+        let shots = (self.bullets.len(), self.mines.len());
         self.control_player(dt, input);
         let drained = self.update_mining(dt, input.mine);
         if let Some(before) = ship_before.as_mut() {
             before.0 -= drained;
         }
         self.update_arms(dt, input.fire);
+        self.pad_noise(shots.0, shots.1);
         if self.stats.shears {
             // Shears cut a weak cord the moment it latches and wear a stout one through.
             for tether in self
@@ -788,6 +799,7 @@ impl Game {
                 self.tethers.push(Tether::link(partner, head));
             }
         }
+        self.reload_pads(id);
     }
 
     /// Remembers that a spawn was destroyed. A chain counts only once every segment is gone.
@@ -1294,10 +1306,11 @@ impl Game {
             self.lives = self.lives.saturating_sub(1);
             self.bullets.retain(|bullet| bullet.friendly);
             self.tethers.retain(|t| t.kind != TetherKind::Latch);
-            self.shed_on_death(position);
+            let insured = self.insurance_pays();
+            self.shed_on_death(position, insured);
             if self.lives == 0 {
                 self.game_over = true;
-            } else {
+            } else if !self.respawn_at_pad(position) {
                 self.spawn_player(position);
             }
         }
@@ -1324,6 +1337,11 @@ impl Game {
             .map(|offset| origin + offset)
             .max_by(|a, b| clearance(*a).total_cmp(&clearance(*b)))
             .unwrap_or(origin);
+        self.spawn_player_exact(position);
+    }
+
+    /// Puts a fresh ship exactly at `position`, refitted and under shield time.
+    fn spawn_player_exact(&mut self, position: Vec2) {
         let mut player = self.make_body(BodyKind::Player, position);
         player.angle = FRAC_PI_2;
         self.bodies.push(player);

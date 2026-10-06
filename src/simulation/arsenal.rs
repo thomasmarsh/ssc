@@ -312,6 +312,17 @@ impl Arsenal {
         }
     }
 
+    /// Raises an owned profile one level (a bench upgrade). It can only go up and stops at
+    /// the trait cap; returns the new level, or None if not owned or already maxed.
+    pub fn raise(&mut self, profile: Profile) -> Option<u8> {
+        let held = self.level(profile);
+        if held == 0 || held >= profile.max_level() {
+            return None;
+        }
+        self.levels[profile.index()] = held + 1;
+        Some(held + 1)
+    }
+
     /// Makes an owned profile active. False if it is not owned or already active.
     pub fn set_active(&mut self, profile: Profile) -> bool {
         if !self.owns(profile) || profile == self.active {

@@ -27,10 +27,13 @@ pub enum Sound {
     Mine,
     Switch,
     Dry,
+    Deploy,
+    Land,
+    Takeoff,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 18] = [
+    pub const ALL: [Sound; 21] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -49,6 +52,9 @@ impl Sound {
         Sound::Mine,
         Sound::Switch,
         Sound::Dry,
+        Sound::Deploy,
+        Sound::Land,
+        Sound::Takeoff,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -196,6 +202,44 @@ impl Sound {
                     square(sweep(t / 0.2, 190.0, 120.0), t) * gate * decay(t, 0.12)
                 });
                 lowpass(&mut v, 1800.0);
+                v
+            }
+            // A soft two-step thunk and a settling chirp: a clamp locking into rock.
+            Sound::Deploy => {
+                let mut v = voice(0.34, |t, _| {
+                    let thunk = sine(sweep((t / 0.12).min(1.0), 210.0, 95.0), t) * decay(t, 0.07);
+                    let local = (t - 0.14).max(0.0);
+                    let chirp = if t > 0.14 {
+                        sine(sweep((local / 0.2).min(1.0), 700.0, 980.0), t) * decay(local, 0.07)
+                    } else {
+                        0.0
+                    };
+                    thunk * 0.9 + chirp * 0.45
+                });
+                lowpass(&mut v, 2600.0);
+                v
+            }
+            // A slow settling swell with a little hush: the ship coming to rest.
+            Sound::Land => {
+                let mut noise = Noise::new(83);
+                let mut v = voice(0.55, |t, _| {
+                    let swell = (t / 0.55 * std::f32::consts::PI).sin().powf(0.8);
+                    let f = sweep((t / 0.55).min(1.0), 330.0, 120.0);
+                    (sine(f, t) * 0.8 + sine(f * 2.0, t) * 0.15 + noise.next() * 0.12) * swell
+                });
+                lowpass(&mut v, 1800.0);
+                v
+            }
+            // The mirror image: a rising, airy push away from the ground.
+            Sound::Takeoff => {
+                let mut noise = Noise::new(89);
+                let mut v = voice(0.5, |t, _| {
+                    let rise = (t / 0.5).min(1.0);
+                    let swell = (rise * std::f32::consts::PI).sin().powf(0.9);
+                    let f = sweep(rise, 140.0, 520.0);
+                    (sine(f, t) * 0.7 + noise.next() * 0.25 * (1.0 - rise)) * swell
+                });
+                lowpass_sweep(&mut v, 900.0, 2600.0);
                 v
             }
             Sound::HurtHull => {

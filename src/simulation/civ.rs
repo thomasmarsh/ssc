@@ -391,7 +391,7 @@ impl Game {
 
     /// Sends a war party (or a big raid) in from off screen, already hunting the ship and
     /// born with the doctrine's brain.
-    fn launch_party(&mut self, t: Territory, big: bool, standing: Standing) {
+    pub(super) fn launch_party(&mut self, t: Territory, big: bool, standing: Standing) {
         let Some(ship) = self.player().map(|p| p.position) else {
             return;
         };
@@ -402,6 +402,12 @@ impl Game {
         let count = count.round().max(1.0) as usize;
         let alive = self.civ_strength(t.id);
         let (member, warrior) = (t.member(self.seed), t.warrior(self.seed));
+        // Raiders go for a pad their territory has seen, if it is in the loaded region, and
+        // otherwise for the ship.
+        let (mark, at_pad) = match self.known_pad_in_range(t.id) {
+            Some(pad) => (pad, true),
+            None => (ship, false),
+        };
         let heading = Vec2::from_angle(self.civ_rng.f32() * TAU) * ARRIVAL;
         let mut sent = 0;
         for k in 0..count.min(CIV_CAP.saturating_sub(alive)) {
@@ -411,8 +417,12 @@ impl Game {
             } else {
                 member
             };
-            let at = ship + heading + self.civ_rng.direction() * self.civ_rng.range(0.0, 260.0);
+            let at = mark + heading + self.civ_rng.direction() * self.civ_rng.range(0.0, 260.0);
             let quadrant = QuadrantId::containing(at);
+            // A party aimed at a pad must still arrive inside the simulated region.
+            if at_pad && !self.active.contains(&quadrant) {
+                continue;
+            }
             let crowded = self
                 .bodies
                 .iter()
@@ -433,8 +443,8 @@ impl Game {
             );
             body.alert = true;
             body.home = Some(t.capital.center());
-            body.velocity = (ship - at).normalize_or_zero() * species.genome.cruise;
-            body.wander = (ship - at).to_angle();
+            body.velocity = (mark - at).normalize_or_zero() * species.genome.cruise;
+            body.wander = (mark - at).to_angle();
             body.angle = body.wander;
             body.fire_cooldown = 1.5 + self.civ_rng.f32() * 2.0;
             if body.brain.is_some()
@@ -447,10 +457,11 @@ impl Game {
             sent += 1;
         }
         if sent > 0 {
+            let target = if at_pad { "  - for your pad" } else { "" };
             let text = if big {
-                format!("RAID  {}  {sent} inbound", self.territory_name)
+                format!("RAID  {}  {sent} inbound{target}", self.territory_name)
             } else {
-                format!("WAR PARTY  {}  {sent} inbound", self.territory_name)
+                format!("WAR PARTY  {}  {sent} inbound{target}", self.territory_name)
             };
             self.notify(text, upgrades::Rarity::Epic);
         }

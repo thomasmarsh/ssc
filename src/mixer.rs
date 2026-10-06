@@ -118,6 +118,10 @@ fn spec(cue: &Cue) -> Spec {
         Cue::Respawn { .. } => ship(Sound::Respawn, 0.55, 0.0),
         Cue::Pickup { .. } => ship(Sound::Pickup, 0.55, 0.0),
         Cue::Mine { .. } => ship(Sound::Mine, 0.3, 0.06),
+        // Soft: these punctuate a calm moment, never a fight.
+        Cue::Deploy { .. } => ship(Sound::Deploy, 0.4, 0.02),
+        Cue::Land { .. } => ship(Sound::Land, 0.4, 0.02),
+        Cue::Takeoff { .. } => ship(Sound::Takeoff, 0.4, 0.02),
         Cue::Switch { dry: false } => ship(Sound::Switch, 0.5, 0.0),
         Cue::Switch { dry: true } | Cue::Dry => ship(Sound::Dry, 0.6, 0.0),
         Cue::Hurt { hull: false } => ship(Sound::HurtShield, 0.7, 0.0),
@@ -141,6 +145,7 @@ fn interval(sound: Sound) -> f32 {
         Sound::Latch => 0.25,
         Sound::Mine => 0.12,
         Sound::Switch | Sound::Dry => 0.06,
+        Sound::Deploy | Sound::Land | Sound::Takeoff => 0.4,
     }
 }
 
