@@ -34,6 +34,10 @@ pub enum Cue {
         at: Vec2,
         strength: f32,
     },
+    /// The mining beam is working a rock.
+    Mine {
+        at: Vec2,
+    },
     /// The ship lost shield or hull this step.
     Hurt {
         hull: bool,

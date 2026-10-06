@@ -108,6 +108,15 @@ Every spawn has a stable index within its quadrant (its position in the generato
 - Free rocks vary in outline and material: ice is brittle and yields shield charge; ore is dense and tough with richer salvage; purple crystal bursts on destruction, hurting nearby ships and fauna, and often yields a surge. HOME rocks remain ordinary.
 - Inhabited husks have a hollow mouth and moving feelers. They release two to four creatures when approached or shot, including on a lethal hit. Shells and sheltered nests are seeded more frequently away from HOME.
 
+## Mining and materials (built)
+
+The ship carries three materials, `Cargo { metal, volatiles, crystal }`, cap 200 each (`src/simulation/mining.rs`). Hold `M` (gamepad right bumper) to extend a beam (range 260, about 12 degree half-cone, along the ship's heading or aim) at the nearest minable rock. Mining and firing exclude each other (the beam wins while held). The beam draws 4 shield per second, suppresses shield recharge while on, refuses below 6 shield and has no heat. Mute moved to `N`.
+
+- Every rock holds ore = radius^2 / 40 (ore x1.5, husk x0.5), derived from size and kind, never drawn from RNG and never stored with the spawn. Yield per beam second: ore 1.0 metal, plain 0.4 metal, ice 1.0 volatiles, husk shell 0.25 volatiles, planetoid 0.3 of one material picked by a hash of its spawn index. Crystal is harvested in 0.5 s cycles of 4 shards and bursts (the existing crystal blast, ship included) if the beam is held past three cycles; releasing resets the count.
+- Mining shrinks the radius as sqrt(ore / full) down to 14, where the rock crumbles into a pickup of its leftover and vanishes (recorded in `fallen`). It never shatters, so mining never multiplies rocks; shatter fragments from shooting split the parent's remaining ore, so shooting cannot create ore. Partial depletion persists in `mined` (by spawn, quantized upward) and is re-applied when a quadrant reloads; rocks without a spawn index are not persisted. Planetoids never shrink and give a 400 unit budget (tracked in `mined`), with no regrowth.
+- Tenants: mining a host counts as harm (rooted creatures turn alert for a few seconds); a rock crumbled from under them releases them (`release_from`). Mining a husk wakes its tenants, as an attack does; a hatched husk is plain rock. Pinned nest stones are not minable, so a nest's refuge cannot be eroded (shooting still opens it).
+- Dying costs 25% of each material, dropped as pickups where the ship died. Salvage is `Item::Material(kind, amount)`: it adds to the hold, and scores about its amount; a part scrapped for a full slot yields metal (rating x 10) as well as score.
+
 ## Ecosystem bases (built)
 
 Bases appear where danger, aggression, tech or swarm are high, and never at HOME. Their kind and armament come from a separate seeded stream:

@@ -14,6 +14,7 @@ mod ecology;
 mod food;
 mod growth;
 mod loot;
+mod mining;
 mod root;
 mod tether;
 pub mod upgrades;
@@ -27,6 +28,7 @@ pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
 pub use food::{FOOD_RADIUS, Food, fertility};
 pub use growth::Egg;
 pub use loot::{Notice, Pickup};
+pub use mining::{Beam, Cargo, Lode, Material};
 pub use root::{Root, STAND as ROOT_STAND};
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 use upgrades::{Item, Loadout, Stats};
@@ -94,6 +96,8 @@ pub struct Input {
     pub turn: f32,
     pub brake: bool,
     pub fire: bool,
+    /// Hold the mining beam. It excludes firing: while held, the guns stay quiet.
+    pub mine: bool,
     /// Optional heading vector, allowing pointer/controller aiming without input APIs.
     pub aim_direction: Option<Vec2>,
     /// Optional thrust vector (length 0..1) independent of heading, for twin-stick play.
@@ -182,6 +186,8 @@ pub struct Body {
     pub rig: Rig,
     /// Asteroids: what the rock is made of, and what lives in a husk.
     pub rock: RockKind,
+    /// Asteroids: the ore it holds (derived from size, see `mining`).
+    pub lode: Lode,
     pub den: Option<(Species, u8)>,
     /// Creatures: stored energy, up to `max_energy` (which scales with size). It drains with
     /// time and movement and is restored by eating; see `food`.
@@ -217,6 +223,8 @@ pub struct Body {
     fire_cooldown: f32,
     contact_cooldown: f32,
     since_hit: f32,
+    /// Seconds a harm that does no damage (a mining beam on its host) still counts.
+    provoked: f32,
     brood_timer: f32,
 }
 
@@ -312,6 +320,9 @@ pub struct Game {
     pub stats: Stats,
     /// Recent things worth telling the player about (pickups, wrecks).
     pub notices: Vec<Notice>,
+    /// What the ship carries, and the mining beam if it is on.
+    pub cargo: Cargo,
+    pub beam: Option<Beam>,
     pub score: u64,
     pub lives: u32,
     pub game_over: bool,
@@ -357,6 +368,12 @@ pub struct Game {
     next_chain: u32,
     /// Spawns destroyed so far, per quadrant, so a quadrant reloads as it was left.
     fallen: HashMap<QuadrantId, HashSet<u32>>,
+    /// Ore taken from rocks (planetoid budget spent), by spawn, quantized; see `mining`.
+    mined: HashMap<(QuadrantId, u32), f32>,
+    /// Seconds the beam has held its target, the target, and the throttle on full-hold notes.
+    mine_clock: f32,
+    mine_target: Option<u64>,
+    mine_note: f32,
     loaded: HashSet<QuadrantId>,
     active: Vec<QuadrantId>,
 }
@@ -376,6 +393,12 @@ impl Game {
             loadout: Loadout::default(),
             stats: Stats::BASE,
             notices: Vec::new(),
+            cargo: Cargo::default(),
+            beam: None,
+            mined: HashMap::new(),
+            mine_clock: 0.0,
+            mine_target: None,
+            mine_note: 0.0,
             score: 0,
             lives: 3,
             game_over: false,
@@ -462,8 +485,13 @@ impl Game {
             return;
         }
         let dt = dt.min(0.05);
+        // Mining and firing exclude each other: the beam wins while it is held.
+        let input = Input {
+            fire: input.fire && !input.mine,
+            ..input
+        };
         let in_flight = self.bullets.len();
-        let ship_before = self.player().map(|p| (p.shield, p.health));
+        let mut ship_before = self.player().map(|p| (p.shield, p.health));
         self.time += dt;
         self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
         for effect in &mut self.effects {
@@ -474,12 +502,14 @@ impl Game {
         self.update_civilizations(dt);
         self.update_loadout(dt);
         let recharge = self.stats.recharge;
+        let beaming = self.beam.is_some();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             body.fire_cooldown = (body.fire_cooldown - dt).max(0.0);
             body.contact_cooldown = (body.contact_cooldown - dt).max(0.0);
             body.panic = (body.panic - dt).max(0.0);
             body.since_hit += dt;
-            if body.since_hit > 2.0 {
+            body.provoked = (body.provoked - dt).max(0.0);
+            if body.since_hit > 2.0 && !(beaming && body.kind == BodyKind::Player) {
                 let rate = if body.kind == BodyKind::Player {
                     recharge
                 } else {
@@ -492,6 +522,10 @@ impl Game {
             }
         }
         self.control_player(dt, input);
+        let drained = self.update_mining(dt, input.mine);
+        if let Some(before) = ship_before.as_mut() {
+            before.0 -= drained;
+        }
         self.update_arms(dt, input.fire);
         if self.stats.shears {
             // Shears cut a weak cord the moment it latches and wear a stout one through.
@@ -711,6 +745,7 @@ impl Game {
             body.genes = spawn.phenotype;
             body.pinned = spawn.pinned;
             body.origin = Some((id, spawn.index));
+            self.apply_mined(&mut body);
             body.angle = self.rng.f32() * TAU;
             body.wander = body.angle;
             body.fire_cooldown = 1.0 + self.rng.f32() * 2.0;
@@ -794,6 +829,7 @@ impl Game {
                 } else {
                     1.0
                 };
+            shard.lode = Self::fragment_lode(rock, pieces, radius);
             shard.health = radius * 1.6 * 0.8;
             shard.max_health = shard.health;
             shard.velocity = rock.velocity + direction * self.rng.range(70.0, 150.0);
@@ -1326,6 +1362,7 @@ impl Game {
             active: true,
             rig: Rig::default(),
             rock: RockKind::Plain,
+            lode: Lode::default(),
             den: None,
             energy: 0.0,
             max_energy: 0.0,
@@ -1346,6 +1383,7 @@ impl Game {
             fire_cooldown: 0.0,
             contact_cooldown: 0.0,
             since_hit: 0.0,
+            provoked: 0.0,
             brood_timer: 0.0,
         }
     }

@@ -38,6 +38,7 @@ fn lifetime(item: &Item) -> f32 {
     match item {
         Item::Part(_) | Item::Life => 90.0,
         Item::Surge(_) => 50.0,
+        Item::Material(..) => 60.0,
         _ => 30.0,
     }
 }
@@ -120,9 +121,15 @@ impl Game {
                 self.lives = (self.lives + 1).min(MAX_LIVES);
                 self.notify("EXTRA LIFE".into(), rarity);
             }
-            Item::Scrap(points) => {
-                self.score = self.score.saturating_add(u64::from(points));
-                self.notify(format!("SALVAGE +{points}"), rarity);
+            Item::Material(kind, amount) => {
+                let taken = self.cargo.add(kind, amount);
+                self.score = self.score.saturating_add(amount as u64);
+                let full = if taken < amount - 0.5 {
+                    " (HOLD FULL)"
+                } else {
+                    ""
+                };
+                self.notify(format!("{} +{taken:.0}{full}", kind.label()), rarity);
             }
             Item::Part(part) => {
                 let name = part.name.to_uppercase();
@@ -139,8 +146,10 @@ impl Game {
                     Install::Scrapped(part) => {
                         let value = (part.rating() * 200.0) as u64;
                         self.score = self.score.saturating_add(value);
+                        let metal = (part.rating() * 10.0).round();
+                        let taken = self.cargo.add(Material::Metal, metal);
                         self.notify(
-                            format!("SCRAPPED  {name}  +{value}"),
+                            format!("SCRAPPED  {name}  +{value}  METAL +{taken:.0}"),
                             upgrades::Rarity::Common,
                         );
                     }
@@ -219,6 +228,7 @@ impl Game {
                     RockKind::Ice => {
                         if rng.chance(0.22) {
                             drops.push(Item::Recharge(25.0 + 15.0 * grade.sqrt()));
+                            drops.push(Item::Material(Material::Volatiles, 5.0));
                         }
                     }
                     // Ore is mostly scrap, now and then a salvaged part of heavy gear.
@@ -229,7 +239,8 @@ impl Game {
                                 source.affinity[Slot::Engine.index()] += 2.0;
                                 drops.push(Item::Part(upgrades::roll_part(&mut rng, &source)));
                             } else {
-                                drops.push(Item::Scrap((45.0 * grade) as u32 / 5 * 5));
+                                let amount = ((45.0 * grade) as u32 / 5 * 5).max(5) as f32;
+                                drops.push(Item::Material(Material::Metal, amount));
                             }
                         }
                     }
@@ -315,6 +326,7 @@ impl Game {
     /// died for the respawned ship to recover.
     pub(super) fn shed_on_death(&mut self, position: Vec2) {
         self.loadout.surges.clear();
+        self.shed_cargo(position);
         if let Some(best) = self.loadout.best_part() {
             let part = self.loadout.parts.remove(best);
             self.notify(
@@ -645,21 +657,29 @@ mod tests {
         let mut game = empty_game();
         game.player_invulnerability = 1e9;
         game.drop_item(Vec2::new(100.0, 0.0), Vec2::ZERO, Item::Repair(10.0));
-        game.drop_item(Vec2::new(3000.0, 0.0), Vec2::ZERO, Item::Scrap(50));
+        game.drop_item(
+            Vec2::new(3000.0, 0.0),
+            Vec2::ZERO,
+            Item::Material(Material::Metal, 50.0),
+        );
         let score = game.score;
         for _ in 0..90 {
             game.step(DT, Input::default());
         }
         assert_eq!(game.pickups.len(), 1, "near one should be taken");
         assert_eq!(game.score, score);
-        for _ in 0..60 * 31 {
+        for _ in 0..60 * 61 {
             game.step(DT, Input::default());
         }
         assert!(game.pickups.is_empty(), "unclaimed salvage fades");
         // A bigger magnet reaches farther.
         let mut game = empty_game();
         game.collect(Item::Surge(surge(Effect::Stat(Stat::Magnet, 3.0), 60.0)));
-        game.drop_item(Vec2::new(450.0, 0.0), Vec2::ZERO, Item::Scrap(50));
+        game.drop_item(
+            Vec2::new(450.0, 0.0),
+            Vec2::ZERO,
+            Item::Material(Material::Metal, 50.0),
+        );
         for _ in 0..90 {
             game.step(DT, Input::default());
         }
@@ -667,14 +687,15 @@ mod tests {
     }
 
     #[test]
-    fn extra_lives_are_capped_and_scrap_scores() {
+    fn extra_lives_are_capped_and_salvage_scores() {
         let mut game = empty_game();
         for _ in 0..10 {
             game.collect(Item::Life);
         }
         assert_eq!(game.lives, MAX_LIVES);
-        game.collect(Item::Scrap(75));
+        game.collect(Item::Material(Material::Metal, 75.0));
         assert_eq!(game.score, 75);
+        assert_eq!(game.cargo.metal, 75.0);
     }
 
     #[test]
@@ -751,7 +772,11 @@ mod tests {
     #[test]
     fn far_pickups_unload_with_their_quadrant() {
         let mut game = empty_game();
-        game.drop_item(Vec2::new(500.0, 0.0), Vec2::ZERO, Item::Scrap(10));
+        game.drop_item(
+            Vec2::new(500.0, 0.0),
+            Vec2::ZERO,
+            Item::Material(Material::Metal, 10.0),
+        );
         set_player(
             &mut game,
             Vec2::new(8.0 * world::QUADRANT_SIZE, 0.0),

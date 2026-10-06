@@ -8,8 +8,8 @@ use bevy::{
 use ssc::genome::{Trigger, Weapon};
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
-    Body, BodyKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, Pickup, STRONG_CORD, Shape,
-    TetherKind, fertility,
+    Beam, Body, BodyKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, Material, Pickup,
+    STRONG_CORD, Shape, TetherKind, fertility,
 };
 use ssc::world::{BaseKind, QUADRANT_SIZE, RockKind, hash2};
 
@@ -27,6 +27,9 @@ pub struct Hud;
 pub struct Overlay;
 #[derive(Component)]
 pub struct Legend;
+/// The cargo hold readout under the ship panel.
+#[derive(Component)]
+pub struct CargoHud;
 /// One line of the pickup feed (newest last), a span so each can take its rarity's color.
 #[derive(Component)]
 pub struct FeedLine(usize);
@@ -75,7 +78,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire\nC  camera    P  pause    S  slow motion    R  radar    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    hold M  mine (no fire)\nC  camera    P  pause    S  slow motion    R  radar    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
@@ -137,6 +140,18 @@ pub fn setup(mut commands: Commands) {
             }
         });
     commands.spawn((
+        CargoHud,
+        Text::new(""),
+        TextFont::from_font_size(13.0),
+        TextColor(MUTED),
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(28),
+            top: px(345),
+            ..default()
+        },
+    ));
+    commands.spawn((
         Legend,
         Text::new(""),
         TextFont::from_font_size(12.0),
@@ -151,7 +166,18 @@ pub fn setup(mut commands: Commands) {
     ));
 }
 
-type LegendOnly = (With<Legend>, Without<Hud>, Without<Overlay>);
+type CargoOnly = (
+    With<CargoHud>,
+    Without<Hud>,
+    Without<Overlay>,
+    Without<Legend>,
+);
+type LegendOnly = (
+    With<Legend>,
+    Without<Hud>,
+    Without<Overlay>,
+    Without<CargoHud>,
+);
 
 fn rarity_color(rarity: Rarity) -> Color {
     let [r, g, b] = rarity.color();
@@ -233,8 +259,26 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
     lines
 }
 
+/// One line per material: its letter, a bar to the cap and the count.
+fn cargo_text(game: &Game) -> String {
+    let mut text = String::from("CARGO");
+    for kind in Material::ALL {
+        let filled = (game.cargo.fraction(kind) * 10.0).round() as usize;
+        text.push_str(&format!(
+            "\n{}  [{}{}]  {:3.0}/{:.0}",
+            kind.letter(),
+            "#".repeat(filled),
+            ".".repeat(10 - filled.min(10)),
+            game.cargo.amount(kind),
+            game.cargo.cap(kind),
+        ));
+    }
+    text
+}
+
 pub fn update_hud(
     session: Res<Session>,
+    mut cargo: Single<&mut Text, CargoOnly>,
     mut feed: Query<(&mut TextSpan, &mut TextColor, &FeedLine), Without<RigLine>>,
     mut rig: Query<(&mut TextSpan, &mut TextColor, &RigLine), Without<FeedLine>>,
     mut hud: Single<&mut Text, (With<Hud>, Without<Overlay>)>,
@@ -242,6 +286,10 @@ pub fn update_hud(
     mut legend: Single<&mut Text, LegendOnly>,
 ) {
     let game = &session.game;
+    let hold = cargo_text(game);
+    if cargo.0 != hold {
+        cargo.0 = hold;
+    }
     // Species have no fixed names: list the most common ones nearby, as their genes spell them.
     let mut census: Vec<(u64, String, usize)> = Vec::new();
     for body in game
@@ -768,6 +816,11 @@ pub fn draw(
             shell.with_alpha(0.35 * soon),
         );
     }
+    if let (Some(beam), Some(ship)) = (&game.beam, game.player())
+        && let Some(rock) = game.body(beam.target)
+    {
+        draw_beam(&mut gizmos, game.time, ship, rock, beam);
+    }
     for pickup in game.pickups.iter().filter(|p| {
         (p.position - camera)
             .abs()
@@ -1116,8 +1169,11 @@ fn draw_pickup(gizmos: &mut Gizmos, pickup: &Pickup) {
                 .circle_2d(p, 16.0 * pulse, gold.with_alpha(0.4))
                 .resolution(18);
         }
-        Item::Scrap(_) => {
-            ring(gizmos, 4, 5.0, spin, Color::srgb(0.8, 0.75, 0.5));
+        Item::Material(kind, _) => {
+            let [r, g, b] = kind.color();
+            let tint = Color::srgb(r, g, b);
+            ring(gizmos, 4, 5.5, spin, tint);
+            ring(gizmos, 4, 3.0, -spin, tint.with_alpha(0.6));
         }
         Item::Part(part) => {
             ring(gizmos, 6, 11.0 * pulse, spin * 0.3, rarity);
@@ -1477,5 +1533,47 @@ fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
     }
     if g.social == ssc::genome::Social::Brood && head {
         gizmos.circle_2d(p, r * 0.3, color).resolution(8);
+    }
+}
+
+/// The mining beam: a flickering line from the ship's nose to the rock's face, and a ring
+/// around the rock that fills as it is worked (for crystal, the harvest cycle, turning red
+/// as the burst nears).
+fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Beam) {
+    let [r, g, b] = beam.material.color();
+    let tint = Color::srgb(r, g, b);
+    let direction = Vec2::from_angle(ship.angle);
+    let nose = ship.position + direction * ship.radius * 1.5;
+    let side = Vec2::new(-direction.y, direction.x);
+    let wobble = (time * 40.0).sin() * 2.5;
+    let mid = nose.lerp(beam.end, 0.5) + side * wobble;
+    gizmos.linestrip_2d([nose, mid, beam.end], tint);
+    gizmos.line_2d(nose, beam.end, tint.with_alpha(0.35));
+    // Sparks at the face.
+    for k in 0..3 {
+        let t = time * 9.0 + k as f32 * 2.1;
+        let spark =
+            beam.end + Vec2::from_angle(t.sin() * 2.0 + k as f32) * (4.0 + 5.0 * t.cos().abs());
+        gizmos.line_2d(beam.end, spark, tint.with_alpha(0.8));
+    }
+    let ring_radius = rock.radius + 9.0;
+    let warn = if beam.danger > 0.66 {
+        Color::srgb(1.0, 0.3, 0.25)
+    } else {
+        tint
+    };
+    gizmos
+        .circle_2d(rock.position, ring_radius, tint.with_alpha(0.18))
+        .resolution(40);
+    let steps = (beam.progress.clamp(0.0, 1.0) * 40.0).ceil() as usize;
+    if steps > 0 {
+        let start = std::f32::consts::FRAC_PI_2;
+        gizmos.linestrip_2d(
+            (0..=steps).map(|i| {
+                let t = (i as f32 / 40.0).min(beam.progress.clamp(0.0, 1.0));
+                rock.position + Vec2::from_angle(start - t * std::f32::consts::TAU) * ring_radius
+            }),
+            warn,
+        );
     }
 }

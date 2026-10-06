@@ -24,10 +24,11 @@ pub enum Sound {
     HurtShield,
     HurtHull,
     Latch,
+    Mine,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 15] = [
+    pub const ALL: [Sound; 16] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -43,6 +44,7 @@ impl Sound {
         Sound::HurtShield,
         Sound::HurtHull,
         Sound::Latch,
+        Sound::Mine,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -162,6 +164,16 @@ impl Sound {
                 });
                 lowpass(&mut v, 3200.0);
                 crush(&mut v, 20.0, 3);
+                v
+            }
+            // A soft grinding tick: filtered noise over a low hum, dull enough to repeat for
+            // as long as the beam is held.
+            Sound::Mine => {
+                let mut noise = Noise::new(71);
+                let mut v = voice(0.11, |t, _| {
+                    (noise.next() * 0.55 + sine(150.0, t) * 0.6) * decay(t, 0.05)
+                });
+                lowpass(&mut v, 1500.0);
                 v
             }
             Sound::HurtHull => {

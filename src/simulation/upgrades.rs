@@ -6,6 +6,7 @@
 //! few ingredients yield a wide range of items. `Stats::compute` folds them into what the
 //! simulation reads. Pure data and deterministic rolls; no game state lives here.
 
+use super::Material;
 use crate::genome::{Diet, Genome, Weapon};
 use crate::world::{QuadrantParams, Rng};
 
@@ -713,7 +714,8 @@ pub enum Item {
     /// Shield points restored at once.
     Recharge(f32),
     Life,
-    Scrap(u32),
+    /// Raw material for the ship's cargo hold (and a small score bonus of about its amount).
+    Material(Material, f32),
     Part(Part),
     Surge(Surge),
 }
@@ -733,7 +735,7 @@ impl Item {
             Self::Repair(_) => "Hull repair".into(),
             Self::Recharge(_) => "Shield charge".into(),
             Self::Life => "Extra life".into(),
-            Self::Scrap(points) => format!("Salvage +{points}"),
+            Self::Material(kind, amount) => format!("{} +{amount:.0}", kind.label()),
             Self::Part(p) => p.name.clone(),
             Self::Surge(s) => s.name.clone(),
         }
@@ -1207,7 +1209,18 @@ pub fn roll_item(rng: &mut Rng, source: &Source) -> Item {
         1 => Item::Recharge(20.0 + 20.0 * source.grade.sqrt() * rng.range(0.8, 1.2)),
         2 => Item::Surge(roll_surge(rng, source)),
         3 => Item::Part(roll_part(rng, source)),
-        4 => Item::Scrap((40.0 * source.grade * rng.range(0.8, 1.4)) as u32 / 5 * 5),
+        4 => {
+            // The same single draw picks the amount and, through its low digits, the kind of
+            // material, so existing loot streams keep their shape.
+            let roll = rng.range(0.8, 1.4);
+            let amount = ((15.0 * source.grade * roll) as u32 / 5 * 5).max(5) as f32;
+            let kind = match (roll * 97.0).fract() {
+                f if f < 0.5 => Material::Metal,
+                f if f < 0.75 => Material::Volatiles,
+                _ => Material::Crystal,
+            };
+            Item::Material(kind, amount)
+        }
         _ => Item::Life,
     }
 }
@@ -1217,7 +1230,10 @@ pub fn roll_salvage(rng: &mut Rng, source: &Source) -> Item {
     match pick(rng, &[1.0, 1.0, 1.0]) {
         0 => Item::Repair(10.0 + 8.0 * source.grade),
         1 => Item::Recharge(14.0 + 8.0 * source.grade),
-        _ => Item::Scrap(25),
+        _ => Item::Material(
+            Material::Metal,
+            ((10.0 * source.grade) as u32 / 5 * 5).max(10) as f32,
+        ),
     }
 }
 

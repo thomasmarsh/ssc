@@ -15,7 +15,7 @@ use bevy::{
     window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode},
 };
 use ssc::simulation::upgrades::{self, Item, Source};
-use ssc::simulation::{Game, Input};
+use ssc::simulation::{Game, Input, Material};
 use ssc::world::{QUADRANT_SIZE, Rng};
 
 /// Left stick deadzone for thrust; the right stick aims and fires past a larger push.
@@ -254,7 +254,7 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyC) {
         session.camera_view = session.camera_view.next();
     }
-    if keys.just_pressed(KeyCode::KeyM) {
+    if keys.just_pressed(KeyCode::KeyN) {
         audio.muted = !audio.muted;
     }
     if keys.just_pressed(KeyCode::KeyV) {
@@ -287,6 +287,7 @@ fn controls(
     let mut stick_move = None;
     let mut stick_aim = None;
     let mut pad_brake = false;
+    let mut pad_mine = false;
     for pad in &gamepads {
         let left = pad.left_stick();
         if left.length() > STICK_DEADZONE {
@@ -297,6 +298,8 @@ fn controls(
             stick_aim = Some(right);
         }
         pad_brake |= pad.pressed(GamepadButton::LeftTrigger2) || pad.pressed(GamepadButton::South);
+        // The right bumper holds the mining beam (the right stick aims it; the guns go quiet).
+        pad_mine |= pad.pressed(GamepadButton::RightTrigger);
     }
     let pad_fire = stick_aim.is_some();
     session.input = Input {
@@ -312,6 +315,7 @@ fn controls(
             || keys.pressed(KeyCode::Space)
             || mouse.pressed(MouseButton::Left)
             || pad_fire,
+        mine: keys.pressed(KeyCode::KeyM) || pad_mine,
         aim_direction: stick_aim.or(aim_direction),
         move_direction: stick_move,
     };
@@ -428,6 +432,29 @@ fn smoke_run(
     {
         arm_for_smoke(&mut session.game, grade);
     }
+    // SSC_MINE=1: hold the mining beam on the nearest free rock (aimed at it each frame).
+    if std::env::var_os("SSC_MINE").is_some() && run.frames > 2 {
+        let ship = session.game.player().map(|p| p.position);
+        let rock = session
+            .game
+            .bodies
+            .iter()
+            .filter(|b| b.kind == ssc::simulation::BodyKind::Asteroid && !b.pinned)
+            .min_by(|a, b| {
+                let at = ship.unwrap_or(Vec2::ZERO);
+                at.distance(a.position).total_cmp(&at.distance(b.position))
+            })
+            .map(|b| (b.position, b.radius));
+        if let (Some(at), Some((rock, radius))) = (ship, rock) {
+            let toward = (rock - at).normalize_or_zero();
+            if at.distance(rock) > radius + 150.0 {
+                session.game.teleport(rock - toward * (radius + 150.0));
+            }
+            session.input.mine = true;
+            session.input.fire = false;
+            session.input.aim_direction = Some(toward);
+        }
+    }
     run.frames += 1;
     if run.frames < limit || run.requested {
         return;
@@ -462,7 +489,9 @@ fn arm_for_smoke(game: &mut Game, grade: f32) {
         Item::Repair(30.0),
         Item::Recharge(30.0),
         Item::Life,
-        Item::Scrap(50),
+        Item::Material(Material::Metal, 50.0),
+        Item::Material(Material::Volatiles, 30.0),
+        Item::Material(Material::Crystal, 20.0),
         Item::Part(upgrades::roll_part(&mut rng, &source)),
         Item::Part(upgrades::roll_part(&mut rng, &source)),
         Item::Surge(upgrades::roll_surge(&mut rng, &source)),

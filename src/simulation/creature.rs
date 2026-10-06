@@ -268,6 +268,7 @@ impl Game {
             let by_distance = g.trigger != Trigger::Harm
                 && player_distance < if body.alert { lose } else { sight };
             let provoked = (g.trigger != Trigger::Sight && is_hurt(body))
+                || body.provoked > 0.0
                 || (body.enraged && player_distance < RAGE_PURSUIT_RANGE);
             body.alert = by_distance || warned || provoked || posture.rallied;
             if body.panic > 0.0 {
