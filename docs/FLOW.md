@@ -296,3 +296,32 @@ The order is chosen so each step makes the next one legible and the whole is shi
 ## 11. Top five ideas
 
 From this document: (1) the geometric HUD of rings, pips and arcs that replaces the text wall; (2) one interact key with docking assist and auto repair; (3) a core loop built on a single next-lure marker and a free ping on arrival; (4) a shake, hit-stop and chain budget that gives feel without noise; (5) the Tow Rig, a one-button asteroid weapon that composes with thrust, rotation and dash.
+
+## 12. Status: what the P0 pass built
+
+Written after the pass; the sections above stay as the review. Everything here is in the README's controls table and in [UNIVERSE.md](UNIVERSE.md#hud-input-and-feel-built).
+
+**Built (P0 and a little more)**
+
+- **Geometric HUD (section 4).** Hull ring (ten segments, green, amber, red) inside a cyan shield arc around the ship; a bottom cluster with the weapon (icon, fuel arc in the material's color, level dots, a tick per owned profile, the name only as a toast on a switch), parry, dash and ping rings (locked, cooling with a fill and the seconds, ready, active, dashed red when the shield cannot pay, a NEW tag until first use) and three cargo bars with small numbers; five threat pips top left; score, chain bar and lives top right; region and sector at the top, fading to a quiet tag after six seconds; a standing meter (tier icon, bar with tier ticks) inside a civilization's land; the nearest-civilization line and arrow under the region; the apex crown and hull bar. Notices are toasts. The six latent percentages, SHIP POWER and THREAT, the ship panel, territory and wildlife detail text moved behind hold `Tab` (the radar comes with it) or `F3`. The long legend is a context line of at most five keys plus a full list on `F1`.
+- **One interact key (P0 item 2).** `E` (B or Select) lands, builds a kit and deploys a pad, opens and closes the bench, tithes, with a keycap prompt over the ship that says which, or why not. `O`, `L` and `K` are gone. The beacon stays on `H` (it is a deliberate, paid act, and `E` near nothing should never spend crystal); on the star map `H` or `E` deploys.
+- **Auto repair (item 3), boosts always on (item 4), insurance fixed (item 5).** Hull mends from metal after three quiet seconds; the shield mends this way only below half and with more than 25 volatiles left (they are fuel, and the shield recharges on its own). The settings screen has switches for repair and boosts for tinkerers. `R`, `B`, `I` are retired.
+- **Rendering and window keys out of play (item 6).** `V`, `C`, `U`, `N`, `T`, `S` and `F11` live on the settings screen (`Esc`, Start on a pad), which also resumes, restarts and quits. Radar defaults to off and shows with the details (item 8).
+- **Bench and map keys (item 7).** At the bench, arrows pick a row and a tab and Enter does the thing (`[` `]` `F` retired); `Q` still takes from the stash. The star map keeps its own keys (`[` `]` pick a note, `F` pins); cutting the notes (item 9) is not done.
+- **Feedback (section 7).** Screen shake with the budget (per-source caps, one total, six a second, none from firing, mining or pickups, off under reduce effects); hit stops of 0.03 s for big kills and hull hits of 20 or more, at most one per half second with the parry's included; a white tick where the ship's shot hurts something; a ring and a floating score on a kill; a red arc on the shield ring where a hit came from and a red frame on a low hull; a ring out from the ship for a bench purchase; the chain bar (kills, grazes and perfect parries, x3 at most, score only).
+- **Core loop (section 5).** A free ping on the first visit to each sector (coalesced) feeds one gold next-lure marker (lode, then civilization, then planetoid, then apex, with distance), a diamond on the target or on the screen edge with kind and distance.
+
+**Not built yet (still as written above)**
+
+- Docking assist (a press within 400 units eases the ship in): landing still needs speed under 80 within 80 units, and the prompt says "DOCK SLOW DOWN" when it will refuse.
+- The guided first ten minutes beyond the free ping and the lure, and "BEST BUY" at the bench.
+- The purchase show proper (the part plugging into the ship graphic, the one-line change "DASH 240 to 270"); today a ring and the notice. Pickups flying to the ship along a curve, the low-hull heartbeat cue, the respawn-grace shell and an auto-zooming camera.
+- Everything in P1 and P2: three-tab bench, ten skills, resource roles, trophy gating, lode fatigue, the Tow Rig, a single star-map pin, specimen log, controller-first map.
+
+**Judgement calls worth a look when playing**
+
+- Radar off by default is a real loss for some players; the threat pips and edge arrows are the replacement. Flip it in the settings if it hurts.
+- The auto repair delay (3 s), the shield threshold (50 percent) and the volatile reserve (25) are guesses in `tuning.rs`.
+- The chain multiplies score only, so the existing kill test that expected a flat bounty now expects a chain after the second kill in a window.
+- Enter restarts only after the last ship is lost; mid-run restart is in the settings so a stray Enter at the bench cannot end a run.
+- Narrow windows (under about 700 pixels wide) drop trailing items from the hint line and wrap the details into scrolling rows; very small windows are not a target.

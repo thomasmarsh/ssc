@@ -717,31 +717,24 @@ fn prompt_text(prompt: &ssc::simulation::interact::Prompt) -> String {
 fn ability_icon(g: &mut Gizmos, s: &Screen, ability: Ability, c: Vec2, color: Color) {
     match ability {
         Ability::Parry => {
-            // A forward shield arc with its two ticks.
-            arc(
-                g,
-                s,
-                c + Vec2::new(0.0, 4.0),
-                9.0,
-                FRAC_PI_2 - 1.0,
-                FRAC_PI_2 + 1.0,
+            // A shield: flat top, pointed foot, and a forward arc over it.
+            g.linestrip_2d(
+                [
+                    s.v(c + Vec2::new(-6.5, -6.0)),
+                    s.v(c + Vec2::new(6.5, -6.0)),
+                    s.v(c + Vec2::new(6.5, 1.5)),
+                    s.v(c + Vec2::new(0.0, 8.5)),
+                    s.v(c + Vec2::new(-6.5, 1.5)),
+                    s.v(c + Vec2::new(-6.5, -6.0)),
+                ],
                 color,
-            );
-            arc(
-                g,
-                s,
-                c + Vec2::new(0.0, 4.0),
-                6.0,
-                FRAC_PI_2 - 0.9,
-                FRAC_PI_2 + 0.9,
-                color.with_alpha(0.5),
             );
             line(
                 g,
                 s,
-                c + Vec2::new(0.0, 4.0),
-                c + Vec2::new(0.0, 8.0),
-                color,
+                c + Vec2::new(0.0, -6.0),
+                c + Vec2::new(0.0, 5.5),
+                color.with_alpha(0.55),
             );
         }
         Ability::Dash => {
