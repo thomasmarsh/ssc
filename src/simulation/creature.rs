@@ -3,6 +3,7 @@
 //! one kind of enemy are now genes (sight, standoff, rage, fire period, ...).
 
 use super::civ as civil;
+use super::wildlife::Mode;
 use super::*;
 use crate::genome::{Diet, Fear, Social, Trigger, Weapon};
 
@@ -152,6 +153,7 @@ impl Game {
             Vec::new()
         };
         let civs = self.civ_snapshot();
+        let pulls = self.fauna_pulls();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if body.kind != BodyKind::Creature {
                 continue;
@@ -192,6 +194,7 @@ impl Game {
             let seeking = body.wants_host();
             let mut prey: Option<(f32, Vec2)> = None;
             let civ = self.civ_lineages.get(&body.species).copied();
+            let pull = pulls.get(&body.id).copied();
             let mut civil_near: Option<(f32, Vec2)> = None;
             let hunting = body.hunts_prey();
             let prey_sight = (g.sight * phenotype.sensor_acuity).clamp(250.0, 900.0);
@@ -245,6 +248,7 @@ impl Game {
                 }
                 if other.civil
                     && civ.is_none()
+                    && pull.is_none()
                     && distance_squared < civil::SHOO_RANGE * civil::SHOO_RANGE
                     && civil_near.is_none_or(|(best, _)| distance_squared < best)
                 {
@@ -288,7 +292,10 @@ impl Game {
                 && player_distance < if body.alert && !hidden { lose } else { sight };
             let provoked = (g.trigger != Trigger::Sight && is_hurt(body))
                 || body.provoked > 0.0
-                || (body.enraged && player_distance < RAGE_PURSUIT_RANGE);
+                || (body.enraged
+                    && player_distance < RAGE_PURSUIT_RANGE
+                    // A calm civilization's person hurt by wildlife is not enraged at the ship.
+                    && (!posture.calm || self.civ_struck.contains_key(&body.id)));
             body.alert = by_distance || (warned && !posture.calm) || provoked || posture.rallied;
             if hidden_long {
                 // Out of sight long enough: only a harm done to it keeps a creature on the hunt.
@@ -454,6 +461,26 @@ impl Game {
             if let Some((_, toward)) = civil_near {
                 desired -= toward.normalize_or_zero() * cruise * 1.6;
             }
+            // Hostile wildlife sets upon what it hates, a civilization's idle people go after
+            // it, and friendly wildlife drifts in to the settlement (see `wildlife`).
+            let mut striking = false;
+            if let Some(p) = pull {
+                match p.mode {
+                    Mode::Attack | Mode::Defend if !body.alert => {
+                        let pace = if p.mode == Mode::Attack {
+                            tuning::ATTACK_PACE
+                        } else {
+                            tuning::DEFEND_PACE
+                        };
+                        desired += p.toward.normalize_or_zero() * speed * pace;
+                        striking = true;
+                    }
+                    Mode::Herd if p.distance > tuning::HERD_RING => {
+                        desired += p.toward.normalize_or_zero() * cruise * tuning::HERD_PULL;
+                    }
+                    _ => {}
+                }
+            }
             if let (Diet::Rocks, Some((_, toward)), false) = (g.diet, meal, body.alert) {
                 desired += toward.normalize_or_zero() * cruise * 1.2;
             }
@@ -482,6 +509,8 @@ impl Game {
                 speed
             } else if chasing {
                 (cruise * 1.4).max(speed * 0.7)
+            } else if striking {
+                speed
             } else {
                 cruise * 1.4
             };

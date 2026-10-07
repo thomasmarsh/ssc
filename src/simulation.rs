@@ -39,6 +39,7 @@ mod titles;
 pub mod tuning;
 pub mod upgrades;
 mod weapons;
+mod wildlife;
 
 pub use apexes::{ApexInfo, ApexReport};
 pub use brain::Brain;
@@ -419,6 +420,8 @@ pub struct Game {
     civ_regard: BTreeMap<u64, Regard>,
     civ_hits: Vec<(u64, f32)>,
     civ_struck: HashMap<u64, f32>,
+    /// Wildlife stances toward civilizations; see `wildlife`.
+    fauna: wildlife::Fauna,
     civ_clock: f32,
     civ_rng: Rng,
     /// Apex elders generated in the sectors met, and which have been announced; see `apexes`.
@@ -523,6 +526,7 @@ impl Game {
             civ_regard: BTreeMap::new(),
             civ_hits: Vec::new(),
             civ_struck: HashMap::new(),
+            fauna: wildlife::Fauna::default(),
             apexes: BTreeMap::new(),
             apex_seen: HashSet::new(),
             apex_state: HashMap::new(),
@@ -676,6 +680,7 @@ impl Game {
                 }
             }
         }
+        self.update_wildlife(dt);
         self.steer_creatures(dt);
         self.update_civ_mining(dt);
         self.update_roots(dt);

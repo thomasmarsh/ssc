@@ -365,3 +365,47 @@ pub const TITLE_RECKLESS_DEATHS: u32 = 3;
 pub const TITLE_RECKLESS_SECONDS: f32 = 360.0;
 pub const TITLE_HERMIT_MINED: f32 = 300.0;
 pub const TITLE_HERMIT_KILLS: u32 = 10;
+
+// ---- wildlife and civilizations ------------------------------------------------------------
+
+/// How each species regards each civilization is `affinity` (pure, -1 hostile to 1 friendly; its
+/// own numbers live in `src/affinity.rs`). The simulation re-reads who is near whom every
+/// `FAUNA_PERIOD` seconds. Wildlife nearer than `HOSTILE_REACH` to a civil body it is hostile
+/// to sets upon it; a friendly species within `FRIEND_RANGE` drifts toward the settlement and
+/// holds at `HERD_RING` (pull as a multiple of its cruise speed).
+pub const FAUNA_PERIOD: f32 = 0.25;
+pub const HOSTILE_REACH: f32 = 1100.0;
+pub const FRIEND_RANGE: f32 = 1600.0;
+pub const HERD_RING: f32 = 480.0;
+pub const HERD_PULL: f32 = 1.8;
+/// Pressure limits: at most `MAX_ATTACKERS` wildlife on one civil body and `MAX_ASSAULT` on one
+/// civilization at once (`MAX_ASSAULT_PEACEFUL` on a settlement), whatever is hostile nearby.
+pub const MAX_ATTACKERS: usize = 3;
+pub const MAX_ASSAULT: usize = 8;
+pub const MAX_ASSAULT_PEACEFUL: usize = 3;
+/// A bite: `FAUNA_BITE` plus `FAUNA_BITE_PER_CONTACT` per point of the genome's contact damage
+/// (times the attacker's threat), every `FAUNA_BITE_PERIOD` seconds, within `FAUNA_BITE_REACH`
+/// of the other's rim. A structure takes `FAUNA_STRUCTURE_SCALE` of it, a settlement's people
+/// and works only `FAUNA_PEACEFUL_SCALE` more. Wildlife never destroys a structure or an elder
+/// (their fall is the ship's doing): they bottom out at `FAUNA_STRUCTURE_FLOOR` of their hull.
+pub const FAUNA_BITE: f32 = 5.0;
+pub const FAUNA_BITE_PER_CONTACT: f32 = 0.5;
+pub const FAUNA_BITE_PERIOD: f32 = 0.9;
+pub const FAUNA_BITE_REACH: f32 = 45.0;
+pub const FAUNA_STRUCTURE_SCALE: f32 = 0.35;
+pub const FAUNA_PEACEFUL_SCALE: f32 = 0.4;
+pub const FAUNA_STRUCTURE_FLOOR: f32 = 0.4;
+/// Pace of a hostile on the attack (of its full speed) and of a defender on the hunt.
+pub const ATTACK_PACE: f32 = 0.9;
+pub const DEFEND_PACE: f32 = 0.8;
+/// A civilization's idle people hunt hostile wildlife within `DEFEND_RANGE` of themselves and
+/// `DEFEND_LEASH` of their post. An armed one strikes from `DEFEND_REACH_SHARE` of its weapon
+/// range (an unarmed one at the rim), for `STRIKE_DAMAGE` (times its threat) at most every
+/// fire period and `STRIKE_PERIOD_MIN`. A fortress turret reaches `TURRET_DEFEND_RANGE`.
+pub const DEFEND_RANGE: f32 = 1000.0;
+pub const DEFEND_LEASH: f32 = 1500.0;
+pub const DEFEND_REACH_SHARE: f32 = 0.6;
+pub const STRIKE_DAMAGE: f32 = 9.0;
+pub const STRIKE_PERIOD_MIN: f32 = 0.8;
+pub const TURRET_DEFEND_RANGE: f32 = 950.0;
+pub const TURRET_STRIKE: f32 = 16.0;
