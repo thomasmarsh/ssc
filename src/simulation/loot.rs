@@ -284,6 +284,14 @@ impl Game {
                     let source = Source::of_creature(genome, body.genes.threat, params);
                     drops.push(upgrades::roll_item(&mut rng, &source));
                 }
+                // A carrier of a rare power is worth a little more: one extra, slightly
+                // luckier roll (drawn last, so every other drop of this body is unchanged).
+                if self.carrier_bonus(body).is_some() && rng.chance(crate::power::EXTRA_DROP_CHANCE)
+                {
+                    let mut source = Source::of_creature(genome, body.genes.threat, params);
+                    source.bias = crate::power::EXTRA_DROP_LUCK;
+                    drops.push(upgrades::roll_item(&mut rng, &source));
+                }
             }
             BodyKind::Asteroid if !body.pinned && body.radius >= 30.0 => {
                 let grade = world::threat(params.depth);

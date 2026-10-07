@@ -443,11 +443,16 @@ impl Map {
                     s.favourite.index(),
                     s.power.map_or(String::new(), |c| {
                         format!(
-                            "{} ({} {:.2}, {})",
+                            "{} ({} {:.2}, {}{})",
                             c.power.creature(),
                             c.power.gene(),
                             c.strength,
-                            c.power.tier().label()
+                            c.power.tier().label(),
+                            if c.power.built() {
+                                ""
+                            } else {
+                                ", not awake yet"
+                            }
                         )
                     }),
                 ));

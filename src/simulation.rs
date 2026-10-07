@@ -33,6 +33,7 @@ mod mining;
 mod pads;
 mod parry;
 mod ping;
+mod powers;
 mod regions;
 mod regrow;
 mod root;
@@ -70,6 +71,7 @@ pub use pads::{
     Pad, PadHint, PadKey, PadState, STASH_CAP, price_text,
 };
 pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RANGE, RING_SPEED};
+pub use powers::{BlinkTell, PowerView};
 pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
@@ -276,6 +278,8 @@ pub struct Body {
     brood_timer: f32,
     /// Gravity wells made by the generator: the genome and the pose that moves them.
     pub well: Option<WellRun>,
+    /// Intangible this step (a phasing creature's other half): see `powers`.
+    pub phased: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -298,6 +302,8 @@ pub struct Bullet {
     pub burst: f32,
     /// A friendly shot that reaches it destroys it (missiles).
     pub fragile: bool,
+    /// The share of a hostile shot's damage that skips the ship's shield (a hullpick's bolt).
+    pub pith: f32,
     /// Bodies already pierced, so a shot inside one does not strike it every tick.
     struck: [u64; 4],
     /// Already tested against the parry shield (it rolls once per shot).
@@ -320,6 +326,7 @@ impl Bullet {
             seek: 0.0,
             burst: 0.0,
             fragile: false,
+            pith: 0.0,
             struck: [0; 4],
             parried: false,
         }
@@ -440,6 +447,7 @@ pub struct Game {
     apexes: BTreeMap<(SectorId, u32), ApexInfo>,
     apex_seen: HashSet<(SectorId, u32)>,
     apex_state: HashMap<u64, apexes::ApexState>,
+    power_state: HashMap<u64, powers::PowerState>,
     apex_rng: Rng,
     seed: u64,
     rng: Rng,
@@ -548,6 +556,7 @@ impl Game {
             apexes: BTreeMap::new(),
             apex_seen: HashSet::new(),
             apex_state: HashMap::new(),
+            power_state: HashMap::new(),
             apex_rng: Rng::new(seed ^ crate::apex::APEX_SALT),
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
@@ -725,6 +734,7 @@ impl Game {
         self.update_tethers(dt);
         self.update_chains(dt);
         self.update_apexes(dt);
+        self.update_powers(dt);
         self.fire_weapons();
         self.cue_new_shots(in_flight);
         self.update_wells(dt);
@@ -1218,6 +1228,10 @@ impl Game {
                 if a.chain.is_some() && a.chain == b.chain {
                     continue;
                 }
+                // A phased body is a rumour: nothing touches it and it touches nothing.
+                if a.phased || b.phased {
+                    continue;
+                }
                 if clings(a, b) {
                     continue;
                 }
@@ -1343,11 +1357,15 @@ impl Game {
         let boost = self.damage_boost();
         let dashing = self.dashing();
         let mut grazes = Vec::new();
+        // Where a hullpick's bolt reached the ship's hull (a dull tick, not a chirp).
+        let mut piths: Vec<Vec2> = Vec::new();
         // Seekers home on hostile creatures and bases; gather them only if any are in flight.
         let targets: Vec<Vec2> = if self.bullets.iter().any(|b| b.friendly && b.homing > 0) {
             self.bodies
                 .iter()
-                .filter(|b| b.active && matches!(b.kind, BodyKind::Creature | BodyKind::Base))
+                .filter(|b| {
+                    b.active && !b.phased && matches!(b.kind, BodyKind::Creature | BodyKind::Base)
+                })
                 .map(|b| b.position)
                 .collect()
         } else {
@@ -1371,7 +1389,7 @@ impl Game {
             let mut hit: Option<(usize, f32)> = None;
             for (index, body) in self.bodies.iter().enumerate().filter(|(_, b)| b.active) {
                 let target = if bullet.friendly {
-                    body.kind != BodyKind::Player
+                    body.kind != BodyKind::Player && !body.phased
                 } else {
                     matches!(
                         body.kind,
@@ -1444,7 +1462,7 @@ impl Game {
                 let dealt = if !bullet.friendly && body.rock == RockKind::Wall {
                     0.0
                 } else {
-                    damage(
+                    damage_bypassing(
                         body,
                         armored(
                             body,
@@ -1457,8 +1475,16 @@ impl Game {
                             bullet.friendly,
                         ),
                         self.player_invulnerability,
+                        if bullet.friendly { 0.0 } else { bullet.pith },
                     )
                 };
+                if !bullet.friendly
+                    && bullet.pith > 0.0
+                    && dealt > 0.0
+                    && body.kind == BodyKind::Player
+                {
+                    piths.push(previous.lerp(bullet.position, fraction));
+                }
                 if bullet.friendly && matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                     self.run.damage_dealt += dealt;
                 }
@@ -1562,6 +1588,9 @@ impl Game {
         for at in grazes {
             self.dash_graze(at);
         }
+        for at in piths {
+            self.cue(Cue::Pith { at });
+        }
         let invulnerability = self.player_invulnerability;
         for (at, radius, amount, direct, friendly) in blasts {
             for body in self
@@ -1572,7 +1601,7 @@ impl Game {
                 if body.position.distance(at) >= radius + body.radius {
                     continue;
                 }
-                if friendly && body.kind != BodyKind::Player {
+                if friendly && body.kind != BodyKind::Player && !body.phased {
                     let dealt = damage(body, armored(body, amount * boost, true), 0.0);
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
@@ -1621,7 +1650,11 @@ impl Game {
                 .as_ref()
                 .is_some_and(|b| b.kind == BaseKind::Turret);
             let bounty = match kind {
-                BodyKind::Creature => (body.genome.bounty * body.genes.threat) as u64,
+                BodyKind::Creature => {
+                    (body.genome.bounty
+                        * body.genes.threat
+                        * self.carrier_bonus(body).unwrap_or(1.0)) as u64
+                }
                 BodyKind::Asteroid if body.rock == RockKind::Wall => 0,
                 BodyKind::Asteroid => 25,
                 BodyKind::Base if turret => (60.0 * body.genes.threat) as u64,
@@ -1808,6 +1841,7 @@ impl Game {
             provoked: 0.0,
             brood_timer: 0.0,
             well: None,
+            phased: false,
         }
     }
 
@@ -1937,6 +1971,11 @@ fn armored(body: &Body, amount: f32, friendly: bool) -> f32 {
 }
 
 fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) -> f32 {
+    damage_bypassing(body, amount, player_invulnerability, 0.0)
+}
+
+/// `damage` where a share of it (`bypass`, 0 to 1) skips the shield and goes straight to hull.
+fn damage_bypassing(body: &mut Body, amount: f32, player_invulnerability: f32, bypass: f32) -> f32 {
     if body.kind == BodyKind::BlackHole
         || body.rock == RockKind::Planetoid
         || (body.kind == BodyKind::Player && player_invulnerability > 0.0)
@@ -1951,7 +1990,7 @@ fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) -> f32 {
         BodyKind::Base => amount / body.genes.threat.max(1.0).sqrt(),
         _ => amount,
     };
-    let absorbed = body.shield.min(amount);
+    let absorbed = body.shield.min(amount * (1.0 - bypass.clamp(0.0, 1.0)));
     body.shield -= absorbed;
     body.health -= amount - absorbed;
     body.since_hit = 0.0;

@@ -41,10 +41,16 @@ pub enum Sound {
     PerfectParry,
     /// Dashing through fire: a quick rising zip.
     Graze,
+    /// A blinker announcing where it will land: two quick rising notes.
+    Blink,
+    /// A phased creature about to turn solid: a rising chime.
+    PhaseSolid,
+    /// A hullpick's bolt reaching the hull: a dull tick, unlike the shield's chirp.
+    Pith,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 29] = [
+    pub const ALL: [Sound; 32] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -74,6 +80,9 @@ impl Sound {
         Sound::Dash,
         Sound::PerfectParry,
         Sound::Graze,
+        Sound::Blink,
+        Sound::PhaseSolid,
+        Sound::Pith,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -332,6 +341,35 @@ impl Sound {
                     (tri(f, t) * 0.6 + sine(f * 2.0, t) * 0.2) * decay(t, 0.06)
                 });
                 lowpass(&mut v, 5000.0);
+                v
+            }
+            Sound::Blink => {
+                let mut v = voice(0.26, |t, _| {
+                    let second = t >= 0.11;
+                    let local = if second { t - 0.11 } else { t };
+                    let f = if second { 1760.0 } else { 1175.0 };
+                    (sine(f, t) * 0.7 + tri(f * 2.0, t) * 0.2) * decay(local, 0.07)
+                });
+                lowpass(&mut v, 5200.0);
+                v
+            }
+            Sound::PhaseSolid => {
+                let mut v = voice(0.42, |t, _| {
+                    let rise = (t / 0.4).min(1.0);
+                    let f = sweep(rise, 330.0, 990.0);
+                    let swell = (rise * std::f32::consts::PI * 0.5).sin();
+                    (sine(f, t) * 0.6 + sine(f * 1.5, t) * 0.25) * swell * decay(t, 0.5)
+                });
+                lowpass(&mut v, 4200.0);
+                v
+            }
+            // A dull tick of low noise: it lands on hull, not on shield.
+            Sound::Pith => {
+                let mut noise = Noise::new(113);
+                let mut v = voice(0.09, |t, _| {
+                    (noise.next() * 0.5 + square(130.0, t) * 0.6) * decay(t, 0.03)
+                });
+                lowpass(&mut v, 900.0);
                 v
             }
             // A short airy whoosh: filtered noise that sweeps up and fades.

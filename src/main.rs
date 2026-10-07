@@ -2,6 +2,7 @@ mod audio;
 mod hud;
 mod juice;
 mod nebula;
+mod powerview;
 mod presentation;
 mod settings;
 mod wellview;
@@ -826,6 +827,40 @@ fn smoke_run(
             .and_then(|v| v.trim().parse::<f32>().ok())
     {
         session.game.time = time;
+    }
+    // SSC_SPECIMEN=skipjack|veilwing|hullpick: three specimens of a rare power, a few hundred
+    // units from the ship (use with SSC_TELEPORT somewhere past ring 3).
+    if run.frames == 0
+        && let Ok(name) = std::env::var("SSC_SPECIMEN")
+    {
+        use ssc::genome::{Genome, Species};
+        let genome = match name.as_str() {
+            "skipjack" => Genome::skipjack(),
+            "veilwing" => Genome::veilwing(),
+            "hullpick" => Genome::hullpick(),
+            _ => Genome::default(),
+        };
+        let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
+        for k in 0..3 {
+            let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (420.0 + 90.0 * k as f32);
+            session.game.place_creature(&Species::of(genome), at);
+        }
+    }
+    // SSC_SPECIMEN_TELL=1: just before the screenshot, run the game until a blink is announced.
+    if run.frames + 3 == limit && std::env::var_os("SSC_SPECIMEN_TELL").is_some() {
+        for _ in 0..4000 {
+            session.game.step(0.02, ssc::simulation::Input::default());
+            let told = session.game.bodies.iter().any(|b| {
+                session
+                    .game
+                    .power_view(b)
+                    .blink
+                    .is_some_and(|t| t.progress() > 0.5)
+            });
+            if told {
+                break;
+            }
+        }
     }
     // SSC_OUTPOST=1: start at the early outpost's capital (standing meter, tithe seat).
     if run.frames == 0 && std::env::var_os("SSC_OUTPOST").is_some() {

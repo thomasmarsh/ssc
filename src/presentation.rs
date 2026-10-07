@@ -2186,7 +2186,19 @@ pub fn draw(
                 }
             }
             BodyKind::Creature => {
-                draw_creature(&mut gizmos, game.time, body, color);
+                draw_creature(
+                    &mut gizmos,
+                    game.time,
+                    body,
+                    crate::powerview::outline(game, body, color),
+                );
+                if let Some(back) = crate::powerview::afterimage(body) {
+                    // A phased body trails a ghost of itself.
+                    let mut ghost = body.clone();
+                    ghost.position += back;
+                    draw_creature(&mut gizmos, game.time, &ghost, color.with_alpha(0.1));
+                }
+                crate::powerview::draw(&mut gizmos, game, body);
                 if !body.follower
                     && let Some([cr, cg, cb]) = game.civ_tint(body)
                 {
@@ -2474,6 +2486,9 @@ pub fn draw(
             } else {
                 CYAN
             }
+        } else if bullet.pith > 0.0 {
+            // A hullpick's bolt: violet, the colour of the spine that fired it.
+            Color::srgb(0.85, 0.35, 1.0)
         } else {
             Color::srgb(1.0, 0.3, 0.37)
         };

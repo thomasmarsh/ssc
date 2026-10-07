@@ -115,6 +115,7 @@ impl Game {
                         reach: TURRET_REACH,
                         shot_speed: SHOT_SPEED,
                         sharpness: genes.sharpness(),
+                        pith: 0.0,
                     };
                     let spin = self.discharge(weapon, volley, &muzzle, spin);
                     self.bodies[index].spin = spin;

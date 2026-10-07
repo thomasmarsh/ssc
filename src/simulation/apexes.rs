@@ -57,11 +57,9 @@ const CHARGE_RANGE: (f32, f32) = (350.0, 1500.0);
 /// Queen: seconds between escorts (calm, enraged) and the most alive at once.
 const ESCORT_EVERY: (f32, f32) = (5.5, 3.0);
 const ESCORT_CAP: (usize, usize) = (4, 7);
-/// Phantom: seconds between blinks (calm, enraged), the ring around the ship it lands in,
-/// and the nearest it will blink from.
-const BLINK_EVERY: (f32, f32) = (3.4, 1.9);
-const BLINK_RING: (f32, f32) = (340.0, 520.0);
-const BLINK_FROM: f32 = 220.0;
+/// Phantom: a phase change shortens its blink period by this factor (3.4 s to 1.9 s). The
+/// blink itself is the `blink` gene (see `powers`); the apex only sets its values.
+const ENRAGE_BLINK: f32 = 1.9 / 3.4;
 /// Maelstrom: seconds between pulls (calm, enraged), a pull's length, its acceleration on the
 /// ship and the range it reaches.
 const PULL_EVERY: (f32, f32) = (8.0, 5.0);
@@ -194,13 +192,16 @@ impl Game {
                     self.juggernaut(index, &mut state, dt, to_ship, alert, enraged);
                 }
                 Archetype::Queen => self.queen(index, &mut state, alert, enraged),
-                Archetype::Phantom => self.phantom(index, &mut state, ship.0, alert, enraged),
                 Archetype::Maelstrom => {
                     self.maelstrom(index, &mut state, dt, distance, alert, enraged);
                 }
-                // The rest is in the genes: cords, the pack's perfect lead, the spiral, and the
-                // bulwark's plates (see `guard`).
-                Archetype::Lasher | Archetype::Bulwark | Archetype::Hunter | Archetype::Warden => {}
+                // The rest is in the genes: cords, the pack's perfect lead, the spiral, the
+                // phantom's blink (see `powers`), and the bulwark's plates (see `guard`).
+                Archetype::Phantom
+                | Archetype::Lasher
+                | Archetype::Bulwark
+                | Archetype::Hunter
+                | Archetype::Warden => {}
             }
             self.apex_state.insert(id, state);
         }
@@ -220,6 +221,9 @@ impl Game {
         g.cruise *= ENRAGE_SPEED;
         g.fire_period *= ENRAGE_FIRE;
         g.contact_damage *= ENRAGE_STING;
+        if crate::power::Power::Blink.active(g) {
+            g.power_period *= ENRAGE_BLINK;
+        }
         self.effect(at, radius * 3.0, 0.8, EffectKind::Explosion);
         self.notify(format!("APEX: {name} enrages"), Rarity::Epic);
     }
@@ -309,31 +313,6 @@ impl Game {
         self.add_body(body);
         self.effect(spot, 24.0, 0.4, EffectKind::Respawn);
         state.escorts.push(id);
-    }
-
-    fn phantom(
-        &mut self,
-        index: usize,
-        state: &mut ApexState,
-        ship: Vec2,
-        alert: bool,
-        enraged: bool,
-    ) {
-        let from = self.bodies[index].position;
-        if !alert || state.clock > 0.0 || from.distance(ship) < BLINK_FROM {
-            return;
-        }
-        state.clock = pick(BLINK_EVERY, enraged);
-        let ring = self.apex_rng.range(BLINK_RING.0, BLINK_RING.1);
-        let to = ship + self.apex_rng.direction() * ring;
-        let radius = self.bodies[index].radius;
-        self.effect(from, radius * 2.2, 0.35, EffectKind::Respawn);
-        self.effect(to, radius * 2.2, 0.35, EffectKind::Respawn);
-        let body = &mut self.bodies[index];
-        body.position = to;
-        body.velocity *= 0.3;
-        // It loosens a burst the moment it lands.
-        body.fire_cooldown = 0.2;
     }
 
     fn maelstrom(
@@ -1018,10 +997,7 @@ mod tests {
             if now.distance(last) > 250.0 {
                 blinks += 1;
                 let gap = now.distance(spot);
-                assert!(
-                    (BLINK_RING.0 - 40.0..BLINK_RING.1 + 40.0).contains(&gap),
-                    "landed {gap} from the ship"
-                );
+                assert!((300.0..560.0).contains(&gap), "landed {gap} from the ship");
             }
             last = now;
         }

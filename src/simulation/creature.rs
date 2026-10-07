@@ -546,6 +546,7 @@ impl Game {
                 && body.alert
                 && body.panic <= 0.0
                 && body.fire_cooldown <= 0.0
+                && !body.phased
                 && g.armed(body.part))
             {
                 continue;
@@ -613,8 +614,13 @@ impl Game {
                             aim: direction,
                             velocity: body.velocity,
                             reach: g.weapon_range,
-                            shot_speed: g.shot_speed,
+                            shot_speed: if g.bypass_share() > 0.0 {
+                                g.shot_speed.min(crate::power::BYPASS_SHOT_SPEED)
+                            } else {
+                                g.shot_speed
+                            },
                             sharpness: body.genes.sharpness(),
+                            pith: g.bypass_share(),
                         };
                         let spin = body.spin;
                         let spun = self.discharge(weapon, g.volley, &muzzle, spin);

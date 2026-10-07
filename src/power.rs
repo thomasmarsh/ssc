@@ -8,7 +8,7 @@
 //! original population: the species draw is the last draw of `sample`, and awakening reads a
 //! roll `individual_from` already made.
 
-use crate::genome::Genome;
+use crate::genome::{Genome, Weapon};
 use crate::world::SectorParams;
 
 /// An intensity below this is dormant. Drift never reaches it from zero (the block is skipped
@@ -28,6 +28,42 @@ pub const MUTATION_FLOOR: f32 = GATE + 0.02;
 /// How sector character tilts a power's weight: `BIAS_BASE + BIAS_SLOPE * above(param)`.
 pub const BIAS_BASE: f32 = 0.75;
 pub const BIAS_SLOPE: f32 = 1.0;
+
+// ---- tuning: the powers that are built --------------------------------------------------
+
+/// A move that carries a creature (blink) shows its destination this long before it lands;
+/// anything that disables the ship shows itself at least `TELL_JAM` ahead (not built yet).
+pub const TELL_MOVE: f32 = 0.35;
+pub const TELL_JAM: f32 = 0.6;
+/// Blink: it will not blink from, or land within, this of the ship; a hop is at least
+/// `BLINK_MIN_HOP` long; the landing ring around the ship is this share of `power_reach`; the
+/// longest hop is `power_reach` times one plus `BLINK_HOP_GAIN` times the strength; it fires
+/// a snap shot `BLINK_SNAP` seconds after landing. Rocks and bodies keep `BLINK_CLEAR` clear.
+pub const BLINK_FROM: f32 = 220.0;
+pub const BLINK_LAND: f32 = 180.0;
+pub const BLINK_MIN_HOP: f32 = 120.0;
+pub const BLINK_RING: (f32, f32) = (0.65, 1.0);
+pub const BLINK_HOP_GAIN: f32 = 2.2;
+pub const BLINK_SNAP: f32 = 0.2;
+pub const BLINK_CLEAR: f32 = 30.0;
+/// Phase: the share of a cycle spent phased is `PHASE_DUTY.0 + PHASE_DUTY.1 * strength`, but
+/// the solid window is never shorter than `PHASE_SOLID_MIN`; the last `PHASE_LEAD` seconds of
+/// the phased window are the lead-in (still intangible, outline brightening, a chime).
+pub const PHASE_DUTY: (f32, f32) = (0.2, 0.4);
+pub const PHASE_SOLID_MIN: f32 = 1.0;
+pub const PHASE_LEAD: f32 = 0.4;
+/// Bypass: the share of a shot's damage that skips the shield is `BYPASS_SHARE.0 + BYPASS_SHARE.1
+/// * strength`, never above `BYPASS_MAX`; its shots are slow enough to read; the carrier shows a
+/// charge `BYPASS_TELL` seconds before it fires.
+pub const BYPASS_SHARE: (f32, f32) = (0.2, 0.6);
+pub const BYPASS_MAX: f32 = 0.8;
+pub const BYPASS_SHOT_SPEED: f32 = 260.0;
+pub const BYPASS_TELL: f32 = 0.35;
+/// Killing a carrier of a built power pays this much more bounty (by tier) and rolls one
+/// extra drop with this chance and a little luck.
+pub const BOUNTY_BONUS: (f32, f32) = (1.25, 1.5);
+pub const EXTRA_DROP_CHANCE: f32 = 0.3;
+pub const EXTRA_DROP_LUCK: f32 = 0.25;
 
 /// How serious a power is. Mild and Strange can awaken in individuals; Severe and Mythic come
 /// from lineages and apexes only.
@@ -229,6 +265,26 @@ impl Power {
         matches!(self, Self::Blink | Self::Phase | Self::Bypass)
     }
 
+    /// Whether a body plan can carry the power at all: a blinker is a single body (a chain
+    /// would be torn apart), a bypasser needs a gun that fires plain shots.
+    pub fn fits(self, g: &Genome) -> bool {
+        match self {
+            Self::Blink => g.parts() == 1,
+            Self::Bypass => matches!(g.weapon, Weapon::Projectile | Weapon::Needles),
+            _ => true,
+        }
+    }
+
+    /// The colour of the power's tell: a halo or a spine in this tint.
+    pub fn tint(self) -> [f32; 3] {
+        match self {
+            Self::Blink => [0.35, 0.95, 1.0],
+            Self::Phase => [0.75, 0.55, 1.0],
+            Self::Bypass => [0.85, 0.35, 1.0],
+            _ => [0.9, 0.9, 0.9],
+        }
+    }
+
     /// The raw gene value.
     pub fn value(self, g: &Genome) -> f32 {
         match self {
@@ -291,6 +347,17 @@ impl Power {
     }
 }
 
+/// Where a phasing creature is in its cycle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhaseView {
+    /// Intangible: shots, rocks and bodies pass through, and it neither fires nor hurts.
+    pub phased: bool,
+    /// From 0 to 1 over the last `PHASE_LEAD` seconds of the phased window.
+    pub lead: f32,
+    /// Seconds of the solid window left (zero while phased).
+    pub solid_left: f32,
+}
+
 /// A power a genome carries and how strongly.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Carried {
@@ -311,6 +378,48 @@ impl Genome {
                 strength: power.strength(self),
             })
             .max_by(|a, b| a.strength.total_cmp(&b.strength))
+    }
+
+    /// The strongest power the simulation acts on (see `Power::built`).
+    pub fn live_power(&self) -> Option<Carried> {
+        self.power().filter(|c| c.power.built())
+    }
+
+    /// The share of a shot's damage that skips the shield (zero for a body without the gene).
+    pub fn bypass_share(&self) -> f32 {
+        let s = Power::Bypass.strength(self);
+        if s <= 0.0 {
+            0.0
+        } else {
+            (BYPASS_SHARE.0 + BYPASS_SHARE.1 * s).min(BYPASS_MAX)
+        }
+    }
+
+    /// Phase: the cycle of a creature `key` (its chain or id) at `time`, if it phases.
+    pub fn phase_at(&self, key: u64, time: f32) -> Option<PhaseView> {
+        let s = Power::Phase.strength(self);
+        if s <= 0.0 {
+            return None;
+        }
+        let period = self.power_period.max(1.5);
+        let phased_len = (period * (PHASE_DUTY.0 + PHASE_DUTY.1 * s))
+            .min(period - PHASE_SOLID_MIN)
+            .max(PHASE_LEAD + 0.1);
+        let solid_len = period - phased_len;
+        // Each creature keeps its own beat, so a flock does not blink in unison.
+        let offset = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / 16_777_216.0 * period;
+        let u = (time + offset).rem_euclid(period);
+        let phased = u >= solid_len;
+        let lead = if phased {
+            ((u - (period - PHASE_LEAD)) / PHASE_LEAD).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        Some(PhaseView {
+            phased,
+            lead,
+            solid_left: if phased { 0.0 } else { solid_len - u },
+        })
     }
 
     /// Effect strength of one power (zero when dormant).
@@ -420,10 +529,98 @@ pub fn sample(g: &mut Genome, roll: f32, params: &SectorParams) {
     let mut start = 0.0;
     for (power, weight) in Power::ALL.into_iter().zip(weights(params)) {
         if roll < start + weight {
-            express(g, power, (roll - start) / weight, SPECIES_INTENSITY);
+            // A body plan that cannot carry it (a chain cannot blink) stays plain; a bypasser
+            // is given a gun (see `style`).
+            if power == Power::Bypass || power.fits(g) {
+                express(g, power, (roll - start) / weight, SPECIES_INTENSITY);
+                style(g, power);
+            }
             return;
         }
         start += weight;
+    }
+}
+
+/// What a carrier species looks like and is, so the player recognises it: a Veilwing is a
+/// triangular moth, a Skipjack a small stretched diamond, a Hullpick a thin needle with a gun
+/// and no shield (a glass cannon). Only species are styled; an awakened individual keeps its
+/// own body and shows its power by its tell alone.
+fn style(g: &mut Genome, power: Power) {
+    match power {
+        Power::Phase => {
+            g.sides = 3;
+            g.aspect = 1.6;
+        }
+        Power::Blink => {
+            g.sides = 4;
+            g.aspect = 1.4;
+        }
+        Power::Bypass => {
+            if !matches!(g.weapon, Weapon::Projectile | Weapon::Needles) {
+                g.weapon = Weapon::Projectile;
+                g.volley = 1;
+                g.fire_period = g.fire_period.clamp(1.6, 3.0);
+            }
+            g.shot_speed = g.shot_speed.min(BYPASS_SHOT_SPEED);
+            g.shield = 0.0;
+            g.hull = g.hull.min(40.0);
+            g.radius = g.radius.min(14.0);
+            g.aspect = 1.8;
+        }
+        _ => {}
+    }
+}
+
+impl Genome {
+    /// The specimens of the bestiary, as ordinary genomes: a Veilwing (phase).
+    pub fn veilwing() -> Self {
+        Self {
+            phase: 0.8,
+            power_period: 4.0,
+            radius: 14.0,
+            hull: 30.0,
+            weapon: Weapon::Projectile,
+            fire_period: 2.2,
+            sides: 3,
+            aspect: 1.6,
+            fear: crate::genome::Fear::Bullets,
+            trigger: crate::genome::Trigger::Proximity,
+            speed: 140.0,
+            ..Self::default()
+        }
+    }
+
+    /// A Skipjack (blink).
+    pub fn skipjack() -> Self {
+        Self {
+            blink: 0.6,
+            power_period: 3.4,
+            power_reach: 320.0,
+            speed: 220.0,
+            weapon: Weapon::Projectile,
+            fire_period: 1.8,
+            sides: 4,
+            aspect: 1.4,
+            radius: 12.0,
+            hull: 30.0,
+            fear: crate::genome::Fear::Bullets,
+            ..Self::default()
+        }
+    }
+
+    /// A Hullpick (shield bypass).
+    pub fn hullpick() -> Self {
+        Self {
+            bypass: 0.7,
+            weapon: Weapon::Projectile,
+            shot_speed: BYPASS_SHOT_SPEED,
+            hull: 18.0,
+            standoff: 300.0,
+            aspect: 1.8,
+            radius: 8.0,
+            shield: 0.0,
+            ..Self::default()
+        }
     }
 }
 
@@ -443,7 +640,9 @@ pub fn awaken(mut g: Genome, roll: f32, ring: u32) -> Genome {
     let inner = slot / 0.25;
     let eligible: Vec<(Power, f32)> = Power::ALL
         .into_iter()
-        .filter(|p| matches!(p.tier(), Tier::Mild | Tier::Strange) && p.first_ring() <= ring)
+        .filter(|p| {
+            matches!(p.tier(), Tier::Mild | Tier::Strange) && p.first_ring() <= ring && p.fits(&g)
+        })
         .map(|p| (p, p.rate()))
         .collect();
     let total: f32 = eligible.iter().map(|e| e.1).sum();

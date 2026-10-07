@@ -298,6 +298,7 @@ impl Game {
                 reach: TURRET_REACH,
                 shot_speed: 380.0,
                 sharpness,
+                pith: 0.0,
             };
             let count = if weapon == Weapon::Mine { 3 } else { volley };
             self.discharge(weapon, count, &muzzle, spin);

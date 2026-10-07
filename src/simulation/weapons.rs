@@ -59,6 +59,8 @@ pub(super) struct Muzzle {
     pub shot_speed: f32,
     /// Depth scaling on damage.
     pub sharpness: f32,
+    /// The share of each shot's damage that skips the ship's shield (a hullpick).
+    pub pith: f32,
 }
 
 /// Seconds a pattern keeps its source waiting, relative to the fire-period gene.
@@ -77,6 +79,25 @@ impl Game {
         let count = usize::from(volley.max(1));
         let room = MAX_BULLETS.saturating_sub(self.bullets.len());
         let sharp = m.sharpness;
+        let first = self.bullets.len();
+        let spin = self.fire_pattern(weapon, count, room, sharp, m, spin);
+        if m.pith > 0.0 {
+            for shot in &mut self.bullets[first..] {
+                shot.pith = m.pith;
+            }
+        }
+        spin
+    }
+
+    fn fire_pattern(
+        &mut self,
+        weapon: Weapon,
+        count: usize,
+        room: usize,
+        sharp: f32,
+        m: &Muzzle,
+        spin: f32,
+    ) -> f32 {
         match weapon {
             Weapon::Projectile => {
                 // A lone shot is the stock gun; more fan out and each carries less.
@@ -190,7 +211,9 @@ impl Game {
         let hostile_targets: Vec<Vec2> = if self.mines.iter().any(|m| m.friendly) {
             self.bodies
                 .iter()
-                .filter(|b| b.active && matches!(b.kind, BodyKind::Creature | BodyKind::Base))
+                .filter(|b| {
+                    b.active && !b.phased && matches!(b.kind, BodyKind::Creature | BodyKind::Base)
+                })
                 .map(|b| b.position)
                 .collect()
         } else {
@@ -270,7 +293,8 @@ impl Game {
                 continue;
             }
             if friendly {
-                if body.kind != BodyKind::Player {
+                // A phased body is out of reach of a nova and a mine.
+                if body.kind != BodyKind::Player && !body.phased {
                     let dealt = damage(body, armored(body, amount, true), 0.0);
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
@@ -396,6 +420,7 @@ mod tests {
             reach: 800.0,
             shot_speed: 300.0,
             sharpness: 1.0,
+            pith: 0.0,
         }
     }
 

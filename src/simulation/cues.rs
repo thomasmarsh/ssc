@@ -85,6 +85,18 @@ pub enum Cue {
     },
     /// A species-range was wiped out (see `run`).
     Extirpated,
+    /// A creature is about to land at `at` (a blink's telegraph).
+    Blink {
+        at: Vec2,
+    },
+    /// A phasing creature is about to turn solid at `at`.
+    PhaseSolid {
+        at: Vec2,
+    },
+    /// A hullpick's bolt reached the hull: a dull tick.
+    Pith {
+        at: Vec2,
+    },
 }
 
 impl Game {

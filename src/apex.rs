@@ -177,7 +177,7 @@ impl Archetype {
 
     /// Stamps the archetype on a genome that has already been pushed to the wide end.
     /// `grand` is the rank's share, softening a lesser elder.
-    fn shape(self, g: &mut Genome, grand: f32) {
+    pub(crate) fn shape(self, g: &mut Genome, grand: f32) {
         // (radius, sides, aspect, mass, speed, hue, pale, bright)
         let (radius, sides, aspect, mass, speed, hue, pale, bright) = match self {
             Self::Juggernaut => (68.0, 6, 1.15, 300.0, 210.0, 0.02, 0.15, 0.95),
@@ -244,6 +244,10 @@ impl Archetype {
                 g.weapon_range = 800.0;
                 g.standoff = 300.0;
                 g.strafe = 1.0;
+                // It blinks beside the ship: the move is a gene, shared with the wild Skipjack.
+                g.blink = 1.0;
+                g.power_period = 3.4;
+                g.power_reach = 520.0;
             }
             Self::Bulwark => {
                 g.contact_damage = 24.0;

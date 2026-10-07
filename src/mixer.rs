@@ -132,6 +132,23 @@ fn spec(cue: &Cue) -> Spec {
         Cue::Parry => ship(Sound::Parry, 0.5, 0.02),
         Cue::PerfectParry { .. } => ship(Sound::PerfectParry, 0.8, 0.0),
         Cue::Graze { .. } => ship(Sound::Graze, 0.5, 0.03),
+        Cue::Blink { at } => Spec {
+            sound: Sound::Blink,
+            gain: 0.5,
+            reach: Some(1400.0),
+            priority: Priority::Explosion,
+            detune: 0.03,
+            at: Some(at),
+        },
+        Cue::PhaseSolid { at } => Spec {
+            sound: Sound::PhaseSolid,
+            gain: 0.45,
+            reach: Some(1200.0),
+            priority: Priority::Explosion,
+            detune: 0.02,
+            at: Some(at),
+        },
+        Cue::Pith { .. } => ship(Sound::Pith, 0.75, 0.03),
         Cue::Deflect { at, .. } => Spec {
             sound: Sound::Deflect,
             gain: 0.55,
@@ -177,6 +194,9 @@ fn interval(sound: Sound) -> f32 {
         Sound::Dash => 0.1,
         Sound::PerfectParry => 0.3,
         Sound::Graze => 0.15,
+        Sound::Blink => 0.15,
+        Sound::PhaseSolid => 0.3,
+        Sound::Pith => 0.1,
     }
 }
 
