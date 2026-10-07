@@ -373,6 +373,7 @@ const LEGEND='<details open><summary>Legend</summary><div class="leg">'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="5" fill="var(--rock)" stroke="var(--ink)"/><circle cx="15" cy="10" r="8" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Planetoid (size by radius); green ring: renewable</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6" fill="none" stroke="var(--well)" stroke-width="2"/><circle cx="15" cy="10" r="2" fill="var(--well)"/></svg><span>Gravity well</span>'
 +'<svg viewBox="0 0 30 20"><path d="M15 2L27 11h-4v7H7v-7H3z" fill="var(--accent)"/></svg><span>HOME, sector (0,0)</span>'
++'<svg viewBox="0 0 30 20"><defs><linearGradient id="nb"><stop offset="0" stop-color="hsl(150,55%,45%)" stop-opacity=".5"/><stop offset="1" stop-color="hsl(210,55%,45%)" stop-opacity=".5"/></linearGradient></defs><rect width="30" height="20" fill="url(#nb)"/></svg><span>In the game, the nebula behind the stars uses these same colours: range hue, life, rock brown, belts, oases, confluences and civilization tints. Press U in game to reduce effects</span>'
 +'</div><p class="sub">Drag to pan, wheel or pinch to zoom, click or tap a sector to pin it. North (+y) is up. Zoom in for species counts, coordinates and fort tiers.</p></details>';
 function setFilter(i){filter=i;$("#sf").value=i<0?"":String(i);build()}
 function panel(){

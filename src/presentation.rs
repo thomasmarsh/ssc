@@ -1979,7 +1979,12 @@ pub fn draw(
         Projection::Orthographic(p) => p.area.half_size(),
         _ => Vec2::new(900.0, 450.0),
     };
-    draw_backdrop(&mut gizmos, camera, half);
+    let sky = if session.reduce_effects {
+        ssc::backdrop::Backdrop::NEUTRAL
+    } else {
+        ssc::backdrop::backdrop_at(game.seed(), camera)
+    };
+    draw_backdrop(&mut gizmos, camera, half, &sky);
     for body in game.bodies.iter().filter(|b| {
         // Cull on the body's full extent, not its center: a planetoid is hundreds of units
         // wide and must stay drawn while only its edge (or halo) is on screen.
@@ -3140,7 +3145,7 @@ fn slot_glyph(gizmos: &mut Gizmos, p: Vec2, slot: Slot, color: Color) {
 }
 
 /// Faint grid and parallax starfield derived purely from position, so space is endless.
-fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2) {
+fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2, sky: &ssc::backdrop::Backdrop) {
     let reach = half + Vec2::splat(40.0);
     let grid = Color::srgb(0.03, 0.06, 0.09);
     let step = 200.0;
@@ -3164,17 +3169,25 @@ fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2) {
     }
     // Deeper layers drift more slowly than the camera; the nearest layer is fixed in world space.
     for (layer, parallax, cell, tint) in [
-        (1_u64, 0.25_f32, 150.0_f32, Color::srgb(0.13, 0.2, 0.3)),
-        (2, 0.55, 190.0, Color::srgb(0.22, 0.32, 0.45)),
-        (3, 1.0, 260.0, Color::srgb(0.5, 0.64, 0.78)),
+        (1_u64, 0.25_f32, 150.0_f32, [0.13, 0.2, 0.3]),
+        (2, 0.55, 190.0, [0.22, 0.32, 0.45]),
+        (3, 1.0, 260.0, [0.5, 0.64, 0.78]),
     ] {
+        // The region's star colour shifts the usual blue-white; its density thins or thickens
+        // the field (about two cells in three keep a star in a plain region).
+        let tint = Color::srgb(
+            (tint[0] * sky.star_tint[0] / ssc::backdrop::STAR_BASE[0]).min(1.0),
+            (tint[1] * sky.star_tint[1] / ssc::backdrop::STAR_BASE[1]).min(1.0),
+            (tint[2] * sky.star_tint[2] / ssc::backdrop::STAR_BASE[2]).min(1.0),
+        );
+        let keep = (2.0 / 3.0 * sky.star_density).clamp(0.0, 1.0);
         let center = camera * parallax;
         let min = ((center - reach) / cell).floor().as_ivec2();
         let max = ((center + reach) / cell).ceil().as_ivec2();
         for cx in min.x..=max.x {
             for cy in min.y..=max.y {
                 let h = hash2(layer, cx, cy);
-                if h.is_multiple_of(3) {
+                if (h >> 40) as f32 / 16_777_216.0 >= keep {
                     continue;
                 }
                 let offset =

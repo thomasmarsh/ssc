@@ -35,10 +35,14 @@ struct Spec {
 enum Kind {
     FarWisp,
     MidWisp,
+    MidStreak,
+    MidFilament,
     NearGrit,
+    Wash,
+    Vignette,
 }
 
-const SPECS: [Spec; 3] = [
+const SPECS: [Spec; 7] = [
     Spec {
         kind: Kind::FarWisp,
         parallax: 0.2,
@@ -54,11 +58,39 @@ const SPECS: [Spec; 3] = [
         z: -29.0,
     },
     Spec {
+        kind: Kind::MidStreak,
+        parallax: 0.55,
+        tile: 2600.0,
+        turn: 0.5,
+        z: -28.8,
+    },
+    Spec {
+        kind: Kind::MidFilament,
+        parallax: 0.45,
+        tile: 2800.0,
+        turn: -0.6,
+        z: -28.6,
+    },
+    Spec {
         kind: Kind::NearGrit,
         parallax: 0.8,
         tile: 700.0,
         turn: 0.4,
         z: -28.0,
+    },
+    Spec {
+        kind: Kind::Wash,
+        parallax: 1.0,
+        tile: 1.0,
+        turn: 0.0,
+        z: -27.0,
+    },
+    Spec {
+        kind: Kind::Vignette,
+        parallax: 1.0,
+        tile: 1.0,
+        turn: 0.0,
+        z: -26.0,
     },
 ];
 
@@ -135,14 +167,17 @@ pub fn setup(
     let mut handles = Vec::new();
     for (index, spec) in SPECS.iter().enumerate() {
         let grain = match spec.kind {
-            Kind::FarWisp | Kind::MidWisp => Grain::Wisp,
-            Kind::NearGrit => Grain::Grit,
+            Kind::FarWisp | Kind::MidWisp => Some(Grain::Wisp),
+            Kind::MidStreak => Some(Grain::Streak),
+            Kind::MidFilament => Some(Grain::Filament),
+            Kind::NearGrit => Some(Grain::Grit),
+            Kind::Wash | Kind::Vignette => None,
         };
-        let texture = images.add(grain_image(grain));
+        let texture = grain.map(|g| images.add(grain_image(g)));
         let material = materials.add(ColorMaterial {
             color: Color::WHITE,
             alpha_mode: AlphaMode2d::Blend,
-            texture: Some(texture),
+            texture,
             ..default()
         });
         let mesh = meshes.add(grid_mesh());
@@ -213,7 +248,16 @@ pub fn update(
                 let rgba = match spec.kind {
                     Kind::FarWisp => l.far_wisp,
                     Kind::MidWisp => l.mid_wisp,
+                    Kind::MidStreak => l.mid_streak,
+                    Kind::MidFilament => l.mid_filament,
                     Kind::NearGrit => l.near_grit,
+                    Kind::Wash => l.wash,
+                    Kind::Vignette => [
+                        0.0,
+                        0.0,
+                        0.0,
+                        backdrop::vignette_alpha(l.vignette, local.length()),
+                    ],
                 };
                 let linear = Color::srgb(rgba[0], rgba[1], rgba[2]).to_linear();
                 colors.push([linear.red, linear.green, linear.blue, rgba[3]]);
