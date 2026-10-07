@@ -174,6 +174,18 @@ impl Game {
     /// hostile shots on the path are swallowed by the ship's brief invulnerability (a graze).
     fn dash_through(&mut self, from: Vec2, to: Vec2, ship_radius: f32) {
         let mut grazes = Vec::new();
+        let cords: Vec<usize> = self
+            .tethers
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.kind == TetherKind::Sling)
+            .filter_map(|(i, t)| self.tether_ends(t).map(|ends| (i, ends)))
+            .filter(|(_, (a, b))| tether::segment_distance(from, to, *a, *b) < ship_radius + 3.0)
+            .map(|(i, _)| i)
+            .collect();
+        for i in cords {
+            self.tethers[i].health = 0.0;
+        }
         for body in self
             .bodies
             .iter_mut()

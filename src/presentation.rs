@@ -2608,6 +2608,22 @@ pub fn draw(
             }
         }
     }
+    for rock in game
+        .bodies
+        .iter()
+        .filter(|b| b.active && b.sling_thrown > 0.0)
+    {
+        let direction = rock.velocity.normalize_or_zero();
+        let color = Color::srgb(1.0, 0.65, 0.25);
+        gizmos.line_2d(
+            rock.position - direction * (rock.radius + 60.0),
+            rock.position - direction * rock.radius,
+            color,
+        );
+        gizmos
+            .circle_2d(rock.position, rock.radius + 4.0, color.with_alpha(0.8))
+            .resolution(24);
+    }
     for tether in &game.tethers {
         if tether.health <= 0.0 {
             continue;
@@ -2615,6 +2631,13 @@ pub fn draw(
         let Some((from, to)) = game.tether_ends(tether) else {
             continue;
         };
+        if tether.kind == TetherKind::Sling {
+            let tint = Color::srgb(1.0, 0.65, 0.25);
+            let fray = (tether.health / tether.max_health).clamp(0.0, 1.0);
+            gizmos.line_2d(from, to, tint.with_alpha(0.25 + 0.35 * fray));
+            gizmos.circle_2d(to, 5.0, tint).resolution(12);
+            continue;
+        }
         if tether.kind == TetherKind::Web {
             let warning = tether.warning > 0.0;
             let [r, g, b] = ssc::power::Power::Weave.tint();

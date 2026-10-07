@@ -374,7 +374,13 @@ impl Game {
         {
             for rock in self.bodies.iter().filter(|b| b.active && edible(b)) {
                 // A creature never eats the rock it clings to.
-                if creature.root.is_some_and(|r| r.host == rock.id) {
+                if creature.root.is_some_and(|r| r.host == rock.id)
+                    || self.tethers.iter().any(|t| {
+                        t.kind == TetherKind::Sling
+                            && t.owner == creature.id
+                            && t.other == Some(rock.id)
+                    })
+                {
                     continue;
                 }
                 if !taken.contains(&rock.id)

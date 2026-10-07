@@ -298,8 +298,8 @@ fn main() {
         .run();
 }
 
-fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>) {
-    if session.paused || session.chart.is_some() || session.settings.is_some() {
+fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>, smoke: Res<SmokeRun>) {
+    if smoke.hold || session.paused || session.chart.is_some() || session.settings.is_some() {
         return;
     }
     let input = session.input;
@@ -790,6 +790,8 @@ fn apply_style(
 struct SmokeRun {
     frames: u32,
     requested: bool,
+    /// Explicit specimen captures advance through their bounded hook, independent of GPU speed.
+    hold: bool,
 }
 
 fn smoke_run(
@@ -874,6 +876,7 @@ fn smoke_run(
             "hullworm" => Genome::hullworm(),
             "remora" => Genome::remora(),
             "weaver" => Genome::weaver(),
+            "slinger" => Genome::slinger(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
@@ -887,21 +890,53 @@ fn smoke_run(
         };
         if matches!(
             name.as_str(),
-            "stormcap" | "dizzard" | "argus" | "dirgewhale" | "hullworm"
+            "stormcap" | "dizzard" | "argus" | "dirgewhale" | "hullworm" | "slinger"
         ) {
             // The jammers only work on a ship that is not in grace.
             session.game.player_invulnerability = 0.0;
         }
+        if name == "slinger" {
+            // Load the destination, then isolate a readable authored encounter from wild threats.
+            session.game.player_invulnerability = 1e9;
+            session.game.step(0.02, ssc::simulation::Input::default());
+            session.game.player_invulnerability = 0.0;
+            let rocks: Vec<_> = session
+                .game
+                .bodies
+                .iter()
+                .filter(|b| b.kind == ssc::simulation::BodyKind::Asteroid && !b.pinned)
+                .take(3)
+                .map(|b| b.id)
+                .collect();
+            session
+                .game
+                .bodies
+                .retain(|b| b.kind == ssc::simulation::BodyKind::Player || rocks.contains(&b.id));
+            session.game.tethers.clear();
+        }
+        if name == "slinger"
+            && (std::env::var_os("SSC_SPECIMEN_TELL").is_some()
+                || std::env::var_os("SSC_SPECIMEN_THROW").is_some())
+        {
+            run.hold = true;
+        }
         let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
-        let count = if name == "weaver" { 1 } else { 3 };
+        let count = if matches!(name.as_str(), "weaver" | "slinger") {
+            1
+        } else {
+            3
+        };
         for k in 0..count {
             let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (near + 90.0 * k as f32);
             let id = session.game.place_creature(&Species::of(genome), at);
-            if name == "weaver" {
+            if matches!(name.as_str(), "weaver" | "slinger") {
                 // Stage a stationary web with free stones, so bounded screenshots do not
                 // depend on the sector happening to put rocks beside the specimen.
                 for body in session.game.bodies.iter_mut().filter(|b| b.id == id) {
                     body.pinned = true;
+                    if name == "slinger" {
+                        body.alert = true;
+                    }
                 }
                 for (i, rock) in session
                     .game
@@ -917,6 +952,11 @@ fn smoke_run(
                 {
                     rock.position = at + Vec2::from_angle(-1.2 + i as f32 * 1.2) * 300.0;
                     rock.velocity = Vec2::ZERO;
+                    if name == "slinger" {
+                        rock.radius = 22.0;
+                        rock.mass = 25.0;
+                        rock.rock = ssc::world::RockKind::Plain;
+                    }
                 }
             }
         }
@@ -994,35 +1034,75 @@ fn smoke_run(
             session.game.step(0.02, ssc::simulation::Input::default());
         }
     }
-    // SSC_SPECIMEN_TELL=1: just before the screenshot, run the game until a blink is announced.
+    // SSC_SPECIMEN_TELL=1: advance to the specimen warning before the screenshot.
     if run.frames + 3 == limit && std::env::var_os("SSC_SPECIMEN_TELL").is_some() {
         for _ in 0..4000 {
             session.game.step(0.02, ssc::simulation::Input::default());
-            let told = session.game.song_rings().iter().any(|r| r.radius > 200.0)
-                || session
+            let told = if std::env::var("SSC_SPECIMEN").as_deref() == Ok("slinger") {
+                session
                     .game
-                    .tethers
+                    .bodies
                     .iter()
-                    .any(|t| t.kind == ssc::simulation::TetherKind::Web && t.warning > 0.0)
-                || session.game.bodies.iter().any(|b| {
-                    session
+                    .any(|b| b.pinned && session.game.power_view(b).sling.is_some())
+            } else {
+                session
+                    .game
+                    .bodies
+                    .iter()
+                    .any(|b| session.game.power_view(b).sling.is_some())
+                    || session.game.song_rings().iter().any(|r| r.radius > 200.0)
+                    || session
                         .game
-                        .power_view(b)
-                        .blink
-                        .is_some_and(|t| t.progress() > 0.5)
-                        || session.game.power_view(b).shove_age.clamp(0.2, 0.3)
-                            == session.game.power_view(b).shove_age
-                        || session
+                        .tethers
+                        .iter()
+                        .any(|t| t.kind == ssc::simulation::TetherKind::Web && t.warning > 0.0)
+                    || session.game.bodies.iter().any(|b| {
+                        session
                             .game
                             .power_view(b)
-                            .jam
+                            .blink
                             .is_some_and(|t| t.progress() > 0.5)
-                });
+                            || session.game.power_view(b).shove_age.clamp(0.2, 0.3)
+                                == session.game.power_view(b).shove_age
+                            || session
+                                .game
+                                .power_view(b)
+                                .jam
+                                .is_some_and(|t| t.progress() > 0.5)
+                    })
+            };
             if told {
                 break;
             }
         }
+        if std::env::var("SSC_SPECIMEN").as_deref() == Ok("slinger") {
+            assert!(
+                session
+                    .game
+                    .bodies
+                    .iter()
+                    .any(|b| b.pinned && session.game.power_view(b).sling.is_some()),
+                "Slinger smoke capture did not reach a warning"
+            );
+        }
     }
+    // SSC_SPECIMEN_THROW=1: capture a launched rock after a short visible flight.
+    if run.frames + 3 == limit && std::env::var_os("SSC_SPECIMEN_THROW").is_some() {
+        for _ in 0..4000 {
+            session.game.step(0.02, ssc::simulation::Input::default());
+            if session.game.bodies.iter().any(|b| b.sling_thrown > 0.0) {
+                for _ in 0..6 {
+                    session.game.step(0.02, ssc::simulation::Input::default());
+                }
+                break;
+            }
+        }
+        assert!(
+            session.game.bodies.iter().any(|b| b.sling_thrown > 0.0),
+            "Slinger smoke capture did not reach a throw"
+        );
+    }
+
     // SSC_OUTPOST=1: start at the early outpost's capital (standing meter, tithe seat).
     if run.frames == 0 && std::env::var_os("SSC_OUTPOST").is_some() {
         let capital = ssc::territory::outpost(session.game.seed()).capital;

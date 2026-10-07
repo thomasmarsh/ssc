@@ -47,6 +47,7 @@ mod root;
 pub mod run;
 mod shove;
 pub mod skills;
+mod sling;
 mod song;
 mod split;
 mod tether;
@@ -89,6 +90,7 @@ pub use powers::{BlinkTell, JamKind, JamTell, PowerView};
 pub use realms::RealmState;
 pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
+pub use sling::SlingTell;
 pub use song::SongRing;
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 pub use titles::{TitleFacts, title, title_case};
@@ -299,6 +301,10 @@ pub struct Body {
     /// Seconds left of being a shoved body (held to the shove speed cap), seconds until the
     /// ship's ram may push it extra again, and seconds the beam's grip is let go; see `shove`.
     shoved: f32,
+    /// Orbit release immunity and seconds of hostile thrown-rock attribution.
+    sling_free: f32,
+    pub sling_thrown: f32,
+    hostile_rock_kill: bool,
     shove_clock: f32,
     grip_free: f32,
     /// The body (the ship) this parasite is fastened to; see `parasite`.
@@ -759,6 +765,8 @@ impl Game {
             body.since_hit += dt;
             body.provoked = (body.provoked - dt).max(0.0);
             body.shoved = (body.shoved - dt).max(0.0);
+            body.sling_free = (body.sling_free - dt).max(0.0);
+            body.sling_thrown = (body.sling_thrown - dt).max(0.0);
             body.shove_clock = (body.shove_clock - dt).max(0.0);
             body.grip_free = (body.grip_free - dt).max(0.0);
             if body.since_hit > 2.0 && !(beaming && body.kind == BodyKind::Player) {
@@ -875,6 +883,7 @@ impl Game {
         self.update_diplomacy(dt);
         self.update_apex();
         self.remove_destroyed();
+        self.prune_slings();
         self.cue_player_damage(ship_before, sources);
     }
 
@@ -1863,17 +1872,22 @@ impl Game {
                 .base
                 .as_ref()
                 .is_some_and(|b| b.kind == BaseKind::Turret);
-            let bounty = match kind {
-                BodyKind::Creature => {
-                    (body.genome.bounty
-                        * body.genes.threat
-                        * self.carrier_bonus(body).unwrap_or(1.0)) as u64
+            let bounty = if body.hostile_rock_kill {
+                0
+            } else {
+                match kind {
+                    BodyKind::Creature => {
+                        (body.genome.bounty
+                            * body.genes.threat
+                            * self.carrier_bonus(body).unwrap_or(1.0))
+                            as u64
+                    }
+                    BodyKind::Asteroid if body.rock == RockKind::Wall => 0,
+                    BodyKind::Asteroid => 25,
+                    BodyKind::Base if turret => (60.0 * body.genes.threat) as u64,
+                    BodyKind::Base => 500,
+                    _ => 0,
                 }
-                BodyKind::Asteroid if body.rock == RockKind::Wall => 0,
-                BodyKind::Asteroid => 25,
-                BodyKind::Base if turret => (60.0 * body.genes.threat) as u64,
-                BodyKind::Base => 500,
-                _ => 0,
             };
             // Kills chain: another within the window multiplies the score (never the damage).
             let earned = if bounty > 0 && kind != BodyKind::Asteroid {
@@ -1888,7 +1902,7 @@ impl Game {
                 .is_some_and(|p| p.position.distance(position) < KILL_FEEL_RANGE);
             let body_kind = matches!(kind, BodyKind::Creature | BodyKind::Base);
             let big = feel::big_kill(body.max_health, body_kind);
-            if near && body_kind && !turret {
+            if near && body_kind && !turret && !body.hostile_rock_kill {
                 self.feel_event(feel::FeelEvent::Kill {
                     at: position,
                     score: earned,
@@ -1917,17 +1931,19 @@ impl Game {
             }
             if kind != BodyKind::Player {
                 self.civ_destroyed(body);
-                self.civ_killed(body);
-                self.wildlife_killed(body);
-                self.apex_slain(body);
-                self.drop_loot(body);
-                self.siphon(body);
+                if !body.hostile_rock_kill {
+                    self.civ_killed(body);
+                    self.wildlife_killed(body);
+                    self.apex_slain(body);
+                    self.drop_loot(body);
+                    self.siphon(body);
+                }
             }
             self.record_fallen(body);
-            if kind == BodyKind::Base && !turret {
+            if kind == BodyKind::Base && !turret && !body.hostile_rock_kill {
                 self.run.bases += 1;
             }
-            self.note_creature_lost(body, false);
+            self.note_creature_lost(body, body.hostile_rock_kill);
         }
         if let Some(position) = lost_player {
             self.run.deaths += 1;
@@ -2058,6 +2074,9 @@ impl Game {
             well: None,
             phased: false,
             shoved: 0.0,
+            sling_free: 0.0,
+            sling_thrown: 0.0,
+            hostile_rock_kill: false,
             shove_clock: 0.0,
             grip_free: 0.0,
             latch: None,

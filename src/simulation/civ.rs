@@ -584,7 +584,7 @@ impl Game {
         if !elder {
             self.spill_cache(tid, body.position);
         }
-        if elder {
+        if elder && !body.hostile_rock_kill {
             let bonus = (ELDER_SCORE * body.genes.threat) as u64;
             self.score = self.score.saturating_add(bonus);
         }
@@ -601,7 +601,7 @@ impl Game {
         if before != after || !self.civ_fall(tid).capital || !self.civ_fall(tid).elder {
             self.notify(format!("{what}  {name}  - {tail}"), upgrades::Rarity::Epic);
         }
-        if before != Standing::Fallen && after == Standing::Fallen {
+        if before != Standing::Fallen && after == Standing::Fallen && !body.hostile_rock_kill {
             self.run.civs_toppled += 1;
         }
         if after == Standing::Fallen && self.raid.as_ref().is_some_and(|r| r.territory == tid) {

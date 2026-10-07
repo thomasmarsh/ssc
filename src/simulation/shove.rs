@@ -67,11 +67,16 @@ pub(super) fn on_contact(
         }
     };
     let closing = -closing_speed;
+    // An incoming hostile stone remains the creature's throw until the ship actually rams it.
+    if other.sling_thrown > 0.0 && ship.velocity.dot(toward) < 0.5 * closing {
+        return;
+    }
     if !shoveable(other) || closing < t::SHOVE_MIN_CLOSING * 0.5 {
         return;
     }
     // Let go of a rock that is being rammed, so the grip does not yank it back.
     other.grip_free = other.grip_free.max(t::GRIP_RELEASE);
+    other.sling_thrown = 0.0;
     if other.kind == BodyKind::Asteroid {
         other.shoved = other.shoved.max(t::SHOVE_TAG);
     }
@@ -89,6 +94,11 @@ pub(super) fn on_contact(
     if other.kind == BodyKind::Asteroid {
         other.velocity = other.velocity.clamp_length_max(skills.shove_speed_cap());
     }
+}
+
+pub(super) fn kick(body: &mut Body, dir: Vec2, impulse: f32, dv_cap: f32, speed_cap: f32) {
+    let dv = (impulse / body.mass).min(dv_cap);
+    body.velocity = (body.velocity + dir * dv).clamp_length_max(speed_cap);
 }
 
 impl Game {
@@ -165,9 +175,14 @@ impl Game {
         }
         let Some((_, index)) = best else { return };
         let rock = &mut self.bodies[index];
-        let dv = (skills.whip_impulse() / rock.mass).min(t::WHIP_DV);
-        rock.velocity += dir * dv;
-        rock.velocity = rock.velocity.clamp_length_max(skills.shove_speed_cap());
+        kick(
+            rock,
+            dir,
+            skills.whip_impulse(),
+            t::WHIP_DV,
+            skills.shove_speed_cap(),
+        );
+        rock.sling_thrown = 0.0;
         rock.shoved = rock.shoved.max(t::SHOVE_TAG);
         rock.shove_clock = t::SHOVE_COOLDOWN;
         rock.grip_free = rock.grip_free.max(t::GRIP_RELEASE);

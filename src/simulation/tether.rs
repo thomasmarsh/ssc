@@ -111,6 +111,8 @@ pub enum TetherKind {
     Link,
     /// Temporary, warned cord from a weaver to a free rock.
     Web,
+    /// Harmless orbit cord; its rock is thrown only after a separate warning.
+    Sling,
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +142,8 @@ pub struct Tether {
     pub warning: f32,
     /// Seconds a web has left, including its warning; other cords do not expire.
     pub remaining: f32,
+    /// Angular target of a Slinger orbit, unused by other cords.
+    pub orbit_angle: f32,
 }
 
 impl Tether {
@@ -172,6 +176,7 @@ impl Tether {
             age: 0.0,
             warning: 0.0,
             remaining: f32::INFINITY,
+            orbit_angle: 0.0,
         }
     }
 
@@ -193,11 +198,21 @@ impl Tether {
             age: 0.0,
             warning: 0.0,
             remaining: f32::INFINITY,
+            orbit_angle: 0.0,
         }
     }
 
     pub fn attached(&self) -> bool {
         self.tip.is_none()
+    }
+
+    pub(super) fn sling(owner: u64, other: u64, rest: f32, angle: f32) -> Self {
+        Self {
+            kind: TetherKind::Sling,
+            rest,
+            orbit_angle: angle,
+            ..Self::link(owner, other)
+        }
     }
 
     pub(super) fn web(owner: u64, other: u64, rest: f32, warning: f32) -> Self {
@@ -254,6 +269,8 @@ impl Game {
         for mut tether in tethers {
             if self.step_tether(&mut tether, dt, &mut severed) {
                 kept.push(tether);
+            } else if tether.kind == TetherKind::Sling {
+                self.release_sling_rock(tether.other);
             }
         }
         self.tethers = kept;
@@ -268,6 +285,9 @@ impl Game {
             return false;
         };
         let player = self.bodies.iter().position(|b| b.kind == BodyKind::Player);
+        if tether.kind == TetherKind::Sling {
+            return self.step_orbit(tether, owner, player, dt);
+        }
         if tether.kind == TetherKind::Web {
             return self.step_web(tether, owner, player, dt, severed);
         }
@@ -400,7 +420,7 @@ impl Game {
                 }
                 true
             }
-            TetherKind::Web => unreachable!("webs are advanced above"),
+            TetherKind::Web | TetherKind::Sling => unreachable!("rock cords are advanced above"),
         }
     }
 }

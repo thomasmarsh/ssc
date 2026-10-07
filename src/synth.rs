@@ -71,10 +71,12 @@ pub enum Sound {
     Crack,
     /// A web being strung: a rising, plucked chord.
     Weave,
+    SlingTell,
+    SlingThrow,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 44] = [
+    pub const ALL: [Sound; 46] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -119,6 +121,8 @@ impl Sound {
         Sound::Dirge,
         Sound::Crack,
         Sound::Weave,
+        Sound::SlingTell,
+        Sound::SlingThrow,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -484,6 +488,17 @@ impl Sound {
                 });
                 lowpass(&mut v, 1200.0);
                 v
+            }
+            Sound::SlingTell => voice(0.8, |t, _| {
+                let f = sweep((t / 0.8).min(1.0), 140.0, 640.0);
+                (sine(f, t) + sine(f * 2.0, t) * 0.25) * (t / 0.04).min(1.0) * decay(t, 0.5)
+            }),
+            Sound::SlingThrow => {
+                let mut noise = Noise::new(772);
+                voice(0.3, |t, _| {
+                    (noise.next() * 0.6 + sine(sweep(t / 0.3, 280.0, 65.0), t) * 0.5)
+                        * decay(t, 0.09)
+                })
             }
             Sound::Weave => {
                 let mut v = voice(0.7, |t, _| {

@@ -96,6 +96,9 @@ pub struct PowerState {
     pub(super) idle: f32,
     /// Seconds before a weaver may string another rock.
     pub(super) web_clock: f32,
+    pub(super) sling_clock: f32,
+    pub(super) gather_clock: f32,
+    pub(super) sling: Option<super::sling::SlingTell>,
 }
 
 /// Everything the adapter needs to draw a body's power.
@@ -120,6 +123,7 @@ pub struct PowerView {
     pub blip: Vec2,
     /// A dirge's mouth opening: 0 to 1.
     pub song: f32,
+    pub sling: Option<super::sling::SlingTell>,
 }
 
 impl Game {
@@ -128,6 +132,7 @@ impl Game {
         let state = self.power_state.get(&body.id);
         PowerView {
             blink: state.and_then(|s| s.blink),
+            sling: state.and_then(|s| s.sling),
             trail: state.and_then(|s| s.trail),
             phase: body.genome.phase_at(phase_key(body), self.time),
             jam: state.and_then(|s| s.jam),
@@ -199,6 +204,7 @@ impl Game {
                     || (Power::Mimic.active(&g) && Power::Mimic.fits(&g))
                     || Power::Cloud.active(&g)
                     || Power::Weave.active(&g)
+                    || (Power::Sling.active(&g) && Power::Sling.fits(&g))
                     || Power::Devour.active(&g));
             if phase.is_none() && !blinks && !jammer && !fielder {
                 self.bodies[index].phased = false;
@@ -214,6 +220,8 @@ impl Game {
                 bulk: 1.0,
                 song_clock: 1.5 + 0.5 * (id % 4) as f32,
                 web_clock: 1.0 + 0.4 * (id % 5) as f32,
+                sling_clock: g.power_period,
+                gather_clock: 0.6,
                 ..PowerState::default()
             });
             match phase {
@@ -249,6 +257,9 @@ impl Game {
             }
             if fielder && Power::Song.active(&g) {
                 self.step_song(index, &mut state, dt, ship, &mut cues);
+            }
+            if fielder && Power::Sling.active(&g) {
+                self.step_sling(index, &mut state, dt, ship, &mut cues);
             }
             if fielder && Power::Weave.active(&g) {
                 self.step_weave(index, &mut state, dt, ship, &mut cues);

@@ -8,7 +8,7 @@ use crate::power::{self, Power};
 use std::collections::BTreeSet;
 
 /// A web never anchors to a wall, planetoid, nest stone or occupied husk.
-fn web_rock(body: &Body) -> bool {
+pub(super) fn web_rock(body: &Body) -> bool {
     body.active
         && body.health > 0.0
         && !body.consumed

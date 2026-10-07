@@ -337,7 +337,7 @@ The Tow Rig of section 8 (a hook, a cord, a thruster pod, a sling) is not built 
 - **The whip.** A dash that ends within 140 of a free rock ahead (inside a 41 degree cone) cracks it with an impulse of 4500 (+30 percent a level), capped at 520 of speed; the dash's invulnerability keeps the ship safe.
 - **PLATING.** The ship's half share of an impact is cut by 20 percent a level when the ship caused it (it supplied half the closing speed, or the other body was shoved), and from level 3 every collision by 15 percent a level from there. A rock's plain touch (12 hull) is not covered.
 - **Skills.** SHOVE and PLATING are locked at level 0 (shown on the RIG tab and as `locked` in the details panel), levels 1 to 4, prices from `tuning.rs` (metal builds, crystal tunes), kept through death and cleared on restart. PLATING needs SHOVE level 1 to buy.
-- **Not built:** pods, cords on rocks, guidance, a second rock, credit for a shoved rock's kills to the ship beyond the existing ram rules (a shoved rock is still a rock; regard and score follow existing impact rules).
+- **Not built for the ship:** pods, cords on rocks, guidance, a second rock, credit for a shoved rock's kills to the ship beyond the existing ram rules (a shoved rock is still a rock; regard and score follow existing impact rules).
 
 ## Status: organs and symbiotes
 
@@ -423,3 +423,8 @@ The exact table is `realm::CATALOG`; adding a realm kind is one row (its stress 
 8. Which realm do players avoid and which do they seek? Quiet Gold should be a rest, not a farm: does threat -40 percent make the sector a safe grinding spot?
 9. Mining and Symbiosis are never a primary stress. Does the miner feel safe everywhere, and is a barren realm (a stress on mining) worth a row?
 10. Does any realm combination at a border (Hungry Deep next to Glass Seas) produce an unplayable sector, and does the banner cooldown (30 s) hide a real change?
+
+
+## Status: Slinger rocks
+
+BESTIARY step 9 is built for Weaver and Slinger, generator version 17. Slinger reuses the cuttable creature-to-rock endpoints with its own harmless orbit cords and fixed-aim warning, then releases ordinary rocks through the shove and kinetic-impact rules. See BESTIARY section 18 for tuning and counters. The Tow Rig remains superseded; its Slinger sinew unlock is not part of progression. Parry still stops shots only. The escape route is ordinary lateral movement off the warned arrow, dash, or cutting or mining ammunition before release.

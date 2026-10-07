@@ -165,6 +165,38 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
         eyes(gizmos, p, r, time, view.glare, tint);
     }
     match carried.power {
+        Power::Sling => {
+            dotted_circle(gizmos, p, r + 18.0, tint.with_alpha(0.45), 16, time * 0.9);
+            for k in 0..4 {
+                let angle = body.angle + k as f32 * TAU / 4.0 + 0.4;
+                let radial = Vec2::from_angle(angle);
+                let knee = p + radial * (r + 15.0);
+                let tip = knee + Vec2::from_angle(angle + 0.8) * 18.0;
+                gizmos.line_2d(p + radial * r, knee, tint);
+                gizmos.line_2d(knee, tip, tint);
+            }
+            if let Some(tell) = view.sling
+                && let Some(rock) = game.body(tell.rock)
+            {
+                let at = rock.position;
+                let progress = (1.0 - tell.left / tell.total).clamp(0.0, 1.0);
+                gizmos
+                    .circle_2d(at, rock.radius + 7.0 + 12.0 * (1.0 - progress), tint)
+                    .resolution(32);
+                let end = at + tell.direction * 300.0;
+                for i in 0..12 {
+                    let u = i as f32 / 12.0;
+                    gizmos.line_2d(
+                        at.lerp(end, u),
+                        at.lerp(end, u + 0.04),
+                        tint.with_alpha(0.85),
+                    );
+                }
+                let side = Vec2::new(-tell.direction.y, tell.direction.x);
+                gizmos.line_2d(end, end - tell.direction * 18.0 + side * 10.0, tint);
+                gizmos.line_2d(end, end - tell.direction * 18.0 - side * 10.0, tint);
+            }
+        }
         Power::Weave => {
             // Six spinnerets make the builder readable even before it has found a rock.
             let mut tips = Vec::with_capacity(7);

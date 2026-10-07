@@ -20,6 +20,17 @@ pub const WEB_ANGLE: f32 = 0.55;
 pub const WEB_SECTOR_CAP: usize = 2;
 pub const WEB_PULL_CAP: f32 = 80.0;
 
+/// Slinger orbits remain below the kinetic threshold. Aim locks at warning onset.
+pub const SLING_TELL: f32 = 0.8;
+pub const SLING_OFFSCREEN_TELL: f32 = 1.2;
+pub const SLING_SECTOR_CAP: usize = 2;
+pub const SLING_WORLD_CAP: usize = 16;
+pub const SLING_GATHER: f32 = 0.7;
+pub const SLING_ORBIT_SPEED: f32 = 180.0;
+pub const SLING_ACCEL: f32 = 600.0;
+pub const SLING_RELEASE: f32 = 5.0;
+pub const SLING_MIN_SHIP: f32 = 220.0;
+
 /// An intensity below this is dormant. Drift never reaches it from zero (the block is skipped
 /// by `Genome::drifted`) and a mutation cannot cross it in one step.
 pub const GATE: f32 = 0.3;
@@ -444,6 +455,7 @@ impl Power {
                 | Self::Latch
                 | Self::Symbiote
                 | Self::Weave
+                | Self::Sling
         )
     }
 
@@ -452,6 +464,7 @@ impl Power {
     pub fn fits(self, g: &Genome) -> bool {
         match self {
             Self::Blink | Self::Mimic => g.parts() == 1,
+            Self::Sling => g.radius <= 65.0 && g.mass > 0.0,
             Self::Bypass => matches!(g.weapon, Weapon::Projectile | Weapon::Needles),
             _ => true,
         }
@@ -478,6 +491,7 @@ impl Power {
             Self::Symbiote => [1.0, 0.72, 0.25],
             Self::Latch => [0.75, 0.45, 1.0],
             Self::Weave => [0.65, 1.0, 0.85],
+            Self::Sling => [1.0, 0.65, 0.25],
             _ => [0.9, 0.9, 0.9],
         }
     }
@@ -808,6 +822,20 @@ fn style(g: &mut Genome, power: Power) {
             g.speed = g.speed.min(60.0);
             g.hull = g.hull.max(120.0);
         }
+        Power::Sling => {
+            g.segments = 1;
+            g.limbs = 4;
+            g.limb_len = 1;
+            g.radius = g.radius.clamp(18.0, 26.0);
+            g.mass = g.mass.max(80.0);
+            g.hull = g.hull.max(80.0);
+            g.speed = g.speed.min(70.0);
+            g.cruise = g.cruise.min(25.0);
+            g.weapon = Weapon::None;
+            g.fling = 0.0;
+            g.diet = crate::genome::Diet::Rocks;
+            g.standoff = 400.0;
+        }
         Power::Weave => {
             g.segments = 1;
             g.limbs = 6;
@@ -862,6 +890,23 @@ fn style(g: &mut Genome, power: Power) {
 }
 
 impl Genome {
+    /// A compact crab that orbits small rocks and throws them on a warning.
+    pub fn slinger() -> Self {
+        let mut g = Self {
+            sling: 0.6,
+            power_period: 3.5,
+            power_reach: 750.0,
+            radius: 22.0,
+            hull: 80.0,
+            mass: 80.0,
+            speed: 60.0,
+            cruise: 25.0,
+            ..Self::default()
+        };
+        style(&mut g, Power::Sling);
+        g
+    }
+
     /// A spoked builder that strings cords to rocks rather than firing at the ship.
     pub fn weaver() -> Self {
         let mut g = Self {
@@ -1223,6 +1268,27 @@ mod tests {
             }
         }
         carriers as f32 / n as f32
+    }
+
+    #[test]
+    fn slingers_have_deterministic_styling_and_a_ring_six_gate() {
+        assert!(Power::Sling.built());
+        let index = Power::ALL.iter().position(|p| *p == Power::Sling).unwrap();
+        for depth in [0.0, 3.0, 5.0, 6.0] {
+            assert_eq!(weights(&far(depth))[index], 0.0);
+        }
+        let w = weights(&far(30.0));
+        let roll = w[..index].iter().sum::<f32>() + w[index] * 0.5;
+        let mut a = Genome::default();
+        let mut b = Genome::default();
+        sample(&mut a, roll, &far(30.0));
+        sample(&mut b, roll, &far(30.0));
+        assert_eq!(a, b);
+        assert_eq!(a.live_power().unwrap().power, Power::Sling);
+        assert_eq!((a.segments, a.limbs, a.limb_len), (1, 4, 1));
+        assert_eq!(a.weapon, Weapon::None);
+        assert!(a.mass >= 80.0);
+        assert_eq!(Genome::slinger().parts(), 5);
     }
 
     #[test]

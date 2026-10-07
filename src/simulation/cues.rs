@@ -109,6 +109,12 @@ pub enum Cue {
         at: Vec2,
     },
     /// A weaver strings a harmless warning cord before it tightens.
+    SlingTell {
+        at: Vec2,
+    },
+    SlingThrow {
+        at: Vec2,
+    },
     Weave {
         at: Vec2,
     },

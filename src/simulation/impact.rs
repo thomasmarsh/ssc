@@ -56,15 +56,22 @@ pub(super) fn strike(
         } else {
             armored(target, raw, other.kind == BodyKind::Player)
         };
-        (amount, other.kind == BodyKind::Player)
+        (
+            amount,
+            other.kind == BodyKind::Player,
+            other.sling_thrown > 0.0,
+        )
     });
-    for (target, (amount, from_ship)) in [a, b].into_iter().zip(amounts) {
+    for (target, (amount, from_ship, hostile_rock)) in [a, b].into_iter().zip(amounts) {
         let invulnerable = if target.kind == BodyKind::Player {
             invulnerability
         } else {
             0.0
         };
         let taken = damage(target, amount, invulnerable);
+        if hostile_rock && target.health <= 0.0 && target.kind != BodyKind::Player {
+            target.hostile_rock_kill = true;
+        }
         if from_ship && matches!(target.kind, BodyKind::Creature | BodyKind::Base) {
             dealt += taken;
         }
