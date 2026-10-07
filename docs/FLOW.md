@@ -342,3 +342,84 @@ The Tow Rig of section 8 (a hook, a cord, a thruster pod, a sling) is not built 
 ## Status: organs and symbiotes
 
 Written after the slice; see BESTIARY.md "Step 8" for the numbers. The "first apex-linked organs" of the P1 list became the smaller version: the Kindling Remora (bond by calm grooming), the Hullworm (a drain with counterplay), four organs and the SYMBIOSIS skill on the existing RIG tab (no new tab), shown as a hexagon per working organ in the bottom cluster beside the cargo pips (hollow grey when asleep, a draining ring while a bond runs on loan), as motes orbiting the ship, and as rows in the details panel. Judgement calls worth a look when playing: the Veil and Skip node organs are useless without DASH; the bond loan (300 s without a slot) is a guess; the relic rate (one sector in 14) and the worm's 2 to 6 a second drain are guesses; the bench's RIG tab is now 15 rows and scrolls in a 17-line panel.
+
+## Balance dimensions: no build covers every realm
+
+Written with the realms and the sniping counters (UNIVERSE.md, "Realms" and "Sniping counters"). The problem it answers: power was one number, depth threat against ship power, so a big gun meant you could blast everything from beyond its reach, bosses included. The answer is not a flatter curve but a second axis. Depth still says how strong things are; the **realm** (a continent of 40 to 120 sectors) says what kind of strong the place tests. You can be formidable in one dimension and puny in the next realm.
+
+### The axes a player can power up
+
+Eight, each with the concrete knobs that raise it (rig skills, parts, arsenal profiles, organs):
+
+| Axis | What raises it |
+| --- | --- |
+| Damage | Damage and fire rate stats, the lance, missiles, blast, nova; per-hit weight beats plating, area beats swarms |
+| Range | Range and shot speed stats, the lance and homing; sensors aside, this is how far a shot flies and keeps its damage (`Profile::reach`) |
+| Defense | Hull, shield, recharge, armour, PLATING, parry; staying power against a crowd or a boss |
+| Mobility | Thrust, top speed, handling, dash, SHOVE and the beam's grip; being fast enough to dodge a barrage, a well or a pack |
+| Mining | Beam power and range, ore yield, magnet, cargo, planetoid pads; the economy that pays for fuel profiles and parts |
+| Sensors | Sonar tiers, the ping, the arrows' reach, being unnoticed on a pad; knowing where things are before they know you |
+| Symbiosis | Organs and bonds (Remora, Faraday, Veil, Skip node), SYMBIOSIS slots; cover in specific places (Faraday against jams, Remora against attrition, the Skip node against walls and wells) |
+| Utility | Beacons, pads, kits, the energy abilities (dash and parry run on shield, so they fail when the shield is low or the realm dulls them) |
+
+A ship is strong in about three of the eight at once (`realm::BUILD_AXES`). That number is the design: a test pins that every choice of three leaves some realm testing an axis the ship left out.
+
+### The axes an enemy or realm can stress
+
+Enemies stress the same axes through stats and behaviour; a realm stresses them through modifiers (`realm::Effects`, all independent of depth):
+
+| Stress | Levers | Where it lives |
+| --- | --- | --- |
+| Damage | Enemy hull, shield and flat plating (a per-hit amount off every hit, never below a quarter of it), elders that adapt and bubble | `Effects.foe`, `adapt`, `apexes::shield_factor` |
+| Range | Weapon range cut, falloff past a sweet spot, enemies that close (lunges, blinks, pulls) or outrange (barrages) | `Effects.weapon_range`, `Profile::reach`, `apexes::closers` |
+| Defense | More creatures, swarms, hunters, harder hits, elders | `Effects.life/swarms/predators/apex`, `foe.damage` |
+| Mobility | Faster enemies, heavy gravity, more wells, packs, dash and parry that fizzle | `foe.speed`, `gravity`, `wells`, `fizzle` |
+| Mining | Rich or poor rock (yield multiplier) | `Effects.mining` (a rest and a rich realm today; no realm punishes the miner yet) |
+| Sensors | Sensor reach cut (ping range, the arrows), enemies that arrive before you see them | `Effects.sensor` |
+| Symbiosis | Jam time, jam carriers (what an organ cancels) | `Effects.jammers/jam_time` |
+| Utility | Jam carriers and elders, fizzling abilities | `Effects.jammers/fizzle/jam_time` |
+
+### Which realms stress which axes
+
+`X` is a primary stress (the realm is built to test it), `x` a mild secondary one, `+` an axis the realm favours (strength there pays more, or the realm leaves it alone). The starter Cradle stresses nothing.
+
+| Realm | Dam | Rng | Def | Mob | Min | Sen | Sym | Uti | Effects at full strength |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| The Veil | + | X | x | + | | X | | | weapon range -35%, sensors -45%, enemy speed +20%, damage +10% |
+| Dead Reach | + | | | X | + | x | | X | jam carriers x4, jams +40% long, dash and parry fizzle 25%, mining +25% |
+| The Crush | | x | | X+ | | | | | gravity +70%, wells +120%, enemy speed -5% |
+| Hive Marches | + | | X | x | | | | | swarms +140%, creatures +40%, hunters -30%, enemy hull -20%, damage -10% |
+| Iron Tide | X | | + | | x | | | | enemy shield +140%, hull +40%, plating 6 per hit, speed -15%, every elder bubbled, mining +30% |
+| Glass Seas | X | | x | + | | | | | enemy hull -55%, shield -60%, speed +35%, swarms +80%, creatures +70% |
+| Quiet Gold | | | | | + | | | + | threat -40%, elders -50%, creatures -20%, mining +60% (the rest realm) |
+| Hungry Deep | + | + | X | X | | x | | | hunters +220%, enemy speed and damage +15% |
+| Bright Silence | X | | X | + | | + | | x | creatures -82%, elders +350%, enemy hull +15% |
+
+The exact table is `realm::CATALOG`; adding a realm kind is one row (its stress axes, its favoured axes, its `Effects`, the biomes and elder archetypes it weights, the powers its elders carry, whether its elders are bubbled). Modifiers rise from nothing at a realm's border to the table value over ten sectors, and from nothing at ring 16 to full by ring 28, so a modifier never steps. HOME and a wide area around it are always the Cradle.
+
+### Which builds are strong where
+
+- **Heavy gun** (big damage, long range, slow shots, the lance): Iron Tide (a heavy hit shrugs off plating, a lance passes a bubble), Hungry Deep at range if it can keep the distance. Weak in Glass Seas (overkill on a swarm, slow shots miss fast bodies), the Veil (range cut by a third, so the sweet spot is the whole fight) and Bright Silence (an elder adapts to the family that hurts it and a sniper takes barrages).
+- **Fast light guns, needles, area** (nova, missiles, spread): Glass Seas and Hive Marches. Weak in Iron Tide (plating turns light hits to a quarter) and against a bubble.
+- **Mobility** (thrust, dash, SHOVE): the Crush, Hungry Deep, the Veil (close the gap on your terms), Bright Silence (dodge the barrages). Weak in Dead Reach (the dash fizzles a quarter of the time) and where a slow heavy ship can sit on a rock belt.
+- **Tank** (hull, shield, PLATING, parry): Hive Marches, Hungry Deep, Iron Tide (a slow enemy can be out-lasted). Weak where the shield is the resource, Dead Reach (energy abilities fizzle, jams last longer).
+- **Miner** (beam, yield, cargo): Quiet Gold, Iron Tide, Dead Reach; the economy that buys everything else, but no realm stresses it yet, so it never pays for itself in danger.
+- **Sensors and stealth**: Bright Silence (a few elders, a lot of room to avoid them) and the Veil's counter; weak in the Veil itself.
+- **Symbiosis**: not a place, a patch. Faraday and the Veil organ cover Dead Reach and the Hive; Remora covers attrition in Hungry Deep; Skip node and Veil organ ease the Crush.
+
+### The rule
+
+**No build covers every realm.** A realm's primary stress must be something a build can fail, and every axis must be tested in some realm and favoured in another. Adaptive resistance (damage families), weapon falloff, recoil and heavy shots, elder closers (lunges, blinks, pulls) and barrages, and bubbles are the per-fight form of the same rule: the realm decides which counters are in play, and each leaves a hit worth something (`ADAPT_MAX`, `Reach.floor`, `BUBBLE_LEAK`, `PLATING_FLOOR` are all above zero).
+
+### Play-testing questions
+
+1. Is the starter Cradle big enough to learn in (it is 28 or more sectors across, at least a ring of 14) and does the first realm border feel like an event, not a cliff? Is a ten-sector ramp readable in the HUD tag?
+2. Can a heavy-gun build get through the Veil and Glass Seas without switching guns or the ship? Does it want to? Is "switch the family" (`[` `]`) discovered, or does the player need the HARDENED line in the details panel and the pips on the apex bar?
+3. Do adaptive pips read at a glance during a fight, and is 55 percent the right cap? Does a one-family ship feel punished or cheated? Is a third of the pool the right fill?
+4. Is the sweet-spot falloff noticed? Does the player move in to fight, or does recoil and slower heavy shots feel like a tax on upgrades?
+5. Are barrages fair: is a 1.2 s telegraph enough to move, is the gap between shots wide enough at every range, and does the realm (Veil: sensors cut) hide the telegraph? Do lunges feel like the elder punishing a sniper or like teleporting?
+6. Is the bubble understandable (a ring that thins, a broken dashed ring, `BUBBLE BROKEN`)? Does the lance as the bypass feel like a discovery or a trap for players without one?
+7. Does Dead Reach's fizzle feel like a realm rule or like a bug (it refuses with the same cue as a jam, and it locks the key for 0.6 s)? Should the HUD name it?
+8. Which realm do players avoid and which do they seek? Quiet Gold should be a rest, not a farm: does threat -40 percent make the sector a safe grinding spot?
+9. Mining and Symbiosis are never a primary stress. Does the miner feel safe everywhere, and is a barren realm (a stress on mining) worth a row?
+10. Does any realm combination at a border (Hungry Deep next to Glass Seas) produce an unplayable sector, and does the banner cooldown (30 s) hide a real change?
