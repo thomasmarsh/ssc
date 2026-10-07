@@ -167,7 +167,8 @@ pub fn region(seed: u64, id: SectorId) -> Region {
         // end in the biome's word.
         let lead = &eco.presence[0];
         if lead.spread != Spread::Generalist && lead.weight >= NICHE_NAMES_AT {
-            let key = named(5 ^ lead.species.lineage, 0, 0);
+            let patch = lead.patch.id;
+            let key = named(5 ^ lead.species.lineage, patch as i32, (patch >> 32) as i32);
             let kinds = BiomeKind::ALL;
             let word = kinds[((key >> 17) % kinds.len() as u64) as usize].word();
             (RegionKind::Wild, key, word.to_string())

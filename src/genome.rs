@@ -12,8 +12,7 @@
 //! draws from its own salted streams, never from the stream that places the original
 //! population.
 
-use crate::world::{Rng, SectorId, SectorParams, hash2, value_noise};
-use bevy::prelude::Vec2;
+use crate::world::{Rng, SectorParams, hash2};
 
 /// No creature has more bodies than this, however its genes combine.
 pub const MAX_PARTS: u32 = 28;
@@ -433,22 +432,21 @@ impl Genome {
         a.iter().zip(&b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32
     }
 
-    /// The same lineage as expressed in sector `id`: every gene nudged by a smooth
-    /// noise field, so neighboring sectors hold close relatives. `amplitude` is zero at
-    /// the founding node (the unmutated type specimen) and grows with distance.
-    pub(crate) fn expressed(
+    /// The genome with every gene nudged by `signed(gene index)`, a value in [-1, 1],
+    /// scaled by `amplitude` (zero leaves it untouched). The machinery behind the species'
+    /// clines and the offsets of isolated populations (see `range`): real and integer genes shift by a share of their span, categories flip
+    /// only at the extremes, and everything passes through `limited()`.
+    pub(crate) fn drifted(
         mut self,
-        seed: u64,
         lineage: u64,
-        id: SectorId,
         amplitude: f32,
+        signed: impl Fn(usize) -> f32,
     ) -> Self {
         if amplitude <= 0.0 {
             return self;
         }
-        let at = Vec2::new(id.x as f32, id.y as f32) * 0.25;
         for (index, gene) in self.genes().into_iter().enumerate() {
-            let signed = (value_noise(seed ^ lineage, 300 + index as u64, at) - 0.5) * 2.0;
+            let signed = signed(index).clamp(-1.0, 1.0);
             match gene {
                 Gene::Real { v, lo, hi } => {
                     *v = (*v + signed * amplitude * 0.3 * (hi - lo)).clamp(lo, hi);
@@ -1427,6 +1425,7 @@ impl GenePool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::SectorId;
 
     #[test]
     fn home_species_are_named_and_colored_from_their_genes() {

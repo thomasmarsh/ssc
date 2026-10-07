@@ -126,6 +126,27 @@ pub const OASIS_BELT: f32 = 0.3;
 /// The most species any sector may hold.
 pub const MAX_SPECIES: usize = 6;
 
+// ---- tuning: clines and isolation ---------------------------------------------------
+
+/// A cline is smooth per-gene noise across space, small in amplitude: its frequency per
+/// sector and its strength for a classic and for a sampled species (the `Genome::drifted`
+/// amplitude, a share of 0.3 of a gene's span at 1).
+pub const CLINE_FREQUENCY: f32 = 0.05;
+pub const CLINE_AMPLITUDE: (f32, f32) = (0.06, 0.22);
+/// How far a separate population drifts from the rest: the offset amplitude at full
+/// isolation for a classic and for a sampled species, scaled by the isolation distance.
+pub const PATCH_AMPLITUDE: (f32, f32) = (0.1, 0.5);
+/// Sectors between a population's heart and its species' anchor at which isolation is full.
+pub const ISOLATION_SCALE: f32 = 40.0;
+/// A connected population of more vertices than this (of its mask lattice) is a continent,
+/// not an isolate, and is not offset.
+pub const PATCH_CAP: usize = 60;
+/// A belt this deep cuts a population in two.
+pub const PATCH_BELT: f32 = 0.6;
+/// Classics keep their type-specimen look on the start rings and drift in over this many
+/// rings beyond.
+pub const CLASSIC_DRIFT_RINGS: f32 = 4.0;
+
 /// Rock belts: ridges (the contour where a slow noise field crosses its middle, features
 /// about 50 sectors across). Within `BELT_CORE` sectors of the ridge line a belt is at full
 /// depth, thinning to nothing by `BELT_EDGE`, whatever the slope of the field there; inside
@@ -174,6 +195,8 @@ const BELT_SALT: u64 = 0xBE17_5000_0000_0041;
 const MASK_CHANNEL: u64 = 11;
 
 const DEBUT_CHANNEL: u64 = 13;
+const CLINE_CHANNEL: u64 = 400;
+const PATCH_SALT: u64 = 0x9A7C_4000_0000_0045;
 const POCKET_CHANNEL: u64 = 12;
 const KEY_SALT: u64 = 0x5BEC_1E50_0000_003F;
 
@@ -464,6 +487,112 @@ impl Distribution {
             * smooth(((n - DEBUT_NOISE.0) / (DEBUT_NOISE.1 - DEBUT_NOISE.0)).clamp(0.0, 1.0))
     }
 
+    /// The population sector `id` belongs to: the connected group of mask-lattice vertices
+    /// (4-neighbours, above the mask threshold, not cut by a belt) around it. A group too
+    /// large to be an isolate is the species' continent (patch 0, no isolation). The id is
+    /// that of the group's highest vertex, so every sector of one population agrees.
+    pub fn patch(&self, seed: u64, id: SectorId) -> Patch {
+        const CONTINENT: Patch = Patch {
+            id: 0,
+            isolation: 0.0,
+        };
+        let f = self.patch_frequency;
+        let p = at_of(id) * f;
+        let cover = lerp(MASK_COVER.0, MASK_COVER.1, self.breadth).clamp(0.001, 0.999);
+        let q = 1.0 - cover;
+        let threshold = 0.5 + MASK_NOISE_SD / 1.702 * (q / (1.0 - q)).ln();
+        let value = |v: (i32, i32)| {
+            regional_noise(
+                seed,
+                self.key,
+                MASK_CHANNEL,
+                Vec2::new(v.0 as f32, v.1 as f32),
+                1.0,
+            )
+        };
+        let (fx, fy) = (p.x.floor() as i32, p.y.floor() as i32);
+        let corners = [(fx, fy), (fx + 1, fy), (fx, fy + 1), (fx + 1, fy + 1)];
+        let start = corners
+            .into_iter()
+            .max_by(|a, b| value(*a).total_cmp(&value(*b)).then(b.cmp(a)))
+            .expect("four corners");
+        if value(start) < threshold {
+            return CONTINENT;
+        }
+        let blocked =
+            |v: (i32, i32)| belt(seed, Vec2::new(v.0 as f32, v.1 as f32) / f) >= PATCH_BELT;
+        let mut seen = vec![start];
+        let mut next = 0;
+        let mut peak = start;
+        while next < seen.len() {
+            let at = seen[next];
+            next += 1;
+            if value(at) > value(peak) || (value(at) == value(peak) && at < peak) {
+                peak = at;
+            }
+            for step in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let to = (at.0 + step.0, at.1 + step.1);
+                if !seen.contains(&to) && value(to) >= threshold && !blocked(to) {
+                    if seen.len() >= PATCH_CAP {
+                        return CONTINENT;
+                    }
+                    seen.push(to);
+                }
+            }
+        }
+        let heart = Vec2::new(peak.0 as f32, peak.1 as f32) / f;
+        Patch {
+            id: hash2(seed ^ self.key ^ PATCH_SALT, peak.0, peak.1) | 1,
+            isolation: (heart.distance(self.anchor) / ISOLATION_SCALE).clamp(0.0, 1.0),
+        }
+    }
+
+    /// The species' genome as it looks in sector `id`: the founder with its cline (smooth
+    /// per-gene noise) and, for an isolated population, an offset hashed from the species
+    /// and the patch, scaled by how far the population is from the species' anchor.
+    /// Classics stay type specimens on the start rings and drift only a little after.
+    pub fn genome_at(&self, seed: u64, id: SectorId, patch: &Patch) -> Genome {
+        let founder = self.founder(seed);
+        let ring = ring(id);
+        let (cline, offset) = match self.family {
+            Family::Wild => (CLINE_AMPLITUDE.1, PATCH_AMPLITUDE.1),
+            _ => {
+                let ramp = smooth(((ring as f32 - 2.0) / CLASSIC_DRIFT_RINGS).clamp(0.0, 1.0));
+                (CLINE_AMPLITUDE.0 * ramp, PATCH_AMPLITUDE.0 * ramp)
+            }
+        };
+        let offset = offset * patch.isolation;
+        let total = cline + offset;
+        if total <= 0.0 {
+            return founder;
+        }
+        let at = at_of(id);
+        let genome = founder.drifted(self.key, total, |gene| {
+            let along = (regional_noise(
+                seed,
+                self.key,
+                CLINE_CHANNEL + gene as u64,
+                at,
+                CLINE_FREQUENCY,
+            ) - 0.5)
+                * 2.0;
+            let apart = if patch.id == 0 {
+                0.0
+            } else {
+                let h = hash2(self.key ^ PATCH_SALT ^ patch.id, gene as i32, 17);
+                ((h >> 40) as f32 / 16_777_216.0 - 0.5) * 2.0
+            };
+            (along * cline + apart * offset) / total
+        });
+        // Drift may flip a category; the depth ramp is judged on the founder, so a sampled
+        // species never shows a body or diet the ring forbids.
+        if self.family == Family::Wild && wild_min_ring(&genome) > ring {
+            founder
+        } else {
+            genome
+        }
+    }
+
     /// The species' founding genome, before the sector's expression of it.
     pub fn founder(&self, seed: u64) -> Genome {
         if let Some(species) = self.family.species() {
@@ -609,6 +738,14 @@ fn weights(seed: u64, id: SectorId, oasis: bool) -> Vec<(Distribution, f32)> {
     }
 }
 
+/// A population of a species: the id of its connected group (zero for the continent, the
+/// species' main body) and how isolated it is, in [0, 1].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Patch {
+    pub id: u64,
+    pub isolation: f32,
+}
+
 /// A species at a sector and how abundant it is there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Presence {
@@ -616,8 +753,10 @@ pub struct Presence {
     pub weight: f32,
     pub family: Family,
     pub spread: Spread,
-    /// Where the lineage began, in sector units (names its region, see `region`).
+    /// Where the lineage began, in sector units.
     pub center: Vec2,
+    /// The population it belongs to here (names its region, see `region`).
+    pub patch: Patch,
 }
 
 /// What a sector's ecology is: who lives there, how much life it holds, how rock-rich it is.
@@ -727,29 +866,18 @@ pub fn ecology(seed: u64, id: SectorId) -> Ecology {
     let presence = weights
         .into_iter()
         .map(|(d, weight)| {
-            let amplitude = match (d.family, ring) {
-                (Family::Wild, _) => 0.3,
-                (_, 0..=2) => 0.0,
-                _ => 0.1,
-            };
-            let founder = d.founder(seed);
-            let mut genome = founder.expressed(seed, d.key, id, amplitude);
-            // Expression may flip a category; the depth ramp is judged on the founder, so
-            // a sampled species never shows a body or diet the ring forbids.
-            if d.family == Family::Wild && wild_min_ring(&genome) > ring {
-                genome = founder;
-            }
+            let patch = d.patch(seed, id);
             Presence {
                 species: Species {
                     lineage: d.key,
                     generation: at.distance(d.anchor).round().min(65_535.0) as u16,
-                    genome,
+                    genome: d.genome_at(seed, id, &patch),
                 },
-
                 weight,
                 family: d.family,
                 spread: d.spread,
                 center: d.anchor,
+                patch,
             }
         })
         .collect();
@@ -1298,5 +1426,126 @@ mod tests {
             }
         }
         assert!(checked >= 3, "only {checked} species checked");
+    }
+
+    /// Present sectors of a species with their genome there and their patch.
+    fn population(seed: u64, d: &Distribution) -> Vec<(SectorId, Patch, Genome)> {
+        habitat(seed, d)
+            .into_iter()
+            .filter(|(_, present)| *present)
+            .map(|(id, _)| {
+                let patch = d.patch(seed, id);
+                (id, patch, d.genome_at(seed, id, &patch))
+            })
+            .collect()
+    }
+
+    /// Clines are smooth: neighbours of one population are close relatives, and the
+    /// genome drifts further the further apart two sectors lie.
+    #[test]
+    fn clines_are_smooth_and_accumulate_with_distance() {
+        let (mut near, mut far, mut n_near, mut n_far) = (0.0, 0.0, 0, 0);
+        let mut worst = 0.0_f32;
+        for tier in 3..9 {
+            for slot in 0..SLOTS_PER_TIER {
+                let d = Distribution::wild(SEED, tier, slot);
+                if d.spread != Spread::Generalist {
+                    continue;
+                }
+                let pop = population(SEED, &d);
+                for (i, (a, pa, ga)) in pop.iter().enumerate().step_by(7) {
+                    for (b, pb, gb) in pop.iter().skip(i + 1).step_by(5) {
+                        if pa.id != pb.id {
+                            continue;
+                        }
+                        let sep = a.x.abs_diff(b.x).max(a.y.abs_diff(b.y));
+                        let dist = ga.distance(gb);
+                        if sep == 1 {
+                            near += dist;
+                            n_near += 1;
+                            worst = worst.max(dist);
+                        } else if (20..=30).contains(&sep) {
+                            far += dist;
+                            n_far += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(n_near > 30 && n_far > 30, "{n_near} {n_far}");
+        let (near, far) = (near / n_near as f32, far / n_far as f32);
+        assert!(near < 0.01, "neighbours differ by {near}");
+        assert!(worst < 0.05, "worst neighbour step {worst}");
+        assert!(far > 3.0 * near, "no accumulation: {near} then {far}");
+    }
+
+    /// Groups separated by a hole look more different than a connected group does over the
+    /// same distances, and the further the isolate from its species' anchor the more.
+    #[test]
+    fn split_populations_differ_more_than_connected_ones() {
+        let (mut same, mut apart, mut n_same, mut n_apart) = (0.0, 0.0, 0, 0);
+        let (mut low, mut high, mut n_low, mut n_high) = (0.0, 0.0, 0, 0);
+        for tier in 4..12 {
+            for slot in 0..SLOTS_PER_TIER {
+                let d = Distribution::wild(SEED, tier, slot);
+                if d.spread == Spread::Generalist {
+                    continue;
+                }
+                let pop = population(SEED, &d);
+                for (a, pa, ga) in pop.iter().step_by(3) {
+                    if pa.id != 0 {
+                        let (target, count) = if pa.isolation < 0.5 {
+                            (&mut low, &mut n_low)
+                        } else {
+                            (&mut high, &mut n_high)
+                        };
+                        *target += ga.distance(&d.founder(SEED));
+                        *count += 1;
+                    }
+                    for (b, pb, gb) in pop.iter().step_by(11) {
+                        let sep = a.x.abs_diff(b.x).max(a.y.abs_diff(b.y));
+                        if !(4..=14).contains(&sep) {
+                            continue;
+                        }
+                        if pa.id == pb.id {
+                            same += ga.distance(gb);
+                            n_same += 1;
+                        } else {
+                            apart += ga.distance(gb);
+                            n_apart += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(n_same > 50 && n_apart > 50, "{n_same} {n_apart}");
+        let (same, apart) = (same / n_same as f32, apart / n_apart as f32);
+        assert!(apart > 1.5 * same, "connected {same}, split {apart}");
+        assert!(n_low > 20 && n_high > 20, "{n_low} {n_high}");
+        let (low, high) = (low / n_low as f32, high / n_high as f32);
+        assert!(high > 1.2 * low, "near isolates {low}, far ones {high}");
+    }
+
+    /// The classics stay recognisable wherever they drift to.
+    #[test]
+    fn classics_stay_recognisable_and_unchanged_on_the_start_rings() {
+        for family in Family::CLASSICS {
+            let d = Distribution::classic(family);
+            let home = family.species().unwrap().genome;
+            let mut widest = 0.0_f32;
+            for seed in SEEDS {
+                for id in sectors(40).filter(|id| ring(*id) >= 3) {
+                    if d.abundance(seed, id) < PRESENT {
+                        continue;
+                    }
+                    let g = d.genome_at(seed, id, &d.patch(seed, id));
+                    widest = widest.max(g.distance(&home));
+                }
+            }
+            assert!(widest < 0.12, "{family:?} drifted by {widest}");
+            for id in sectors(2) {
+                assert_eq!(d.genome_at(SEED, id, &d.patch(SEED, id)), home);
+            }
+        }
     }
 }

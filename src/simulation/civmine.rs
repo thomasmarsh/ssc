@@ -471,10 +471,9 @@ mod tests {
             for miner in &m.miners {
                 let rock = game.body(miner.rock).unwrap();
                 let (q, _) = rock.origin.unwrap();
-                assert_eq!(
-                    world::territory(SEED, SectorId::containing(rock.position)).map(|x| x.id),
-                    Some(t.id)
-                );
+                // Judged where the rock was placed: a drifting rock may cross the border
+                // after a miner has taken it.
+                assert_eq!(world::territory(SEED, q).map(|x| x.id), Some(t.id));
                 assert!(q.chebyshev_distance(t.capital) <= 4);
             }
         }
