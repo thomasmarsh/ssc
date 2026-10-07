@@ -56,6 +56,7 @@ impl Game {
         self.parry.window = t::PARRY_WINDOW;
         self.parry.age = 0.0;
         self.parry.cooldown = self.loadout.skills.parry_cooldown();
+        self.feel.used[0] = true;
         self.parry.perfected = false;
         self.parry.refunded = 0.0;
         self.cue(Cue::Parry);
@@ -93,7 +94,12 @@ impl Game {
         (self.parry.flash / t::PARRY_FLASH).clamp(0.0, 1.0)
     }
 
-    /// Whether the simulation is frozen for a perfect parry's hit-stop.
+    /// Freezes the simulation for `seconds` (the hit-stop budget lives in `feel`).
+    pub(super) fn start_stop(&mut self, seconds: f32) {
+        self.parry.stop = self.parry.stop.max(seconds);
+    }
+
+    /// Whether the simulation is frozen for a hit-stop.
     pub fn hit_stopped(&self) -> bool {
         self.parry.stop > 0.0
     }
@@ -103,6 +109,7 @@ impl Game {
         if self.parry.stop <= 0.0 {
             return false;
         }
+        self.feel.stop_since += dt;
         self.parry.stop = (self.parry.stop - dt).max(0.0);
         self.parry.flash = (self.parry.flash - dt).max(0.0);
         true
@@ -186,7 +193,7 @@ impl Game {
             self.run.perfect_parries += 1;
             self.streak.link();
             self.parry.cooldown = (self.parry.cooldown - t::PARRY_PERFECT_COOLDOWN_REFUND).max(0.0);
-            self.parry.stop = t::PARRY_HITSTOP;
+            self.request_hit_stop(t::PARRY_HITSTOP);
             self.parry.flash = t::PARRY_FLASH;
             cues.push(Cue::PerfectParry { at: origin });
         }

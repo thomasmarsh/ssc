@@ -28,6 +28,7 @@ mod impact;
 pub mod interact;
 mod legacy;
 mod loot;
+pub mod lure;
 mod mining;
 mod pads;
 mod parry;
@@ -97,6 +98,8 @@ const HOME_LEASH: f32 = 800.0;
 /// Enemies this close to a destroyed base lose their bearings for a while.
 const ECOSYSTEM_RADIUS: f32 = 2200.0;
 const PLAYER_SPEED: f32 = 460.0;
+/// Kills this close to the ship are felt (a floating score, a hit stop for a big one).
+const KILL_FEEL_RANGE: f32 = 1400.0;
 /// A wall segment's hull per unit of radius on top of a rock's 1.6, before depth.
 pub const WALL_HULL: f32 = 5.0;
 /// A destroyed crystal's burst.
@@ -331,6 +334,8 @@ impl Bullet {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffectKind {
     Impact,
+    /// The ship's shot hurt a creature or station: a short white tick.
+    Hit,
     Explosion,
     Respawn,
     /// A birth or hatching.
@@ -471,6 +476,10 @@ pub struct Game {
     region: regions::RegionState,
     /// The score chain; see `feel`.
     streak: feel::Streak,
+    /// Hit stops, direction marks and the events the screen reacts to; see `feel`.
+    feel: feel::FeelState,
+    /// The next-lure marker and the free ping on entering a sector; see `lure`.
+    lure: lure::LureState,
 }
 
 impl Game {
@@ -541,6 +550,8 @@ impl Game {
             sanctuary: true,
             region: regions::RegionState::default(),
             streak: feel::Streak::default(),
+            feel: feel::FeelState::default(),
+            lure: lure::LureState::default(),
             seed,
             rng: Rng::new(seed),
             loot: Rng::new(seed ^ loot::LOOT_SALT),
@@ -591,6 +602,8 @@ impl Game {
             player.velocity = Vec2::ZERO;
         }
         self.focus = position;
+        // Arriving somewhere new earns its free ping at once.
+        self.lure.rearm();
     }
 
     /// Latent parameters of the sector the player is in.
@@ -624,14 +637,17 @@ impl Game {
         };
         let in_flight = self.bullets.len();
         let mut ship_before = self.player().map(|p| (p.shield, p.health));
+        let sources = self.incoming_sources();
         self.time += dt;
         self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
         self.streak.tick(dt);
+        self.feel.tick(dt);
         for effect in &mut self.effects {
             effect.remaining -= dt;
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
         self.update_ping(dt);
+        self.update_lure(dt);
         self.update_legacy(dt);
         let jumped = self.update_chart(dt);
         if let Some(before) = ship_before.as_mut() {
@@ -752,7 +768,7 @@ impl Game {
         self.update_diplomacy(dt);
         self.update_apex();
         self.remove_destroyed();
-        self.cue_player_damage(ship_before);
+        self.cue_player_damage(ship_before, sources);
     }
 
     /// Loads sectors the player can reach, unloads distant ones, and flags which
@@ -1138,6 +1154,7 @@ impl Game {
         let invulnerability = self.player_invulnerability;
         let mut flings = Vec::new();
         let mut rammed = 0.0;
+        let mut ship_rammed = false;
         // A dashing ship staggers what it touches; a flinger's touch is a graze.
         let dashing = self.dashing();
         let mut grazes = Vec::new();
@@ -1248,6 +1265,7 @@ impl Game {
                 if a.kind == BodyKind::Player && a.contact_cooldown <= 0.0 {
                     let dealt = ram_contact(a, b, closing_speed, invulnerability);
                     rammed += dealt;
+                    ship_rammed |= dealt > 0.0;
                     if dealt > 0.0 && diplomacy::civil_target(b) {
                         self.civ_hits.push((b.id, dealt));
                     }
@@ -1255,6 +1273,7 @@ impl Game {
                 if b.kind == BodyKind::Player && b.contact_cooldown <= 0.0 {
                     let dealt = ram_contact(b, a, closing_speed, invulnerability);
                     rammed += dealt;
+                    ship_rammed |= dealt > 0.0;
                     if dealt > 0.0 && diplomacy::civil_target(a) {
                         self.civ_hits.push((a.id, dealt));
                     }
@@ -1262,6 +1281,9 @@ impl Game {
             }
         }
         self.run.damage_dealt += rammed;
+        if ship_rammed {
+            self.feel_event(feel::FeelEvent::Ram);
+        }
         for at in grazes {
             self.dash_graze(at);
         }
@@ -1277,6 +1299,8 @@ impl Game {
     fn move_bullets(&mut self, dt: f32) {
         self.shoot_eggs(dt);
         let mut impacts = Vec::new();
+        // Where the ship's shots hurt a creature or station: a white tick instead of a spark.
+        let mut hits: Vec<Vec2> = Vec::new();
         // (where, radius, damage, body already struck, from the ship's side)
         let mut blasts: Vec<(Vec2, f32, f32, u64, bool)> = Vec::new();
         let cords = self.cord_segments();
@@ -1439,7 +1463,14 @@ impl Game {
                 } else {
                     bullet.remaining = 0.0;
                 }
-                impacts.push(at);
+                if bullet.friendly
+                    && dealt > 0.0
+                    && matches!(body.kind, BodyKind::Creature | BodyKind::Base)
+                {
+                    hits.push(at);
+                } else {
+                    impacts.push(at);
+                }
             }
         }
         // Fragile shots (missiles) are destroyed by any friendly shot that reaches them.
@@ -1523,6 +1554,9 @@ impl Game {
         for position in impacts {
             self.effect(position, 16.0, 0.22, EffectKind::Impact);
         }
+        for position in hits {
+            self.effect(position, 12.0, 0.16, EffectKind::Hit);
+        }
     }
 
     fn remove_destroyed(&mut self) {
@@ -1566,6 +1600,22 @@ impl Game {
                 bounty
             };
             self.score = self.score.saturating_add(earned);
+            // A big body going down stops the game for a breath, and the screen marks the kill.
+            let near = self
+                .player()
+                .is_some_and(|p| p.position.distance(position) < KILL_FEEL_RANGE);
+            let body_kind = matches!(kind, BodyKind::Creature | BodyKind::Base);
+            let big = feel::big_kill(body.max_health, body_kind);
+            if near && body_kind && !turret {
+                self.feel_event(feel::FeelEvent::Kill {
+                    at: position,
+                    score: earned,
+                    big,
+                });
+                if big {
+                    self.request_hit_stop(feel::BIG_STOP);
+                }
+            }
             match kind {
                 BodyKind::Player => lost_player = Some(position),
                 BodyKind::Asteroid if body.rock == RockKind::Crystal => {
@@ -1727,7 +1777,7 @@ impl Game {
 
     fn effect(&mut self, position: Vec2, radius: f32, lifetime: f32, kind: EffectKind) {
         let cue = match kind {
-            EffectKind::Impact => Some(Cue::Impact { at: position }),
+            EffectKind::Impact | EffectKind::Hit => Some(Cue::Impact { at: position }),
             EffectKind::Explosion => Some(Cue::Explosion {
                 at: position,
                 radius,
@@ -1985,6 +2035,8 @@ mod tests {
         game.sanctuary = false;
         game.bodies[0].position = Vec2::ZERO;
         game.player_invulnerability = 0.0;
+        // The free ping on entering a sector is its own tests' business.
+        game.set_auto_ping(false);
         game
     }
 
@@ -2898,6 +2950,10 @@ mod tests {
             .health = 0.0;
         game.player_invulnerability = 1e9;
         game.step(DT, Input::default());
+        // A big kill holds the game for a breath; let it pass.
+        while game.hit_stopped() {
+            game.step(DT, Input::default());
+        }
         // Leave far enough for the sector to unload, then come back.
         game.teleport(herd.center() + Vec2::new(6.0 * world::SECTOR_SIZE, 0.0));
         game.step(DT, Input::default());

@@ -97,6 +97,8 @@ pub enum RingState {
 pub struct AbilityRing {
     pub ability: Ability,
     pub state: RingState,
+    /// Bought but never used yet: the ring wears a NEW tag.
+    pub fresh: bool,
     /// How recovered it is, 0 to 1 (one when ready).
     pub fill: f32,
     /// Seconds until ready (zero when ready).
@@ -133,6 +135,7 @@ pub fn ability_ring(
     AbilityRing {
         ability,
         state,
+        fresh: false,
         fill,
         left: cooldown.max(0.0),
     }
@@ -287,6 +290,10 @@ pub struct HudModel {
     pub repairing: bool,
     /// Seconds since the ship last took damage or spent shield.
     pub calm: f32,
+    /// Where recent hits came from: (angle from the ship, share of the mark's time left).
+    pub hurts: Vec<(f32, f32)>,
+    /// The next-lure marker, if any.
+    pub lure: Option<super::lure::Lure>,
 }
 
 impl Game {
@@ -378,6 +385,10 @@ impl Game {
                 true,
             ),
         ];
+        let mut abilities = abilities;
+        for (i, ring) in abilities.iter_mut().take(2).enumerate() {
+            ring.fresh = ring.state != RingState::Locked && !self.feel.used[i];
+        }
         let arsenal = &self.loadout.arsenal;
         let profile = arsenal.active;
         let owned = arsenal.owned();
@@ -429,6 +440,8 @@ impl Game {
             boost: self.dash_boost(),
             repairing: self.is_repairing(),
             calm: self.player().map_or(0.0, |s| s.since_hit),
+            hurts: self.hurt_marks(),
+            lure: self.next_lure(),
         }
     }
 }
@@ -438,6 +451,7 @@ mod tests {
     use super::*;
     use crate::simulation::Input;
     use crate::simulation::tests::{DT, empty_game};
+    use bevy::prelude::Vec2;
 
     #[test]
     fn segments_drain_from_the_end_and_a_sliver_still_shows() {
@@ -534,6 +548,48 @@ mod tests {
         assert!(hints.iter().all(|h| h.key != "D" && h.key != "SHIFT"));
         game.game_over = true;
         assert_eq!(game.context_hints()[0].key, "ENTER");
+    }
+
+    #[test]
+    fn a_bought_ability_is_fresh_until_it_is_used() {
+        use crate::simulation::skills::Skill;
+        let mut game = empty_game();
+        game.set_auto_ping(false);
+        game.loadout.skills.raise(Skill::Dash);
+        game.step(DT, Input::default());
+        let hud = game.hud();
+        assert!(hud.abilities[1].fresh);
+        assert!(!hud.abilities[0].fresh, "a locked ring is not new");
+        assert!(!hud.abilities[2].fresh);
+        game.cargo.metal = 0.0;
+        assert!(game.dash(None));
+        assert!(!game.hud().abilities[1].fresh);
+    }
+
+    #[test]
+    fn a_hit_leaves_a_direction_mark_that_fades() {
+        let mut game = empty_game();
+        game.set_auto_ping(false);
+        game.step(DT, Input::default());
+        let ship = game.player().unwrap().position;
+        // A hostile shot right beside the ship, then damage with it close.
+        game.bullets.push(crate::simulation::Bullet::hostile(
+            ship + Vec2::new(0.0, 40.0),
+            Vec2::new(0.0, -300.0),
+            2.0,
+            12.0,
+        ));
+        game.player_invulnerability = 0.0;
+        for _ in 0..14 {
+            game.step(DT, Input::default());
+        }
+        let marks = game.hud().hurts;
+        assert!(!marks.is_empty(), "the hit was marked");
+        assert!((marks[0].0 - std::f32::consts::FRAC_PI_2).abs() < 0.5);
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert!(game.hud().hurts.is_empty());
     }
 
     #[test]

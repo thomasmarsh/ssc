@@ -297,6 +297,11 @@ impl Game {
         if self.game_over || self.ping.cooldown > 0.0 {
             return false;
         }
+        self.send_ping(false)
+    }
+
+    /// Sends the ping. A `free` one (the one on entering a sector) leaves the cooldown alone.
+    pub(super) fn send_ping(&mut self, free: bool) -> bool {
         let Some(origin) = self.player().map(|p| p.position) else {
             return false;
         };
@@ -304,7 +309,9 @@ impl Game {
         let range = skills.ping_range(PING_RANGE);
         let speed = skills.ping_speed(RING_SPEED);
         let owns = |kind: EchoKind| kind.unlocked_by().is_none_or(|s| skills.level(s) > 0);
-        self.ping.cooldown = skills.ping_cooldown(PING_COOLDOWN);
+        if !free {
+            self.ping.cooldown = skills.ping_cooldown(PING_COOLDOWN);
+        }
         self.ping.ring = Some(Ring {
             origin,
             started: self.time,
@@ -438,9 +445,23 @@ impl Game {
             }
         }
         self.ping.echoes.retain(|e| time < e.born + ECHO_LIFE);
+        let any = !sounded.is_empty();
         for echo in sounded {
             self.chart_learn_echo(&echo);
             self.cue(Cue::Echo { at: echo.position });
+            if let Some(kind) = super::lure::LureKind::of_echo(echo.kind, echo.renewable) {
+                self.consider_lure(super::lure::Lure {
+                    kind,
+                    position: echo.position,
+                });
+            }
+        }
+        // An apex elder in reach is the marker of last resort.
+        if any && let Some(apex) = self.apex_report() {
+            self.consider_lure(super::lure::Lure {
+                kind: super::lure::LureKind::Apex,
+                position: apex.position,
+            });
         }
     }
 

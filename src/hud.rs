@@ -240,6 +240,22 @@ pub fn draw_ship_rings(
             );
         }
     }
+    // Where the last hits came from: a red arc on the shield ring that fades.
+    for &(angle, left) in &hud.hurts {
+        for (grow, alpha) in [(0.0, 0.95), (s.px(2.5), 0.45)] {
+            let r = shield_r + grow;
+            g.linestrip_2d(
+                (0..=8).map(|k| on_ring(angle - 0.45 + 0.9 * k as f32 / 8.0, r)),
+                DRY_RED.with_alpha(alpha * left),
+            );
+        }
+        // A tick pointing in from the arc's middle.
+        g.line_2d(
+            on_ring(angle, shield_r + s.px(6.0)),
+            on_ring(angle, shield_r - s.px(4.0)),
+            DRY_RED.with_alpha(left),
+        );
+    }
     // A mending ship wears a slow green halo.
     if hud.repairing {
         let r = shield_r + s.px(5.0 + 2.0 * pulse(time, 4.0));
@@ -519,6 +535,135 @@ pub fn draw_apex(g: &mut Gizmos, game: &Game, s: &Screen, y: f32) {
         6.0,
         color.with_alpha(0.9),
     );
+}
+
+// ---- the next lure -----------------------------------------------------------------------
+
+const LURE_GOLD: Color = Color::srgb(1.0, 0.84, 0.28);
+
+/// Where the lure marker is: its pixel, whether that is inside the window (the diamond sits on
+/// the target) or on the edge (an arrow points the way), and the direction from the middle of
+/// the window.
+fn lure_anchor(s: &Screen, target: Vec2) -> (Vec2, bool, Vec2) {
+    let at = s.px_of(target);
+    let middle = s.size / 2.0;
+    let inset = 34.0;
+    let inside = at.x > inset && at.x < s.size.x - inset && at.y > inset && at.y < s.size.y - inset;
+    let d = (at - middle).normalize_or_zero();
+    if inside {
+        return (at, true, d);
+    }
+    // Along the ray from the middle to the target, stopped at the inset rectangle (and kept off
+    // the bottom cluster's row).
+    let reach = Vec2::new(middle.x - inset, middle.y - inset - 36.0).max(Vec2::splat(1.0));
+    let t = (reach.x / d.x.abs().max(1e-4)).min(reach.y / d.y.abs().max(1e-4));
+    (middle + d * t, false, d)
+}
+
+/// The next-lure marker: a gold diamond on the target when it is in view, else a gold diamond
+/// arrow on the screen edge. There is only ever one.
+pub fn draw_lure(g: &mut Gizmos, hud: &HudModel, s: &Screen, time: f32) {
+    let Some(lure) = hud.lure else {
+        return;
+    };
+    let (at, inside, d) = lure_anchor(s, lure.position);
+    let beat = 0.75 + 0.25 * pulse(time, 5.0);
+    let color = LURE_GOLD.with_alpha(beat);
+    let size = 9.0;
+    let diamond = |c: Vec2, r: f32| {
+        [
+            s.v(c + Vec2::new(0.0, -r)),
+            s.v(c + Vec2::new(r, 0.0)),
+            s.v(c + Vec2::new(0.0, r)),
+            s.v(c + Vec2::new(-r, 0.0)),
+            s.v(c + Vec2::new(0.0, -r)),
+        ]
+    };
+    if inside {
+        g.linestrip_2d(diamond(at, size + 5.0), color);
+        g.linestrip_2d(diamond(at, size + 1.0), color.with_alpha(0.5));
+        circle(g, s, at, 2.0, color);
+    } else {
+        // A diamond with a chevron leading out toward the target.
+        let side = Vec2::new(-d.y, d.x);
+        g.linestrip_2d(diamond(at - d * 4.0, size), color);
+        g.linestrip_2d(
+            [
+                s.v(at + d * 10.0 + side * 6.0),
+                s.v(at + d * 18.0),
+                s.v(at + d * 10.0 - side * 6.0),
+            ],
+            color,
+        );
+    }
+}
+
+/// Floating kills and bench rings: short expanding rings in world space.
+pub fn draw_juice(g: &mut Gizmos, juice: &crate::juice::Juice, s: &Screen) {
+    use crate::juice::RingKind;
+    for ring in &juice.rings {
+        let t = ring.progress();
+        let ease = 1.0 - (1.0 - t) * (1.0 - t);
+        let fade = 1.0 - t;
+        match ring.kind {
+            RingKind::Kill | RingKind::BigKill => {
+                let big = ring.kind == RingKind::BigKill;
+                let reach = if big { 90.0 } else { 46.0 };
+                let color = if big { LURE_GOLD } else { WHITE };
+                g.circle_2d(ring.at, s.px(8.0 + reach * ease), color.with_alpha(fade))
+                    .resolution(32);
+                if big {
+                    g.circle_2d(
+                        ring.at,
+                        s.px(4.0 + reach * 0.6 * ease),
+                        color.with_alpha(fade * 0.5),
+                    )
+                    .resolution(24);
+                }
+            }
+            RingKind::Purchase(rarity) => {
+                let [r, gr, b] =
+                    ssc::simulation::upgrades::Rarity::ALL[usize::from(rarity).min(3)].color();
+                let color = Color::srgb(r, gr, b);
+                for (delay, grow) in [(0.0, 1.0), (0.18, 0.7)] {
+                    let local = ((t - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+                    if local <= 0.0 {
+                        continue;
+                    }
+                    let e = 1.0 - (1.0 - local) * (1.0 - local);
+                    g.circle_2d(
+                        ring.at,
+                        s.px(22.0 + 80.0 * grow * e),
+                        color.with_alpha((1.0 - local) * 0.9),
+                    )
+                    .resolution(40);
+                }
+            }
+        }
+    }
+}
+
+/// A red wash along the window's edge while the hull is low: nested outlines that pulse, at
+/// most a thin frame (well under a fifth of the screen).
+pub fn draw_vignette(g: &mut Gizmos, hud: &HudModel, s: &Screen, time: f32) {
+    if hud.hull_fraction >= ssc::simulation::hud::LOW || hud.hull <= 0.0 {
+        return;
+    }
+    let need = 1.0 - hud.hull_fraction / ssc::simulation::hud::LOW;
+    let beat = 0.55 + 0.45 * pulse(time, 3.2);
+    for k in 0..4 {
+        let inset = 2.0 + 5.0 * k as f32;
+        let alpha = 0.4 * need * beat * (1.0 - k as f32 / 4.0);
+        outline_box(
+            g,
+            s,
+            inset,
+            inset,
+            s.size.x - 2.0 * inset,
+            s.size.y - 2.0 * inset,
+            DRY_RED.with_alpha(alpha),
+        );
+    }
 }
 
 // ---- the interact prompt -----------------------------------------------------------------
@@ -871,6 +1016,7 @@ pub fn draw_hud(g: &mut Gizmos, game: &Game, hud: &HudModel, s: &Screen, time: f
     draw_nearest(g, game, s, 108.0);
     draw_apex(g, game, s, 130.0);
     draw_prompt(g, game, s, time);
+    draw_lure(g, hud, s, time);
     let layout = ClusterLayout::of(s);
     draw_weapon(g, hud, layout.weapon, s, time);
     for (ring, c) in hud.abilities.iter().zip(layout.abilities) {
@@ -894,6 +1040,10 @@ pub enum Tag {
     Apex,
     Vitals,
     Hints,
+    /// The next lure's kind and distance, by its marker.
+    Lure,
+    /// A floating score (by slot).
+    Floater(usize),
     /// The active weapon's name, briefly after a switch.
     Weapon,
     /// The interact prompt's label, and the key in its cap.
@@ -904,7 +1054,7 @@ pub enum Tag {
 }
 
 impl Tag {
-    const ALL: [Tag; 18] = [
+    const ALL: [Tag; 25] = [
         Tag::Region,
         Tag::Sector,
         Tag::Score,
@@ -914,6 +1064,13 @@ impl Tag {
         Tag::Apex,
         Tag::Vitals,
         Tag::Hints,
+        Tag::Lure,
+        Tag::Floater(0),
+        Tag::Floater(1),
+        Tag::Floater(2),
+        Tag::Floater(3),
+        Tag::Floater(4),
+        Tag::Floater(5),
         Tag::Weapon,
         Tag::Prompt,
         Tag::PromptKey,
@@ -931,6 +1088,8 @@ impl Tag {
             Tag::Score => 26.0,
             Tag::Weapon => 17.0,
             Tag::Prompt => 14.0,
+            Tag::Lure => 12.0,
+            Tag::Floater(_) => 15.0,
             Tag::PromptKey => 15.0,
             Tag::Sector | Tag::Mult | Tag::Hints | Tag::Standing | Tag::Nearest | Tag::Apex => 12.0,
             Tag::Vitals | Tag::Key(_) => 11.0,
@@ -1092,6 +1251,34 @@ fn describe(
                 Align::Center,
             )
         }
+        Tag::Lure => {
+            let lure = hud.lure?;
+            let (at, inside, d) = lure_anchor(s, lure.position);
+            let sectors = lure.position.distance(game.player()?.position) / ssc::world::SECTOR_SIZE;
+            let text = format!("{}  {sectors:.1}", lure.kind.label());
+            // Under the diamond when it sits on the target, inward of the arrow at the edge.
+            let half = text.chars().count() as f32 * 3.6;
+            let place = if inside {
+                at + Vec2::new(0.0, 24.0)
+            } else {
+                // Inward of the arrow, clear of it: along the way back, shifted by the text's
+                // own half-width where the arrow is on a side edge.
+                at - d * 26.0 - Vec2::new(d.x * (half + 6.0) * d.x.abs().sqrt(), 0.0)
+            };
+            (text, LURE_GOLD.with_alpha(0.9), place, Align::Center)
+        }
+        Tag::Floater(i) => {
+            let floater = session.juice.floaters.get(i)?;
+            let rise = floater.age * 34.0;
+            let fade = (1.0 - floater.age).clamp(0.0, 1.0);
+            let at = s.px_of(floater.at) + Vec2::new(0.0, -14.0 - rise);
+            (
+                floater.text.clone(),
+                if floater.big { LURE_GOLD } else { WHITE }.with_alpha(fade),
+                at,
+                Align::Center,
+            )
+        }
         Tag::Prompt | Tag::PromptKey => {
             let prompt = game.interact_prompt()?;
             let ship = game.player()?;
@@ -1125,8 +1312,15 @@ fn describe(
             let c = layout.abilities[i];
             let text = if ring.state == RingState::Cooling && ring.left >= 0.1 {
                 format!("{:.1}", ring.left)
+            } else if ring.fresh && ring.state == RingState::Ready {
+                "NEW".to_string()
             } else {
                 label.to_string()
+            };
+            let color = if ring.fresh && ring.state == RingState::Ready {
+                LURE_GOLD
+            } else {
+                color
             };
             (
                 text,

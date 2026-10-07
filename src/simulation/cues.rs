@@ -122,14 +122,47 @@ impl Game {
         }
     }
 
-    pub(super) fn cue_player_damage(&mut self, before: Option<(f32, f32)>) {
+    /// What the ship lost this step, as a sound, a direction mark, a shake event and, for a
+    /// heavy hull hit, a hit stop. `sources` is what was near enough to be the cause, taken
+    /// before the step (`incoming_sources`).
+    pub(super) fn cue_player_damage(
+        &mut self,
+        before: Option<(f32, f32)>,
+        sources: (Vec<Vec2>, Vec<(Vec2, f32)>, bool),
+    ) {
         let (Some((shield, health)), Some(now)) = (before, self.player()) else {
             return;
         };
-        if now.health < health {
+        let (hull_lost, shield_broke, at) = (
+            (health - now.health.max(0.0)).max(0.0),
+            shield > 0.0 && now.shield <= 0.0,
+            now.position,
+        );
+        let hurt_shield = now.shield < shield;
+        if hull_lost > 0.0 {
             self.cue(Cue::Hurt { hull: true });
-        } else if now.shield < shield {
+        } else if hurt_shield {
             self.cue(Cue::Hurt { hull: false });
+        }
+        if hull_lost <= 0.0 && !hurt_shield {
+            return;
+        }
+        let (shots, bodies, apex) = sources;
+        let angle = super::feel::incoming_angle(at, &shots, &bodies);
+        if let Some(angle) = angle {
+            self.feel.hurts.push(super::feel::HurtMark {
+                angle,
+                left: super::feel::HURT_MARK,
+            });
+        }
+        self.feel_event(super::feel::FeelEvent::Hurt {
+            hull: hull_lost,
+            shield_broke,
+            angle,
+            apex,
+        });
+        if hull_lost >= super::feel::HEAVY_HIT {
+            self.request_hit_stop(super::feel::BIG_STOP);
         }
     }
 }
@@ -176,7 +209,7 @@ mod tests {
             .find(|b| b.kind == BodyKind::Player)
             .unwrap();
         ship.shield -= 5.0;
-        game.cue_player_damage(before);
+        game.cue_player_damage(before, Default::default());
         assert_eq!(game.drain_cues(), vec![Cue::Hurt { hull: false }]);
     }
 }

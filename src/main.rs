@@ -1,5 +1,6 @@
 mod audio;
 mod hud;
+mod juice;
 mod nebula;
 mod presentation;
 mod settings;
@@ -168,6 +169,8 @@ pub struct Session {
     /// The settings screen (Esc), with the selected row, and the options it holds that the
     /// game itself keeps: auto repair and the boosts.
     pub settings: Option<usize>,
+    /// Screen shake, floating scores and rings; see `juice`.
+    pub juice: juice::Juice,
     pub auto_repair: bool,
     pub boosts: bool,
     /// The star map, while it is open (the simulation waits), with its cursor and note preset.
@@ -202,6 +205,7 @@ impl Default for Session {
             style: RenderStyle::default(),
             reduce_effects: std::env::var_os("SSC_REDUCE_EFFECTS").is_some(),
             settings: None,
+            juice: juice::Juice::default(),
             auto_repair: true,
             boosts: true,
             chart: None,
@@ -273,6 +277,7 @@ fn main() {
                 camera,
                 apply_style,
                 nebula::update,
+                juice::update,
                 audio::apply_mute,
                 audio::play_cues,
                 presentation::draw,
@@ -683,12 +688,14 @@ fn chart_controls(
     }
 }
 
-/// The camera trails the ship with a little look-ahead so fast flight shows what is coming.
+/// The camera trails the ship with a little look-ahead so fast flight shows what is coming,
+/// and shakes with the trauma budget (never when effects are reduced, never by rotating).
 fn camera(
     session: Res<Session>,
     time: Res<Time>,
-    mut view: Single<(&mut Transform, &mut Projection), With<Camera2d>>,
+    mut view: Single<(&Camera, &mut Transform, &mut Projection), With<Camera2d>>,
     mut previous_view: Local<CameraView>,
+    mut base: Local<Option<Vec2>>,
 ) {
     let game = &session.game;
     let target = if session.camera_view == CameraView::Sector {
@@ -703,19 +710,29 @@ fn camera(
     } else {
         1.0 - (-6.0 * time.delta_secs()).exp()
     };
-    let (transform, projection) = &mut *view;
-    let current = transform.translation.truncate();
+    let (camera, transform, projection) = &mut *view;
+    let current = base.unwrap_or(transform.translation.truncate());
     // Snap sector framing and the return to close view, keeping the ship visible.
-    transform.translation =
-        if session.camera_view == CameraView::Sector || *previous_view == CameraView::Sector {
-            target
-        } else {
-            current.lerp(target, smoothing)
-        }
-        .extend(0.0);
+    let next = if session.camera_view == CameraView::Sector || *previous_view == CameraView::Sector
+    {
+        target
+    } else {
+        current.lerp(target, smoothing)
+    };
+    *base = Some(next);
+    let mut world_per_pixel = 1.0;
     if let Projection::Orthographic(projection) = &mut **projection {
         projection.scaling_mode = session.camera_view.scaling_mode();
+        if let Some(size) = camera.logical_viewport_size() {
+            world_per_pixel = projection.area.height() / size.y.max(1.0);
+        }
     }
+    let shake = if session.reduce_effects {
+        Vec2::ZERO
+    } else {
+        session.juice.trauma.offset(session.juice.clock) * world_per_pixel
+    };
+    transform.translation = (next + shake).extend(0.0);
     *previous_view = session.camera_view;
 }
 
@@ -806,6 +823,42 @@ fn smoke_run(
         let capital = ssc::territory::outpost(session.game.seed()).capital;
         session.game.teleport(capital.center());
         session.game.player_invulnerability = 1e9;
+    }
+    // SSC_HIT=<degrees>: a hostile shot from that direction lands just before the screenshot,
+    // to show the damage direction mark and the hit feel.
+    if run.frames + 20 == limit
+        && let Some(degrees) = std::env::var("SSC_HIT")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        && let Some(ship) = session.game.player().map(|p| p.position)
+    {
+        let from = Vec2::from_angle(degrees.to_radians()) * 34.0;
+        session.game.player_invulnerability = 0.0;
+        session.game.bullets.push(ssc::simulation::Bullet::hostile(
+            ship + from,
+            -from.normalize() * 900.0,
+            2.0,
+            30.0,
+        ));
+    }
+    // SSC_BUY=1: buy the bench's selected row just before the screenshot (a purchase ring).
+    // SSC_KILL=1: destroy the nearest creatures just before it (floating scores, kill rings).
+    if run.frames + 20 == limit && std::env::var_os("SSC_BUY").is_some() {
+        session.game.bench_confirm();
+    }
+    if run.frames + 20 == limit && std::env::var_os("SSC_KILL").is_some() {
+        let at = session.game.player().map_or(Vec2::ZERO, |p| p.position);
+        let mut near: Vec<_> = session
+            .game
+            .bodies
+            .iter_mut()
+            .filter(|b| b.kind == BodyKind::Creature && !b.follower)
+            .collect();
+        near.sort_by(|a, b| a.position.distance(at).total_cmp(&b.position.distance(at)));
+        for (n, body) in near.into_iter().take(3).enumerate() {
+            body.position = at + Vec2::from_angle(0.9 + n as f32 * 2.1) * (180.0 + 60.0 * n as f32);
+            body.health = 0.0;
+        }
     }
     // SSC_HURT=<fraction>: set hull and shield to that fraction (to check the rings).
     // SSC_ABILITIES=1: unlock parry and dash, then use them so their rings are cooling.

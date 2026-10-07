@@ -126,7 +126,9 @@ Rings on the ship: outer cyan arc = shield, ten green segments = hull.
 Bottom: weapon (arc = fuel, dots = level, ticks = owned), parry / dash / ping
 rings (arc fills as they recover, lock = not bought yet, dashed red = no shield),
 three bars = metal, volatiles, crystal.  Top left: threat pips.  Top right: score,
-chain bar, lives.  Gold = apex.  Red edge arrow = hunting, blue = calm.";
+chain bar, lives.  Gold diamond = the next lure (every new sector gets a free ping).
+Gold crown = apex.  Red edge arrow = hunting, blue = calm.  A red arc on the ring
+shows where a hit came from; a red frame means the hull is low.";
 
 /// SSC_OFFSCREEN=1: render into an image instead of the window (for screenshots when the
 /// display is asleep or locked, where a window renders black).
@@ -2567,6 +2569,11 @@ pub fn draw(
                 Color::srgba(0.85, 0.7, 1.0, fade * 0.45),
                 Color::srgba(0.95, 0.85, 1.0, fade * 0.3),
             ),
+            // The ship's shot found something: a crisp white tick, no orange spark.
+            EffectKind::Hit => (
+                Color::srgba(1.0, 1.0, 1.0, fade * 0.7),
+                Color::srgba(1.0, 1.0, 1.0, fade),
+            ),
             EffectKind::Mature => (
                 Color::srgba(0.7, 0.9, 1.0, fade),
                 Color::srgba(1.0, 1.0, 1.0, fade),
@@ -2599,6 +2606,10 @@ pub fn draw(
             crate::hud::draw_ship_rings(&mut gizmos, &hud, ship, &screen, game.time);
         }
         crate::hud::draw_hud(&mut gizmos, game, &hud, &screen, game.time);
+        if !session.reduce_effects {
+            crate::hud::draw_juice(&mut gizmos, &session.juice, &screen);
+            crate::hud::draw_vignette(&mut gizmos, &hud, &screen, game.time);
+        }
     }
     // The radar: always on if the setting says so, else while the details are open and there
     // is room beside them. Mid-right, clear of the corners and the bottom cluster.

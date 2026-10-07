@@ -117,6 +117,7 @@ impl Game {
         self.focus = to;
         self.player_invulnerability = self.player_invulnerability.max(t::DASH_INVULN);
         self.dash.cooldown = self.loadout.skills.dash_cooldown();
+        self.feel.used[1] = true;
         self.dash.trail = Some((from, to, 0.0));
         self.dash.window = t::DASH_INVULN;
         self.dash.grazed = false;

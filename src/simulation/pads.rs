@@ -1338,8 +1338,16 @@ impl Game {
         self.notify(text, Rarity::Common);
     }
 
+    #[cfg(test)]
+    pub(super) fn bench_done_for_test(&mut self) {
+        self.bench_done("TEST".into(), Rarity::Rare);
+    }
+
     fn bench_done(&mut self, text: String, rarity: Rarity) {
         self.cue(Cue::Pickup { rarity });
+        self.feel_event(super::feel::FeelEvent::Purchase {
+            rarity: rarity as u8,
+        });
         self.notify(text, rarity);
     }
 
