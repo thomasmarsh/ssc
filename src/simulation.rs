@@ -26,6 +26,7 @@ mod guide;
 pub mod hud;
 mod impact;
 pub mod interact;
+mod jam;
 mod legacy;
 mod loot;
 pub mod lure;
@@ -63,6 +64,7 @@ pub use growth::Egg;
 pub use guide::{
     Bearing, GuideKind, MAX_BEACON_ARROWS, MAX_MINERAL_ARROWS, MAX_THREAT_ARROWS, proximity,
 };
+pub use jam::{JamView, System as JamSystem};
 pub use legacy::{Bequest, Legacy, Wreck};
 pub use loot::{Notice, Pickup};
 pub use mining::{Beam, Cargo, Lode, Material, renewable};
@@ -71,7 +73,7 @@ pub use pads::{
     Pad, PadHint, PadKey, PadState, STASH_CAP, price_text,
 };
 pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RANGE, RING_SPEED};
-pub use powers::{BlinkTell, PowerView};
+pub use powers::{BlinkTell, JamKind, JamTell, PowerView};
 pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
@@ -448,6 +450,8 @@ pub struct Game {
     apex_seen: HashSet<(SectorId, u32)>,
     apex_state: HashMap<u64, apexes::ApexState>,
     power_state: HashMap<u64, powers::PowerState>,
+    /// Jams, confusion and the screen glitch on the ship; see `jam`.
+    jam: jam::JamState,
     apex_rng: Rng,
     seed: u64,
     rng: Rng,
@@ -557,6 +561,7 @@ impl Game {
             apex_seen: HashSet::new(),
             apex_state: HashMap::new(),
             power_state: HashMap::new(),
+            jam: jam::JamState::default(),
             apex_rng: Rng::new(seed ^ crate::apex::APEX_SALT),
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
@@ -648,6 +653,19 @@ impl Game {
             fire: input.fire && !input.mine,
             ..input
         };
+        // A confused pilot's hands deliver a bent input, and a jammed gun does not fire.
+        let input = self.scramble_input(input);
+        let input = if self.jammed(JamSystem::Weapons) {
+            if input.fire {
+                self.cue(Cue::Refused);
+            }
+            Input {
+                fire: false,
+                ..input
+            }
+        } else {
+            input
+        };
         let in_flight = self.bullets.len();
         let mut ship_before = self.player().map(|p| (p.shield, p.health));
         let sources = self.incoming_sources();
@@ -659,6 +677,7 @@ impl Game {
             effect.remaining -= dt;
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
+        self.update_jam(dt, input.fire);
         self.update_ping(dt);
         self.update_lure(dt);
         self.update_legacy(dt);
@@ -1772,6 +1791,7 @@ impl Game {
         }
         self.focus = position;
         self.player_invulnerability = 2.5;
+        self.clear_jams();
         self.effect(position, 50.0, 1.0, EffectKind::Respawn);
     }
 

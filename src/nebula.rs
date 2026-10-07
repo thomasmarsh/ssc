@@ -209,6 +209,7 @@ pub fn update(
         _ => Vec2::new(900.0, 450.0),
     } * MARGIN;
     let seed = session.game.seed();
+    let dim = session.game.dim_sources();
     for (Cloud(index), mut transform, mut visibility) in &mut layers {
         *visibility = if session.reduce_effects {
             Visibility::Hidden
@@ -260,7 +261,19 @@ pub fn update(
                     ],
                 };
                 let linear = Color::srgb(rgba[0], rgba[1], rgba[2]).to_linear();
-                colors.push([linear.red, linear.green, linear.blue, rgba[3]]);
+                // A light eater turns the clouds down (never past the floor); the vignette
+                // layer darkens instead.
+                let dark = if dim.is_empty() {
+                    0.0
+                } else {
+                    ssc::simulation::Game::dim_from(&dim, world)
+                };
+                let alpha = if spec.kind == Kind::Vignette {
+                    rgba[3].max(dark)
+                } else {
+                    rgba[3] * (1.0 - dark)
+                };
+                colors.push([linear.red, linear.green, linear.blue, alpha]);
             }
         }
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);

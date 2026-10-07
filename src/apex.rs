@@ -440,6 +440,33 @@ pub fn escort(queen: &Genome) -> Genome {
     .limited()
 }
 
+/// The jam stamps of the elders (the bestiary's special attacks): from `JAM_RING` out, a major
+/// Maelstrom carries an emp, a Warden a glare and a Phantom a confusion beside its blink. They
+/// are genes like any carrier's, so they obey the same jam fairness rules.
+pub const JAM_STAMP_RING: u32 = 7;
+
+fn stamp_special(g: &mut Genome, rank: Rank, archetype: Archetype, ring: u32) {
+    use crate::power::Power;
+    if rank != Rank::Major || ring < JAM_STAMP_RING {
+        return;
+    }
+    match archetype {
+        Archetype::Maelstrom => {
+            Power::Emp.set(g, 0.7);
+            (g.power_period, g.power_reach, g.power_hold) = (7.0, 340.0, 1.2);
+        }
+        Archetype::Warden => {
+            Power::Glare.set(g, 0.8);
+            (g.power_period, g.power_reach, g.power_hold) = (6.0, 700.0, 1.6);
+        }
+        Archetype::Phantom => {
+            Power::Confuse.set(g, 0.6);
+            (g.power_period, g.power_reach, g.power_hold) = (3.4, 340.0, 1.2);
+        }
+        _ => {}
+    }
+}
+
 /// Appends the sector's apex, if it has one and the pool offers a species to grow it from.
 /// Called last, so nothing earlier moves.
 pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &mut Vec<Spawn>) {
@@ -451,7 +478,13 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
     }
     let mut rng = Rng::new(hash2(seed ^ APEX_SALT ^ 0xA5, id.x, id.y));
     let source = pool.any(&mut rng);
-    let genome = elder(source.genome, &mut rng, rank, archetype(seed, id));
+    let mut genome = elder(source.genome, &mut rng, rank, archetype(seed, id));
+    stamp_special(
+        &mut genome,
+        rank,
+        archetype(seed, id),
+        crate::range::ring(id),
+    );
     if SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + genome.parts() {
         return;
     }

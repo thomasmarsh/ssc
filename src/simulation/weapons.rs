@@ -326,6 +326,9 @@ impl Game {
         for clock in &mut self.arm_clock {
             *clock = (*clock - dt).max(0.0);
         }
+        if self.jammed(JamSystem::Weapons) {
+            return;
+        }
         let Some((position, velocity, angle)) =
             self.player().map(|p| (p.position, p.velocity, p.angle))
         else {

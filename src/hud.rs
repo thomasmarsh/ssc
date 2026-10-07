@@ -34,6 +34,7 @@ const CLUSTER_UP: f32 = 88.0;
 const DIM: Color = Color::srgba(0.36, 0.49, 0.62, 0.3);
 const WHITE: Color = Color::srgb(0.9, 0.95, 1.0);
 const GOOD: Color = PAD_GREEN;
+const JAM_GREY: Color = Color::srgba(0.6, 0.65, 0.72, 0.75);
 
 /// The window in logical pixels, and where the camera looks, for placing HUD shapes.
 #[derive(Clone, Copy)]
@@ -771,6 +772,25 @@ fn padlock(g: &mut Gizmos, s: &Screen, c: Vec2, color: Color) {
     arc(g, s, Vec2::new(c.x, c.y - 1.0), 3.8, 0.0, PI, color);
 }
 
+/// Static inside a ring: short bright dashes that flicker.
+fn jam_static(g: &mut Gizmos, s: &Screen, c: Vec2, r: f32, time: f32, salt: u32) {
+    let step = crate::glitchview::tick(time, false);
+    for k in 0..7 {
+        let u = |n: i32| crate::glitchview::unit(salt, k + n, step);
+        let a = u(0) * TAU;
+        let d = r * 0.8 * u(40).sqrt();
+        let p = c + Vec2::from_angle(a) * d;
+        let w = r * 0.6 * u(80);
+        line(
+            g,
+            s,
+            p - Vec2::new(w, 0.0),
+            p + Vec2::new(w, 0.0),
+            WHITE.with_alpha(0.55),
+        );
+    }
+}
+
 /// One ability ring: a lock, a recovering arc, a ready glow, an active flare or a red
 /// no-energy warning, with its icon inside.
 pub fn draw_ability(g: &mut Gizmos, ring: &AbilityRing, c: Vec2, s: &Screen, time: f32) {
@@ -797,6 +817,12 @@ pub fn draw_ability(g: &mut Gizmos, ring: &AbilityRing, c: Vec2, s: &Screen, tim
             circle(g, s, c, RING_R, AMBER);
             circle(g, s, c, RING_R - 1.5, AMBER);
             ability_icon(g, s, ring.ability, c, AMBER);
+        }
+        RingState::Jammed => {
+            // Greyed out and full of static, with the seconds left below.
+            circle(g, s, c, RING_R, DIM.with_alpha(0.5));
+            ability_icon(g, s, ring.ability, c, DIM.with_alpha(0.5));
+            jam_static(g, s, c, RING_R, time, ring.ability as u32 + 1);
         }
         RingState::NoEnergy => {
             // Dashed red: it would fire, but there is no shield to pay for it.
@@ -890,7 +916,9 @@ fn weapon_glyph(g: &mut Gizmos, s: &Screen, profile: Profile, c: Vec2, color: Co
 pub fn draw_weapon(g: &mut Gizmos, hud: &HudModel, c: Vec2, s: &Screen, time: f32) {
     let w = &hud.weapon;
     let fuel_color = w.material.map_or(CYAN, material_color);
-    let base = if w.dry {
+    let base = if w.jammed {
+        DIM.with_alpha(0.55)
+    } else if w.dry {
         DRY_RED.with_alpha(0.55 + 0.45 * pulse(time, 8.0))
     } else {
         WHITE
@@ -912,6 +940,9 @@ pub fn draw_weapon(g: &mut Gizmos, hud: &HudModel, c: Vec2, s: &Screen, time: f3
     } else {
         gauge(g, s, c, WEAPON_R + 1.5, w.fuel, fuel_color);
         gauge(g, s, c, WEAPON_R + 3.0, w.fuel, fuel_color.with_alpha(0.35));
+    }
+    if w.jammed {
+        jam_static(g, s, c, WEAPON_R, time, 9);
     }
     // Level pips below: lit up to the level, dim up to the profile's maximum.
     let max = w.profile.max_level().max(1);
@@ -1301,9 +1332,12 @@ fn describe(
                 RingState::Ready => WHITE,
                 RingState::Active => AMBER,
                 RingState::NoEnergy => DRY_RED,
+                RingState::Jammed => JAM_GREY,
             };
             let c = layout.abilities[i];
-            let text = if ring.state == RingState::Cooling && ring.left >= 0.1 {
+            let text = if matches!(ring.state, RingState::Jammed | RingState::Cooling)
+                && ring.left >= 0.1
+            {
                 format!("{:.1}", ring.left)
             } else if ring.fresh && ring.state == RingState::Ready {
                 "NEW".to_string()
@@ -1360,7 +1394,8 @@ pub fn update_texts(
     };
     let s = Screen::new(view.1.translation.truncate(), half, size, ui_scale.0);
     let hud = session.game.hud();
-    let hidden = session.game.game_over;
+    // A jammed display shows no text at all.
+    let hidden = session.game.game_over || hud.jam.hud > 0.0;
     for (tag, mut text, mut color, mut node, mut layout) in &mut texts {
         let described = if hidden {
             None

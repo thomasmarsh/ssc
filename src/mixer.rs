@@ -149,6 +149,28 @@ fn spec(cue: &Cue) -> Spec {
             at: Some(at),
         },
         Cue::Pith { .. } => ship(Sound::Pith, 0.75, 0.03),
+        Cue::JamTell { at, confuse } => Spec {
+            sound: if confuse {
+                Sound::ConfuseCharge
+            } else {
+                Sound::JamCharge
+            },
+            gain: 0.6,
+            reach: Some(1600.0),
+            priority: Priority::Ship,
+            detune: 0.0,
+            at: Some(at),
+        },
+        Cue::JamHit { .. } => ship(Sound::JamHit, 0.85, 0.0),
+        Cue::Glare { at } => Spec {
+            sound: Sound::GlareFlash,
+            gain: 0.5,
+            reach: Some(1400.0),
+            priority: Priority::Ship,
+            detune: 0.02,
+            at: Some(at),
+        },
+        Cue::Refused => ship(Sound::Refused, 0.5, 0.0),
         Cue::Deflect { at, .. } => Spec {
             sound: Sound::Deflect,
             gain: 0.55,
@@ -197,6 +219,10 @@ fn interval(sound: Sound) -> f32 {
         Sound::Blink => 0.15,
         Sound::PhaseSolid => 0.3,
         Sound::Pith => 0.1,
+        Sound::JamCharge | Sound::ConfuseCharge => 0.5,
+        Sound::JamHit => 0.3,
+        Sound::GlareFlash => 0.3,
+        Sound::Refused => 0.25,
     }
 }
 

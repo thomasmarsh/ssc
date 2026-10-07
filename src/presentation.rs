@@ -2146,7 +2146,14 @@ pub fn draw(
     } else {
         ssc::backdrop::backdrop_at(game.seed(), camera)
     };
-    draw_backdrop(&mut gizmos, camera, half, &sky);
+    let dim = game.dim_sources();
+    let dark = if dim.is_empty() {
+        0.0
+    } else {
+        Game::dim_from(&dim, camera)
+    };
+    let jam = game.jam_view();
+    draw_backdrop(&mut gizmos, camera, half, &sky, dark);
     for body in game.bodies.iter().filter(|b| {
         // Cull on the body's full extent, not its center: a planetoid is hundreds of units
         // wide and must stay drawn while only its edge (or halo) is on screen.
@@ -2173,6 +2180,10 @@ pub fn draw(
                 let right = p - direction * r - side * r;
                 gizmos.linestrip_2d([tip, left, p - direction * r * 0.45, right, tip], color);
                 draw_rig(&mut gizmos, game, body, session.input.thrust > 0.0);
+                if !session.reduce_effects {
+                    crate::glitchview::ship_fringe(&mut gizmos, &jam, body);
+                }
+                crate::glitchview::confusion(&mut gizmos, &jam, body, game.time);
                 if session.input.thrust > 0.0 && !session.paused && !game.game_over {
                     let flicker = 15.0 + (game.time * 45.0).sin() * 6.0;
                     gizmos.linestrip_2d(
@@ -2186,12 +2197,19 @@ pub fn draw(
                 }
             }
             BodyKind::Creature => {
-                draw_creature(
-                    &mut gizmos,
-                    game.time,
-                    body,
-                    crate::powerview::outline(game, body, color),
-                );
+                // In a light eater's dark a creature draws fainter, never below 55 percent.
+                let faint = if dim.is_empty() {
+                    0.0
+                } else {
+                    Game::dim_from(&dim, p) / (1.0 - ssc::power::DIM_FLOOR)
+                };
+                let shown = crate::powerview::outline(game, body, color);
+                let shown = if faint > 0.0 && !body.phased {
+                    shown.with_alpha(1.0 - 0.45 * faint)
+                } else {
+                    shown
+                };
+                draw_creature(&mut gizmos, game.time, body, shown);
                 if let Some(back) = crate::powerview::afterimage(body) {
                     // A phased body trails a ghost of itself.
                     let mut ghost = body.clone();
@@ -2597,17 +2615,48 @@ pub fn draw(
     draw_echoes(&mut gizmos, game, camera, half);
     draw_beacons(&mut gizmos, game, camera, half);
     draw_wrecks(&mut gizmos, game, camera, half);
-    draw_guides(&mut gizmos, game, camera, half, session.arrows);
+    draw_guides(
+        &mut gizmos,
+        game,
+        camera,
+        half,
+        session.arrows,
+        &jam,
+        session.reduce_effects,
+    );
     if !game.game_over {
         let hud = game.hud();
-        if let Some(ship) = game.player() {
-            crate::hud::draw_ship_rings(&mut gizmos, &hud, ship, &screen, game.time);
+        if jam.hud > 0.0 {
+            // The display is jammed: static where the rings and corners were.
+            let cluster = screen.v(screen.cluster());
+            crate::glitchview::static_box(
+                &mut gizmos,
+                (cluster, Vec2::new(screen.px(150.0), screen.px(50.0))),
+                (40, 7, 0.5),
+                (game.time, session.reduce_effects),
+            );
+            crate::glitchview::static_box(
+                &mut gizmos,
+                (
+                    screen.at(window.x / 2.0, 40.0),
+                    Vec2::new(screen.px(window.x * 0.45), screen.px(30.0)),
+                ),
+                (40, 11, 0.35),
+                (game.time, session.reduce_effects),
+            );
+        } else {
+            if let Some(ship) = game.player() {
+                crate::hud::draw_ship_rings(&mut gizmos, &hud, ship, &screen, game.time);
+            }
+            crate::hud::draw_hud(&mut gizmos, game, &hud, &screen, game.time);
         }
-        crate::hud::draw_hud(&mut gizmos, game, &hud, &screen, game.time);
         if !session.reduce_effects {
             crate::hud::draw_juice(&mut gizmos, &session.juice, &screen);
             crate::hud::draw_vignette(&mut gizmos, &hud, &screen, game.time);
         }
+    }
+    if !session.reduce_effects {
+        crate::glitchview::screen(&mut gizmos, &jam, camera, half, game.time);
     }
     // The radar: always on if the setting says so, else while the details are open and there
     // is room beside them. Mid-right, clear of the corners and the bottom cluster.
@@ -2618,6 +2667,8 @@ pub fn draw(
             game,
             screen.at(window.x - 24.0 - RADAR_RADIUS, window.y / 2.0),
             screen.scale,
+            &jam,
+            session.reduce_effects,
         );
         let _ = radius;
     }
@@ -2626,7 +2677,15 @@ pub fn draw(
 /// Edge arrows toward the nearest offscreen threats and minerals (see `Game::guide_bearings`).
 /// They sit just inside the screen edge at a constant on-screen size, fade with distance and
 /// leave the middle of the view alone.
-fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrows: bool) {
+fn draw_guides(
+    gizmos: &mut Gizmos,
+    game: &Game,
+    camera: Vec2,
+    half: Vec2,
+    arrows: bool,
+    jam: &ssc::simulation::JamView,
+    calm: bool,
+) {
     let ui_scale = half.y * 2.0 / VIEW_HEIGHT;
     let inset = Vec2::splat(26.0 * ui_scale);
     let reach = (half - inset).max(Vec2::splat(1.0));
@@ -2643,7 +2702,14 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
         bearings.extend(game.beacon_bearings(camera, half));
         bearings.extend(game.wreck_bearings(camera, half));
     }
-    for bearing in bearings {
+    for (index, mut bearing) in bearings.into_iter().enumerate() {
+        if jam.glitch > 0.0 {
+            // A glare shuffles the edge arrows: they point a little (or a lot) wrong.
+            let step = crate::glitchview::tick(game.time, calm);
+            let turn =
+                (crate::glitchview::unit(jam.seed, index as i32, step) - 0.5) * 3.0 * jam.glitch;
+            bearing.direction = Vec2::from_angle(turn).rotate(bearing.direction);
+        }
         let d = bearing.direction;
         let t = (reach.x / d.x.abs().max(1e-4)).min(reach.y / d.y.abs().max(1e-4));
         let at = camera + d * t;
@@ -3341,7 +3407,15 @@ fn slot_glyph(gizmos: &mut Gizmos, p: Vec2, slot: Slot, color: Color) {
 }
 
 /// Faint grid and parallax starfield derived purely from position, so space is endless.
-fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2, sky: &ssc::backdrop::Backdrop) {
+fn draw_backdrop(
+    gizmos: &mut Gizmos,
+    camera: Vec2,
+    half: Vec2,
+    sky: &ssc::backdrop::Backdrop,
+    dark: f32,
+) {
+    // A light eater turns the stars down, never past the floor.
+    let lit = 1.0 - dark;
     let reach = half + Vec2::splat(40.0);
     let grid = Color::srgb(0.03, 0.06, 0.09);
     let step = 200.0;
@@ -3372,9 +3446,9 @@ fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2, sky: &ssc::backd
         // The region's star colour shifts the usual blue-white; its density thins or thickens
         // the field (about two cells in three keep a star in a plain region).
         let tint = Color::srgb(
-            (tint[0] * sky.star_tint[0] / ssc::backdrop::STAR_BASE[0]).min(1.0),
-            (tint[1] * sky.star_tint[1] / ssc::backdrop::STAR_BASE[1]).min(1.0),
-            (tint[2] * sky.star_tint[2] / ssc::backdrop::STAR_BASE[2]).min(1.0),
+            (tint[0] * sky.star_tint[0] / ssc::backdrop::STAR_BASE[0]).min(1.0) * lit,
+            (tint[1] * sky.star_tint[1] / ssc::backdrop::STAR_BASE[1]).min(1.0) * lit,
+            (tint[2] * sky.star_tint[2] / ssc::backdrop::STAR_BASE[2]).min(1.0) * lit,
         );
         let keep = (2.0 / 3.0 * sky.star_density).clamp(0.0, 1.0);
         let center = camera * parallax;
@@ -3422,7 +3496,14 @@ fn draw_backdrop(gizmos: &mut Gizmos, camera: Vec2, half: Vec2, sky: &ssc::backd
 }
 
 /// North-up scope centered on the ship, covering the simulated neighborhood.
-fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, ui_scale: f32) {
+fn draw_radar(
+    gizmos: &mut Gizmos,
+    game: &ssc::simulation::Game,
+    center: Vec2,
+    ui_scale: f32,
+    jam: &ssc::simulation::JamView,
+    calm: bool,
+) {
     let origin = game.focus;
     let radius = RADAR_RADIUS * ui_scale;
     let scale = radius / RADAR_RANGE;
@@ -3430,11 +3511,27 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
     gizmos
         .circle_2d(center, radius * 0.5, Color::srgba(0.36, 0.49, 0.62, 0.3))
         .resolution(32);
-    for body in &game.bodies {
+    if jam.hud > 0.0 {
+        // The scope is jammed: only static.
+        crate::glitchview::static_box(
+            gizmos,
+            (center, Vec2::splat(radius * 0.9)),
+            (50, 3, 0.5),
+            (game.time, calm),
+        );
+        return;
+    }
+    let step = crate::glitchview::tick(game.time, calm);
+    for (index, body) in game.bodies.iter().enumerate() {
         if matches!(body.kind, BodyKind::Asteroid | BodyKind::Player) || body.follower {
             continue;
         }
-        let offset = (body.position - origin) * scale;
+        let mut offset = (body.position - origin) * scale;
+        if jam.glitch > 0.0 {
+            // The glare: real blips swim.
+            let u = |n: i32| crate::glitchview::unit(jam.seed, index as i32 + n, step) - 0.5;
+            offset += Vec2::new(u(0), u(7000)) * radius * 0.5 * jam.glitch;
+        }
         if offset.length() < radius - 2.0 * ui_scale {
             let size = match (body.kind, body.alert) {
                 (BodyKind::Base, _) if body.fort.is_some() => 2.0,
@@ -3555,6 +3652,22 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
             p + Vec2::Y * size,
             CYAN.with_alpha(alpha),
         );
+    }
+    if jam.glitch > 0.0 {
+        // Four to nine false blips that were never there.
+        let count = 4 + (jam.seed % 6) as i32;
+        for k in 0..count {
+            let a = crate::glitchview::unit(jam.seed, 9000 + k, step) * std::f32::consts::TAU;
+            let d = crate::glitchview::unit(jam.seed, 9100 + k, step).sqrt()
+                * (radius - 4.0 * ui_scale);
+            gizmos
+                .circle_2d(
+                    center + Vec2::from_angle(a) * d,
+                    3.0 * ui_scale,
+                    Color::srgb(1.0, 0.3, 0.28).with_alpha(0.8 * jam.glitch),
+                )
+                .resolution(6);
+        }
     }
     gizmos.circle_2d(center, 2.5 * ui_scale, CYAN).resolution(6);
 }

@@ -1,4 +1,5 @@
 mod audio;
+mod glitchview;
 mod hud;
 mod juice;
 mod nebula;
@@ -838,13 +839,57 @@ fn smoke_run(
             "skipjack" => Genome::skipjack(),
             "veilwing" => Genome::veilwing(),
             "hullpick" => Genome::hullpick(),
+            "stormcap" => Genome::stormcap(),
+            "argus" => Genome::argus(),
+            "gloomfeeder" => Genome::gloomfeeder(),
+            "dizzard" => Genome::dizzard(),
             _ => Genome::default(),
         };
+        let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
+            200.0
+        } else {
+            420.0
+        };
+        if matches!(name.as_str(), "stormcap" | "dizzard" | "argus") {
+            // The jammers only work on a ship that is not in grace.
+            session.game.player_invulnerability = 0.0;
+        }
         let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
         for k in 0..3 {
-            let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (420.0 + 90.0 * k as f32);
+            let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (near + 90.0 * k as f32);
             session.game.place_creature(&Species::of(genome), at);
         }
+    }
+    // SSC_JAM=emp|confuse|glitch|hud: just before the screenshot, jam the ship (with the dash
+    // and parry owned, so their rings show).
+    if run.frames + 36 == limit
+        && let Ok(kind) = std::env::var("SSC_JAM")
+    {
+        use ssc::simulation::JamSystem;
+        use ssc::simulation::skills::Skill;
+        session.game.loadout.skills.raise(Skill::Dash);
+        session.game.loadout.skills.raise(Skill::Parry);
+        session.game.player_invulnerability = 0.0;
+        match kind.as_str() {
+            "emp" => {
+                session
+                    .game
+                    .apply_jam(&[JamSystem::Weapons, JamSystem::Dash], 1.5);
+            }
+            "hud" => {
+                session
+                    .game
+                    .apply_jam(&[JamSystem::Parry, JamSystem::Hud], 1.5);
+            }
+            "confuse" => {
+                session.game.apply_confuse(0.6, false, 1.5, 1.0);
+            }
+            _ => {
+                let ok = session.game.apply_glitch(2.0, 5);
+                let _ = ok;
+            }
+        }
+        session.game.player_invulnerability = 1e9;
     }
     // SSC_SPECIMEN_TELL=1: just before the screenshot, run the game until a blink is announced.
     if run.frames + 3 == limit && std::env::var_os("SSC_SPECIMEN_TELL").is_some() {
@@ -856,6 +901,11 @@ fn smoke_run(
                     .power_view(b)
                     .blink
                     .is_some_and(|t| t.progress() > 0.5)
+                    || session
+                        .game
+                        .power_view(b)
+                        .jam
+                        .is_some_and(|t| t.progress() > 0.5)
             });
             if told {
                 break;

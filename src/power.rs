@@ -1,6 +1,6 @@
 //! Rare powers: the shared gene block of the bestiary (see `docs/BESTIARY.md`).
 //!
-//! A power is a gene, never a creature kind. Twenty intensity genes and three shared
+//! A power is a gene, never a creature kind. Twenty-one intensity genes and three shared
 //! parameters sit at the end of the genome's tail, all dormant (zero) by default. An intensity
 //! below `GATE` does nothing; above it the effect scales from 0 to 1. A species carries at most
 //! one power, chosen by one extra final draw in `Genome::sample`; an individual of any species
@@ -15,7 +15,7 @@ use crate::world::SectorParams;
 /// by `Genome::drifted`) and a mutation cannot cross it in one step.
 pub const GATE: f32 = 0.3;
 /// Number of genes in the block: three shared parameters and twenty intensities.
-pub const POWER_GENES: usize = 23;
+pub const POWER_GENES: usize = 24;
 /// Individuals awaken from this ring on (a quarter of the 1 percent outlier band: 1 in 400).
 pub const AWAKEN_RING: u32 = 3;
 /// Ring steps over which a power's weight ramps from zero to full past its first ring.
@@ -32,7 +32,7 @@ pub const BIAS_SLOPE: f32 = 1.0;
 // ---- tuning: the powers that are built --------------------------------------------------
 
 /// A move that carries a creature (blink) shows its destination this long before it lands;
-/// anything that disables the ship shows itself at least `TELL_JAM` ahead (not built yet).
+/// anything that disables the ship shows itself at least `TELL_JAM` ahead.
 pub const TELL_MOVE: f32 = 0.35;
 pub const TELL_JAM: f32 = 0.6;
 /// Blink: it will not blink from, or land within, this of the ship; a hop is at least
@@ -59,6 +59,41 @@ pub const BYPASS_SHARE: (f32, f32) = (0.2, 0.6);
 pub const BYPASS_MAX: f32 = 0.8;
 pub const BYPASS_SHOT_SPEED: f32 = 260.0;
 pub const BYPASS_TELL: f32 = 0.35;
+/// Jam fairness (see `simulation::jam`): no jam or confusion lasts longer than `JAM_MAX`, the
+/// glitch no longer than `GLITCH_MAX`; after each the ship is immune for `JAM_IMMUNITY`
+/// (counted from its end) and a glitch for `GLITCH_GAP`.
+pub const JAM_MAX: f32 = 1.5;
+pub const GLITCH_MAX: f32 = 2.0;
+pub const JAM_IMMUNITY: f32 = 6.0;
+pub const GLITCH_GAP: f32 = 3.0;
+/// A jammer starts a charge only when it is this close to the ship (so on screen); the
+/// charge ring closes over `EMP_CHARGE` (never under `TELL_JAM`), `GLARE_TELL` for the eyes.
+pub const JAM_SEEN: f32 = 760.0;
+pub const EMP_CHARGE: f32 = 0.9;
+pub const GLARE_TELL: f32 = 0.7;
+/// The ring radius of a jammer is its `power_reach` clamped to this.
+pub const JAM_RING: (f32, f32) = (200.0, 420.0);
+/// Seconds of jam: `JAM_SECONDS.0 + JAM_SECONDS.1 * strength`, capped by `JAM_MAX` and the
+/// gene's hold. A strong emp locks two systems; the HUD is jammed with chance
+/// `EMP_HUD_CHANCE * strength`.
+pub const JAM_SECONDS: (f32, f32) = (0.8, 0.7);
+pub const EMP_HUD_CHANCE: f32 = 0.35;
+/// Glare: seconds of glitch `GLARE_SECONDS.0 + .1 * strength`, capped by `GLITCH_MAX`.
+pub const GLARE_SECONDS: (f32, f32) = (1.0, 1.0);
+/// Confusion: control offset in radians `CONFUSE_ANGLE.0 + .1 * strength` (a slow sway at
+/// `CONFUSE_SWAY` rad/s), a turn inversion for the first `CONFUSE_FLIP` seconds only above
+/// strength `CONFUSE_FLIP_FROM`, and a seconds-long duration like a jam.
+pub const CONFUSE_ANGLE: (f32, f32) = (0.3, 0.4);
+pub const CONFUSE_SWAY: f32 = 5.0;
+pub const CONFUSE_FLIP: f32 = 0.3;
+pub const CONFUSE_FLIP_FROM: f32 = 0.7;
+/// Dim: the field reaches `power_reach * DIM_REACH`; light never falls under `DIM_FLOOR`
+/// of normal; a creature in the field notices a quiet ship at `DIM_NOTICE` of its range.
+pub const DIM_REACH: f32 = 1.2;
+pub const DIM_FLOOR: f32 = 0.35;
+pub const DIM_NOTICE: f32 = 0.7;
+/// How long after its last shot a ship counts as "firing" for the dark.
+pub const DIM_FIRING: f32 = 1.0;
 /// Killing a carrier of a built power pays this much more bounty (by tier) and rolls one
 /// extra drop with this chance and a little luck.
 pub const BOUNTY_BONUS: (f32, f32) = (1.25, 1.5);
@@ -119,6 +154,8 @@ pub enum Power {
     Sling,
     Rune,
     Split,
+    /// Scrambles the ship's controls briefly (a jam of the pilot, not of a system).
+    Confuse,
 }
 
 /// What a power is: its species rate (one in `n`), tier, first ring, bias and typical shared
@@ -132,7 +169,7 @@ struct Spec {
 }
 
 impl Power {
-    pub const ALL: [Power; 20] = [
+    pub const ALL: [Power; 21] = [
         Self::Phase,
         Self::Repel,
         Self::Warp,
@@ -153,6 +190,7 @@ impl Power {
         Self::Sling,
         Self::Rune,
         Self::Split,
+        Self::Confuse,
     ];
 
     fn spec(self) -> Spec {
@@ -186,6 +224,7 @@ impl Power {
             Self::Sling => s(330.0, Strange, 6, Danger, (3.5, 750.0, 1.0)),
             Self::Rune => s(250.0, Strange, 6, Tech, (5.0, 520.0, 1.0)),
             Self::Split => s(180.0, Mild, 3, Aggression, (5.0, 300.0, 1.0)),
+            Self::Confuse => s(400.0, Severe, 7, Distortion, (7.0, 320.0, 1.4)),
         }
     }
 
@@ -226,6 +265,7 @@ impl Power {
             Self::Sling => "sling",
             Self::Rune => "rune",
             Self::Split => "split",
+            Self::Confuse => "confuse",
         }
     }
 
@@ -252,6 +292,7 @@ impl Power {
             Self::Sling => "Slinger",
             Self::Rune => "Runekeeper",
             Self::Split => "Splitter",
+            Self::Confuse => "Dizzard",
         }
     }
 
@@ -264,7 +305,16 @@ impl Power {
     /// awakened (`weights`, `awaken`), so a carrier never does nothing. Mark a power built when
     /// its behaviour lands.
     pub fn built(self) -> bool {
-        matches!(self, Self::Blink | Self::Phase | Self::Bypass)
+        matches!(
+            self,
+            Self::Blink
+                | Self::Phase
+                | Self::Bypass
+                | Self::Emp
+                | Self::Glare
+                | Self::Dim
+                | Self::Confuse
+        )
     }
 
     /// Whether a body plan can carry the power at all: a blinker is a single body (a chain
@@ -283,6 +333,10 @@ impl Power {
             Self::Blink => [0.35, 0.95, 1.0],
             Self::Phase => [0.75, 0.55, 1.0],
             Self::Bypass => [0.85, 0.35, 1.0],
+            Self::Emp => [0.45, 0.75, 1.0],
+            Self::Glare => [1.0, 0.85, 0.35],
+            Self::Dim => [0.55, 0.45, 0.8],
+            Self::Confuse => [1.0, 0.4, 0.8],
             _ => [0.9, 0.9, 0.9],
         }
     }
@@ -310,6 +364,7 @@ impl Power {
             Self::Sling => g.sling,
             Self::Rune => g.rune,
             Self::Split => g.split,
+            Self::Confuse => g.confuse,
         }
     }
 
@@ -335,6 +390,7 @@ impl Power {
             Self::Sling => g.sling = v,
             Self::Rune => g.rune = v,
             Self::Split => g.split = v,
+            Self::Confuse => g.confuse = v,
         }
     }
 
@@ -485,8 +541,8 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 
 /// The species-level weight of each power at `params`: rate, times the ramp past its first
 /// ring, times the sector's lean.
-pub fn weights(params: &SectorParams) -> [f32; 20] {
-    let mut out = [0.0; 20];
+pub fn weights(params: &SectorParams) -> [f32; 21] {
+    let mut out = [0.0; 21];
     for (slot, power) in out.iter_mut().zip(Power::ALL) {
         let first = power.first_ring() as f32;
         let ramp = smoothstep(first, first + RAMP_RINGS, params.depth);
@@ -608,6 +664,73 @@ impl Genome {
             radius: 12.0,
             hull: 30.0,
             fear: crate::genome::Fear::Bullets,
+            ..Self::default()
+        }
+    }
+
+    /// A Stormcap (emp): a shielded dome that turns systems off from a charging ring.
+    pub fn stormcap() -> Self {
+        Self {
+            emp: 0.75,
+            trigger: crate::genome::Trigger::Sight,
+            sight: 1200.0,
+            lose: 1500.0,
+            power_period: 6.0,
+            power_reach: 320.0,
+            power_hold: 1.4,
+            shield: 40.0,
+            hull: 70.0,
+            radius: 20.0,
+            speed: 40.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// An Argus Moth (glare): many eyes, a glass cannon of a lamp.
+    pub fn argus() -> Self {
+        Self {
+            glare: 0.8,
+            power_period: 5.5,
+            power_reach: 650.0,
+            power_hold: 1.6,
+            sight: 1600.0,
+            hull: 22.0,
+            radius: 14.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Gloomfeeder (dim): a quiet eater of light.
+    pub fn gloomfeeder() -> Self {
+        Self {
+            dim: 0.7,
+            power_reach: 450.0,
+            diet: crate::genome::Diet::Dust,
+            radius: 24.0,
+            hull: 60.0,
+            speed: 30.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Dizzard (confuse): a swaying thing that scrambles a pilot's hands.
+    pub fn dizzard() -> Self {
+        Self {
+            confuse: 0.75,
+            trigger: crate::genome::Trigger::Sight,
+            sight: 1200.0,
+            lose: 1500.0,
+            power_period: 7.0,
+            power_reach: 320.0,
+            power_hold: 1.4,
+            shield: 30.0,
+            hull: 60.0,
+            radius: 18.0,
+            speed: 40.0,
+            weapon: Weapon::None,
             ..Self::default()
         }
     }
@@ -766,7 +889,7 @@ mod tests {
 
     #[test]
     fn rare_powers_are_rarer_than_mild_ones() {
-        let mut counts = [0u32; 20];
+        let mut counts = [0u32; 21];
         let n = 160_000;
         for i in 0..n {
             let g = Genome::sample(&mut Rng::new(0xCAFE_0000 + i), &far(40.0));

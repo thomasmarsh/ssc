@@ -93,6 +93,21 @@ pub enum Cue {
     PhaseSolid {
         at: Vec2,
     },
+    /// A jammer (emp or confusion) began to charge: a rising whine at `at`.
+    JamTell {
+        at: Vec2,
+        confuse: bool,
+    },
+    /// The ship was jammed or confused: a burst of static.
+    JamHit {
+        at: Vec2,
+    },
+    /// A glare's eyes flashed.
+    Glare {
+        at: Vec2,
+    },
+    /// The ship tried to use a jammed system.
+    Refused,
     /// A hullpick's bolt reached the hull: a dull tick.
     Pith {
         at: Vec2,

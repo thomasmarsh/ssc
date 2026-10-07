@@ -37,6 +37,32 @@ impl BlinkTell {
     }
 }
 
+/// Which jam a charging body will deliver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JamKind {
+    Emp,
+    Confuse,
+}
+
+/// A jam announced: a ring that closes on its source. The ship inside the ring when it closes
+/// is jammed; leaving the ring, dashing out or breaking the source cancels it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JamTell {
+    pub kind: JamKind,
+    pub at: Vec2,
+    /// The ring's radius when it began, and seconds left of `total`.
+    pub reach: f32,
+    pub left: f32,
+    pub total: f32,
+}
+
+impl JamTell {
+    /// How far the ring has closed, 0 to 1.
+    pub fn progress(&self) -> f32 {
+        (1.0 - self.left / self.total).clamp(0.0, 1.0)
+    }
+}
+
 /// What the live power of one body is doing, for the drawing and the sound.
 #[derive(Clone, Debug, Default)]
 pub struct PowerState {
@@ -49,6 +75,11 @@ pub struct PowerState {
     trail: Option<(Vec2, Vec2, f32)>,
     /// The lead-in chime has been given for this phased window.
     cued: bool,
+    jam: Option<JamTell>,
+    jam_clock: f32,
+    /// A glare's eyes are opening: seconds left.
+    glare: Option<f32>,
+    jams: u32,
 }
 
 /// Everything the adapter needs to draw a body's power.
@@ -57,6 +88,10 @@ pub struct PowerView {
     pub blink: Option<BlinkTell>,
     pub trail: Option<(Vec2, Vec2, f32)>,
     pub phase: Option<PhaseView>,
+    /// A jam or confusion charging.
+    pub jam: Option<JamTell>,
+    /// A glare's eyes opening: 0 to 1 (1 is the flash).
+    pub glare: f32,
     /// A hullpick about to fire: 0 (not charging) to 1 (about to fire).
     pub bypass_charge: f32,
 }
@@ -69,6 +104,10 @@ impl Game {
             blink: state.and_then(|s| s.blink),
             trail: state.and_then(|s| s.trail),
             phase: body.genome.phase_at(phase_key(body), self.time),
+            jam: state.and_then(|s| s.jam),
+            glare: state
+                .and_then(|s| s.glare)
+                .map_or(0.0, |left| (1.0 - left / power::GLARE_TELL).clamp(0.0, 1.0)),
             bypass_charge: if body.genome.bypass_share() > 0.0
                 && body.alert
                 && body.fire_cooldown > 0.0
@@ -110,7 +149,11 @@ impl Game {
                 && !body.follower
                 && Power::Blink.active(&g)
                 && Power::Blink.fits(&g);
-            if phase.is_none() && !blinks {
+            let jammer = body.active
+                && !body.consumed
+                && !body.follower
+                && (Power::Emp.active(&g) || Power::Confuse.active(&g) || Power::Glare.active(&g));
+            if phase.is_none() && !blinks && !jammer {
                 self.bodies[index].phased = false;
                 continue;
             }
@@ -119,6 +162,7 @@ impl Game {
             let mut state = self.power_state.remove(&id).unwrap_or_else(|| PowerState {
                 // The first use waits a moment, so a creature does not act the instant it loads.
                 clock: 0.6 + 0.4 * (id % 5) as f32,
+                jam_clock: 1.0 + 0.4 * (id % 5) as f32,
                 ..PowerState::default()
             });
             match phase {
@@ -142,6 +186,12 @@ impl Game {
             if blinks {
                 state.clock -= dt;
                 self.step_blink(index, &mut state, dt, ship, &mut cues);
+            }
+            if jammer {
+                if state.jam.is_none() && state.glare.is_none() {
+                    state.jam_clock -= dt;
+                }
+                self.step_jammer(index, &mut state, dt, ship, &mut cues);
             }
             self.power_state.insert(id, state);
         }
@@ -228,6 +278,138 @@ impl Game {
         }
         // Nowhere sensible to go: look again soon.
         state.clock = 0.6;
+    }
+
+    /// The jammers: emp and confusion charge a ring that closes on the body (and cancel when
+    /// its shield breaks or, shieldless, when it is hit); a glare opens its eyes and flashes.
+    /// One charge at a time in the world; none starts while the ship cannot be jammed.
+    fn step_jammer(
+        &mut self,
+        index: usize,
+        state: &mut PowerState,
+        dt: f32,
+        ship: Option<Vec2>,
+        cues: &mut Vec<Cue>,
+    ) {
+        let Some(ship) = ship else {
+            return;
+        };
+        let body = &self.bodies[index];
+        let (id, at, g) = (body.id, body.position, body.genome);
+        let distance = at.distance(ship);
+        if let Some(tell) = state.jam.as_mut() {
+            tell.left -= dt;
+            let elapsed = tell.total - tell.left;
+            let broken = if body.max_shield > 0.0 {
+                body.shield <= 0.0
+            } else {
+                body.since_hit < elapsed
+            };
+            if body.phased || broken {
+                state.jam = None;
+                state.jam_clock = g.power_period * 0.6;
+                return;
+            }
+            if tell.left > 0.0 {
+                return;
+            }
+            let (kind, reach) = (tell.kind, tell.reach);
+            state.jam = None;
+            state.jam_clock = g.power_period;
+            if distance <= reach {
+                let mut rng = Rng::new(hash2(
+                    self.seed ^ POWER_SALT ^ 0x4A41,
+                    (id & 0x7FFF_FFFF) as i32,
+                    state.jams as i32,
+                ));
+                state.jams += 1;
+                match kind {
+                    JamKind::Emp => self.land_emp(&g, &mut rng),
+                    JamKind::Confuse => self.land_confuse(&g, &mut rng),
+                };
+            }
+            return;
+        }
+        if let Some(left) = state.glare.as_mut() {
+            *left -= dt;
+            if *left > 0.0 {
+                return;
+            }
+            state.glare = None;
+            state.jam_clock = g.power_period;
+            let s = Power::Glare.strength(&g);
+            let seconds = power::GLARE_SECONDS.0 + power::GLARE_SECONDS.1 * s;
+            let seed =
+                (hash2(self.seed, (id & 0x7FFF_FFFF) as i32, state.jams as i32) & 0xFFFF) as u32;
+            state.jams += 1;
+            if distance <= g.power_reach * 1.5 && self.apply_glitch(seconds, seed) {
+                cues.push(Cue::Glare { at });
+            }
+            return;
+        }
+        if state.jam_clock > 0.0 || body.phased || body.panic > 0.0 || body.root.is_some() {
+            return;
+        }
+        let busy = self
+            .power_state
+            .values()
+            .any(|s| s.jam.is_some() || s.glare.is_some());
+        if busy {
+            return;
+        }
+        if Power::Glare.active(&g) {
+            if distance <= g.power_reach * 1.5 && self.glitch_ready() {
+                state.glare = Some(power::GLARE_TELL);
+            }
+            return;
+        }
+        let kind = if Power::Emp.active(&g) {
+            JamKind::Emp
+        } else {
+            JamKind::Confuse
+        };
+        let reach = g.power_reach.clamp(power::JAM_RING.0, power::JAM_RING.1);
+        if !body.alert || distance > reach || distance > power::JAM_SEEN || !self.jammable() {
+            return;
+        }
+        let total = power::EMP_CHARGE.max(power::TELL_JAM);
+        state.jam = Some(JamTell {
+            kind,
+            at,
+            reach,
+            left: total,
+            total,
+        });
+        cues.push(Cue::JamTell {
+            at,
+            confuse: kind == JamKind::Confuse,
+        });
+    }
+
+    /// An emp lands: one or two systems the ship has, the HUD besides when rolled.
+    fn land_emp(&mut self, g: &Genome, rng: &mut Rng) -> bool {
+        let s = Power::Emp.strength(g);
+        let mut pool = self.jam_candidates();
+        let mut systems = Vec::new();
+        let first = pool.remove(rng.int(0, pool.len() as u32 - 1) as usize);
+        systems.push(first);
+        if !pool.is_empty() && rng.f32() < 0.8 * s {
+            systems.push(pool[rng.int(0, pool.len() as u32 - 1) as usize]);
+        }
+        if rng.f32() < power::EMP_HUD_CHANCE * s {
+            systems.push(JamSystem::Hud);
+        }
+        let seconds = (power::JAM_SECONDS.0 + power::JAM_SECONDS.1 * s).min(g.power_hold.max(0.5));
+        self.apply_jam(&systems, seconds)
+    }
+
+    /// A confusion lands: the controls sway by an angle that grows with strength.
+    fn land_confuse(&mut self, g: &Genome, rng: &mut Rng) -> bool {
+        let s = Power::Confuse.strength(g);
+        let amp = power::CONFUSE_ANGLE.0 + power::CONFUSE_ANGLE.1 * s;
+        let seconds = (power::JAM_SECONDS.0 + power::JAM_SECONDS.1 * s).min(g.power_hold.max(0.5));
+        let phase = rng.range(0.0, TAU);
+        self.apply_confuse(amp, s >= power::CONFUSE_FLIP_FROM, seconds, phase)
     }
 
     /// Whether a creature of `radius` may land at `to`: inside the loaded sectors and clear of
@@ -767,7 +949,7 @@ mod tests {
         // A power the simulation does not act on yet earns nothing.
         let mut inert = Genome::skipjack();
         inert.blink = 0.0;
-        inert.emp = 0.9;
+        inert.rift = 0.9;
         let (game, id) = arena(inert, Vec2::new(0.0, 900.0));
         assert_eq!(game.carrier_bonus(creature(&game, id)), None);
     }

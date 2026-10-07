@@ -223,7 +223,7 @@ genome! {
         cord_slack: 200.0, 3000.0, 200.0;
         cord_hardness: 1.0, 10.0, 2.0;
         cord_drag: 0.0, 1.0, 0.0;
-        // The rare-power block (see `power`): three shared parameters, then twenty
+        // The rare-power block (see `power`): three shared parameters, then twenty-one
         // intensities, all dormant at zero (below `power::GATE` nothing happens).
         power_period: 1.5, 14.0, 5.0;
         power_reach: 80.0, 900.0, 300.0;
@@ -248,6 +248,7 @@ genome! {
         sling: 0.0, 1.0, 0.0;
         rune: 0.0, 1.0, 0.0;
         split: 0.0, 1.0, 0.0;
+        confuse: 0.0, 1.0, 0.0;
     }
 }
 

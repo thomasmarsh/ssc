@@ -97,6 +97,8 @@ impl Game {
         // know of a pad go for it instead (see `pads`).
         let (hide, hidden_long) = (self.pad.sight_mult(), self.pad.lost_track());
         let hidden = hide > 1.0;
+        // A quiet ship in a dim field is noticed at a fraction of the distance.
+        let dim = self.dim_notice();
         let sanctuary = self.sanctuary
             && player.is_some_and(|(p, _)| {
                 crate::world::SectorId::containing(p) == crate::world::SectorId::ORIGIN
@@ -269,7 +271,7 @@ impl Game {
 
             // What the creature perceives: far, when the ship is hiding.
             let player_distance =
-                player.map_or(f32::INFINITY, |(p, _)| p.distance(body.position)) * hide;
+                player.map_or(f32::INFINITY, |(p, _)| p.distance(body.position)) * hide * dim;
             // A civilization's members see further inside their own territory and are
             // rallied by comrades and calls to arms (see `civ`).
             let posture = civs.posture(

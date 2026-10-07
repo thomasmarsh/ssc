@@ -272,7 +272,22 @@ impl Game {
         self.food_clock -= dt;
         if self.food_clock <= 0.0 {
             self.food_clock += REGROW_PERIOD;
+            let before = self.food.len();
             self.regrow_food();
+            // Plankton does not take in the dark of a light eater.
+            if self.food.len() > before {
+                let dark: Vec<bool> = self.food[before..]
+                    .iter()
+                    .map(|f| self.dim_at(f.position) > 0.2)
+                    .collect();
+                let mut keep = dark.into_iter();
+                let mut index = 0;
+                self.food.retain(|_| {
+                    let drop = index >= before && keep.next().unwrap_or(false);
+                    index += 1;
+                    !drop
+                });
+            }
         }
     }
 

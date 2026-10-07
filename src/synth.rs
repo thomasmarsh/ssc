@@ -47,10 +47,20 @@ pub enum Sound {
     PhaseSolid,
     /// A hullpick's bolt reaching the hull: a dull tick, unlike the shield's chirp.
     Pith,
+    /// An emp charging: a thin whine that rises for most of a second.
+    JamCharge,
+    /// A confusion charging: a wobbling two-tone warble.
+    ConfuseCharge,
+    /// The ship jammed: a burst of static with a falling thump.
+    JamHit,
+    /// A glare's flash: a bright rising chirp.
+    GlareFlash,
+    /// A jammed control pressed: a flat buzz.
+    Refused,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 32] = [
+    pub const ALL: [Sound; 37] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -83,6 +93,11 @@ impl Sound {
         Sound::Blink,
         Sound::PhaseSolid,
         Sound::Pith,
+        Sound::JamCharge,
+        Sound::ConfuseCharge,
+        Sound::JamHit,
+        Sound::GlareFlash,
+        Sound::Refused,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -370,6 +385,49 @@ impl Sound {
                     (noise.next() * 0.5 + square(130.0, t) * 0.6) * decay(t, 0.03)
                 });
                 lowpass(&mut v, 900.0);
+                v
+            }
+            Sound::JamCharge => {
+                let mut v = voice(0.95, |t, _| {
+                    let rise = (t / 0.9).min(1.0);
+                    let f = sweep(rise, 420.0, 2600.0);
+                    (sine(f, t) * 0.5 + tri(f * 1.01, t) * 0.25)
+                        * (0.3 + 0.7 * rise)
+                        * decay(t, 1.4)
+                });
+                lowpass(&mut v, 5200.0);
+                v
+            }
+            Sound::ConfuseCharge => {
+                let mut v = voice(0.95, |t, _| {
+                    let wob = sine(9.0, t);
+                    let f = 640.0 + 140.0 * wob + 380.0 * (t / 0.9).min(1.0);
+                    (sine(f, t) * 0.55 + sine(f * 1.5, t) * 0.25) * decay(t, 1.4)
+                });
+                lowpass(&mut v, 4200.0);
+                v
+            }
+            Sound::JamHit => {
+                let mut noise = Noise::new(211);
+                let mut v = voice(0.34, |t, _| {
+                    let thump = sine(sweep((t / 0.3).min(1.0), 220.0, 70.0), t) * 0.7;
+                    (thump + noise.next() * 0.8) * decay(t, 0.12)
+                });
+                crush(&mut v, 16.0, 3);
+                lowpass(&mut v, 3200.0);
+                v
+            }
+            Sound::GlareFlash => {
+                let mut v = voice(0.24, |t, _| {
+                    let f = sweep((t / 0.2).min(1.0), 1300.0, 3100.0);
+                    (sine(f, t) * 0.5 + sine(f * 1.5, t) * 0.3) * decay(t, 0.09)
+                });
+                lowpass(&mut v, 6000.0);
+                v
+            }
+            Sound::Refused => {
+                let mut v = voice(0.12, |t, _| square(110.0, t) * 0.6 * decay(t, 0.06));
+                lowpass(&mut v, 700.0);
                 v
             }
             // A short airy whoosh: filtered noise that sweeps up and fades.

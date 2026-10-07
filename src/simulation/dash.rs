@@ -81,6 +81,10 @@ impl Game {
         {
             return false;
         }
+        if self.jammed(JamSystem::Dash) {
+            self.cue(Cue::Refused);
+            return false;
+        }
         let Some((from, radius, shield, facing)) = self
             .player()
             .map(|p| (p.position, p.radius, p.shield, p.angle))

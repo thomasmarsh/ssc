@@ -41,6 +41,10 @@ impl Game {
         {
             return false;
         }
+        if self.jammed(JamSystem::Parry) {
+            self.cue(Cue::Refused);
+            return false;
+        }
         let Some(ship) = self.player() else {
             return false;
         };

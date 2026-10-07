@@ -91,6 +91,8 @@ pub enum RingState {
     Active,
     /// Ready except for the shield it costs.
     NoEnergy,
+    /// Jammed: greyed, with static, for the seconds in `left`.
+    Jammed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -150,6 +152,8 @@ pub struct WeaponIcon {
     pub material: Option<Material>,
     pub fuel: f32,
     pub dry: bool,
+    /// Jammed: the gun is greyed with static.
+    pub jammed: bool,
     /// Owned profiles, and the active one's position among them.
     pub owned: u8,
     pub index: u8,
@@ -294,6 +298,8 @@ pub struct HudModel {
     pub hurts: Vec<(f32, f32)>,
     /// The next-lure marker, if any.
     pub lure: Option<super::lure::Lure>,
+    /// Jams, confusion and the glitch.
+    pub jam: super::JamView,
 }
 
 impl Game {
@@ -389,6 +395,13 @@ impl Game {
         for (i, ring) in abilities.iter_mut().take(2).enumerate() {
             ring.fresh = ring.state != RingState::Locked && !self.feel.used[i];
         }
+        let jam = self.jam_view();
+        for (ring, left) in abilities.iter_mut().zip([jam.parry, jam.dash]) {
+            if left > 0.0 && ring.state != RingState::Locked {
+                ring.state = RingState::Jammed;
+                ring.left = left;
+            }
+        }
         let arsenal = &self.loadout.arsenal;
         let profile = arsenal.active;
         let owned = arsenal.owned();
@@ -399,6 +412,7 @@ impl Game {
             material,
             fuel: material.map_or(1.0, |m| self.cargo.fraction(m)),
             dry: !self.usable(profile),
+            jammed: self.jammed(super::JamSystem::Weapons),
             owned: owned.len() as u8,
             index: owned.iter().position(|p| *p == profile).unwrap_or(0) as u8,
         };
@@ -442,6 +456,7 @@ impl Game {
             calm: self.player().map_or(0.0, |s| s.since_hit),
             hurts: self.hurt_marks(),
             lure: self.next_lure(),
+            jam,
         }
     }
 }

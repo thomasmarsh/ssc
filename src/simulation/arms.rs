@@ -251,7 +251,7 @@ impl Game {
         let needs: Vec<Need> = self.loadout.arsenal.boosts.iter().map(|b| b.need).collect();
         let awake: Vec<bool> = needs
             .iter()
-            .map(|&need| on && self.need_holds(need, input))
+            .map(|&need| on && !self.jammed(JamSystem::Boost) && self.need_holds(need, input))
             .collect();
         let mut changed = false;
         let mut spent_out = Vec::new();
