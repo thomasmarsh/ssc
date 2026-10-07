@@ -77,24 +77,16 @@ pub fn screen(gizmos: &mut Gizmos, jam: &JamView, camera: Vec2, half: Vec2, time
 }
 
 /// Red and cyan copies of the ship's outline, offset: the colour smear. Never hides the ship.
-pub fn ship_fringe(gizmos: &mut Gizmos, jam: &JamView, ship: &Body) {
+pub fn ship_fringe(gizmos: &mut Gizmos, jam: &JamView, ship: &Body, hull_angle: f32) {
     let g = jam.glitch;
     if g <= 0.0 {
         return;
     }
     let (p, r) = (ship.position, ship.radius);
-    let d = Vec2::from_angle(ship.angle);
-    let side = Vec2::new(-d.y, d.x);
     for (dx, color) in [(-3.0, RED_FRINGE), (3.0, CYAN_FRINGE)] {
         let o = Vec2::X * dx * g;
         gizmos.linestrip_2d(
-            [
-                p + o + d * r * 1.5,
-                p + o - d * r + side * r,
-                p + o - d * r * 0.45,
-                p + o - d * r - side * r,
-                p + o + d * r * 1.5,
-            ],
+            crate::shipview::outline(p + o, r, hull_angle),
             color.with_alpha(0.45 * g),
         );
     }

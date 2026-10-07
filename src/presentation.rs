@@ -122,6 +122,8 @@ SETTINGS  auto repair, boosts, edge arrows, radar, camera, render style,
           reduce effects, sound, fullscreen, slow motion, restart, quit
 
 READING THE HUD
+Ship: weapon spine / chevron = aim; hull turns toward movement.
+Orange rear flames = main engines; blue front / side jets = RCS (turn / brake).
 Rings on the ship: outer cyan arc = shield, ten green segments = hull.
 Bottom: weapon (arc = fuel, dots = level, ticks = owned), parry / dash / ping
 rings (arc fills as they recover, lock = not bought yet, dashed red = no shield),
@@ -2263,6 +2265,7 @@ pub fn draw(
     view: Single<(&Transform, &Projection, &Camera), With<Camera2d>>,
     ui_scale: Res<UiScale>,
     mut gizmos: Gizmos,
+    mut ship_view: Local<crate::shipview::ShipView>,
 ) {
     let game = &session.game;
     let camera = view.0.translation.truncate();
@@ -2299,7 +2302,6 @@ pub fn draw(
         let p = body.position;
         let r = body.radius;
         let direction = Vec2::from_angle(body.angle);
-        let side = Vec2::new(-direction.y, direction.x);
         let color = if body.kind == BodyKind::Asteroid && body.pinned {
             Color::srgb(0.62, 0.5, 0.38)
         } else {
@@ -2307,31 +2309,31 @@ pub fn draw(
         };
         match body.kind {
             BodyKind::Player => {
+                ship_view.update(body, session.input, game.time);
                 if game.player_invulnerability > 0.0
                     && ((game.time * 12.0) as u32).is_multiple_of(2)
                 {
                     continue;
                 }
-                let tip = p + direction * r * 1.5;
-                let left = p - direction * r + side * r;
-                let right = p - direction * r - side * r;
-                gizmos.linestrip_2d([tip, left, p - direction * r * 0.45, right, tip], color);
-                draw_rig(&mut gizmos, game, body, session.input.thrust > 0.0);
+                let active = !session.paused
+                    && session.chart.is_none()
+                    && session.settings.is_none()
+                    && !game.game_over;
+                let jets = ship_view.thrusters(session.input, body, game.stats.thrust, active);
+                gizmos.linestrip_2d(crate::shipview::outline(p, r, ship_view.angle), color);
+                draw_rig(&mut gizmos, game, body, ship_view.angle, jets.main);
+                crate::shipview::draw_thrusters(
+                    &mut gizmos,
+                    body,
+                    ship_view.angle,
+                    &jets,
+                    game.time,
+                    session.reduce_effects,
+                );
                 if !session.reduce_effects {
-                    crate::glitchview::ship_fringe(&mut gizmos, &jam, body);
+                    crate::glitchview::ship_fringe(&mut gizmos, &jam, body, ship_view.angle);
                 }
                 crate::glitchview::confusion(&mut gizmos, &jam, body, game.time);
-                if session.input.thrust > 0.0 && !session.paused && !game.game_over {
-                    let flicker = 15.0 + (game.time * 45.0).sin() * 6.0;
-                    gizmos.linestrip_2d(
-                        [
-                            p - direction * r + side * r * 0.45,
-                            p - direction * (r + flicker),
-                            p - direction * r - side * r * 0.45,
-                        ],
-                        Color::srgb(1.0, 0.65, 0.24),
-                    );
-                }
             }
             BodyKind::Creature if game.disguise(body).is_some() => {
                 // A mimic: a plain rock, or a bright pickup hanging on a thin stalk. A crack
@@ -3383,17 +3385,29 @@ fn draw_pad(gizmos: &mut Gizmos, game: &Game, pad: &Pad, at: Vec2) {
 /// The ship wears what is bolted to it: guns at the front and flanks, nacelles at the
 /// stern, plating along the sides, glowing cores inside and antennae. Each is drawn in
 /// its rarity's color, so a glance at the ship shows how well equipped it is.
-fn draw_rig(gizmos: &mut Gizmos, game: &Game, ship: &Body, thrusting: bool) {
+fn draw_rig(gizmos: &mut Gizmos, game: &Game, ship: &Body, hull_angle: f32, main: f32) {
     let (p, r) = (ship.position, ship.radius);
-    let d = Vec2::from_angle(ship.angle);
+    let d = Vec2::from_angle(hull_angle);
     let s = Vec2::new(-d.y, d.x);
+    let aim = Vec2::from_angle(ship.angle);
+    let aim_side = Vec2::new(-aim.y, aim.x);
+    // A weapon spine rotates over the hull; start outside the upgrade cores.
+    for sign in [-1.0, 1.0] {
+        gizmos.line_2d(
+            p + aim * r * 0.65 + aim_side * sign * r * 0.12,
+            p + aim * r * 1.85 + aim_side * sign * r * 0.12,
+            Color::srgb(0.85, 0.94, 1.0),
+        );
+    }
     let tint = |rarity: Rarity| rarity_color(rarity);
     for (index, part) in game.loadout.in_slot(Slot::Cannon).enumerate() {
+        let (d, s) = (aim, aim_side);
         let color = tint(part.rarity);
         if index < 2 {
             let sign = if index == 0 { 1.0 } else { -1.0 };
-            let base = p + s * sign * r * 0.95 - d * r * 0.25;
-            gizmos.line_2d(base, p + s * sign * r * 0.45, color);
+            // Keep the rotating gun cluster ahead of its pivot, away from hull equipment.
+            let base = p + d * r * 0.75 + s * sign * r * 0.4;
+            gizmos.line_2d(base, p + d * r * 0.65 + s * sign * r * 0.2, color);
             gizmos.line_2d(base, base + d * r * 1.25, color);
             gizmos.line_2d(
                 base + s * sign * r * 0.2,
@@ -3417,11 +3431,11 @@ fn draw_rig(gizmos: &mut Gizmos, game: &Game, ship: &Body, thrusting: bool) {
             color,
         );
         gizmos.line_2d(back, back + s * sign * r * 0.28, color);
-        if thrusting && !game.game_over {
+        if main > 0.015 {
             let flicker = 8.0 + (game.time * 50.0 + index as f32 * 2.0).sin() * 3.0;
             gizmos.line_2d(
                 back + s * sign * r * 0.14,
-                back + s * sign * r * 0.14 - d * flicker,
+                back + s * sign * r * 0.14 - d * flicker * main,
                 Color::srgb(1.0, 0.7, 0.3),
             );
         }
@@ -3454,24 +3468,30 @@ fn draw_rig(gizmos: &mut Gizmos, game: &Game, ship: &Body, thrusting: bool) {
         gizmos.line_2d(root, tip, color);
         gizmos.circle_2d(tip, 2.4, color).resolution(8);
     }
-    // The active weapon profile shows as a small mark ahead of the nose, in its material's
-    // color (red when it is dry). The stock gun draws nothing.
+    // The aim chevron is always present, including for the stock gun. Material, fuel
+    // and level retain their existing visual language, independently of hull heading.
     let arsenal = &game.loadout.arsenal;
-    if let Some(kind) = arsenal.active.material() {
-        let color = if game.usable(arsenal.active) {
-            material_color(kind).with_alpha(0.75)
-        } else {
-            DRY_RED.with_alpha(0.75)
-        };
-        let tip = p + d * r * 2.7;
-        let wing = r * 0.28;
-        gizmos.line_2d(tip, tip - d * wing * 1.4 + s * wing, color);
-        gizmos.line_2d(tip, tip - d * wing * 1.4 - s * wing, color);
-        for k in 1..arsenal.level(arsenal.active) {
-            let back = d * wing * 0.9 * f32::from(k);
-            gizmos.line_2d(tip - back, tip - back - d * wing * 1.4 + s * wing, color);
-            gizmos.line_2d(tip - back, tip - back - d * wing * 1.4 - s * wing, color);
-        }
+    let color = match arsenal.active.material() {
+        Some(kind) if game.usable(arsenal.active) => material_color(kind).with_alpha(0.75),
+        Some(_) => DRY_RED.with_alpha(0.75),
+        None => Color::srgba(0.85, 0.94, 1.0, 0.8),
+    };
+    let tip = p + aim * r * 2.7;
+    let wing = r * 0.28;
+    gizmos.line_2d(tip, tip - aim * wing * 1.4 + aim_side * wing, color);
+    gizmos.line_2d(tip, tip - aim * wing * 1.4 - aim_side * wing, color);
+    for k in 1..arsenal.level(arsenal.active) {
+        let back = aim * wing * 0.9 * f32::from(k);
+        gizmos.line_2d(
+            tip - back,
+            tip - back - aim * wing * 1.4 + aim_side * wing,
+            color,
+        );
+        gizmos.line_2d(
+            tip - back,
+            tip - back - aim * wing * 1.4 - aim_side * wing,
+            color,
+        );
     }
     if ship.rig.aura > 0 {
         let pulse = 2.2 + 0.2 * (game.time * 6.0).sin();

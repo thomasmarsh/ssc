@@ -6,6 +6,7 @@ mod nebula;
 mod powerview;
 mod presentation;
 mod settings;
+mod shipview;
 mod wellview;
 
 use bevy::{
@@ -506,6 +507,25 @@ fn controls(
         aim_direction: stick_aim.or(aim_direction),
         move_direction: stick_move,
     };
+    // Bounded visual checks of independent aim, turning RCS, braking and coasting.
+    if std::env::var_os("SSC_SMOKE_FRAMES").is_some()
+        && let Ok(mode) = std::env::var("SSC_SHIP_VIEW")
+    {
+        let time = session.game.time;
+        session.input = Input {
+            aim_direction: Some(Vec2::X),
+            move_direction: match mode.as_str() {
+                "cross" => Some(Vec2::Y * 0.8),
+                "reverse" => Some(-Vec2::X),
+                "turn" => Some(Vec2::from_angle((time * 2.0).floor() * 1.5)),
+                "brake" | "coast" if time >= 1.0 => None,
+                "brake" | "coast" => Some(Vec2::Y),
+                _ => Some(Vec2::X),
+            },
+            brake: mode == "brake" && time >= 1.0,
+            ..default()
+        };
+    }
 }
 
 /// Starts a fresh run (a lost one applies its legacy; restarting mid-run earns none).
@@ -1096,6 +1116,9 @@ fn smoke_run(
             session.input.mine = true;
             session.input.fire = false;
         }
+    }
+    if std::env::var_os("SSC_SHIP_VIEW").is_some() {
+        session.game.player_invulnerability = 0.0;
     }
     run.frames += 1;
     if run.frames < limit || run.requested {
