@@ -420,14 +420,17 @@ mod tests {
     const SEED: u64 = 0x535343;
 
     fn horde() -> crate::territory::Territory {
-        // The horde nearest to HOME.
-        (-40..=40)
-            .flat_map(|x| (-40..=40).map(move |y| SectorId { x, y }))
-            .filter_map(|id| {
-                world::territory(SEED, id).filter(|t| t.capital == id && t.shape == CivShape::Horde)
-            })
-            .min_by_key(|t| (crate::range::ring(t.capital), t.capital.x, t.capital.y))
-            .expect("no horde")
+        for x in -40..=40 {
+            for y in -40..=40 {
+                if let Some(t) = world::territory(SEED, SectorId { x, y })
+                    && t.capital == (SectorId { x, y })
+                    && t.shape == CivShape::Horde
+                {
+                    return t;
+                }
+            }
+        }
+        panic!("no horde");
     }
 
     fn hold(game: &mut Game, at: Vec2, seconds: f32) {

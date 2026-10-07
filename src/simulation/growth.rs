@@ -36,6 +36,13 @@ const GROW_FULL: f32 = 0.6;
 /// would-be parent, so booms damp themselves.
 pub const LINEAGE_CAP: usize = 12;
 pub const LINEAGE_AREA: f32 = 1300.0;
+/// No more than this many of a lineage (creatures and eggs) in the whole simulated world.
+/// The local cap above only looks around the would-be parent, so a straggler at the edge of
+/// the crowd keeps breeding, clusters seed new clusters, and a lineage that eats nothing (a
+/// brooder with no food to run short of) grows until it fills every loaded sector's creature
+/// budget and then piles into one. Generated flocks of a lineage rarely top 25 a sector, so
+/// they merely stop growing; fewer than this and the local cap rules.
+pub const LINEAGE_WORLD_CAP: usize = 60;
 /// Reproduction waits while anything is alert, enraged or panicking this close.
 const CALM_RANGE: f32 = 1400.0;
 /// Nothing is born closer to the ship than this.
@@ -205,7 +212,16 @@ impl Game {
 
     /// Creatures and eggs of a lineage near `at`.
     fn lineage_load(&self, lineage: u64, at: Vec2) -> usize {
-        let near = |p: Vec2| p.distance_squared(at) < LINEAGE_AREA * LINEAGE_AREA;
+        self.lineage_within(lineage, at, LINEAGE_AREA)
+    }
+
+    /// Creatures and eggs of a lineage anywhere in the loaded world.
+    fn lineage_world_load(&self, lineage: u64) -> usize {
+        self.lineage_within(lineage, Vec2::ZERO, f32::INFINITY)
+    }
+
+    fn lineage_within(&self, lineage: u64, at: Vec2, range: f32) -> usize {
+        let near = |p: Vec2| p.distance_squared(at) < range * range;
         self.bodies
             .iter()
             .filter(|b| {
@@ -223,7 +239,7 @@ impl Game {
     }
 
     /// Room for `parts` more bodies under every cap: the global budget, the sector's
-    /// creature budget and the lineage's local cap.
+    /// creature budget and the lineage's local and world caps.
     pub(super) fn room_to_breed(&self, parent: &Body, parts: usize) -> bool {
         if self.population() + parts >= MAX_BODIES {
             return false;
@@ -241,6 +257,7 @@ impl Game {
                 .count();
         here + parts < world::SECTOR_BODY_BUDGET as usize
             && self.lineage_load(parent.species, parent.position) < LINEAGE_CAP
+            && self.lineage_world_load(parent.species) < LINEAGE_WORLD_CAP
     }
 
     /// Whether there is something nearby for this forager's offspring to live on.
@@ -569,6 +586,7 @@ impl Game {
             let hatchable = ship.is_none_or(|p| p.distance(egg.position) > SHIP_CLEARANCE)
                 && !self.agitated_near(egg.position, CALM_RANGE * 0.5)
                 && self.lineage_load(egg.lineage, egg.position) <= LINEAGE_CAP + HATCH_SLACK
+                && self.lineage_world_load(egg.lineage) <= LINEAGE_WORLD_CAP + HATCH_SLACK
                 && self.population() < MAX_BODIES - 1
                 && self.population_here(egg.position) < world::SECTOR_BODY_BUDGET as usize;
             if hatchable {
@@ -1292,6 +1310,52 @@ mod tests {
         let (a, b) = (run(), run());
         assert!(a.len() > 7, "{}", a.len());
         assert_eq!(a, b);
+    }
+
+    /// The far-territory runaway: a brooding species that eats nothing (so hunger never
+    /// limits it) and lives where its young scatter. The parent-centred density gate let any
+    /// straggler at the edge of the crowd keep breeding, so the lineage grew until it filled
+    /// the sector budget (and every sector beside it).
+    #[test]
+    fn a_brooding_lineage_stays_under_the_world_cap() {
+        let species = Species::of(Genome {
+            social: Social::Brood,
+            diet: Diet::None,
+            trigger: crate::genome::Trigger::Harm,
+            radius: 14.0,
+            mass: 8.0,
+            hull: 40.0,
+            shield: 10.0,
+            fecundity: Fecundity::Steady,
+            ..Genome::default()
+        });
+        let mut game = Game::new(42);
+        game.player_invulnerability = 1e9;
+        for k in 0..8 {
+            let at = Vec2::from_angle(k as f32 * 0.8) * (800.0 + 250.0 * k as f32);
+            spawn(&mut game, &species, at);
+        }
+        let mut peak = 0;
+        for tick in 0..20 * 60 * 20 {
+            set_player(&mut game, Vec2::new(0.0, -2800.0), Vec2::ZERO);
+            game.step(0.05, Input::default());
+            if tick % 20 == 0 {
+                let mut per: std::collections::HashMap<SectorId, usize> = Default::default();
+                for b in game
+                    .bodies
+                    .iter()
+                    .filter(|b| b.kind == BodyKind::Creature && !b.follower)
+                    .filter(|b| b.species == species.lineage)
+                {
+                    *per.entry(SectorId::containing(b.position)).or_default() += 1;
+                }
+                peak = peak.max(per.values().sum::<usize>());
+            }
+        }
+        assert!(
+            peak <= LINEAGE_WORLD_CAP + HATCH_SLACK + 4,
+            "one lineage held {peak} creatures"
+        );
     }
 
     #[test]
