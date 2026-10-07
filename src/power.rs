@@ -154,6 +154,18 @@ pub const SPLIT_QUEUE: usize = 12;
 pub const CLOUD_DENSITY: (f32, f32) = (0.25, 0.35);
 pub const CLOUD_CORE: f32 = 0.3;
 pub const CLOUD_STING: (f32, f32) = (10.0, 6.0);
+/// Song (Dirgewhale): the ring leaves at `SONG_SPEED`, its safe gap is `SONG_GAP` units wide,
+/// it hurts `SONG_DAMAGE`, shoves `SONG_SHOVE`, and from strength `SONG_JAM_FROM` jams the
+/// weapons `SONG_JAM` s; at most `SONG_RINGS` fly at once. A chant makes neighbours' guns
+/// `CHANT_FIRE` faster.
+pub const SONG_SPEED: f32 = 500.0;
+pub const SONG_GAP: f32 = 80.0;
+pub const SONG_DAMAGE: f32 = 25.0;
+pub const SONG_SHOVE: f32 = 250.0;
+pub const SONG_JAM_FROM: f32 = 0.7;
+pub const SONG_JAM: f32 = 0.6;
+pub const SONG_RINGS: usize = 6;
+pub const CHANT_FIRE: f32 = 0.25;
 /// Killing a carrier of a built power pays this much more bounty (by tier) and rolls one
 /// extra drop with this chance and a little luck.
 pub const BOUNTY_BONUS: (f32, f32) = (1.25, 1.5);
@@ -380,6 +392,7 @@ impl Power {
                 | Self::Devour
                 | Self::Split
                 | Self::Cloud
+                | Self::Song
         )
     }
 
@@ -409,6 +422,7 @@ impl Power {
             Self::Devour => [0.8, 1.0, 0.5],
             Self::Split => [0.8, 0.8, 0.8],
             Self::Cloud => [0.95, 0.85, 0.4],
+            Self::Song => [0.6, 0.8, 1.0],
             _ => [0.9, 0.9, 0.9],
         }
     }
@@ -700,6 +714,11 @@ fn style(g: &mut Genome, power: Power) {
             g.radius = g.radius.max(26.0);
             g.speed = g.speed.min(50.0);
         }
+        Power::Song => {
+            g.radius = g.radius.max(36.0);
+            g.hull = g.hull.max(150.0);
+            g.speed = g.speed.min(90.0);
+        }
         Power::Cloud => {
             g.radius = g.radius.max(50.0);
             g.hull = g.hull.max(90.0);
@@ -907,6 +926,20 @@ impl Genome {
             hull: 120.0,
             speed: 150.0,
             contact_damage: 12.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Dirgewhale (song, positive: a dirge).
+    pub fn dirgewhale() -> Self {
+        Self {
+            song: 0.7,
+            power_period: 4.0,
+            power_reach: 700.0,
+            radius: 44.0,
+            hull: 200.0,
+            mass: 140.0,
             weapon: Weapon::None,
             ..Self::default()
         }

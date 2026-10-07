@@ -2616,6 +2616,7 @@ pub fn draw(
             );
         }
     }
+    crate::powerview::draw_song_rings(&mut gizmos, game);
     draw_parry(&mut gizmos, game);
     draw_dash(&mut gizmos, game);
     draw_boost(&mut gizmos, game);

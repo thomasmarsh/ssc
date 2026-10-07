@@ -41,6 +41,7 @@ mod regrow;
 mod root;
 pub mod run;
 pub mod skills;
+mod song;
 mod split;
 mod tether;
 mod titles;
@@ -78,6 +79,7 @@ pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RAN
 pub use powers::{BlinkTell, JamKind, JamTell, PowerView};
 pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
+pub use song::SongRing;
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 pub use titles::{TitleFacts, title, title_case};
 use upgrades::{Item, Loadout, Stats};
@@ -462,6 +464,8 @@ pub struct Game {
     jam: jam::JamState,
     /// The pieces of dead splitters waiting to fly apart; see `split`.
     splits: Vec<split::Pending>,
+    /// Dirge rings in flight; see `song`.
+    song_rings: Vec<song::SongRing>,
     apex_rng: Rng,
     seed: u64,
     rng: Rng,
@@ -573,6 +577,7 @@ impl Game {
             power_state: HashMap::new(),
             jam: jam::JamState::default(),
             splits: Vec::new(),
+            song_rings: Vec::new(),
             apex_rng: Rng::new(seed ^ crate::apex::APEX_SALT),
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
@@ -766,6 +771,7 @@ impl Game {
         self.update_apexes(dt);
         self.update_powers(dt);
         self.update_splits(dt);
+        self.update_song_rings(dt);
         self.fire_weapons();
         self.cue_new_shots(in_flight);
         self.update_wells(dt);

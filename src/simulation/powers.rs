@@ -87,6 +87,9 @@ pub struct PowerState {
     pub(super) bulk: f32,
     pub(super) pocket: f32,
     pub(super) base: Option<(f32, f32, f32)>,
+    /// Song: seconds to the next ring and the mouth opening before it.
+    pub(super) song_clock: f32,
+    pub(super) song_tell: Option<f32>,
 }
 
 /// Everything the adapter needs to draw a body's power.
@@ -109,6 +112,8 @@ pub struct PowerView {
     pub pocket: f32,
     /// How far a lenswyrm's radar blip is drawn from the truth.
     pub blip: Vec2,
+    /// A dirge's mouth opening: 0 to 1.
+    pub song: f32,
 }
 
 impl Game {
@@ -128,6 +133,9 @@ impl Game {
             bulk: state.map_or(1.0, |s| s.bulk),
             pocket: state.map_or(0.0, |s| s.pocket),
             blip: self.lens_blip(body),
+            song: state
+                .and_then(|s| s.song_tell)
+                .map_or(0.0, |left| (1.0 - left / 0.7).clamp(0.0, 1.0)),
             bypass_charge: if body.genome.bypass_share() > 0.0
                 && body.alert
                 && body.fire_cooldown > 0.0
@@ -181,6 +189,7 @@ impl Game {
                 && (Power::Repel.active(&g)
                     || Power::Warp.active(&g)
                     || Power::Lens.active(&g)
+                    || Power::Song.active(&g)
                     || Power::Cloud.active(&g)
                     || Power::Devour.active(&g));
             if phase.is_none() && !blinks && !jammer && !fielder {
@@ -195,6 +204,7 @@ impl Game {
                 jam_clock: 1.0 + 0.4 * (id % 5) as f32,
                 shove_age: f32::MAX,
                 bulk: 1.0,
+                song_clock: 1.5 + 0.5 * (id % 4) as f32,
                 ..PowerState::default()
             });
             match phase {
@@ -224,6 +234,9 @@ impl Game {
                     state.jam_clock -= dt;
                 }
                 self.step_jammer(index, &mut state, dt, ship, &mut cues);
+            }
+            if fielder && Power::Song.active(&g) {
+                self.step_song(index, &mut state, dt, ship, &mut cues);
             }
             if fielder {
                 eaten.extend(self.step_fields(index, &mut state, dt, &warp_owner, &mut cues));

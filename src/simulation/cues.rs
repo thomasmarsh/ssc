@@ -100,6 +100,10 @@ pub enum Cue {
     Shove {
         at: Vec2,
     },
+    /// A dirge ring left its singer.
+    Song {
+        at: Vec2,
+    },
     /// A splitter died and is about to come apart.
     Split {
         at: Vec2,

@@ -54,6 +54,37 @@ fn dotted_circle(
     }
 }
 
+/// The dirge rings in flight: each a circle with its safe gap left open.
+pub fn draw_song_rings(gizmos: &mut Gizmos, game: &Game) {
+    let tint = tinted(Power::Song);
+    for ring in game.song_rings() {
+        let half = ring.gap_half();
+        let steps = 64;
+        let mut run: Vec<Vec2> = Vec::new();
+        let flush = |gizmos: &mut Gizmos, run: &mut Vec<Vec2>| {
+            if run.len() > 1 {
+                gizmos.linestrip_2d(run.drain(..), tint.with_alpha(0.9));
+            } else {
+                run.clear();
+            }
+        };
+        for k in 0..=steps {
+            let a = k as f32 / steps as f32 * TAU;
+            let apart =
+                ((a - ring.gap_at) + std::f32::consts::PI).rem_euclid(TAU) - std::f32::consts::PI;
+            if apart.abs() <= half {
+                flush(gizmos, &mut run);
+            } else {
+                run.push(ring.center + Vec2::from_angle(a) * ring.radius);
+            }
+        }
+        flush(gizmos, &mut run);
+        gizmos
+            .circle_2d(ring.center, ring.radius + 6.0, tint.with_alpha(0.25))
+            .resolution(64);
+    }
+}
+
 /// A ring of small eyes that open in sequence as `open` rises to 1, then flash.
 fn eyes(gizmos: &mut Gizmos, p: Vec2, r: f32, time: f32, open: f32, tint: Color) {
     let n = 10;
@@ -300,6 +331,40 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
                 );
             }
             dotted_circle(gizmos, p, r, tint.with_alpha(0.18), 32, time * 0.1);
+        }
+        Power::Song => {
+            if body.genome.song < 0.0 {
+                // A chant: slow notes rising off the body, and the aura's edge.
+                for k in 0..3 {
+                    let u = (time * 0.5 + k as f32 / 3.0).fract();
+                    gizmos
+                        .circle_2d(p, r * 1.4 + 40.0 * u, tint.with_alpha(0.45 * (1.0 - u)))
+                        .resolution(24);
+                }
+                dotted_circle(
+                    gizmos,
+                    p,
+                    body.genome.power_reach,
+                    tint.with_alpha(0.18),
+                    40,
+                    time * 0.1,
+                );
+            } else {
+                // The mouth ring opens before each note.
+                let open = view.song;
+                gizmos
+                    .circle_2d(p, r * (1.0 + 0.6 * open), tint.with_alpha(0.4 + 0.5 * open))
+                    .resolution(28);
+                if open > 0.0 {
+                    gizmos
+                        .circle_2d(
+                            p,
+                            r * 2.4 * (1.0 - open) + r,
+                            Color::WHITE.with_alpha(0.6 * open),
+                        )
+                        .resolution(28);
+                }
+            }
         }
         Power::Glare => eyes(gizmos, p, r, time, view.glare.max(0.15), tint),
         Power::Dim => {

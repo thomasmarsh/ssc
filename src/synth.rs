@@ -65,10 +65,12 @@ pub enum Sound {
     Gulp,
     /// A splitter bursting: a wet pop.
     Split,
+    /// A dirge ring leaving: a long low organ note.
+    Dirge,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 41] = [
+    pub const ALL: [Sound; 42] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -110,6 +112,7 @@ impl Sound {
         Sound::Shove,
         Sound::Gulp,
         Sound::Split,
+        Sound::Dirge,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -454,6 +457,16 @@ impl Sound {
                     thump + noise.next() * 0.5 * decay(t, 0.25)
                 });
                 lowpass(&mut v, 1400.0);
+                v
+            }
+            Sound::Dirge => {
+                let mut v = voice(1.1, |t, _| {
+                    let swell = (t / 0.15).min(1.0);
+                    (sine(110.0, t) * 0.6 + sine(165.0, t) * 0.3 + sine(220.0, t) * 0.15)
+                        * swell
+                        * decay(t, 0.7)
+                });
+                lowpass(&mut v, 1200.0);
                 v
             }
             Sound::Split => {

@@ -849,6 +849,7 @@ fn smoke_run(
             "tidegorger" => Genome::tidegorger(),
             "splitter" => Genome::splitter(),
             "murmur" => Genome::murmur(),
+            "dirgewhale" => Genome::dirgewhale(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
@@ -856,7 +857,10 @@ fn smoke_run(
         } else {
             420.0
         };
-        if matches!(name.as_str(), "stormcap" | "dizzard" | "argus") {
+        if matches!(
+            name.as_str(),
+            "stormcap" | "dizzard" | "argus" | "dirgewhale"
+        ) {
             // The jammers only work on a ship that is not in grace.
             session.game.player_invulnerability = 0.0;
         }
@@ -901,20 +905,21 @@ fn smoke_run(
     if run.frames + 3 == limit && std::env::var_os("SSC_SPECIMEN_TELL").is_some() {
         for _ in 0..4000 {
             session.game.step(0.02, ssc::simulation::Input::default());
-            let told = session.game.bodies.iter().any(|b| {
-                session
-                    .game
-                    .power_view(b)
-                    .blink
-                    .is_some_and(|t| t.progress() > 0.5)
-                    || session.game.power_view(b).shove_age.clamp(0.2, 0.3)
-                        == session.game.power_view(b).shove_age
-                    || session
+            let told = session.game.song_rings().iter().any(|r| r.radius > 200.0)
+                || session.game.bodies.iter().any(|b| {
+                    session
                         .game
                         .power_view(b)
-                        .jam
+                        .blink
                         .is_some_and(|t| t.progress() > 0.5)
-            });
+                        || session.game.power_view(b).shove_age.clamp(0.2, 0.3)
+                            == session.game.power_view(b).shove_age
+                        || session
+                            .game
+                            .power_view(b)
+                            .jam
+                            .is_some_and(|t| t.progress() > 0.5)
+                });
             if told {
                 break;
             }
