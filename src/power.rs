@@ -166,6 +166,17 @@ pub const SONG_JAM_FROM: f32 = 0.7;
 pub const SONG_JAM: f32 = 0.6;
 pub const SONG_RINGS: usize = 6;
 pub const CHANT_FIRE: f32 = 0.25;
+/// Mimic (Lurefish): from gene value `MIMIC_LURE` it poses as a pickup (drifting at most
+/// `MIMIC_LURE_DRIFT`), below it as a rock that drifts toward the ship at most `MIMIC_ROCK_DRIFT`.
+/// It cracks (`MIMIC_TELL` s) when the ship is within `MIMIC_REVEAL` of its reach, when hurt, or
+/// after the ship has idled (under `MIMIC_IDLE_SPEED`) inside its reach for `MIMIC_IDLE` s.
+pub const MIMIC_LURE: f32 = 0.6;
+pub const MIMIC_LURE_DRIFT: f32 = 6.0;
+pub const MIMIC_ROCK_DRIFT: f32 = 38.0;
+pub const MIMIC_TELL: f32 = 0.3;
+pub const MIMIC_REVEAL: f32 = 0.5;
+pub const MIMIC_IDLE: f32 = 2.0;
+pub const MIMIC_IDLE_SPEED: f32 = 40.0;
 /// Killing a carrier of a built power pays this much more bounty (by tier) and rolls one
 /// extra drop with this chance and a little luck.
 pub const BOUNTY_BONUS: (f32, f32) = (1.25, 1.5);
@@ -393,6 +404,7 @@ impl Power {
                 | Self::Split
                 | Self::Cloud
                 | Self::Song
+                | Self::Mimic
         )
     }
 
@@ -400,7 +412,7 @@ impl Power {
     /// would be torn apart), a bypasser needs a gun that fires plain shots.
     pub fn fits(self, g: &Genome) -> bool {
         match self {
-            Self::Blink => g.parts() == 1,
+            Self::Blink | Self::Mimic => g.parts() == 1,
             Self::Bypass => matches!(g.weapon, Weapon::Projectile | Weapon::Needles),
             _ => true,
         }
@@ -423,6 +435,7 @@ impl Power {
             Self::Split => [0.8, 0.8, 0.8],
             Self::Cloud => [0.95, 0.85, 0.4],
             Self::Song => [0.6, 0.8, 1.0],
+            Self::Mimic => [1.0, 0.75, 0.3],
             _ => [0.9, 0.9, 0.9],
         }
     }
@@ -714,6 +727,11 @@ fn style(g: &mut Genome, power: Power) {
             g.radius = g.radius.max(26.0);
             g.speed = g.speed.min(50.0);
         }
+        Power::Mimic => {
+            g.diet = crate::genome::Diet::Hunt;
+            g.speed = g.speed.min(140.0);
+            g.radius = g.radius.clamp(10.0, 22.0);
+        }
         Power::Song => {
             g.radius = g.radius.max(36.0);
             g.hull = g.hull.max(150.0);
@@ -940,6 +958,22 @@ impl Genome {
             radius: 44.0,
             hull: 200.0,
             mass: 140.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Lurefish (mimic, a pickup lure).
+    pub fn lurefish() -> Self {
+        Self {
+            mimic: 0.8,
+            power_reach: 260.0,
+            diet: crate::genome::Diet::Hunt,
+            contact_damage: 22.0,
+            bounty: 220.0,
+            hull: 50.0,
+            radius: 14.0,
+            speed: 120.0,
             weapon: Weapon::None,
             ..Self::default()
         }

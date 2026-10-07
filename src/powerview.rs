@@ -111,6 +111,9 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
     let Some(carried) = body.genome.live_power() else {
         return;
     };
+    if game.disguise(body).is_some() {
+        return;
+    }
     if body.follower {
         return;
     }

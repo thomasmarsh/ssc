@@ -86,6 +86,10 @@ impl Game {
                     if body.root.is_some() && !body.alert {
                         continue;
                     }
+                    if self.disguise(body).is_some() {
+                        // A mimic is a rock or a pickup until it shows itself.
+                        continue;
+                    }
                     if self.apex_of(body).is_some() {
                         // Apex arrows are drawn apart (`apex_bearings`).
                         continue;

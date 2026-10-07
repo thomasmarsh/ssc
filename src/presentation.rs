@@ -2196,6 +2196,36 @@ pub fn draw(
                     );
                 }
             }
+            BodyKind::Creature if game.disguise(body).is_some() => {
+                // A mimic: a plain rock, or a bright pickup hanging on a thin stalk. A crack
+                // in the surface and a lit stalk give it away just before it shows itself.
+                let crack = game.reveal_progress(body);
+                match game.disguise(body) {
+                    Some(ssc::simulation::Disguise::Lure) => {
+                        let lure = Pickup {
+                            position: p,
+                            velocity: Vec2::ZERO,
+                            item: Item::Material(ssc::simulation::Material::ALL[0], 8.0),
+                            age: game.time,
+                            remaining: 99.0,
+                        };
+                        draw_pickup(&mut gizmos, &lure);
+                        let stalk = Color::srgb(0.6, 0.7, 0.8).with_alpha(0.07 + 0.8 * crack);
+                        gizmos.line_2d(p, p + direction * (r * 2.4 + 8.0), stalk);
+                    }
+                    _ => draw_rock(&mut gizmos, game.time, body, Color::srgb(0.62, 0.5, 0.38)),
+                }
+                if crack > 0.0 {
+                    for k in 0..5 {
+                        let a = k as f32 * 1.3 + body.id as f32;
+                        gizmos.line_2d(
+                            p,
+                            p + Vec2::from_angle(a) * r * (0.6 + 0.6 * crack),
+                            Color::WHITE.with_alpha(0.4 + 0.5 * crack),
+                        );
+                    }
+                }
+            }
             BodyKind::Creature => {
                 // In a light eater's dark a creature draws fainter, never below 55 percent.
                 let faint = if dim.is_empty() {
@@ -3531,7 +3561,10 @@ fn draw_radar(
     }
     let step = crate::glitchview::tick(game.time, calm);
     for (index, body) in game.bodies.iter().enumerate() {
-        if matches!(body.kind, BodyKind::Asteroid | BodyKind::Player) || body.follower {
+        if matches!(body.kind, BodyKind::Asteroid | BodyKind::Player)
+            || body.follower
+            || game.disguise(body).is_some()
+        {
             continue;
         }
         let mut offset = (body.position - origin) * scale;

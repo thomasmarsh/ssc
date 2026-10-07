@@ -90,6 +90,10 @@ pub struct PowerState {
     /// Song: seconds to the next ring and the mouth opening before it.
     pub(super) song_clock: f32,
     pub(super) song_tell: Option<f32>,
+    /// Mimic: it has shown itself, is cracking (seconds left), and how long the ship idled near.
+    pub(super) revealed: bool,
+    pub(super) reveal: Option<f32>,
+    pub(super) idle: f32,
 }
 
 /// Everything the adapter needs to draw a body's power.
@@ -190,6 +194,7 @@ impl Game {
                     || Power::Warp.active(&g)
                     || Power::Lens.active(&g)
                     || Power::Song.active(&g)
+                    || (Power::Mimic.active(&g) && Power::Mimic.fits(&g))
                     || Power::Cloud.active(&g)
                     || Power::Devour.active(&g));
             if phase.is_none() && !blinks && !jammer && !fielder {
@@ -234,6 +239,9 @@ impl Game {
                     state.jam_clock -= dt;
                 }
                 self.step_jammer(index, &mut state, dt, ship, &mut cues);
+            }
+            if fielder && Power::Mimic.active(&g) {
+                self.step_mimic(index, &mut state, dt, ship, &mut cues);
             }
             if fielder && Power::Song.active(&g) {
                 self.step_song(index, &mut state, dt, ship, &mut cues);

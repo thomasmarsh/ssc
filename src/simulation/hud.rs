@@ -319,6 +319,9 @@ impl Game {
             if self.civ_of(body).is_some_and(|(tid, _)| self.civ_calm(tid)) {
                 continue;
             }
+            if self.disguise(body).is_some() {
+                continue;
+            }
             let d = body.position.distance(ship);
             if body.alert && d < PRESSURE_HUNTING {
                 hunting += 1;

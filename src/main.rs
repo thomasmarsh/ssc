@@ -850,6 +850,7 @@ fn smoke_run(
             "splitter" => Genome::splitter(),
             "murmur" => Genome::murmur(),
             "dirgewhale" => Genome::dirgewhale(),
+            "lurefish" => Genome::lurefish(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {

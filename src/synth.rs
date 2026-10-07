@@ -67,10 +67,12 @@ pub enum Sound {
     Split,
     /// A dirge ring leaving: a long low organ note.
     Dirge,
+    /// A mimic cracking: a dry snap and a rising chirp.
+    Crack,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 42] = [
+    pub const ALL: [Sound; 43] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -113,6 +115,7 @@ impl Sound {
         Sound::Gulp,
         Sound::Split,
         Sound::Dirge,
+        Sound::Crack,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -457,6 +460,16 @@ impl Sound {
                     thump + noise.next() * 0.5 * decay(t, 0.25)
                 });
                 lowpass(&mut v, 1400.0);
+                v
+            }
+            Sound::Crack => {
+                let mut noise = Noise::new(353);
+                let mut v = voice(0.3, |t, _| {
+                    let snap = noise.next() * decay(t, 0.02);
+                    let f = sweep((t / 0.25).min(1.0), 500.0, 1700.0);
+                    snap * 0.8 + sine(f, t) * 0.4 * decay(t, 0.12)
+                });
+                lowpass(&mut v, 5000.0);
                 v
             }
             Sound::Dirge => {

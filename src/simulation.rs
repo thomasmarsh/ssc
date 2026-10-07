@@ -31,6 +31,7 @@ mod jam;
 mod legacy;
 mod loot;
 pub mod lure;
+mod mimic;
 mod mining;
 mod pads;
 mod parry;
@@ -70,6 +71,7 @@ pub use guide::{
 pub use jam::{JamView, System as JamSystem};
 pub use legacy::{Bequest, Legacy, Wreck};
 pub use loot::{Notice, Pickup};
+pub use mimic::Disguise;
 pub use mining::{Beam, Cargo, Lode, Material, renewable};
 pub use pads::{
     Bench, BenchPanel, BenchRow, BenchTab, HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP,

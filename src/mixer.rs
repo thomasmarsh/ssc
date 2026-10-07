@@ -187,6 +187,14 @@ fn spec(cue: &Cue) -> Spec {
             detune: 0.02,
             at: Some(at),
         },
+        Cue::Reveal { at } => Spec {
+            sound: Sound::Crack,
+            gain: 0.7,
+            reach: Some(1200.0),
+            priority: Priority::Ship,
+            detune: 0.03,
+            at: Some(at),
+        },
         Cue::Song { at } => Spec {
             sound: Sound::Dirge,
             gain: 0.8,
@@ -268,6 +276,7 @@ fn interval(sound: Sound) -> f32 {
         Sound::Gulp => 0.15,
         Sound::Split => 0.1,
         Sound::Dirge => 0.8,
+        Sound::Crack => 0.2,
     }
 }
 
