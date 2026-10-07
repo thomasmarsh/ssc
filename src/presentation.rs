@@ -82,8 +82,13 @@ const RIG_LINES: usize = Slot::ALL.len()
     + Material::ALL.len()
     + 3;
 
-pub fn setup(mut commands: Commands) {
-    commands.spawn((
+/// SSC_OFFSCREEN=1: render into an image instead of the window (for screenshots when the
+/// display is asleep or locked, where a window renders black).
+#[derive(Resource)]
+pub struct Offscreen(pub Handle<Image>);
+
+pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    let mut camera = commands.spawn((
         Camera2d,
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::FixedVertical {
@@ -96,6 +101,17 @@ pub fn setup(mut commands: Commands) {
         Tonemapping::None,
         Msaa::Sample4,
     ));
+    if std::env::var_os("SSC_OFFSCREEN").is_some() {
+        let image = Image::new_target_texture(
+            1800,
+            1200,
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            None,
+        );
+        let handle = images.add(image);
+        camera.insert(bevy::camera::RenderTarget::Image(handle.clone().into()));
+        commands.insert_resource(Offscreen(handle));
+    }
     commands.spawn((
         Text::new("SSC   /   DEEP SPACE"),
         TextFont::from_font_size(23.0),
@@ -120,7 +136,7 @@ pub fn setup(mut commands: Commands) {
         },
     ));
     commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine    O  tithe at a seat\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench/tithe  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (locked until bought at the bench, tab 6)\nG / D-LEFT  star map    H  beacon (bench)    bench tab 7  sonar upgrades\nC  camera    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
+        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine    O  tithe at a seat\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench/tithe  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (locked until bought at the bench, tab 6)\nG / D-LEFT  star map    H  beacon (bench)    bench tab 7  sonar upgrades\nC  camera    U  reduce effects    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
         TextFont::from_font_size(13.0),
         TextColor(MUTED),
         Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },

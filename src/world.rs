@@ -985,6 +985,12 @@ pub fn has_planetoid(seed: u64, id: SectorId) -> bool {
     planetoid(seed, id, &latent(seed, id)).is_some()
 }
 
+/// Where sector `id`'s planetoid sits (world units) and its radius, if it has one.
+pub fn planetoid_at(seed: u64, id: SectorId) -> Option<(Vec2, f32)> {
+    let s = planetoid(seed, id, &latent(seed, id))?;
+    Some((s.position, s.radius.unwrap_or(0.0)))
+}
+
 /// A sector's planetoid, if it has one: a fixed, slowly turning world that blooms life
 /// around it. HOME always has one, near the start, the base the ship returns to.
 fn planetoid(seed: u64, id: SectorId, params: &SectorParams) -> Option<Spawn> {

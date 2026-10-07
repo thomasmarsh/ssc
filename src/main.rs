@@ -1,4 +1,5 @@
 mod audio;
+mod nebula;
 mod presentation;
 
 use bevy::{
@@ -154,6 +155,8 @@ pub struct Session {
     pub arrows: bool,
     pub camera_view: CameraView,
     pub style: RenderStyle,
+    /// Hides the nebula backdrop and plain-colours the stars (key U, or SSC_REDUCE_EFFECTS=1).
+    pub reduce_effects: bool,
     /// The star map, while it is open (the simulation waits), with its cursor and note preset.
     pub chart: Option<ChartCursor>,
     /// Best score this session (kept in memory only), whether the run just ended beat it,
@@ -174,6 +177,7 @@ impl Default for Session {
             arrows: true,
             camera_view: CameraView::default(),
             style: RenderStyle::default(),
+            reduce_effects: std::env::var_os("SSC_REDUCE_EFFECTS").is_some(),
             chart: None,
             best: None,
             new_best: false,
@@ -224,7 +228,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_systems(Startup, (presentation::setup, audio::setup))
+        .add_systems(Startup, (presentation::setup, nebula::setup, audio::setup))
         .add_systems(FixedUpdate, simulate)
         .add_systems(
             Update,
@@ -232,6 +236,7 @@ fn main() {
                 controls,
                 camera,
                 apply_style,
+                nebula::update,
                 audio::apply_mute,
                 audio::play_cues,
                 presentation::draw,
@@ -306,6 +311,9 @@ fn controls(
     }
     if keys.just_pressed(KeyCode::KeyN) {
         audio.muted = !audio.muted;
+    }
+    if keys.just_pressed(KeyCode::KeyU) {
+        session.reduce_effects = !session.reduce_effects;
     }
     if keys.just_pressed(KeyCode::KeyV) {
         session.style = session.style.next();
@@ -645,6 +653,7 @@ fn smoke_run(
     mut run: ResMut<SmokeRun>,
     mut session: ResMut<Session>,
     mut commands: Commands,
+    offscreen: Option<Res<presentation::Offscreen>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(limit) = std::env::var("SSC_SMOKE_FRAMES")
@@ -738,14 +747,15 @@ fn smoke_run(
     }
     run.requested = true;
     if let Ok(path) = std::env::var("SSC_SCREENSHOT") {
-        commands
-            .spawn(Screenshot::primary_window())
-            .observe(save_to_disk(path))
-            .observe(
-                |_: On<ScreenshotCaptured>, mut exit: MessageWriter<AppExit>| {
-                    exit.write(AppExit::Success);
-                },
-            );
+        let shot = match &offscreen {
+            Some(target) => Screenshot::image(target.0.clone()),
+            None => Screenshot::primary_window(),
+        };
+        commands.spawn(shot).observe(save_to_disk(path)).observe(
+            |_: On<ScreenshotCaptured>, mut exit: MessageWriter<AppExit>| {
+                exit.write(AppExit::Success);
+            },
+        );
     } else {
         exit.write(AppExit::Success);
     }
