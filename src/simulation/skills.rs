@@ -46,6 +46,8 @@ pub enum Skill {
     /// The ship takes less of the impacts it causes (and later of every collision). Needs
     /// some SHOVE to buy. Locked until bought.
     ShovePlating,
+    /// Organ slots, one a level; needs a Rare or better core fitted. Locked until bought.
+    Symbiosis,
 }
 
 /// Which bench tab sells a skill.
@@ -56,7 +58,7 @@ pub enum SkillTab {
 }
 
 impl Skill {
-    pub const ALL: [Skill; 18] = [
+    pub const ALL: [Skill; 19] = [
         Self::BeamPower,
         Self::BeamRange,
         Self::Yield,
@@ -75,6 +77,7 @@ impl Skill {
         Self::Beacon,
         Self::Shove,
         Self::ShovePlating,
+        Self::Symbiosis,
     ];
 
     /// The bench tab that sells this skill.
@@ -110,6 +113,7 @@ impl Skill {
                     | Self::Beacon
                     | Self::Shove
                     | Self::ShovePlating
+                    | Self::Symbiosis
             )
     }
 
@@ -137,12 +141,14 @@ impl Skill {
             Self::Beacon => "BEACON",
             Self::Shove => "SHOVE",
             Self::ShovePlating => "PLATING",
+            Self::Symbiosis => "SYMBIOSIS",
         }
     }
 
     pub fn max_level(self) -> u8 {
         match self {
             Self::EchoPads | Self::EchoLodes | Self::EchoNests | Self::EchoPredators => 1,
+            Self::Symbiosis => t::SYMBIOSIS_SLOTS as u8,
             _ => t::SKILL_MAX,
         }
     }
@@ -182,6 +188,10 @@ impl Skill {
                 t::PLATING_CAUSED_STEP * 100.0,
                 t::PLATING_ALL_FROM
             ),
+            Self::Symbiosis => format!(
+                "one organ slot a level; grafts cost crystal and volatiles, upkeep {:.1} volatiles a minute",
+                t::ORGAN_UPKEEP
+            ),
             Self::Beacon => format!(
                 "deploy beacons (H) and jump back to one from the chart; {} more standing a level",
                 t::BEACONS_PER_LEVEL
@@ -209,6 +219,7 @@ impl Skill {
             Self::Beacon => &t::PRICE_BEACON,
             Self::Shove => &t::PRICE_SHOVE,
             Self::ShovePlating => &t::PRICE_SHOVE_PLATING,
+            Self::Symbiosis => &t::PRICE_SYMBIOSIS,
         }
     }
 
@@ -222,6 +233,7 @@ impl Skill {
         match self {
             Self::Parry => Some((Slot::Plating, Rarity::Rare)),
             Self::Dash => Some((Slot::Engine, Rarity::Rare)),
+            Self::Symbiosis => Some((Slot::Core, Rarity::Rare)),
             _ => None,
         }
     }
@@ -402,6 +414,11 @@ impl Skills {
             t::PLATING_ALL_STEP * f32::from(level.saturating_sub(t::PLATING_ALL_FROM - 1))
         };
         (1.0 - cut).max(0.0)
+    }
+
+    /// Organ slots the rig has opened.
+    pub fn organ_slots(&self) -> usize {
+        usize::from(self.level(Skill::Symbiosis))
     }
 
     pub fn ping_extra_targets(&self) -> usize {

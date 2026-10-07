@@ -177,6 +177,33 @@ pub const MIMIC_TELL: f32 = 0.3;
 pub const MIMIC_REVEAL: f32 = 0.5;
 pub const MIMIC_IDLE: f32 = 2.0;
 pub const MIMIC_IDLE_SPEED: f32 = 40.0;
+/// Latch (Hullworm): a worm within `LATCH_REACH` of the hull (past the radii) and deeper than
+/// `LATCH_RING` fastens on; at most `LATCH_MAX` at once; each drains `LATCH_DRAIN.0 + .1 * s` of
+/// one resource a second by its diet (a hull drain stops at `LATCH_HULL_FLOOR` of the hull, so it
+/// never kills); a shaken or scraped worm cannot fasten again for `LATCH_RETRY` s and flies off at
+/// `LATCH_FLING`; a solid hit at `LATCH_SCRAPE` closing speed scrapes the nearest one off
+/// (hurting it by `LATCH_SCRAPE_HURT`); a pad cleans the lot after `LATCH_PAD` s.
+pub const LATCH_REACH: f32 = 18.0;
+pub const LATCH_RING: f32 = 5.0;
+pub const LATCH_MAX: usize = 3;
+pub const LATCH_DRAIN: (f32, f32) = (2.0, 4.0);
+pub const LATCH_HULL_DRAIN: f32 = 1.0;
+pub const LATCH_HULL_FLOOR: f32 = 0.2;
+pub const LATCH_RETRY: f32 = 4.0;
+pub const LATCH_FLING: f32 = 300.0;
+pub const LATCH_SCRAPE: f32 = 150.0;
+pub const LATCH_SCRAPE_HURT: f32 = 14.0;
+pub const LATCH_PAD: f32 = 2.0;
+/// Symbiote (Kindling Remora): it drifts toward a calm ship within `GROOM_COME` (the ship
+/// slower than `GROOM_COME_SPEED` and quiet for `GROOM_QUIET` s); holding within `GROOM_RANGE`
+/// at under `GROOM_SPEED` for `GROOM_TIME` s bonds it.
+pub const GROOM_COME: f32 = 320.0;
+pub const GROOM_COME_SPEED: f32 = 140.0;
+pub const GROOM_QUIET: f32 = 2.0;
+pub const GROOM_RANGE: f32 = 120.0;
+pub const GROOM_SPEED: f32 = 60.0;
+pub const GROOM_TIME: f32 = 3.0;
+pub const GROOM_DRIFT: f32 = 45.0;
 /// Killing a carrier of a built power pays this much more bounty (by tier) and rolls one
 /// extra drop with this chance and a little luck.
 pub const BOUNTY_BONUS: (f32, f32) = (1.25, 1.5);
@@ -405,6 +432,8 @@ impl Power {
                 | Self::Cloud
                 | Self::Song
                 | Self::Mimic
+                | Self::Latch
+                | Self::Symbiote
         )
     }
 
@@ -436,6 +465,8 @@ impl Power {
             Self::Cloud => [0.95, 0.85, 0.4],
             Self::Song => [0.6, 0.8, 1.0],
             Self::Mimic => [1.0, 0.75, 0.3],
+            Self::Symbiote => [1.0, 0.72, 0.25],
+            Self::Latch => [0.75, 0.45, 1.0],
             _ => [0.9, 0.9, 0.9],
         }
     }
@@ -751,6 +782,32 @@ fn style(g: &mut Genome, power: Power) {
             g.speed = g.speed.min(60.0);
             g.hull = g.hull.max(120.0);
         }
+        Power::Latch => {
+            // A grey worm: tiny, fed by what its diet takes from the hull it clings to.
+            g.radius = g.radius.min(9.0);
+            g.hull = g.hull.clamp(10.0, 24.0);
+            g.weapon = Weapon::None;
+            g.contact_damage = 0.0;
+            g.diet = match (g.latch.abs() * 53.0).fract() {
+                f if f < 0.4 => crate::genome::Diet::Siphon,
+                f if f < 0.6 => crate::genome::Diet::Rocks,
+                f if f < 0.8 => crate::genome::Diet::Graze,
+                _ => crate::genome::Diet::Hunt,
+            };
+        }
+        Power::Symbiote => {
+            // A shy amber thing that wants to be groomed.
+            g.radius = g.radius.clamp(7.0, 11.0);
+            g.hull = g.hull.clamp(14.0, 26.0);
+            g.shield = g.shield.max(8.0);
+            g.speed = g.speed.min(90.0);
+            g.weapon = Weapon::None;
+            g.contact_damage = 0.0;
+            g.fling = 0.0;
+            g.social = crate::genome::Social::School;
+            g.trigger = crate::genome::Trigger::Harm;
+            g.fear = crate::genome::Fear::Player;
+        }
         Power::Bypass => {
             if !matches!(g.weapon, Weapon::Projectile | Weapon::Needles) {
                 g.weapon = Weapon::Projectile;
@@ -975,6 +1032,41 @@ impl Genome {
             radius: 14.0,
             speed: 120.0,
             weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Hullworm (latch): a grey thumb that fastens on the hull and feeds on the shield.
+    pub fn hullworm() -> Self {
+        Self {
+            latch: 0.7,
+            diet: crate::genome::Diet::Siphon,
+            radius: 7.0,
+            hull: 14.0,
+            speed: 150.0,
+            weapon: Weapon::None,
+            contact_damage: 0.0,
+            hue: 0.0,
+            pale: 0.1,
+            ..Self::default()
+        }
+    }
+
+    /// A Kindling Remora (symbiote): small, amber, shy; it can be groomed into a bond.
+    pub fn remora() -> Self {
+        Self {
+            symbiote: 0.7,
+            fear: crate::genome::Fear::Player,
+            trigger: crate::genome::Trigger::Harm,
+            social: crate::genome::Social::School,
+            radius: 9.0,
+            shield: 12.0,
+            hull: 20.0,
+            bounty: 90.0,
+            speed: 60.0,
+            weapon: Weapon::None,
+            contact_damage: 0.0,
+            hue: 0.1,
             ..Self::default()
         }
     }

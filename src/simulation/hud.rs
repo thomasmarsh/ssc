@@ -180,6 +180,24 @@ pub struct StandingMeter {
     pub fallen: bool,
 }
 
+/// One organ in the bottom cluster: its kind, level and whether it works.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OrganIcon {
+    pub organ: super::organs::Organ,
+    pub level: u8,
+    pub state: OrganState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OrganState {
+    /// Fitted and awake.
+    Active,
+    /// Fitted but the hold is dry.
+    Asleep,
+    /// A fresh bond working without a slot: the share of its time left.
+    Bond(f32),
+}
+
 /// How many threat pips light: none with nothing around, else the verdict ladder (strong 1,
 /// even 2 to 3, underpowered 4, outclassed 5), one more when several hostiles are hunting.
 pub fn threat_pips(power: f32, threat: f32, near: usize, hunting: usize) -> u8 {
@@ -300,6 +318,10 @@ pub struct HudModel {
     pub lure: Option<super::lure::Lure>,
     /// Jams, confusion and the glitch.
     pub jam: super::JamView,
+    /// The organs that are fitted or on a bond's loan.
+    pub organs: Vec<OrganIcon>,
+    /// Worms on the hull, and how fat the fattest is (0 to 1).
+    pub worms: (usize, f32),
 }
 
 impl Game {
@@ -460,7 +482,46 @@ impl Game {
             hurts: self.hurt_marks(),
             lure: self.next_lure(),
             jam,
+            organs: self.organ_icons(),
+            worms: (
+                self.latches().len(),
+                self.latches()
+                    .iter()
+                    .map(|l| (l.fed / 120.0).clamp(0.0, 1.0))
+                    .fold(0.0, f32::max),
+            ),
         }
+    }
+
+    /// The organs to draw: fitted ones (asleep when the hold is dry) and a bond's loan.
+    pub fn organ_icons(&self) -> Vec<OrganIcon> {
+        let organs = &self.loadout.organs;
+        let mut icons: Vec<OrganIcon> = organs
+            .fitted()
+            .iter()
+            .filter_map(|&organ| {
+                organs.strain(organ).map(|s| OrganIcon {
+                    organ,
+                    level: s.level,
+                    state: if organs.dormant {
+                        OrganState::Asleep
+                    } else {
+                        OrganState::Active
+                    },
+                })
+            })
+            .collect();
+        if let Some((organ, left)) = organs.loan()
+            && !organs.is_fitted(organ)
+            && let Some(s) = organs.strain(organ)
+        {
+            icons.push(OrganIcon {
+                organ,
+                level: s.level,
+                state: OrganState::Bond((left / t::BOND_LOAN).clamp(0.0, 1.0)),
+            });
+        }
+        icons
     }
 }
 

@@ -97,6 +97,8 @@ pub struct RunStats {
     pub damage_taken: f32,
     pub deaths: u32,
     pub weapons: u32,
+    /// Organ strains found (new kinds only).
+    pub organs: u32,
     pub pads: u32,
     pub parts: u32,
     pub distance: f32,

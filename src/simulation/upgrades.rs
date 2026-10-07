@@ -748,6 +748,8 @@ pub enum Item {
     Material(Material, f32),
     Part(Part),
     Surge(Surge),
+    /// A specimen of another creature's organ (see `organs`).
+    Specimen(super::organs::Strain),
 }
 
 impl Item {
@@ -755,6 +757,7 @@ impl Item {
         match self {
             Self::Part(p) => p.rarity,
             Self::Surge(s) => s.rarity,
+            Self::Specimen(_) => Rarity::Epic,
             Self::Life => Rarity::Epic,
             _ => Rarity::Common,
         }
@@ -768,6 +771,7 @@ impl Item {
             Self::Material(kind, amount) => format!("{} +{amount:.0}", kind.label()),
             Self::Part(p) => p.name.clone(),
             Self::Surge(s) => s.name.clone(),
+            Self::Specimen(s) => format!("Specimen: {}", s.organ.label()),
         }
     }
 }
@@ -804,6 +808,8 @@ pub struct Loadout {
     pub arsenal: Arsenal,
     /// Rig upgrades bought at the bench (mining, later parry and dash).
     pub skills: super::skills::Skills,
+    /// Organ strains owned and fitted (see `organs`).
+    pub organs: super::organs::Organs,
 }
 
 impl Loadout {

@@ -100,13 +100,36 @@ impl Game {
             .map_or_else(|| Vec2::from_angle(facing), Vec2::normalize);
         let reach = self.loadout.skills.dash_distance();
         let mut travel = reach;
-        for body in self.bodies.iter().filter(|b| {
+        // The Skipjack node hops obstacles thinner than its reach (and still lands clear).
+        let skip = self.skip_thickness();
+        let mut hop = reach;
+        let solids = |b: &&Body| {
             b.active && matches!(b.kind, BodyKind::Asteroid | BodyKind::Base) && b.radius > 0.0
-        }) {
+        };
+        for body in self.bodies.iter().filter(solids) {
             if let Some(hit) =
                 first_contact(from, dir, travel, body.position, body.radius + radius + 2.0)
             {
                 travel = travel.min(hit);
+                if skip.is_none_or(|thick| body.radius * 2.0 > thick) {
+                    hop = hop.min(hit);
+                }
+            }
+        }
+        if hop > travel + 1.0 {
+            let clear = |along: f32| {
+                let to = from + dir * along;
+                self.bodies
+                    .iter()
+                    .filter(solids)
+                    .all(|b| b.position.distance(to) > b.radius + radius + 2.0)
+            };
+            let mut along = hop;
+            while along > travel + 1.0 && !clear(along) {
+                along -= 12.0;
+            }
+            if along > travel + 1.0 {
+                travel = along;
             }
         }
         if travel < t::DASH_MIN {
@@ -126,7 +149,16 @@ impl Game {
         self.dash.window = t::DASH_INVULN;
         self.dash.grazed = false;
         self.dash_through(from, to, radius);
+        self.shake_off();
         self.dash_whip(dir);
+        if let Some(seconds) = self.veil_time() {
+            // The Veil: intangible (and safe) for a moment after the jump.
+            self.veil = seconds;
+            self.player_invulnerability = self.player_invulnerability.max(seconds);
+            if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
+                ship.phased = true;
+            }
+        }
         // Weak cords cannot hold a ship that has just left.
         for tether in self.tethers.iter_mut().filter(|c| {
             c.kind == TetherKind::Latch && c.attached() && c.max_health <= SHEARS_INSTANT
@@ -221,6 +253,14 @@ impl Game {
     pub(super) fn update_dash(&mut self, dt: f32) {
         self.dash.cooldown = (self.dash.cooldown - dt).max(0.0);
         self.dash.window = (self.dash.window - dt).max(0.0);
+        if self.veil > 0.0 {
+            self.veil = (self.veil - dt).max(0.0);
+            if self.veil <= 0.0
+                && let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
+            {
+                ship.phased = false;
+            }
+        }
         self.dash.boost = (self.dash.boost - dt).max(0.0);
         if self.dash.boost <= 0.0 || self.player().is_none() {
             self.dash.stacks = 0;

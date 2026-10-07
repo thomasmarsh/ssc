@@ -851,16 +851,22 @@ fn smoke_run(
             "murmur" => Genome::murmur(),
             "dirgewhale" => Genome::dirgewhale(),
             "lurefish" => Genome::lurefish(),
+            "hullworm" => Genome::hullworm(),
+            "remora" => Genome::remora(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
             200.0
+        } else if name == "hullworm" {
+            30.0
+        } else if name == "remora" {
+            100.0
         } else {
             420.0
         };
         if matches!(
             name.as_str(),
-            "stormcap" | "dizzard" | "argus" | "dirgewhale"
+            "stormcap" | "dizzard" | "argus" | "dirgewhale" | "hullworm"
         ) {
             // The jammers only work on a ship that is not in grace.
             session.game.player_invulnerability = 0.0;
@@ -870,6 +876,37 @@ fn smoke_run(
             let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (near + 90.0 * k as f32);
             session.game.place_creature(&Species::of(genome), at);
         }
+    }
+    // SSC_ORGANS=1: own the four organs with two slots fitted, a bond running, and a hold to
+    // pay the upkeep, to check the HUD icons, the details and the RIG tab.
+    if run.frames == 0 && std::env::var_os("SSC_ORGANS").is_some() {
+        use ssc::genome::Genome;
+        use ssc::simulation::organs::{Organ, Strain};
+        use ssc::simulation::skills::Skill;
+        let game = &mut session.game;
+        game.loadout.skills.raise(Skill::Symbiosis);
+        game.loadout.skills.raise(Skill::Symbiosis);
+        for (organ, genome) in [
+            (Organ::Remora, Genome::remora()),
+            (Organ::Faraday, Genome::stormcap()),
+            (Organ::Veil, Genome::veilwing()),
+            (Organ::Skipjack, Genome::skipjack()),
+        ] {
+            game.loadout
+                .organs
+                .acquire(Strain::from_donor(organ, &genome));
+        }
+        game.loadout
+            .organs
+            .acquire(Strain::from_donor(Organ::Veil, &Genome::veilwing()));
+        game.cargo = Cargo {
+            metal: 120.0,
+            volatiles: 150.0,
+            crystal: 90.0,
+            ..Default::default()
+        };
+        let _ = game.bench_organ(Organ::Veil);
+        let _ = game.bench_organ(Organ::Faraday);
     }
     // SSC_JAM=emp|confuse|glitch|hud: just before the screenshot, jam the ship (with the dash
     // and parry owned, so their rings show).
@@ -901,6 +938,17 @@ fn smoke_run(
             }
         }
         session.game.player_invulnerability = 1e9;
+    }
+    // SSC_STEPS=<seconds>: just before the screenshot, run the game that many seconds ahead (a
+    // remora needs a few calm seconds before its grooming ring shows).
+    if run.frames + 3 == limit
+        && let Some(seconds) = std::env::var("SSC_STEPS")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+    {
+        for _ in 0..(seconds / 0.02) as usize {
+            session.game.step(0.02, ssc::simulation::Input::default());
+        }
     }
     // SSC_SPECIMEN_TELL=1: just before the screenshot, run the game until a blink is announced.
     if run.frames + 3 == limit && std::env::var_os("SSC_SPECIMEN_TELL").is_some() {

@@ -199,6 +199,7 @@ impl Game {
             self.parry.cooldown = (self.parry.cooldown - t::PARRY_PERFECT_COOLDOWN_REFUND).max(0.0);
             self.request_hit_stop(t::PARRY_HITSTOP);
             self.parry.flash = t::PARRY_FLASH;
+            self.shake_off();
             cues.push(Cue::PerfectParry { at: origin });
         }
         for cue in cues {

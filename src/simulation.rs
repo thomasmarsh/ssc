@@ -33,7 +33,9 @@ mod loot;
 pub mod lure;
 mod mimic;
 mod mining;
+pub mod organs;
 mod pads;
+mod parasite;
 mod parry;
 mod ping;
 mod powers;
@@ -294,6 +296,8 @@ pub struct Body {
     shoved: f32,
     shove_clock: f32,
     grip_free: f32,
+    /// The body (the ship) this parasite is fastened to; see `parasite`.
+    latch: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -414,6 +418,12 @@ pub struct Game {
     impact_gap: HashMap<(u64, u64), f32>,
     /// The rock the beam's grip is holding right now, if any; see `shove`.
     gripped: Option<u64>,
+    /// Sectors whose relic has been taken this run; see `organs`.
+    relics_taken: HashSet<SectorId>,
+    /// Seconds left of the Veil organ's intangibility after a dash.
+    veil: f32,
+    /// Worms on the hull, grooming and the shy remora; see `parasite`.
+    parasites: parasite::ParasiteState,
     parry_rng: Rng,
     /// The sonar ring, its echoes and their cache; see `ping`.
     ping: ping::PingState,
@@ -545,6 +555,9 @@ impl Game {
             dash: dash::DashState::default(),
             impact_gap: HashMap::new(),
             gripped: None,
+            relics_taken: HashSet::new(),
+            veil: 0.0,
+            parasites: parasite::ParasiteState::default(),
             parry_rng: Rng::new(seed ^ parry::PARRY_SALT),
             ping: ping::PingState::default(),
             chart: chart::ChartState::default(),
@@ -718,6 +731,7 @@ impl Game {
         self.update_civilizations(dt);
         self.update_region(dt);
         self.update_loadout(dt, &input);
+        self.update_organs(dt);
         let recharge = self.stats.recharge;
         let beaming = self.beam.is_some();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
@@ -785,6 +799,8 @@ impl Game {
         self.update_chains(dt);
         self.update_apexes(dt);
         self.update_powers(dt);
+        // After steering, so a remora's drift to a calm ship wins over its shyness.
+        self.update_parasites(dt, input.fire);
         self.update_splits(dt);
         self.update_song_rings(dt);
         self.fire_weapons();
@@ -815,6 +831,7 @@ impl Game {
         self.contain_in_active_region();
         self.resolve_contacts();
         self.sync_roots();
+        self.sync_latches();
         // After contacts, so an impact cannot leave a joint stretched past its limit.
         self.constrain_chains();
         self.update_parry(dt);
@@ -854,6 +871,7 @@ impl Game {
             if self.loaded.insert(id) {
                 self.populate(id);
                 self.populate_food(id);
+                self.place_relic(id);
             }
         }
         self.loaded
@@ -1261,6 +1279,7 @@ impl Game {
         let mut grazes = Vec::new();
         self.prune_impacts();
         let mut struck = Vec::new();
+        let mut scrapes: Vec<Vec2> = Vec::new();
         let skills = self.loadout.skills;
         for i in 0..self.bodies.len() {
             let (before, after) = self.bodies.split_at_mut(i + 1);
@@ -1357,6 +1376,16 @@ impl Game {
                     }
                 } else if closing_speed < 0.0 {
                     let caused = shove::ship_caused(a, b, normal, closing_speed);
+                    // Hitting something solid at speed scrapes a worm off the hull.
+                    if -closing_speed >= crate::power::LATCH_SCRAPE {
+                        let solid =
+                            |x: &Body| matches!(x.kind, BodyKind::Asteroid | BodyKind::Base);
+                        if a.kind == BodyKind::Player && solid(b) {
+                            scrapes.push(normal);
+                        } else if b.kind == BodyKind::Player && solid(a) {
+                            scrapes.push(-normal);
+                        }
+                    }
                     let impulse = normal * (-1.7 * closing_speed / inverse_sum);
                     a.velocity -= impulse * inverse_a;
                     b.velocity += impulse * inverse_b;
@@ -1400,6 +1429,9 @@ impl Game {
         }
         for at in grazes {
             self.dash_graze(at);
+        }
+        for normal in scrapes {
+            self.scrape_off(normal);
         }
         for (at, raw) in struck {
             self.effect(at, 14.0 + raw * 0.25, 0.25, EffectKind::Impact);
@@ -1496,7 +1528,7 @@ impl Game {
                     matches!(
                         body.kind,
                         BodyKind::Player | BodyKind::Asteroid | BodyKind::BlackHole
-                    )
+                    ) && !body.phased
                 };
                 if !target || body.health <= 0.0 || bullet.struck.contains(&body.id) {
                     continue;
@@ -1954,6 +1986,7 @@ impl Game {
             shoved: 0.0,
             shove_clock: 0.0,
             grip_free: 0.0,
+            latch: None,
         }
     }
 
@@ -1999,6 +2032,9 @@ fn is_fixed(body: &Body) -> bool {
 /// True when one of the two clings to the other, or both cling to the same host: they never
 /// collide, so a rooter neither shoves its rock nor its neighbors.
 fn clings(a: &Body, b: &Body) -> bool {
+    if a.latch == Some(b.id) || b.latch == Some(a.id) {
+        return true;
+    }
     match (a.root, b.root) {
         (Some(x), Some(y)) => x.host == y.host || x.host == b.id || y.host == a.id,
         (Some(x), None) => x.host == b.id,

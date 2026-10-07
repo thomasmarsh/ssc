@@ -1030,6 +1030,50 @@ impl ClusterLayout {
     }
 }
 
+/// Small gland icons right of the cargo pips: a hexagon in the organ's tint, solid when it
+/// works, hollow and grey when asleep, with a ring that drains while a bond runs on loan, and a
+/// dot a level.
+pub fn draw_organs(g: &mut Gizmos, hud: &HudModel, layout: &ClusterLayout, s: &Screen, time: f32) {
+    use ssc::simulation::hud::OrganState;
+    for (k, icon) in hud.organs.iter().enumerate() {
+        let c = layout.cargo + Vec2::new(3.0 * CARGO_STEP + 14.0, -14.0 + k as f32 * 20.0);
+        let [r, gr, b] = icon.organ.tint();
+        let tint = Color::srgb(r, gr, b);
+        let hex = |radius: f32| -> Vec<Vec2> {
+            (0..=6)
+                .map(|i| {
+                    let a = i as f32 * TAU / 6.0 + FRAC_PI_2;
+                    s.at(c.x + a.cos() * radius, c.y - a.sin() * radius)
+                })
+                .collect()
+        };
+        match icon.state {
+            OrganState::Active => {
+                g.linestrip_2d(hex(8.0), tint);
+                g.linestrip_2d(hex(4.5), tint.with_alpha(0.8));
+                g.linestrip_2d(hex(2.0), tint);
+            }
+            OrganState::Asleep => {
+                g.linestrip_2d(hex(8.0), JAM_GREY);
+            }
+            OrganState::Bond(left) => {
+                g.linestrip_2d(hex(8.0), tint.with_alpha(0.55 + 0.3 * pulse(time, 3.0)));
+                g.linestrip_2d(hex(3.5), tint.with_alpha(0.7));
+                gauge(g, s, c, 11.5, left, tint.with_alpha(0.7));
+            }
+        }
+        for n in 0..icon.level {
+            disc(
+                g,
+                s,
+                Vec2::new(c.x + 13.0 + f32::from(n) * 4.0, c.y),
+                1.0,
+                tint,
+            );
+        }
+    }
+}
+
 pub const CARGO_HALF_HEIGHT: f32 = CARGO_H / 2.0;
 
 /// The whole HUD apart from the ship's own rings.
@@ -1047,6 +1091,7 @@ pub fn draw_hud(g: &mut Gizmos, game: &Game, hud: &HudModel, s: &Screen, time: f
         draw_ability(g, ring, c, s, time);
     }
     draw_cargo(g, &hud.cargo, layout.cargo, s, time);
+    draw_organs(g, hud, &layout, s, time);
 }
 
 // ---- texts ------------------------------------------------------------------------------

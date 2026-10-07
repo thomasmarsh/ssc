@@ -39,6 +39,7 @@ fn lifetime(item: &Item) -> f32 {
     match item {
         Item::Part(_) | Item::Life => 90.0,
         Item::Surge(_) => 50.0,
+        Item::Specimen(_) => 120.0,
         Item::Material(..) => 60.0,
         _ => 30.0,
     }
@@ -235,6 +236,9 @@ impl Game {
                 self.refresh_stats();
             }
             Item::Surge(surge) => self.charge(surge),
+            Item::Specimen(strain) => {
+                self.take_strain(strain, "SPECIMEN");
+            }
         }
     }
 
@@ -291,6 +295,16 @@ impl Game {
                     let mut source = Source::of_creature(genome, body.genes.threat, params);
                     source.bias = crate::power::EXTRA_DROP_LUCK;
                     drops.push(upgrades::roll_item(&mut rng, &source));
+                }
+                // A special carrier's first kill may leave a specimen of its organ (drawn after
+                // everything else, so no other drop of this body moves).
+                if body.origin.is_some()
+                    && let Some(organ) = genome
+                        .live_power()
+                        .and_then(|c| organs::Organ::from_power(c.power))
+                    && rng.chance(tuning::HARVEST_CHANCE)
+                {
+                    drops.push(Item::Specimen(organs::Strain::from_donor(organ, genome)));
                 }
             }
             BodyKind::Asteroid if !body.pinned && body.radius >= 30.0 => {

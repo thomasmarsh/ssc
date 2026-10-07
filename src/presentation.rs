@@ -77,7 +77,7 @@ pub(crate) const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
 const FEED_LINES: usize = 5;
 /// Bench panel rows: the tab strip, up to nine rows and the footer hint.
-const BENCH_LINES: usize = 13;
+const BENCH_LINES: usize = 17;
 /// Panel rows: five slots, a header and up to eleven profiles, a header and up to nine
 /// boosts, a header and three materials. Rows with nothing to say are empty (no height).
 /// Where the ship panel's lines divide into its two columns: gear and arsenal, then the rig.
@@ -733,6 +733,57 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             ),
             if level > 0 { OWNED } else { MUTED },
         ));
+    }
+    {
+        let organs = &game.loadout.organs;
+        let slots = game.loadout.skills.organ_slots();
+        let mut owned = false;
+        for organ in ssc::simulation::organs::Organ::ALL {
+            let Some(strain) = organs.strain(organ) else {
+                continue;
+            };
+            owned = true;
+            let state = if organs.is_fitted(organ) {
+                if organs.dormant {
+                    "fitted, asleep"
+                } else {
+                    "fitted"
+                }
+            } else if let Some((_, left)) = organs.loan().filter(|(o, _)| *o == organ) {
+                // The bond's loan counts down in minutes and seconds.
+                &format!("bond {}:{:02}", left as u32 / 60, left as u32 % 60)
+            } else {
+                "owned"
+            };
+            lines.push((
+                format!(
+                    "{:<11}{}/3 x{:.1}  {state}\n",
+                    organ.label(),
+                    strain.level,
+                    strain.magnitude
+                ),
+                if organs.active(organ).is_some() {
+                    CYAN
+                } else {
+                    OWNED
+                },
+            ));
+        }
+        if owned || slots > 0 {
+            lines.push((
+                format!("ORGAN SLOTS  {}/{slots}\n", organs.fitted().len()),
+                MUTED,
+            ));
+        }
+        if !game.latches().is_empty() {
+            lines.push((
+                format!(
+                    "HULLWORMS   {} aboard: dash or ram a rock\n",
+                    game.latches().len()
+                ),
+                DRY_RED,
+            ));
+        }
     }
     let sonar = Skill::of_tab(SkillTab::Sonar);
     let tiers = sonar.iter().filter(|s| s.starts_locked()).count();
@@ -2458,6 +2509,7 @@ pub fn draw(
             game.gripped() == Some(beam.target),
         );
     }
+    draw_symbiosis(&mut gizmos, game);
     for pickup in game.pickups.iter().filter(|p| {
         (p.position - camera)
             .abs()
@@ -3421,6 +3473,19 @@ fn draw_pickup(gizmos: &mut Gizmos, pickup: &Pickup) {
                     .resolution(20);
             }
         }
+        Item::Specimen(strain) => {
+            // A sealed specimen: a hexagonal gland in the organ's tint, turning, with a halo.
+            let [r, g, b] = strain.organ.tint();
+            let tint = Color::srgb(r, g, b);
+            ring(gizmos, 6, 10.0 * pulse, spin * 0.5, tint);
+            ring(gizmos, 6, 5.5, -spin * 0.5, tint.with_alpha(0.8));
+            gizmos
+                .circle_2d(p, 17.0 * pulse, tint.with_alpha(0.35))
+                .resolution(20);
+            gizmos
+                .circle_2d(p, 24.0 * pulse, tint.with_alpha(0.15))
+                .resolution(24);
+        }
         Item::Surge(surge) => {
             ring(gizmos, 4, 11.0 * pulse, spin, rarity);
             slot_glyph(gizmos, p, surge.slot, rarity);
@@ -3932,6 +3997,56 @@ fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
     }
     if g.social == ssc::genome::Social::Brood && head {
         gizmos.circle_2d(p, r * 0.3, color).resolution(8);
+    }
+}
+
+/// What the ship carries and what carries it: a ring that fills around a remora being groomed,
+/// a pulsing violet ring on each worm on the hull (brighter as it feeds), and a small mote
+/// orbiting the ship for every organ that works.
+fn draw_symbiosis(gizmos: &mut Gizmos, game: &Game) {
+    use std::f32::consts::{FRAC_PI_2, TAU};
+    let time = game.time;
+    if let Some(groom) = game.grooming() {
+        let amber = Color::srgb(1.0, 0.72, 0.25);
+        gizmos
+            .circle_2d(groom.at, 24.0, amber.with_alpha(0.2))
+            .resolution(28);
+        let steps = (groom.fill * 40.0).ceil() as usize;
+        if steps > 0 {
+            gizmos.linestrip_2d(
+                (0..=steps).map(|i| {
+                    let t = (i as f32 / 40.0).min(groom.fill);
+                    groom.at + Vec2::from_angle(FRAC_PI_2 - t * TAU) * 24.0
+                }),
+                amber,
+            );
+        }
+    }
+    for latch in game.latches() {
+        if let Some(worm) = game.body(latch.worm) {
+            let fat = (latch.fed / 120.0).clamp(0.0, 1.0);
+            let beat = 1.0 + 0.25 * (time * (6.0 + 6.0 * fat)).sin();
+            let violet = Color::srgb(0.75, 0.45, 1.0);
+            gizmos
+                .circle_2d(
+                    worm.position,
+                    (worm.radius + 4.0) * beat,
+                    violet.with_alpha(0.5 + 0.4 * fat),
+                )
+                .resolution(14);
+        }
+    }
+    if let Some(ship) = game.player() {
+        let icons = game.organ_icons();
+        let n = icons.len().max(1) as f32;
+        for (k, icon) in icons.iter().enumerate() {
+            let [r, g, b] = icon.organ.tint();
+            let a = time * 0.9 + k as f32 * TAU / n;
+            let at = ship.position + Vec2::from_angle(a) * (ship.radius + 12.0);
+            gizmos
+                .circle_2d(at, 2.4, Color::srgb(r, g, b).with_alpha(0.9))
+                .resolution(8);
+        }
     }
 }
 

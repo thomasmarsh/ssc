@@ -23,6 +23,7 @@
 //!   enemy suffers one seeded raid roll when its sector reloads.
 
 use super::arsenal::Profile;
+use super::organs::Organ;
 use super::skills::{Skill, SkillTab};
 use super::tuning as t;
 use super::upgrades::Rarity;
@@ -1309,7 +1310,7 @@ impl Game {
             BenchTab::Reforge | BenchTab::Upgrade => self.loadout.parts.len(),
             BenchTab::Arms => self.bench_profiles().len(),
             BenchTab::Stash => Material::ALL.len(),
-            BenchTab::Rig => Skill::of_tab(SkillTab::Rig).len(),
+            BenchTab::Rig => Skill::of_tab(SkillTab::Rig).len() + Organ::ALL.len(),
             BenchTab::Sonar => Skill::of_tab(SkillTab::Sonar).len(),
         }
     }
@@ -1370,7 +1371,16 @@ impl Game {
             BenchTab::Upgrade => self.bench_upgrade(cursor),
             BenchTab::Arms => self.bench_level(cursor),
             BenchTab::Stash => self.bench_stash(cursor, true),
-            BenchTab::Rig => self.bench_skill(SkillTab::Rig, cursor),
+            BenchTab::Rig => {
+                let skills = Skill::of_tab(SkillTab::Rig).len();
+                match cursor.checked_sub(skills).and_then(|k| Organ::ALL.get(k)) {
+                    Some(&organ) => match self.bench_organ(organ) {
+                        Ok(text) => self.bench_done(text, Rarity::Epic),
+                        Err(text) => self.bench_failed(text),
+                    },
+                    None => self.bench_skill(SkillTab::Rig, cursor),
+                }
+            }
             BenchTab::Sonar => self.bench_skill(SkillTab::Sonar, cursor),
         }
     }
@@ -1720,6 +1730,47 @@ impl Game {
                         selected: i == bench.cursor,
                         ok,
                     });
+                }
+                if tab == SkillTab::Rig {
+                    let skills = Skill::of_tab(SkillTab::Rig).len();
+                    let slots = self.loadout.skills.organ_slots();
+                    let organs = &self.loadout.organs;
+                    for (k, organ) in Organ::ALL.into_iter().enumerate() {
+                        let text = match organs.strain(organ) {
+                            None => {
+                                format!("{} ORGAN  not owned  {}", organ.label(), organ.summary())
+                            }
+                            Some(strain) => {
+                                let state = if organs.is_fitted(organ) {
+                                    if organs.dormant {
+                                        "FITTED, ASLEEP"
+                                    } else {
+                                        "FITTED"
+                                    }
+                                } else if organs.loan().is_some_and(|(o, _)| o == organ) {
+                                    "BONDED, LOAN"
+                                } else if slots == 0 {
+                                    "OWNED, NEEDS SYMBIOSIS"
+                                } else if organs.grafted(organ) {
+                                    "OWNED  swap free"
+                                } else {
+                                    "OWNED  graft 8C 20V a level"
+                                };
+                                format!(
+                                    "{} ORGAN  level {}/{}  x{:.1}  {state}",
+                                    organ.label(),
+                                    strain.level,
+                                    t::ORGAN_LEVELS,
+                                    strain.magnitude
+                                )
+                            }
+                        };
+                        rows.push(BenchRow {
+                            text,
+                            selected: skills + k == bench.cursor,
+                            ok: organs.owns(organ) && slots > 0,
+                        });
+                    }
                 }
                 footer = if tab == SkillTab::Sonar {
                     "ENTER buys the next level; X pings; upgrades are kept for the run".into()
@@ -2611,7 +2662,11 @@ mod tests {
         bench(&mut game, 5);
         let panel = game.bench_panel().unwrap();
         assert_eq!(panel.tab, BenchTab::Rig);
-        assert_eq!(panel.rows.len(), Skill::of_tab(SkillTab::Rig).len());
+        assert_eq!(
+            panel.rows.len(),
+            Skill::of_tab(SkillTab::Rig).len() + Organ::ALL.len(),
+            "the skills and then the organ rows"
+        );
         // Short of the price: nothing bought, nothing spent.
         stock(&mut game, 5.0, 0.0, 0.0);
         game.bench_confirm();

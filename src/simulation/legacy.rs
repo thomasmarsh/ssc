@@ -39,6 +39,8 @@ pub struct Legacy {
     /// Materials carried into this run, and the weapon.
     pub carried: Cargo,
     pub weapon: Option<(Profile, u8)>,
+    /// The best organ strain of the last run, at level 1.
+    pub organ: Option<super::organs::Strain>,
     pub wrecks: Vec<Wreck>,
     /// How many runs came before this one.
     pub generation: u32,
@@ -48,6 +50,7 @@ pub struct Legacy {
 impl Legacy {
     pub fn is_empty(&self) -> bool {
         self.weapon.is_none()
+            && self.organ.is_none()
             && self.carried.metal + self.carried.volatiles + self.carried.crystal < 0.5
     }
 }
@@ -57,6 +60,7 @@ impl Legacy {
 pub struct Bequest {
     pub carried: Cargo,
     pub weapon: Option<(Profile, u8)>,
+    pub organ: Option<super::organs::Strain>,
     pub wreck: Option<Wreck>,
     pub insured: bool,
 }
@@ -100,6 +104,11 @@ impl Game {
                     .map(|p| (p, self.loadout.arsenal.level(p).min(weapon_cap)))
             })
             .flatten();
+        // Insured runs also pass on their best organ, at level 1.
+        let organ = (weapon_cap > 0)
+            .then(|| self.loadout.organs.best())
+            .flatten()
+            .map(|s| super::organs::Strain { level: 1, ..s });
         let mut held = Cargo::default();
         for kind in Material::ALL {
             held.add(kind, self.cargo.amount(kind).min(t::WRECK_CAP).floor());
@@ -115,6 +124,7 @@ impl Game {
         Bequest {
             carried,
             weapon,
+            organ,
             wreck,
             insured,
         }
@@ -144,6 +154,7 @@ impl Game {
             legacy.generation += 1;
             legacy.carried = bequest.carried;
             legacy.weapon = bequest.weapon;
+            legacy.organ = bequest.organ;
             if let Some(mut wreck) = bequest.wreck.clone() {
                 legacy.next_wreck += 1;
                 wreck.id = legacy.next_wreck;
@@ -169,6 +180,9 @@ impl Game {
             }
             self.refresh_stats();
         }
+        if let Some(strain) = legacy.organ {
+            self.loadout.organs.acquire(strain);
+        }
         self.legacy = legacy;
         if !self.legacy.is_empty() {
             self.notify(self.legacy_line(), Rarity::Rare);
@@ -184,6 +198,9 @@ impl Game {
         )];
         if let Some((profile, level)) = self.legacy.weapon {
             parts.push(format!("{} {level}", profile.label()));
+        }
+        if let Some(strain) = self.legacy.organ {
+            parts.push(format!("{} ORGAN", strain.organ.label()));
         }
         format!("LEGACY  {}", parts.join("  "))
     }
@@ -294,6 +311,9 @@ impl Game {
             cap,
             match b.weapon {
                 Some((p, l)) => format!("   weapon {} {l}", p.label()),
+                None => String::new(),
+            } + &match b.organ {
+                Some(s) => format!("   organ {}", s.organ.label()),
                 None => String::new(),
             }
         )];

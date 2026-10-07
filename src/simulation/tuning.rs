@@ -101,6 +101,42 @@ pub const PRICE_SHOVE: [(Material, f32); 2] = [(Material::Metal, 35.0), (Materia
 pub const PRICE_SHOVE_PLATING: [(Material, f32); 2] =
     [(Material::Metal, 45.0), (Material::Crystal, 10.0)];
 
+// ---- organs and symbiosis (see `organs` and `parasite`) ---------------------------------------
+
+/// An organ is an owned strain, level 1 to `ORGAN_LEVELS`; a level multiplies the perk by
+/// `ORGAN_LEVEL_GAIN`. SYMBIOSIS (a skill, one slot a level, needs a Rare core) opens slots;
+/// the first graft of a strain costs `GRAFT_CRYSTAL` crystal and `GRAFT_VOLATILES` volatiles
+/// times its level (swapping an owned, paid strain is free), and each fitted organ draws
+/// `ORGAN_UPKEEP` volatiles a minute: at an empty hold it sleeps (dormant, never lost). A lesser
+/// find (a sample that cannot raise a strain) pays `LESSER_VOLATILES` per level instead.
+pub const ORGAN_LEVELS: u8 = 3;
+pub const ORGAN_LEVEL_GAIN: [f32; 3] = [1.0, 1.5, 2.0];
+pub const SYMBIOSIS_SLOTS: usize = 3;
+pub const GRAFT_CRYSTAL: f32 = 8.0;
+pub const GRAFT_VOLATILES: f32 = 20.0;
+pub const ORGAN_UPKEEP: f32 = 0.4;
+pub const LESSER_VOLATILES: f32 = 12.0;
+/// A bond works at once for `BOND_LOAN` seconds without a slot (and settles into a free slot
+/// without a graft cost). A special carrier's first kill leaves a specimen with chance
+/// `HARVEST_CHANCE`; one sector in `RELIC_ONE_IN` (from depth `RELIC_FROM`) holds a sealed relic.
+pub const BOND_LOAN: f32 = 300.0;
+pub const HARVEST_CHANCE: f32 = 0.25;
+pub const RELIC_ONE_IN: u64 = 14;
+pub const RELIC_FROM: f32 = 2.0;
+/// The perks at level 1, times the strain's magnitude (0.6 to 1.6, from the donor's genes):
+/// Remora mends this much hull a second after `REMORA_QUIET` quiet seconds; Faraday cuts the
+/// length of every jam and glitch by this share (immune when it reaches one); Veil leaves the
+/// ship intangible this long after a dash; Skipjack lets a dash hop an obstacle thinner than
+/// this (and lands clear of every other).
+pub const REMORA_REGEN: f32 = 0.8;
+pub const REMORA_QUIET: f32 = 2.0;
+pub const FARADAY_CUT: f32 = 0.3;
+pub const VEIL_TIME: f32 = 0.35;
+pub const SKIP_THICK: f32 = 80.0;
+/// Price of the first SYMBIOSIS level (growing with `PRICE_GROWTH`): volatiles and crystal.
+pub const PRICE_SYMBIOSIS: [(Material, f32); 2] =
+    [(Material::Volatiles, 40.0), (Material::Crystal, 20.0)];
+
 // ---- the mining beam -----------------------------------------------------------------------
 
 /// How much of each material the hold carries before cargo upgrades.
