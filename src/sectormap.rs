@@ -119,8 +119,9 @@ pub struct Cell {
     pub species: Vec<SpeciesAt>,
     pub creatures: u32,
     pub asteroids: u32,
-    /// Ecosystem bases that are not a civilization's.
-    pub bases: u32,
+    /// Wall segments and turrets of a civilization's fortresses (wild life has no stations:
+    /// the old ecosystem bases are gone).
+    pub works: u32,
     /// Gravity wells, as fractions of a sector from the center (y up).
     pub wells: Vec<(f32, f32)>,
     pub planetoids: Vec<PlanetoidAt>,
@@ -145,7 +146,7 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
             (p.y - center.y) / SECTOR_SIZE,
         )
     };
-    let (mut creatures, mut asteroids, mut bases, mut outposts) = (0, 0, 0, 0);
+    let (mut creatures, mut asteroids, mut works, mut outposts) = (0, 0, 0, 0);
     let (mut wells, mut planetoids, mut capital) = (Vec::new(), Vec::new(), false);
     for s in &spawns {
         match s.kind {
@@ -160,11 +161,13 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
                     dy,
                 });
             }
+            BodyKind::Asteroid if s.civ.is_some_and(|c| c.role == CivRole::Wall) => works += 1,
             BodyKind::Asteroid => asteroids += 1,
             BodyKind::Base => match s.civ.map(|c| c.role) {
                 Some(CivRole::Capital) => capital = true,
                 Some(CivRole::Outpost) => outposts += 1,
-                _ => bases += 1,
+                Some(CivRole::Turret) => works += 1,
+                _ => {}
             },
             BodyKind::Player => {}
         }
@@ -200,7 +203,7 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
             .collect(),
         creatures,
         asteroids,
-        bases,
+        works,
         wells,
         planetoids,
         territory: territory(seed, id),
@@ -437,7 +440,7 @@ impl Map {
     }
 
     /// One cell's JSON row. Layout (read by `template.html`): ring, life, matter, region kind,
-    /// region index, species `[[index, weight, isolation]...]`, creatures, asteroids, bases, wells
+    /// region index, species `[[index, weight, isolation]...]`, creatures, asteroids, works, wells
     /// `[[dx, dy]...]`, planetoids `[[radius, renewable, dx, dy]...]`, territory index or -1,
     /// capital 0/1, outposts, apex index or -1, diversity cap, belt depth, biome cell index,
     /// oasis 0/1, then the wildlife's affinity read (0 none, 1 neutral, 2 friendly, 3 hostile,
@@ -465,7 +468,7 @@ impl Map {
                 self.species_index[&s.lineage], s.weight, s.isolation
             );
         }
-        let _ = write!(o, "],{},{},{},[", c.creatures, c.asteroids, c.bases);
+        let _ = write!(o, "],{},{},{},[", c.creatures, c.asteroids, c.works);
         for (i, (dx, dy)) in c.wells.iter().enumerate() {
             if i > 0 {
                 o.push(',');

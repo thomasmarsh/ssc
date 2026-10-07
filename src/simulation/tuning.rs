@@ -425,3 +425,30 @@ pub const KILL_BANNER_EVERY: f32 = 4.0;
 /// the territory it is in.
 pub const TAG_COUNT: usize = 3;
 pub const TAG_RANGE: f32 = 2600.0;
+
+// ---- drops ---------------------------------------------------------------------------------
+
+/// Where the parts come from. Wild stations are gone (they were cheap farms: a few hits for a
+/// part and a handful of rolls), so permanent gear comes from what is hard: civilizations,
+/// apex elders and tough creatures.
+///
+/// A creature's drop chance is multiplied by its hardness,
+/// `HARD_FLOOR + HARD_SLOPE * (hull + shield) / HARD_REF`, at most `HARD_CAP`: a frail thing
+/// (hull 20) drops a little less than it did, a Bogey a quarter more, a juggernaut three
+/// and a half times as much.
+pub const HARD_FLOOR: f32 = 0.7;
+pub const HARD_SLOPE: f32 = 1.0;
+pub const HARD_REF: f32 = 100.0;
+pub const HARD_CAP: f32 = 3.5;
+/// No creature drops more often than this.
+pub const DROP_CHANCE_CAP: f32 = 0.6;
+/// A civilization's capital pays `CAPITAL_PARTS` parts plus one per fortress tier (0 to 3) and
+/// its kind's rolls plus one per tier; its first part is at least Rare from tier 1 and Epic at
+/// tier `CAPITAL_EPIC_TIER`. An outpost seat pays one part and `OUTPOST_ROLLS` rolls, one more
+/// of each at fortress tier `OUTPOST_BONUS_TIER` or more. Wall turrets pay scrap only.
+pub const CAPITAL_PARTS: u32 = 2;
+pub const CAPITAL_EPIC_TIER: u8 = 3;
+pub const OUTPOST_ROLLS: u32 = 1;
+pub const OUTPOST_BONUS_TIER: u8 = 2;
+/// An elder (a civilization's boss) pays one more part at fortress tier `ELDER_BONUS_TIER`.
+pub const ELDER_BONUS_TIER: u8 = 2;

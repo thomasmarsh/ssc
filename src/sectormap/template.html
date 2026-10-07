@@ -334,7 +334,7 @@ function describe(cr,full){
  if(row[BELT]>0)h+='<div class="row"><span class="k">Belt</span>'+bar(row[BELT])+' <span>'+row[BELT].toFixed(2)+(row[OAS]?' <span class="ok">oasis: a planetoid restores a little life</span>':'')+'</span></div>';
  h+='<div class="row"><span class="k">Rock</span>'+bar(row[MAT])+' <span>'+row[MAT].toFixed(2)+' <span class="sub">'+rockWord(row[MAT])+'</span></span></div>';
  const pl=row[PLA];
- h+='<div class="row"><span class="k">Bodies</span><span>'+row[CRE]+' creatures, '+row[AST]+' asteroids, '+pl.length+' planetoid'+(pl.length===1?'':'s')+(row[WELL].length?', '+row[WELL].length+' gravity well'+(row[WELL].length===1?'':'s'):'')+(row[BAS]?', '+row[BAS]+' base'+(row[BAS]===1?'':'s'):'')+'</span></div>';
+ h+='<div class="row"><span class="k">Bodies</span><span>'+row[CRE]+' creatures, '+row[AST]+' asteroids, '+pl.length+' planetoid'+(pl.length===1?'':'s')+(row[WELL].length?', '+row[WELL].length+' gravity well'+(row[WELL].length===1?'':'s'):'')+(row[BAS]?', '+row[BAS]+' fortress piece'+(row[BAS]===1?'':'s'):'')+'</span></div>';
  if(pl.length)h+='<div class="row"><span class="k">Planetoid</span><span>'+pl.map(p=>'radius '+p[0]+(p[1]?' <span class="ok">renewable</span>':'')).join('; ')+'</span></div>';
  if(terr){
   h+='<h3>Territory</h3><div class="row"><span class="dot" style="background:'+terr[8]+'"></span><b>'+esc(terr[0])+'</b></div>';

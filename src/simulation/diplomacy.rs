@@ -717,8 +717,11 @@ mod tests {
         let (mut game, o, ship) = at_the_outpost();
         assert_eq!(game.civ_tier(o.id), Tier::Ignores);
         assert!(game.civ_regard(o.id) >= t::REGARD_START_OUTPOST);
-        let seconds = (t::FRIENDLY_AT - t::REGARD_START_OUTPOST) / t::REST_RATE + 20.0;
-        assert!(hold_saying(&mut game, ship, seconds, "shares its charts"));
+        // (A slack of a minute: a member bumping the idle ship costs a little regard and the
+        // calm clock, and where they mill about varies with what else is loaded.)
+        let seconds = (t::FRIENDLY_AT - t::REGARD_START_OUTPOST) / t::REST_RATE + 60.0;
+        let ok = hold_saying(&mut game, ship, seconds, "shares its charts");
+        assert!(ok);
         assert_eq!(game.civ_tier(o.id), Tier::Friendly);
         // The charts are of the outpost's land, and the ship need not have flown there.
         let shared = game

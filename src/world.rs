@@ -444,9 +444,8 @@ const NEST_RING_RADIUS: f32 = 130.0;
 const SAFE_RADIUS: f32 = 900.0;
 /// Separates the stream for structures, species choice and exotic fauna from the original one.
 const WILD_SALT: u64 = 0xA11C_E5ED_0000_0001;
-/// Separate streams for station kinds, rock kinds and husks, so adding variety never moves
-/// anything already placed.
-const STATION_SALT: u64 = 0x57A7_1010_0000_0003;
+/// Separate streams for rock kinds and husks, so adding variety never moves anything already
+/// placed.
 const ROCK_SALT: u64 = 0x20C4_0000_0000_0005;
 const HUSK_SALT: u64 = 0x4D5C_0000_0000_0007;
 
@@ -670,7 +669,11 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
         }
     }
 
-    // Bases breed whichever niche the sector favors, and build a heavy guardian.
+    // Wild bases (hives, foundries, bastions, depots) used to be placed here: spawn points
+    // that bred the sector's fauna and paid a part for a few hits, an easy farm. Wildlife
+    // reproduces naturally (eggs, live birth) and civilizations alone keep stations now.
+    // The draws stay so every later draw on this stream falls where it always did; nothing
+    // is placed.
     let base_chance = wildness
         * (0.6 * danger + above(aggression) + 0.6 * above(tech) + 0.6 * above(swarm)).min(0.85);
     if populated && wild.chance(base_chance) {
@@ -681,17 +684,9 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
         } else {
             Niche::Hunter
         };
-        let brood = pool.bred(niche, &mut wild);
-        let guardian = pool.bred(Niche::Heavy, &mut wild);
-        let (base_kind, arms) = station(seed, id, params);
-        out.push(Spawn {
-            phenotype: genes,
-            brood: Some(brood),
-            guardian: Some(guardian),
-            base_kind: Some(base_kind),
-            arms,
-            ..Spawn::at(BodyKind::Base, place(&mut wild))
-        });
+        let _ = pool.bred(niche, &mut wild);
+        let _ = pool.bred(Niche::Heavy, &mut wild);
+        let _ = place(&mut wild);
     }
 
     // Exotic fauna: any species of the pool, wherever tech, distortion or danger run high.
@@ -1099,66 +1094,12 @@ pub fn plankton(seed: u64, id: SectorId, params: &SectorParams) -> Vec<Plankton>
     out
 }
 
-/// A new station's kind and what it shoots, from the sector's character on its own stream.
-fn station(seed: u64, id: SectorId, params: &SectorParams) -> (BaseKind, Option<(Weapon, u8)>) {
-    let mut rng = Rng::new(hash2(seed ^ STATION_SALT, id.x, id.y));
-    let above = |p: f32| (p - 0.5).max(0.0) * 2.0;
-    let weights = [
-        1.0 + 2.0 * above(params.swarm),
-        0.6 + 2.0 * above(params.density),
-        0.4 + 2.0 * above(params.tech) + params.danger,
-        0.4 + 2.0 * above(params.distortion) + above(params.aggression),
-    ];
-    let total: f32 = weights.iter().sum();
-    let mut roll = rng.f32() * total;
-    let mut kind = BaseKind::Depot;
-    for (candidate, weight) in BaseKind::ALL.iter().zip(weights) {
-        roll -= weight;
-        if roll < 0.0 {
-            kind = *candidate;
-            break;
-        }
-    }
-    let arms = match kind {
-        BaseKind::Hive | BaseKind::Foundry | BaseKind::Turret => None,
-        BaseKind::Depot => Some((Weapon::Nova, rng.int(9, 15) as u8)),
-        BaseKind::Bastion => {
-            let options = [
-                (Weapon::Projectile, 1.0),
-                (Weapon::Missile, 0.2 + above(params.tech)),
-                (
-                    Weapon::Needles,
-                    0.1 + above(params.tech) * (0.3 + params.danger),
-                ),
-                (Weapon::Nova, 0.2 + above(params.aggression)),
-                (
-                    Weapon::Spiral,
-                    0.1 + above(params.aggression) * (0.3 + params.danger),
-                ),
-            ];
-            let total: f32 = options.iter().map(|o| o.1).sum();
-            let mut roll = rng.f32() * total;
-            let mut weapon = Weapon::Projectile;
-            for (candidate, weight) in options {
-                roll -= weight;
-                if roll < 0.0 {
-                    weapon = candidate;
-                    break;
-                }
-            }
-            Some((weapon, crate::genome::volley_for(weapon, &mut rng)))
-        }
-    };
-    (kind, arms)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn wild_structures_and_materials_are_diverse_and_repeatable() {
-        let mut stations = [0; 4];
         let mut rocks = [0; 6];
         let mut hollows = 0;
         for x in 3..=12 {
@@ -1167,9 +1108,11 @@ mod tests {
                 let spawns = generate(0x535343, id);
                 assert_eq!(spawns, generate(0x535343, id));
                 for spawn in spawns.into_iter().filter(|s| s.fort.is_none()) {
-                    if let Some(kind) = spawn.base_kind {
-                        stations[BaseKind::ALL.iter().position(|k| *k == kind).unwrap()] += 1;
-                    }
+                    // No spawn points in the wild: stations belong to civilizations.
+                    assert!(
+                        spawn.base_kind.is_none() || spawn.civ.is_some(),
+                        "a wild base at {id:?}"
+                    );
                     if spawn.kind == BodyKind::Asteroid {
                         let index = match spawn.rock {
                             RockKind::Plain => 0,
@@ -1186,7 +1129,6 @@ mod tests {
                 }
             }
         }
-        assert!(stations.iter().all(|n| *n > 0), "{stations:?}");
         assert!(rocks.iter().all(|n| *n > 0), "{rocks:?}");
         assert!(
             rocks[4] >= 20 && hollows >= 160,
@@ -1436,14 +1378,16 @@ mod tests {
                     .any(exotic)
             );
         }
-        let mut seen = [false; 5];
+        let mut seen = [false; 4];
         for seed in 0..40 {
             for s in compose(seed, SectorId { x: 9, y: 9 }, &wild_params()) {
+                // Wild life has no spawn points: no bases, no brooders (only civilizations
+                // keep stations).
+                assert!(s.brood.is_none() && s.base_kind.is_none() && s.kind != BodyKind::Base);
                 seen[0] |= s.pinned;
-                seen[1] |= s.brood.is_some();
-                seen[2] |= s.link.is_some();
-                seen[3] |= s.species.is_some_and(|sp| sp.genome.is_jointed());
-                seen[4] |= s
+                seen[1] |= s.link.is_some();
+                seen[2] |= s.species.is_some_and(|sp| sp.genome.is_jointed());
+                seen[3] |= s
                     .species
                     .is_some_and(|sp| sp.genome.weapon == Weapon::Tether)
                     && s.link.is_none();
@@ -1705,15 +1649,13 @@ mod tests {
         };
         assert!(kinds(2).len() <= 2, "{:x?}", kinds(2));
         assert!(kinds(6).len() > 10, "far rings hold many lineages");
-        // Structures and bases need depth.
-        let stations = (3..=12)
-            .flat_map(|x| (-6..=6).map(move |y| SectorId { x, y }))
-            .filter(|id| {
-                generate(5, *id)
-                    .iter()
-                    .any(|s| s.base_kind.is_some() && s.fort.is_none())
-            })
-            .count();
-        assert!(stations > 0);
+        // Structures need depth; the only stations are a civilization's.
+        let stations: Vec<Spawn> = (3..=14)
+            .flat_map(|x| (-14..=14).map(move |y| SectorId { x, y }))
+            .flat_map(|id| (1..=4).flat_map(move |seed| generate(seed, id)))
+            .filter(|s| s.base_kind.is_some() && s.fort.is_none())
+            .collect();
+        assert!(!stations.is_empty());
+        assert!(stations.iter().all(|s| s.civ.is_some()), "a wild base");
     }
 }

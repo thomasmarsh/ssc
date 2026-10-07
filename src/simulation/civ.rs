@@ -859,6 +859,61 @@ mod tests {
     }
 
     #[test]
+    fn a_fallen_capital_pays_by_how_well_it_was_defended() {
+        let mut seen = std::collections::BTreeSet::new();
+        // The shallowest and the deepest civilization of each seed.
+        let mut picks = Vec::new();
+        for seed in [SEED, 1, 42] {
+            let mut all: Vec<Territory> = (-40..=40)
+                .flat_map(|x| (-40..=40).map(move |y| SectorId { x, y }))
+                .filter_map(|id| world::territory(seed, id).filter(|t| t.capital == id))
+                .filter(|t| !t.peaceful())
+                .collect();
+            all.sort_by_key(|t| (t.fort_tier(), t.id));
+            picks.extend(all.first().map(|t| (seed, *t)));
+            picks.extend(all.last().map(|t| (seed, *t)));
+        }
+        for (seed, t) in picks {
+            let shape = t.shape;
+            // The ship stands off so it does not collect the drops as they fly.
+            let off = t.capital.center() + Vec2::new(0.0, 2600.0);
+            let mut game = visit(seed, off);
+            let seat = game
+                .bodies
+                .iter()
+                .find(|b| {
+                    b.origin
+                        .and_then(|o| game.civ_bases.get(&o))
+                        .is_some_and(|c| c.1 == CivRole::Capital)
+                })
+                .map(|b| b.id)
+                .expect("the capital has a seat");
+            game.pickups.clear();
+            game.bodies
+                .iter_mut()
+                .find(|b| b.id == seat)
+                .unwrap()
+                .health = 0.0;
+            game.step(DT, Input::default());
+            let parts = game
+                .pickups
+                .iter()
+                .filter(|p| matches!(p.item, Item::Part(_)))
+                .count() as u32;
+            let tier = t.fort_tier();
+            assert!(
+                parts >= crate::simulation::tuning::CAPITAL_PARTS + u32::from(tier),
+                "{seed} {shape:?} tier {tier}: {parts} parts"
+            );
+            seen.insert(tier);
+        }
+        assert!(
+            seen.len() >= 2,
+            "several defense tiers were checked: {seen:?}"
+        );
+    }
+
+    #[test]
     fn a_ruined_civilization_stays_ruined_across_unload_and_reload() {
         let t = find(SEED, CivShape::Horde);
         let mut game = visit(SEED, t.capital.center());
