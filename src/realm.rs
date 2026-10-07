@@ -791,22 +791,30 @@ impl Realm {
         format!("{}   {}", self.spec().title, self.tests_line())
     }
 
-    /// What the realm changes here, as (label, signed percent) pairs, biggest first: the details
-    /// panel's lines. Empty where nothing differs by `SHOWN_AT`.
-    pub fn changes(&self) -> Vec<(&'static str, i32)> {
-        let mut out: Vec<(&'static str, f32)> = self
+    /// What the realm changes here, as (label, change) pairs, biggest first: the details panel's
+    /// lines. A multiplier reads as a signed percent, flat armour as points knocked off each
+    /// hit, the fizzle chance as a percent chance. Empty where nothing differs by `SHOWN_AT`.
+    pub fn changes(&self) -> Vec<(&'static str, String)> {
+        let mut out: Vec<(&'static str, f32, String)> = self
             .effects
             .fields()
             .into_iter()
             .filter_map(|(label, v, neutral)| {
-                let delta = if neutral == 0.0 { v } else { v - neutral };
-                (delta.abs() >= SHOWN_AT).then_some((label, delta))
+                let delta = v - neutral;
+                if delta.abs() < SHOWN_AT {
+                    return None;
+                }
+                let text = match label {
+                    "ENEMY PLATING" => format!("-{v:.0} PER HIT"),
+                    "ABILITY FIZZLE" => format!("{:.0}% OF PRESSES", v * 100.0),
+                    _ => format!("{:+.0}%", delta * 100.0),
+                };
+                let weight = if neutral == 0.0 { delta / 6.0 } else { delta };
+                Some((label, weight.abs(), text))
             })
             .collect();
-        out.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
-        out.into_iter()
-            .map(|(l, d)| (l, (d * 100.0).round() as i32))
-            .collect()
+        out.sort_by(|a, b| b.1.total_cmp(&a.1));
+        out.into_iter().map(|(l, _, t)| (l, t)).collect()
     }
 
     /// How much a species of this genome takes to the realm: hunters and packs, schoolers and
@@ -860,6 +868,10 @@ impl Realm {
         Some(stamps[((roll * stamps.len() as f32) as usize).min(stamps.len() - 1)])
     }
 }
+
+/// How many of the eight axes a ship can be strong in at once (the design rule `no build covers every
+/// realm` is checked against it).
+pub const BUILD_AXES: usize = 3;
 
 /// An elder only carries its realm's signature power where the realm is this strong.
 pub const STAMP_FROM: f32 = 0.5;
@@ -1199,9 +1211,13 @@ mod tests {
         assert!(
             changes
                 .iter()
-                .any(|(l, d)| *l == "ENEMY SHIELD" && *d > 100)
+                .any(|(l, d)| *l == "ENEMY SHIELD" && d == "+140%")
         );
-        assert!(changes.iter().any(|(l, _)| *l == "ENEMY PLATING"));
+        assert!(
+            changes
+                .iter()
+                .any(|(l, d)| *l == "ENEMY PLATING" && d == "-6 PER HIT")
+        );
         assert!(r.stress_line().contains("IRON TIDE") && r.stress_line().contains("DAMAGE"));
         assert!(realm(SEED, SectorId::ORIGIN).changes().is_empty());
         assert!(
@@ -1342,6 +1358,57 @@ mod tests {
                 let d: f32 = a.iter().zip(b).map(|(x, y)| (x - y).abs()).sum();
                 assert!(d > 0.05, "two realm kinds share a colour");
             }
+        }
+    }
+
+    /// The rule: no build covers every realm. A ship gets strong in about `BUILD_AXES` of the
+    /// eight axes; whichever it picks, some realm stresses a primary axis it left out, and every
+    /// combat axis is both tested in one realm and favoured in another.
+    #[test]
+    fn no_build_covers_every_realm() {
+        let primary: Vec<Axis> = CATALOG
+            .iter()
+            .flat_map(|s| s.primary.iter().copied())
+            .collect();
+        let mut stressed: Vec<Axis> = primary.clone();
+        stressed.sort();
+        stressed.dedup();
+        assert!(stressed.len() > BUILD_AXES, "{stressed:?}");
+        // Every way of picking `BUILD_AXES` axes leaves some realm's primary stress uncovered.
+        let n = Axis::ALL.len();
+        for a in 0..n {
+            for b in a + 1..n {
+                for c in b + 1..n {
+                    let build = [Axis::ALL[a], Axis::ALL[b], Axis::ALL[c]];
+                    assert!(
+                        CATALOG
+                            .iter()
+                            .any(|s| s.primary.iter().any(|p| !build.contains(p))),
+                        "{build:?} covers every realm"
+                    );
+                    // And no build is safe everywhere: some realm has every primary axis outside it.
+                    assert!(
+                        CATALOG.iter().any(|s| !s.primary.is_empty()
+                            && s.primary.iter().all(|p| !build.contains(p))),
+                        "{build:?} is untouched by some realm"
+                    );
+                }
+            }
+        }
+        // Every combat axis is tested somewhere, and each one is a strength elsewhere.
+        for axis in [
+            Axis::Damage,
+            Axis::Range,
+            Axis::Defense,
+            Axis::Mobility,
+            Axis::Sensors,
+            Axis::Utility,
+        ] {
+            assert!(primary.contains(&axis), "{axis:?} is never primary");
+            assert!(
+                CATALOG.iter().any(|s| s.favours.contains(&axis)),
+                "{axis:?} is never favoured"
+            );
         }
     }
 }

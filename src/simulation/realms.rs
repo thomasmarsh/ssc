@@ -118,7 +118,7 @@ impl Game {
         for pair in changes.chunks(2) {
             lines.push(
                 pair.iter()
-                    .map(|(label, pct)| format!("{label} {pct:+}%"))
+                    .map(|(label, change)| format!("{label} {change}"))
                     .collect::<Vec<_>>()
                     .join("   "),
             );

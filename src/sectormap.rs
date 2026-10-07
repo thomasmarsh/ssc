@@ -694,7 +694,7 @@ impl Map {
             let lines: Vec<String> = probe
                 .changes()
                 .iter()
-                .map(|(label, pct)| format!("{label} {pct:+}%"))
+                .map(|(label, change)| format!("{label} {change}"))
                 .collect();
             json_str(&mut j, &lines.join("; "));
             j.push(']');
