@@ -623,17 +623,15 @@ mod tests {
 
     /// A territory of the wanted shape and the sector of its capital.
     fn find(seed: u64, shape: CivShape) -> Territory {
-        for x in -40..=40 {
-            for y in -40..=40 {
-                if let Some(t) = world::territory(seed, SectorId { x, y })
-                    && t.shape == shape
-                    && t.capital == (SectorId { x, y })
-                {
-                    return t;
-                }
-            }
-        }
-        panic!("no {shape:?} territory");
+        // The nearest such capital to HOME (the first found scanning from a corner would
+        // sit at the far edge of the map, in whatever deep wildlife lives there).
+        (-40..=40)
+            .flat_map(|x| (-40..=40).map(move |y| SectorId { x, y }))
+            .filter_map(|id| {
+                world::territory(seed, id).filter(|t| t.shape == shape && t.capital == id)
+            })
+            .min_by_key(|t| (crate::range::ring(t.capital), t.capital.x, t.capital.y))
+            .unwrap_or_else(|| panic!("no {shape:?} territory"))
     }
 
     /// A game with the ship at `at`, a fresh world around it.

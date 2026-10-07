@@ -2705,7 +2705,10 @@ mod tests {
                         .count()
                 })
                 .unwrap();
-            let spot = Vec2::new(edge.0 as f32, edge.1 as f32) * (world::SECTOR_SIZE / 2.0 - 200.0);
+            // Near the edge, but far enough in that a Fatso drifting over the border from
+            // the now fuller ring one does not bump the idle ship (that is a collision, not a
+            // hunt).
+            let spot = Vec2::new(edge.0 as f32, edge.1 as f32) * (world::SECTOR_SIZE / 2.0 - 900.0);
             set_player(&mut game, spot, Vec2::ZERO);
             game.step(DT, Input::default());
             assert!(
@@ -3372,7 +3375,18 @@ mod tests {
     fn far_sectors_hold_novel_species_that_survive_a_long_flight() {
         let seed = 0x535343;
         let mut names = std::collections::HashSet::new();
-        for (x, y) in [(14, 14), (-12, -9), (0, 9), (20, -5)] {
+        // Eight probes: a sector holds two to four species now (it used to hold more), so
+        // the cast is varied across more places.
+        for (x, y) in [
+            (14, 14),
+            (-12, -9),
+            (0, 9),
+            (20, -5),
+            (-17, 12),
+            (8, -22),
+            (-25, -6),
+            (11, 27),
+        ] {
             let id = SectorId { x, y };
             let mut game = Game::new(seed);
             game.player_invulnerability = 1e9;
@@ -3495,16 +3509,68 @@ mod home_flocking_tests {
     #[test]
     fn start_bogeys_stay_in_schools_and_stay_calm() {
         for seed in [42, 11, 5, 1] {
-            stay_in_schools(seed);
+            let start = crate::range::start_sector(seed, Species::bogey());
+            stay_in_schools(seed, start, None);
         }
     }
 
-    fn stay_in_schools(seed: u64) {
+    /// Ring two is a full ring of Bogeys now, not one seed-directional slice, so the schools
+    /// have to hold across all of it. A single sector's mean spacing wanders (a lone bogey
+    /// of a neighbour's thin fringe moves it by tens), so the ring is judged as a whole: the
+    /// measurements of its sixteen sectors, pooled, meet the same bounds as the start school.
+    /// The calm check (nothing hostile without a reason) is strict in every sector.
+    #[test]
+    fn bogeys_school_across_the_whole_of_ring_two() {
+        for seed in [42, 11, 5, 1] {
+            let mut pooled = Vec::new();
+            for x in -2..=2 {
+                for y in -2..=2 {
+                    let id = SectorId { x, y };
+                    if crate::range::ring(id) == 2 {
+                        stay_in_schools(seed, id, Some(&mut pooled));
+                    }
+                }
+            }
+            let n = pooled.len() as f32;
+            let spacing = pooled.iter().map(|m| m.spacing).sum::<f32>() / n;
+            let (isolated, subjects) = pooled
+                .iter()
+                .fold((0, 0), |(i, s), m| (i + m.isolated, s + m.subjects));
+            let (lone, count) = pooled
+                .iter()
+                .fold((0, 0), |(l, c), m| (l + m.lone_fed, c + m.count));
+            assert!(spacing < 200.0, "seed {seed}: ring-two spacing {spacing}");
+            assert!(
+                isolated as f32 <= subjects as f32 * 0.05,
+                "seed {seed}: {isolated} of {subjects} have no schoolmate near"
+            );
+            assert!(
+                lone as f32 <= count as f32 * 0.04,
+                "seed {seed}: {lone} of {count} bogeys alone"
+            );
+        }
+    }
+
+    /// One observation of a school: fed bogeys cut off, fed bogeys counted, mean spacing,
+    /// bogeys in all and fed ones alone.
+    struct Observation {
+        isolated: usize,
+        subjects: usize,
+        spacing: f32,
+        count: usize,
+        lone_fed: usize,
+    }
+
+    /// Idles beside the school of sector `start` for a minute, asserting the school holds
+    /// (with `observed` it only records each observation, for the caller to judge) and that
+    /// no bogey turns hostile without a reason.
+    fn stay_in_schools(seed: u64, start: SectorId, mut observed: Option<&mut Vec<Observation>>) {
+        let strict = observed.is_none();
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
         let lineage = Species::bogey().lineage;
-        let start = crate::range::start_sector(seed, Species::bogey());
         game.teleport(crate::range::calm_spot(seed, start));
+
         game.step(1.0 / 60.0, Input::default());
         // Observe the school on its own: a Fatso blundering through it (impacts hurt, and a
         // hurt bogey alarms its mates) is a real but separate event.
@@ -3528,24 +3594,39 @@ mod home_flocking_tests {
                 count >= 5,
                 "seed {seed} {second}s: the school thinned to {count}"
             );
-            // At most 5 percent (and one creature) of the fed bogeys cut off from their school:
-            // HOME's band of 33 allowed one.
-            assert!(
-                isolated <= 1.max((subjects as f32 * 0.05).ceil() as usize),
-                "seed {seed} {second}s: {isolated} of {subjects} have no schoolmate near"
-            );
-            // 170 at HOME's one big band of 33; ring-two schools are few and small, so the
-            // mean wanders between about 125 and 190 across seeds (245 before the tuning).
-            assert!(spacing < 200.0, "seed {seed} {second}s: spacing {spacing}");
-            // At most 4 percent of fed bogeys alone (HOME's single band allowed one of 33).
-            assert!(
-                lone_fed as f32 <= (count as f32 * 0.04).ceil(),
-                "seed {seed} {second}s: bogeys are alone: {sizes:?}"
-            );
+            if let Some(observed) = observed.as_deref_mut() {
+                observed.push(Observation {
+                    isolated,
+                    subjects,
+                    spacing,
+                    count,
+                    lone_fed,
+                });
+            }
+
             assert!(
                 spacing > 50.0,
-                "seed {seed} {second}s: packed into a ball: {spacing}"
+                "seed {seed} {start:?} {second}s: packed into a ball: {spacing}"
             );
+            if strict {
+                // At most 5 percent (and one creature) of the fed bogeys cut off from their
+                // school: HOME's band of 33 allowed one.
+                assert!(
+                    isolated <= 1.max((subjects as f32 * 0.05).ceil() as usize),
+                    "seed {seed} {second}s: {isolated} of {subjects} have no schoolmate near"
+                );
+                // 170 at HOME's one big band of 33; ring-two schools are few and small, so
+                // the mean wanders between about 125 and 190 across seeds (245 before the
+                // tuning).
+                assert!(spacing < 200.0, "seed {seed} {second}s: spacing {spacing}");
+                // At most 4 percent of fed bogeys alone (HOME's single band allowed one of
+                // 33).
+                assert!(
+                    lone_fed as f32 <= (count as f32 * 0.04).ceil(),
+                    "seed {seed} {second}s: bogeys are alone: {sizes:?}"
+                );
+            }
+
             // Calm unless something explains it: the ship drifted close, the bogey is hurt (a
             // gravity well next door, a collision), or a hurt mate's panic spread to it.
             let ship = game.player().unwrap().position;

@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 /// A range counts toward a convergence zone when it is at least this present.
 pub const CONFLUENCE_WEIGHT: f32 = 0.35;
 /// Species it takes to make a convergence zone (rare: see `range` tests).
-pub const CONFLUENCE_SPECIES: usize = 4;
+pub const CONFLUENCE_SPECIES: usize = 5;
 /// Below this life a sector is a sparse gap; a planetoid there makes an oasis.
 pub const GAP_LIFE: f32 = 0.2;
 pub const OASIS_LIFE: f32 = 0.35;

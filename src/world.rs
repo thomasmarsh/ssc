@@ -610,6 +610,7 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
             let anchor = place(&mut pop);
             let size = pop.int(plan.size.0, plan.size.1);
             let size = (size as f32 * (0.4 + 0.6 * entry.weight)).round().max(1.0) as u32;
+
             cluster(
                 &mut pop,
                 &mut wild,
@@ -1587,11 +1588,12 @@ mod tests {
         // No code places a serpent: a long spine plus a wave gene turns up on its own, in
         // sectors well away from home, and never at HOME.
         let mut slitherers = 0;
-        for x in -10..=10 {
-            for y in -10..=10 {
+        for x in -14..=14 {
+            for y in -14..=14 {
                 for s in generate(0x535343, SectorId { x, y }) {
                     if let Some(sp) = s.species {
                         let slithers = sp.genome.segments >= 4 && sp.genome.wave >= 0.8;
+
                         assert!(!(slithers && x == 0 && y == 0));
                         slitherers += slithers as u32;
                     }
@@ -1615,7 +1617,7 @@ mod tests {
     }
 
     #[test]
-    fn ring_one_holds_only_fatsos_and_ring_two_only_the_allowed_kinds() {
+    fn ring_one_holds_only_fatsos_and_ring_two_only_fatsos_and_bogeys() {
         let (fatso, bogey, smarty) = (
             Species::fatso().lineage,
             Species::bogey().lineage,
@@ -1636,11 +1638,14 @@ mod tests {
                         }
                         _ => {
                             assert!(
-                                found.iter().all(|l| [fatso, bogey, smarty].contains(l)),
-                                "ring two admits Fatsos, Bogeys and Smarties only"
+                                found.iter().all(|l| [fatso, bogey].contains(l)),
+                                "ring two admits Fatsos and Bogeys only"
+                            );
+                            assert!(
+                                found.contains(&bogey),
+                                "seed {seed} {id:?}: every ring-two sector holds Bogeys"
                             );
                             bogeys += found.iter().filter(|l| **l == bogey).count();
-                            smarties += found.iter().filter(|l| **l == smarty).count();
                         }
                     }
                     // Just food and rocks: no structures, hazards or rooted life either.
@@ -1653,6 +1658,20 @@ mod tests {
                                 && !(s.pinned && s.rock != RockKind::Planetoid)
                                 && s.civ.is_none()
                         }));
+                    }
+                }
+            }
+        }
+        // Smarties wait for ring three, where they debut.
+        for seed in [0x535343, 1, 42, 7, 99] {
+            for x in -3..=3 {
+                for y in -3..=3 {
+                    let id = SectorId { x, y };
+                    if crate::range::ring(id) == 3 {
+                        smarties += lineages(&generate(seed, id))
+                            .iter()
+                            .filter(|l| **l == smarty)
+                            .count();
                     }
                 }
             }
@@ -1678,7 +1697,7 @@ mod tests {
             }
             out
         };
-        assert!(kinds(2).len() <= 3, "{:x?}", kinds(2));
+        assert!(kinds(2).len() <= 2, "{:x?}", kinds(2));
         assert!(kinds(6).len() > 10, "far rings hold many lineages");
         // Structures and bases need depth.
         let stations = (3..=12)
