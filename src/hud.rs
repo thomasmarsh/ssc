@@ -67,6 +67,12 @@ impl Screen {
         self.at(p.x, p.y)
     }
 
+    /// The pixel a world position falls on.
+    pub fn px_of(&self, world: Vec2) -> Vec2 {
+        let d = (world - self.center) / self.scale;
+        Vec2::new(self.size.x / 2.0 + d.x, self.size.y / 2.0 - d.y)
+    }
+
     /// A length in pixels as world units.
     pub fn px(&self, length: f32) -> f32 {
         length * self.scale
@@ -515,6 +521,52 @@ pub fn draw_apex(g: &mut Gizmos, game: &Game, s: &Screen, y: f32) {
     );
 }
 
+// ---- the interact prompt -----------------------------------------------------------------
+
+/// Where the prompt over the ship sits: the keycap's center, the label's center and its
+/// half-width, all in pixels. It hovers above the ship, clear of the rings, and never rides up
+/// into the top row.
+fn prompt_layout(s: &Screen, ship: Vec2, label: &str) -> (Vec2, Vec2, f32) {
+    let at = s.px_of(ship);
+    let half = label.chars().count() as f32 * 3.9;
+    let center = Vec2::new(
+        at.x.clamp(half + 40.0, (s.size.x - half - 40.0).max(half + 40.0)),
+        (at.y - 66.0).clamp(150.0, (s.size.y - 190.0).max(150.0)),
+    );
+    let key = center + Vec2::new(-half - 4.0, 0.0);
+    let label_c = center + Vec2::new(16.0, 0.0);
+    (key, label_c, half)
+}
+
+/// The keycap of the interact prompt: a rounded box that glows while a press would work and
+/// dims with a reason when it would not.
+pub fn draw_prompt(g: &mut Gizmos, game: &Game, s: &Screen, time: f32) {
+    let (Some(prompt), Some(ship)) = (game.interact_prompt(), game.player()) else {
+        return;
+    };
+    // The bench panel says how to close it.
+    if game.bench_open() {
+        return;
+    }
+    let text = prompt_text(&prompt);
+    let (key, _, _) = prompt_layout(s, ship.position, &text);
+    let blocked = prompt.blocked.is_some();
+    let color = if blocked { PAD_AMBER } else { CYAN };
+    let (x, y) = (key.x - 12.0, key.y - 12.0);
+    if !blocked {
+        let glow = 0.2 + 0.25 * pulse(time, 4.0);
+        outline_box(g, s, x - 3.0, y - 3.0, 30.0, 30.0, color.with_alpha(glow));
+    }
+    outline_box(g, s, x, y, 24.0, 24.0, color);
+}
+
+fn prompt_text(prompt: &ssc::simulation::interact::Prompt) -> String {
+    match prompt.blocked {
+        Some(reason) => format!("{}  {reason}", prompt.label),
+        None => prompt.label.clone(),
+    }
+}
+
 // ---- the bottom cluster -----------------------------------------------------------------
 
 fn ability_icon(g: &mut Gizmos, s: &Screen, ability: Ability, c: Vec2, color: Color) {
@@ -818,6 +870,7 @@ pub fn draw_hud(g: &mut Gizmos, game: &Game, hud: &HudModel, s: &Screen, time: f
     draw_standing(g, hud, s, time);
     draw_nearest(g, game, s, 108.0);
     draw_apex(g, game, s, 130.0);
+    draw_prompt(g, game, s, time);
     let layout = ClusterLayout::of(s);
     draw_weapon(g, hud, layout.weapon, s, time);
     for (ring, c) in hud.abilities.iter().zip(layout.abilities) {
@@ -843,12 +896,15 @@ pub enum Tag {
     Hints,
     /// The active weapon's name, briefly after a switch.
     Weapon,
+    /// The interact prompt's label, and the key in its cap.
+    Prompt,
+    PromptKey,
     Key(usize),
     Cargo(usize),
 }
 
 impl Tag {
-    const ALL: [Tag; 16] = [
+    const ALL: [Tag; 18] = [
         Tag::Region,
         Tag::Sector,
         Tag::Score,
@@ -859,6 +915,8 @@ impl Tag {
         Tag::Vitals,
         Tag::Hints,
         Tag::Weapon,
+        Tag::Prompt,
+        Tag::PromptKey,
         Tag::Key(0),
         Tag::Key(1),
         Tag::Key(2),
@@ -872,6 +930,8 @@ impl Tag {
             Tag::Region => 19.0,
             Tag::Score => 26.0,
             Tag::Weapon => 17.0,
+            Tag::Prompt => 14.0,
+            Tag::PromptKey => 15.0,
             Tag::Sector | Tag::Mult | Tag::Hints | Tag::Standing | Tag::Nearest | Tag::Apex => 12.0,
             Tag::Vitals | Tag::Key(_) => 11.0,
             Tag::Cargo(_) => 10.0,
@@ -991,13 +1051,27 @@ fn describe(
             if hints.is_empty() {
                 return None;
             }
-            let text = hints
+            // As many as fit: the standing keys give way before the window does.
+            let mut items: Vec<String> = hints
                 .iter()
                 .map(|h| format!("{} {}", h.key, h.action))
-                .collect::<Vec<_>>()
-                .join("     ");
+                .collect();
+            items.extend(["F1 HELP", "TAB DETAILS", "ESC SETTINGS"].map(String::from));
+            let room = (s.size.x - 24.0) / 6.8;
+            let mut text = String::new();
+            for item in items {
+                let next = if text.is_empty() {
+                    item.clone()
+                } else {
+                    format!("{text}     {item}")
+                };
+                if next.chars().count() as f32 > room {
+                    break;
+                }
+                text = next;
+            }
             (
-                format!("{text}     F1 HELP     TAB DETAILS"),
+                text,
                 Color::srgba(0.36, 0.49, 0.62, 0.9),
                 Vec2::new(cx, s.size.y - 12.0),
                 Align::Center,
@@ -1017,6 +1091,25 @@ fn describe(
                 layout.weapon + Vec2::new(0.0, -WEAPON_R - 34.0),
                 Align::Center,
             )
+        }
+        Tag::Prompt | Tag::PromptKey => {
+            let prompt = game.interact_prompt()?;
+            let ship = game.player()?;
+            if game.bench_open() {
+                return None;
+            }
+            let text = prompt_text(&prompt);
+            let (key, label, _) = prompt_layout(s, ship.position, &text);
+            let color = if prompt.blocked.is_some() {
+                PAD_AMBER
+            } else {
+                WHITE
+            };
+            if tag == Tag::Prompt {
+                (text, color, label, Align::Center)
+            } else {
+                ("E".to_string(), color, key, Align::Center)
+            }
         }
         Tag::Key(i) => {
             let ability = Ability::ALL[i];
@@ -1067,14 +1160,18 @@ pub enum Align {
 /// Places and fills the HUD texts for this frame.
 pub fn update_texts(
     session: Res<Session>,
-    camera: Single<&Camera, With<Camera2d>>,
+    view: Single<(&Camera, &Transform, &Projection), With<Camera2d>>,
     ui_scale: Res<UiScale>,
     mut texts: Query<(&Tag, &mut Text, &mut TextColor, &mut Node, &mut TextLayout)>,
 ) {
-    let Some(size) = camera.logical_viewport_size() else {
+    let Some(size) = view.0.logical_viewport_size() else {
         return;
     };
-    let s = Screen::new(Vec2::ZERO, Vec2::splat(1.0), size, ui_scale.0);
+    let half = match view.2 {
+        Projection::Orthographic(p) => p.area.half_size(),
+        _ => Vec2::new(900.0, 450.0),
+    };
+    let s = Screen::new(view.1.translation.truncate(), half, size, ui_scale.0);
     let hud = session.game.hud();
     let hidden = session.game.game_over;
     for (tag, mut text, mut color, mut node, mut layout) in &mut texts {

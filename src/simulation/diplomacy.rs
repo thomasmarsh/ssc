@@ -470,15 +470,6 @@ impl Game {
         })
     }
 
-    /// The interact key: opens the bench while landed, otherwise tithes.
-    pub fn interact(&mut self) {
-        if self.pad.landed.is_some() {
-            self.bench_toggle();
-        } else {
-            let _ = self.tithe();
-        }
-    }
-
     /// Gives a civilization's seat an offering: `TITHE_AMOUNT` of the material the hold has most
     /// of, for `TITHE_GAIN` regard. A friendly civilization trades instead: a repair if the ship
     /// is hurt, else a swap for the material the hold lacks.

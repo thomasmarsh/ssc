@@ -34,6 +34,9 @@ pub struct Overlay;
 pub struct DetailsPanel;
 #[derive(Component)]
 pub struct HelpPanel;
+/// The bench panel's root, shown only while the bench is open.
+#[derive(Component)]
+pub struct BenchPanelNode;
 /// A panel that scrolls with the mouse wheel while it is showing.
 #[derive(Component)]
 pub struct Scrollable;
@@ -94,25 +97,29 @@ const RIG_LINES: usize = Slot::ALL.len()
     + Material::ALL.len()
     + 3;
 
-/// The full key list behind F1.
+/// The full key list behind F1 (the README's table, in short).
 const HELP_TEXT: &str = "\
 KEYS   (F1 closes)
 
 FLY     UP thrust    DOWN brake    LEFT / RIGHT turn
 FIRE    SPACE or A, or hold the left mouse button to aim and fire
-MINE    hold M          SWITCH WEAPON  [ ] or 1-9
+MINE    hold M          WEAPON  [ ] or 1-9
 PARRY   D               DASH  SHIFT           PING  X
-LAND    L land / deploy / lift off       BENCH  E (landed)
-TITHE   O (near a civilization's seat)   REPAIR  R    PAD KIT  K
-BEACON  H      STAR MAP  G      BOOSTS  B      INSURE  I
+E       the one context key: land, build and deploy a pad, open and close
+        the bench, tithe at a civilization's seat (the prompt over the ship
+        says which)
+BEACON  H               STAR MAP  G
+SEE     hold TAB for details + radar     F3 latches them
+GAME    P pause    ESC settings and quit    F11 fullscreen    ENTER new run
 
-SEE     hold TAB details + radar     F3 latch details     T edge arrows
-GAME    P pause    ENTER restart    ESC quit    F11 fullscreen
-VIEW    C camera    V render style    U reduce effects    N mute    S slow motion
+BENCH   UP DOWN row    LEFT RIGHT tab (or 1-7)    ENTER do it    Q take    E close
 
 GAMEPAD  sticks fly and aim    R2 mine    L1 / R1 weapon    D-pad right parry
-         L3 dash    R3 ping    Y boosts    B land    X repair    D-pad up kit
-         D-pad left star map    Select bench / tithe    START arrows
+         L3 dash    R3 ping    B or Select interact    Y beacon
+         D-pad left star map    START settings
+
+SETTINGS  auto repair, boosts, edge arrows, radar, camera, render style,
+          reduce effects, sound, fullscreen, slow motion, restart, quit
 
 READING THE HUD
 Rings on the ship: outer cyan arc = shield, ten green segments = hull.
@@ -308,18 +315,25 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             ..default()
         },
     ));
-    // The bench: a panel on the right, under the species legend.
+    // The bench: a panel on the right, shown while it is open.
     commands
         .spawn((
+            BenchPanelNode,
             Text::new(""),
             TextFont::from_font_size(14.0),
             Node {
                 position_type: PositionType::Absolute,
-                right: px(28),
-                top: px(150),
-                max_width: px(440),
+                right: px(16),
+                top: px(DETAILS_TOP),
+                max_width: percent(94),
+                padding: UiRect::axes(px(16), px(12)),
+                border: UiRect::all(px(1)),
+                display: Display::None,
                 ..default()
             },
+            BackgroundColor(Color::srgba(0.012, 0.022, 0.045, 0.92)),
+            BorderColor::all(Color::srgba(0.4, 1.0, 0.65, 0.4)),
+            GlobalZIndex(12),
         ))
         .with_children(|panel| {
             for line in 0..BENCH_LINES {
@@ -407,6 +421,12 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         });
 }
 
+type BenchNodeOnly = (
+    With<BenchPanelNode>,
+    Without<DetailsPanel>,
+    Without<HelpPanel>,
+    Without<HelpBody>,
+);
 type HelpBodyOnly = (With<HelpBody>, Without<HelpPanel>, Without<DetailsPanel>);
 type BenchSpan = (
     &'static mut TextSpan,
@@ -779,11 +799,14 @@ fn pad_lines(game: &Game) -> [(String, Color); 2] {
             PAD_GREEN,
         )
     } else if game.is_repairing() {
-        ("FIELD REPAIR  damage stops it\n".to_string(), PAD_GREEN)
+        (
+            "MENDING  damage or movement stops it\n".to_string(),
+            PAD_GREEN,
+        )
     } else if game.pad_kits() == 0 && game.pad_count() == 0 {
         (
             format!(
-                "K crafts a pad kit  {}\n",
+                "E at a planetoid builds a pad  {}\n",
                 price_text(&ssc::simulation::KIT_PRICE)
             ),
             MUTED,
@@ -821,7 +844,7 @@ fn pad_banner(game: &Game) -> (String, Color) {
             if game.is_hidden() {
                 (
                     format!(
-                        "HIDDEN  x{:.0}\nthrust / L lifts off",
+                        "HIDDEN  x{:.0}\nthrust lifts off",
                         ssc::simulation::HIDE_SIGHT
                     ),
                     PAD_GREEN,
@@ -829,21 +852,20 @@ fn pad_banner(game: &Game) -> (String, Color) {
             } else {
                 (
                     format!(
-                        "EXPOSED  cover back in {:.0}s\nthrust / L lifts off",
+                        "EXPOSED  cover back in {:.0}s\nthrust lifts off",
                         game.cover_broken_for().ceil()
                     ),
                     PAD_AMBER,
                 )
             }
         }
-        PadHint::Land => ("L to land".into(), PAD_GREEN),
-        PadHint::Deploy => (
-            format!("L to deploy a pad  (within {LAND_RANGE:.0} to land after)"),
-            PAD_GREEN,
-        ),
-        PadHint::TooFast => ("slow down to land or deploy".into(), PAD_AMBER),
-        PadHint::Unsafe => ("pad unsafe - a hostile is close".into(), DRY_RED),
-        PadHint::Closer => ("a pad stands here - move closer".into(), PAD_AMBER),
+        // What the interact key would do is the prompt over the ship; see `hud`.
+        PadHint::Land
+        | PadHint::Deploy
+        | PadHint::Build
+        | PadHint::TooFast
+        | PadHint::Unsafe
+        | PadHint::Closer => (String::new(), CYAN),
     }
 }
 
@@ -929,6 +951,7 @@ pub fn update_hud(
     mut rig: Query<(&mut TextSpan, &mut TextColor, &RigLine), Without<FeedLine>>,
     mut pad_text: Single<(&mut Text, &mut TextColor), BannerOnly>,
     mut bench: Query<BenchSpan, BenchOnly>,
+    mut bench_node: Single<&mut Node, BenchNodeOnly>,
     mut hud: Single<&mut Text, (With<Hud>, Without<Overlay>)>,
     mut overlay: Single<&mut Text, (With<Overlay>, Without<Hud>)>,
     mut details_node: Single<&mut Node, (With<DetailsPanel>, Without<HelpPanel>)>,
@@ -938,12 +961,24 @@ pub fn update_hud(
     ui_scale: Res<UiScale>,
 ) {
     let game = &session.game;
-    let (text, tint) = pad_banner(game);
+    let (text, tint) = if game.bench_open() || session.help {
+        (String::new(), CYAN)
+    } else {
+        pad_banner(game)
+    };
     if pad_text.0.0 != text {
         pad_text.0.0 = text;
     }
     pad_text.1.0 = tint;
     let panel = bench_lines(game);
+    let bench_display = if panel.is_empty() {
+        Display::None
+    } else {
+        Display::Flex
+    };
+    if bench_node.display != bench_display {
+        bench_node.display = bench_display;
+    }
     for (mut span, mut color, line) in &mut bench {
         match panel.get(line.0) {
             Some((text, tint)) => {

@@ -24,6 +24,7 @@
 
 use super::arsenal::Profile;
 use super::skills::{Skill, SkillTab};
+use super::tuning as t;
 use super::upgrades::Rarity;
 use super::*;
 use crate::genome::ROOT_ARMED;
@@ -165,6 +166,8 @@ pub enum PadHint {
     None,
     Land,
     Deploy,
+    /// No kit in hand but the hold can pay for one: the key crafts it and sets the pad.
+    Build,
     /// In range of a pad (or a place to deploy) but moving too fast.
     TooFast,
     /// A hostile tenant sits near the pad.
@@ -184,6 +187,10 @@ pub struct PadState {
     pub landed: Option<PadKey>,
     /// Field repair is running.
     pub repairing: bool,
+    /// The running repair began by itself (the ship sat quiet and hurt), so it stays quiet and
+    /// stops the moment the ship moves or fires; and whether the ship may start one at all.
+    auto_run: bool,
+    auto_repair: bool,
     /// Pay `INSURANCE` metal on death to keep the best part (when a pad exists).
     pub insured: bool,
     pub bench: Option<Bench>,
@@ -206,6 +213,8 @@ impl Default for PadState {
             kits: 0,
             landed: None,
             repairing: false,
+            auto_run: false,
+            auto_repair: true,
             insured: true,
             bench: None,
             hidden_for: 0.0,
@@ -473,11 +482,12 @@ impl Game {
         if self.pad.pads.contains_key(&key) {
             return PadHint::Closer;
         }
-        if self.pad.kits == 0 {
+        if self.pad.kits == 0 && !self.cargo.can_afford(&KIT_PRICE) {
             return PadHint::None;
         }
         match self.ship_state() {
             Some((_, speed, _)) if speed > DEPLOY_SPEED => PadHint::TooFast,
+            _ if self.pad.kits == 0 => PadHint::Build,
             _ => PadHint::Deploy,
         }
     }
@@ -492,6 +502,7 @@ impl Game {
         }
         if self.pad.repairing {
             self.pad.repairing = false;
+            self.pad.auto_run = false;
             self.notify("REPAIR STOPPED".into(), Rarity::Common);
             return;
         }
@@ -520,6 +531,56 @@ impl Game {
         self.notify("FIELD REPAIR".into(), Rarity::Common);
     }
 
+    /// Whether the ship mends itself when it sits quiet (on by default).
+    pub fn auto_repair(&self) -> bool {
+        self.pad.auto_repair
+    }
+
+    pub fn set_auto_repair(&mut self, on: bool) {
+        self.pad.auto_repair = on;
+        if !on && self.pad.auto_run {
+            self.pad.repairing = false;
+            self.pad.auto_run = false;
+        }
+    }
+
+    /// Starts the field repair by itself once the ship has sat quiet for `AUTO_REPAIR_DELAY`
+    /// seconds (no damage, thrust, fire or beam) with something to mend and the material to
+    /// do it, and stops it as soon as the ship moves or fires.
+    fn update_auto_repair(&mut self, input: &Input) {
+        let quiet = input.thrust.abs() < 0.05
+            && !input.fire
+            && !input.mine
+            && input.move_direction.is_none()
+            && input.aim_direction.is_none();
+        if self.pad.auto_run && (!quiet || !self.pad.auto_repair) {
+            self.pad.repairing = false;
+            self.pad.auto_run = false;
+        }
+        if !self.pad.repairing {
+            self.pad.auto_run = false;
+        }
+        if !self.pad.auto_repair
+            || self.pad.repairing
+            || !quiet
+            || self.game_over
+            || self.pad.landed.is_some()
+        {
+            return;
+        }
+        let Some(ship) = self.player() else { return };
+        if ship.since_hit < t::AUTO_REPAIR_DELAY {
+            return;
+        }
+        let hull = ship.health < ship.max_health - 1e-3 && self.cargo.metal > 0.0;
+        let shield = ship.shield < ship.max_shield * t::AUTO_SHIELD_BELOW
+            && self.cargo.volatiles > t::AUTO_VOLATILE_RESERVE;
+        if hull || shield {
+            self.pad.repairing = true;
+            self.pad.auto_run = true;
+        }
+    }
+
     fn update_repair(&mut self, dt: f32) {
         if !self.pad.repairing {
             return;
@@ -528,9 +589,13 @@ impl Game {
             self.pad.repairing = false;
             return;
         };
+        let auto = self.pad.auto_run;
         if ship.since_hit <= dt * 1.5 + 1e-3 {
             self.pad.repairing = false;
-            self.notify("REPAIR INTERRUPTED".into(), Rarity::Uncommon);
+            self.pad.auto_run = false;
+            if !auto {
+                self.notify("REPAIR INTERRUPTED".into(), Rarity::Uncommon);
+            }
             return;
         }
         let hull_missing = (ship.max_health - ship.health).max(0.0);
@@ -541,7 +606,9 @@ impl Game {
                 .min(hull_missing)
                 .min(self.cargo.metal / REPAIR_METAL);
             self.cargo.take(Material::Metal, hull * REPAIR_METAL);
-        } else if shield_missing > 1e-3 && self.cargo.volatiles > 1e-4 {
+        } else if shield_missing > 1e-3
+            && self.cargo.volatiles > if auto { t::AUTO_VOLATILE_RESERVE } else { 1e-4 }
+        {
             shield = (REPAIR_SHIELD_RATE * dt)
                 .min(shield_missing)
                 .min(self.cargo.volatiles / REPAIR_VOLATILES);
@@ -556,6 +623,10 @@ impl Game {
             return;
         }
         self.pad.repairing = false;
+        self.pad.auto_run = false;
+        if auto {
+            return;
+        }
         let done = hull_missing <= 1e-3 && shield_missing <= 1e-3;
         self.notify(
             if done {
@@ -593,7 +664,7 @@ impl Game {
         self.pad.kits += 1;
         self.notify(
             format!(
-                "PAD KIT CRAFTED  L at a planetoid  ({} held)",
+                "PAD KIT CRAFTED  E at a planetoid  ({} held)",
                 self.pad.kits
             ),
             Rarity::Uncommon,
@@ -620,6 +691,11 @@ impl Game {
                 }
             }
             PadHint::Deploy => self.deploy_pad(),
+            PadHint::Build => {
+                if self.craft_kit() {
+                    self.deploy_pad();
+                }
+            }
             PadHint::TooFast => self.notify("TOO FAST  slow down".into(), Rarity::Common),
             PadHint::Unsafe => {
                 self.notify("PAD UNSAFE  a hostile is close".into(), Rarity::Uncommon)
@@ -627,7 +703,7 @@ impl Game {
             PadHint::Closer => self.notify("A PAD STANDS HERE  move closer".into(), Rarity::Common),
             _ => {
                 let text = if self.pad.kits == 0 {
-                    "NO PAD IN REACH  K crafts a kit".to_string()
+                    "NO PAD IN REACH  E at a planetoid builds one".to_string()
                 } else {
                     "NO PLANETOID IN REACH".to_string()
                 };
@@ -827,6 +903,7 @@ impl Game {
         self.pad.note = (self.pad.note - dt).max(0.0);
         self.pad.aiming = input.aim_direction.is_some() || input.turn.abs() > 0.05 || input.fire;
         self.update_landed(dt, input);
+        self.update_auto_repair(input);
         self.update_repair(dt);
         if self.pad.pads.is_empty() {
             return;
@@ -1184,7 +1261,7 @@ impl Game {
 
     // ---- the bench -----------------------------------------------------------------------
 
-    /// E: opens or closes the bench (landed only).
+    /// Opens or closes the bench (landed only); the interact key does it.
     pub fn bench_toggle(&mut self) {
         if self.pad.landed.is_none() {
             return;
@@ -1502,7 +1579,7 @@ impl Game {
                     ok: (hull > 0.5 && self.cargo.metal > 0.0)
                         || (shield > 0.5 && self.cargo.volatiles > 0.0),
                 });
-                footer = "F repairs what the hold can pay for".into();
+                footer = "ENTER repairs what the hold can pay for".into();
             }
             BenchTab::Reforge | BenchTab::Upgrade => {
                 let reforge = bench.tab == BenchTab::Reforge;
@@ -1545,9 +1622,9 @@ impl Game {
                     });
                 }
                 footer = if reforge {
-                    "F rerolls the affixes (best of three, never worse)".into()
+                    "ENTER rerolls the affixes (best of three, never worse)".into()
                 } else {
-                    "F raises one rarity step".into()
+                    "ENTER raises one rarity step".into()
                 };
             }
             BenchTab::Arms => {
@@ -1578,7 +1655,7 @@ impl Game {
                         ok: false,
                     });
                 }
-                footer = "F raises the weapon one level".into();
+                footer = "ENTER raises the weapon one level".into();
             }
             BenchTab::Rig | BenchTab::Sonar => {
                 let tab = if bench.tab == BenchTab::Rig {
@@ -1628,9 +1705,9 @@ impl Game {
                     });
                 }
                 footer = if tab == SkillTab::Sonar {
-                    "F buys the next level; X pings; upgrades are kept for the run".into()
+                    "ENTER buys the next level; X pings; upgrades are kept for the run".into()
                 } else {
-                    "F buys the next level; upgrades are kept for the run".into()
+                    "ENTER buys the next level; upgrades are kept for the run".into()
                 };
             }
             BenchTab::Stash => {
@@ -1647,7 +1724,7 @@ impl Game {
                         ok: true,
                     });
                 }
-                footer = format!("F stores {STASH_STEP:.0}   Q takes {STASH_STEP:.0}");
+                footer = format!("ENTER stores {STASH_STEP:.0}   Q takes {STASH_STEP:.0}");
             }
         }
         Some(BenchPanel {
@@ -1721,6 +1798,13 @@ mod tests {
         game.player().unwrap()
     }
 
+    fn ship_mut(game: &mut Game) -> &mut Body {
+        game.bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap()
+    }
+
     fn hurt(game: &mut Game, hull: f32, shield: f32) {
         let s = game
             .bodies
@@ -1745,6 +1829,93 @@ mod tests {
     }
 
     // ---- field repair ----
+
+    // ---- auto repair ----
+
+    #[test]
+    fn a_quiet_hurt_ship_mends_its_hull_by_itself_after_the_delay_and_says_nothing() {
+        let mut game = empty_game();
+        stock(&mut game, 100.0, 100.0, 0.0);
+        hurt(&mut game, 50.0, 0.0);
+        ship_mut(&mut game).since_hit = 0.0;
+        game.notices.clear();
+        let hull = ship(&game).health;
+        run(&mut game, t::AUTO_REPAIR_DELAY - 0.5);
+        assert_eq!(ship(&game).health, hull, "not before the delay");
+        run(&mut game, 4.5);
+        let gained = ship(&game).health - hull;
+        assert!(gained > 10.0, "mended on its own: {gained}");
+        assert!(game.cargo.metal < 100.0, "and paid for in metal");
+        assert!(game.is_repairing());
+        assert!(
+            game.notices.iter().all(|n| n.text.starts_with("ENTERING")),
+            "no repair notices: {:?}",
+            game.notices
+        );
+    }
+
+    #[test]
+    fn auto_repair_waits_while_the_ship_thrusts_or_fires_and_stops_when_it_starts() {
+        let mut game = empty_game();
+        stock(&mut game, 100.0, 100.0, 0.0);
+        hurt(&mut game, 50.0, 0.0);
+        let thrust = Input {
+            thrust: 1.0,
+            ..Default::default()
+        };
+        for _ in 0..120 {
+            game.step(DT, thrust);
+        }
+        assert!(!game.is_repairing());
+        run(&mut game, 1.0);
+        assert!(game.is_repairing());
+        game.step(
+            DT,
+            Input {
+                fire: true,
+                ..Default::default()
+            },
+        );
+        assert!(!game.is_repairing(), "firing stops it");
+    }
+
+    #[test]
+    fn auto_repair_leaves_the_shield_to_recharge_and_keeps_a_volatile_reserve() {
+        let mut game = empty_game();
+        // A scratched shield (above the share) is not worth volatiles.
+        stock(&mut game, 0.0, 100.0, 0.0);
+        hurt(&mut game, 0.0, 10.0);
+        run(&mut game, 5.0);
+        assert_eq!(game.cargo.volatiles, 100.0);
+        // A broken shield is mended, but never below the reserve.
+        game.bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap()
+            .shield = 0.0;
+        game.bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap()
+            .since_hit = 99.0;
+        game.stats.recharge = 0.0;
+        stock(&mut game, 0.0, t::AUTO_VOLATILE_RESERVE + 3.0, 0.0);
+        run(&mut game, 30.0);
+        assert!(game.cargo.volatiles >= t::AUTO_VOLATILE_RESERVE - 0.5);
+        assert!(game.cargo.volatiles < t::AUTO_VOLATILE_RESERVE + 3.0);
+    }
+
+    #[test]
+    fn auto_repair_can_be_switched_off() {
+        let mut game = empty_game();
+        stock(&mut game, 100.0, 0.0, 0.0);
+        hurt(&mut game, 50.0, 0.0);
+        game.set_auto_repair(false);
+        assert!(!game.auto_repair());
+        run(&mut game, 6.0);
+        assert!(!game.is_repairing());
+        assert_eq!(game.cargo.metal, 100.0);
+    }
 
     #[test]
     fn field_repair_is_slow_and_priced_per_point() {

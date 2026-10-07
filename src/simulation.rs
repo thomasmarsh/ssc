@@ -25,6 +25,7 @@ mod growth;
 mod guide;
 pub mod hud;
 mod impact;
+pub mod interact;
 mod legacy;
 mod loot;
 mod mining;

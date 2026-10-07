@@ -224,40 +224,26 @@ pub const MAX_HINTS: usize = 5;
 
 impl Game {
     pub fn context_hints(&self) -> Vec<Hint> {
-        use super::PadHint;
         let mut out = Vec::new();
         if self.game_over {
             out.push(hint("ENTER", "launch again"));
             return out;
         }
         if self.bench_open() {
+            out.push(hint("UP DOWN", "row"));
+            out.push(hint("LEFT RIGHT", "tab"));
+            out.push(hint("ENTER", "buy"));
             out.push(hint("E", "close bench"));
-            out.push(hint("1-7", "tab"));
-            out.push(hint("F", "buy"));
             return out;
         }
         if self.latched_cord().is_some() {
             out.push(hint("SPACE", "shoot the cord"));
         }
-        match self.pad_hint() {
-            PadHint::Landed => {
-                out.push(hint("E", "bench"));
-                out.push(hint("L", "lift off"));
-            }
-            PadHint::Land => out.push(hint("L", "land")),
-            PadHint::Deploy => out.push(hint("L", "deploy pad")),
-            _ => {}
-        }
-        if let Some(tithe) = self.tithe_hint() {
-            out.push(hint(
-                "O",
-                match tithe.material {
-                    Some(kind) => format!("tithe {}", kind.label().to_lowercase()),
-                    None => "tithe (need 20)".to_string(),
-                },
-            ));
-        }
-        if !self.is_landed() {
+        // What the interact key does is the prompt over the ship; the line keeps to the verbs.
+        if self.is_landed() {
+            out.push(hint("E", "bench"));
+            out.push(hint("UP", "lift off"));
+        } else {
             out.push(hint("SPACE", "fire"));
             out.push(hint("M", "mine"));
             if self.parry_unlocked() {

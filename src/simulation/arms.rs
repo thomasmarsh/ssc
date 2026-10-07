@@ -68,6 +68,24 @@ impl Game {
         }
     }
 
+    /// Whether the boosts are on (they are, unless the settings say otherwise).
+    pub fn boosts_on(&self) -> bool {
+        self.loadout.arsenal.boosts_on
+    }
+
+    /// Sets the master switch quietly (the settings screen's; nothing is announced).
+    pub fn set_boosts(&mut self, on: bool) {
+        if self.loadout.arsenal.boosts_on == on {
+            return;
+        }
+        let arsenal = &mut self.loadout.arsenal;
+        arsenal.boosts_on = on;
+        if !on {
+            arsenal.stop_boosts();
+        }
+        self.refresh_stats();
+    }
+
     /// Master switch for the boosts, to save fuel.
     pub fn toggle_boosts(&mut self) {
         let arsenal = &mut self.loadout.arsenal;

@@ -273,6 +273,12 @@ pub const LOOT_JITTER: f32 = 240.0;
 /// `REGION_COOLDOWN` seconds must have passed since the last banner, so flying along a border
 /// does not flicker the ENTERING notice.
 pub const REGION_HOLD: f32 = 3.0;
+/// Auto repair: the ship mends itself after this many quiet seconds (no damage, thrust, fire or
+/// beam). Hull comes from metal; the shield only mends this way when it is below the share
+/// given, and never takes the last of the volatiles (they are fuel).
+pub const AUTO_REPAIR_DELAY: f32 = 3.0;
+pub const AUTO_SHIELD_BELOW: f32 = 0.5;
+pub const AUTO_VOLATILE_RESERVE: f32 = 25.0;
 pub const REGION_COOLDOWN: f32 = 12.0;
 
 // ---- diplomacy -----------------------------------------------------------------------------
