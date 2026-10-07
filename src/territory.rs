@@ -255,6 +255,30 @@ pub fn territory(seed: u64, sector: SectorId) -> Option<Territory> {
     (!covers(seed, &early, t.capital)).then_some(t)
 }
 
+/// The territory holding `sector`, else the first of its eight neighbours' (a fixed order) that
+/// lies in one: the civilization whose wildlife a place beside a claim is read against.
+pub fn nearby_territory(seed: u64, sector: SectorId) -> Option<Territory> {
+    if let Some(t) = territory(seed, sector) {
+        return Some(t);
+    }
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            if (dx, dy) != (0, 0)
+                && let Some(t) = territory(
+                    seed,
+                    SectorId {
+                        x: sector.x + dx,
+                        y: sector.y + dy,
+                    },
+                )
+            {
+                return Some(t);
+            }
+        }
+    }
+    None
+}
+
 /// Standing of a civilization, from its lasting fall flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Standing {

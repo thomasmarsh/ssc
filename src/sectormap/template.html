@@ -95,6 +95,7 @@ svg.lo2 .lod2{display:none}
  <label><input type="checkbox" data-layer="ranges" checked><span class="sw" style="background:linear-gradient(90deg,#4a8,#58c,#c85)"></span>species</label>
  <label>show <select id="sf" aria-label="Show where one species lives"><option value="">all species</option></select></label>
  <label><input type="checkbox" data-layer="diversity"><span class="sw" style="background:linear-gradient(90deg,#fff0,#d33)"></span>diversity</label>
+ <label><input type="checkbox" data-layer="affinity"><span class="sw" style="background:linear-gradient(90deg,#4a8,#cb4,#d44)"></span>wildlife vs civ</label>
  <label><input type="checkbox" data-layer="biomes"><span class="sw" style="background:linear-gradient(90deg,#8bc,#cb8,#b8c)"></span>biomes</label>
  <label><input type="checkbox" data-layer="belts" checked>belts</label>
  <label><input type="checkbox" data-layer="life" checked>life</label>
@@ -125,7 +126,7 @@ const D=/*DATA*/;
 const NS="http://www.w3.org/2000/svg";
 const $=s=>document.querySelector(s);
 const cols=D.cols,rows=D.rows,cells=D.cells;
-const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14,CAPY=15,BELT=16,BIO=17,OAS=18;
+const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14,CAPY=15,BELT=16,BIO=17,OAS=18,MOOD=19,MHOS=20,MFRI=21,MCIV=22;
 const KINDS=["Home","Wild","Confluence","Belt","Reach","Oasis","Civilization"];
 const FORMS=["the peaceful start, no creatures","a country of wildlife, named for its biome or a strong specialist","many species converge (rare, biodiverse)","a rock-rich band with little life","a sparse gap with little life","a planetoid with life around it in the middle of nowhere","a civilization's territory"];
 const hc=-D.x0,hr=D.y1; /* HOME's cell */
@@ -143,14 +144,14 @@ const pat=el("pattern",{id:"hatch",width:".22",height:".22",patternUnits:"userSp
 el("line",{x1:"0",y1:"0",x2:"0",y2:".22",class:"hatch"},pat);
 const world=el("g",{},svg);
 const G={};
-["fill","bio","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
+["fill","bio","aff","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
 G.hatch.setAttribute("class","lod2");G.belt.setAttribute("class","lod");
 ["wells","planets","civs","apex","home"].forEach(n=>G[n].setAttribute("class","lod"));
 G.grid.setAttribute("class","lod2");G.regions.setAttribute("class","lod2");
 
-const layers={ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,grid:false,diversity:false,biomes:false,belts:true};
+const layers={ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,grid:false,diversity:false,biomes:false,belts:true,affinity:false};
 let filter=-1; /* species index shown alone, or -1 */
-const showMap={diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],grid:["grid"]};
+const showMap={affinity:["aff"],diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],grid:["grid"]};
 function applyLayers(){for(const l in showMap)for(const g of showMap[l])G[g].style.display=layers[l]?"":"none"}
 
 const dark=()=>matchMedia("(prefers-color-scheme: dark)").matches;
@@ -166,8 +167,8 @@ function filterWeight(row){for(const s of row[SP])if(s[0]===filter)return s[1];r
 const BIOHUE=[200,130,95,0,285,45,25,170];
 
 function build(){
- for(const n of ["fill","bio","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","home"])G[n].textContent="";
- const divs=[[],[],[],[],[],[],[]],bio=new Map(),bedge=[],belts=[];
+ for(const n of ["fill","bio","aff","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","home"])G[n].textContent="";
+ const divs=[[],[],[],[],[],[],[]],bio=new Map(),bedge=[],belts=[],aff=[[],[],[]];
  /* range hue by life level */
  const fills=new Map(),rocks=[[],[],[],[]],hatch=[],conf=[],tf=new Map(),tedge=new Map(),redge=[];
  const rect=(c,r)=>"M"+c+" "+r+"h1v1h-1z";
@@ -182,6 +183,7 @@ function build(){
   if(row[KIND]===3)hatch.push(rect(c,r));
   if(row[RING]>0){divs[Math.min(6,row[SP].length)].push(rect(c,r));
    const bk=D.biomes[row[BIO]];let ba=bio.get(bk);if(!ba){ba=[];bio.set(bk,ba)}ba.push(rect(c,r))}
+  if(row[MOOD]>=2){const mk=row[MOOD]===2?0:row[MOOD]===3?1:2;aff[mk].push(rect(c,r))}
   if(row[BELT]>=.5)belts.push("M"+c+" "+r+"l1 1M"+(c+1)+" "+r+"l-1 1");
   if(row[OAS])belts.push("M"+(c+.5)+" "+(r+.2)+"m-.12 0a.12 .12 0 1 0 .24 0a.12 .12 0 1 0 -.24 0");
   if(row[KIND]===2)conf.push("M"+(c+.07)+" "+(r+.07)+"h.86v.86h-.86z");
@@ -196,6 +198,7 @@ function build(){
  divs.forEach((l,i)=>{if(l.length&&i>0)el("path",{d:l.join(""),fill:"#d33","fill-opacity":(i*.13).toFixed(2)},G.div)});
  if(divs[0].length)el("path",{d:divs[0].join(""),fill:"#000","fill-opacity":".18"},G.div);
  for(const[k,l]of bio)el("path",{d:l.join(""),fill:"hsl("+BIOHUE[k]+",60%,"+(dark()?"45%":"55%")+")","fill-opacity":".3"},G.bio);
+ [["#3a9","friendly"],["#d33","hostile"],["#cb4","mixed"]].forEach((a,i)=>{if(aff[i].length)el("path",{d:aff[i].join(""),fill:a[0],"fill-opacity":".4"},G.aff)});
  if(bedge.length)el("path",{d:bedge.join(""),class:"bedge"},G.bedge);
  if(belts.length){const cr=belts.filter(x=>x.indexOf("a")<0),oa=belts.filter(x=>x.indexOf("a")>=0);if(cr.length)el("path",{d:cr.join(""),class:"belt"},G.belt);if(oa.length)el("path",{d:oa.join(""),class:"oasis"},G.belt)}
  const ops=[.08,.16,.27,.4];
@@ -339,6 +342,10 @@ function describe(cr,full){
   h+='<div class="row"><span class="k">Capital</span><span>('+terr[5]+', '+terr[6]+'), radius '+terr[7].toFixed(1)+(row[CAP]?' <span class="gold">&#9733; here</span>':'')+'</span></div>';
   if(row[OUT])h+='<div class="row"><span class="k">Outposts</span><span>'+row[OUT]+' here</span></div>';
   if(terr[9]===1)h+='<div class="row ok"><b>The early outpost: peaceful, fights only when hurt</b></div>';
+ }
+ if(row[MOOD]>0){
+  const cv=D.territories[row[MCIV]],words=["","neutral","friendly","hostile","mixed"];
+  h+='<h3>Wildlife toward '+esc(cv[0])+'</h3><div class="row"><b>'+words[row[MOOD]]+'</b> <span class="sub">'+Math.round(row[MHOS]*100)+'% hostile, '+Math.round(row[MFRI]*100)+'% friendly</span></div>';
  }
  if(row[APX]>=0){const a=D.apexes[row[APX]];h+='<h3>Apex</h3><div class="row gold"><b>&#9818; '+esc(a[0])+'</b> <span class="sub">'+esc(a[2])+', '+esc(a[1])+'</span></div>'}
  return h;

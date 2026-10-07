@@ -37,6 +37,17 @@ pub struct Fauna {
     /// Striking civil body (idle person or turret) -> the hostile wild body it is after.
     pub defenders: BTreeMap<u64, u64>,
     clock: f32,
+    /// Per civilization, what the ship has earned by killing its enemies in this window.
+    credit: BTreeMap<u64, Credit>,
+    /// Game time before which no further kill banner is posted.
+    banner_until: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct Credit {
+    start: f32,
+    kills: u32,
+    earned: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -126,7 +137,7 @@ impl Game {
             ..Fauna::default()
         };
         if things.is_empty() {
-            self.fauna = fauna;
+            self.keep_stances(fauna);
             return;
         }
         // Candidates: (distance squared, wild id, thing index, affinity, disposition).
@@ -232,7 +243,119 @@ impl Game {
                 fauna.defenders.insert(th.id, wid);
             }
         }
-        self.fauna = fauna;
+        self.keep_stances(fauna);
+    }
+
+    /// Swaps in a fresh scan, keeping what the ship has earned.
+    fn keep_stances(&mut self, fresh: Fauna) {
+        self.fauna.stances = fresh.stances;
+        self.fauna.defenders = fresh.defenders;
+        self.fauna.clock = fresh.clock;
+    }
+
+    /// A wild creature fell to the ship near a civilization's people. Killing what a civilization
+    /// has taken in costs regard (by how fond of it they are); killing what they are at war with
+    /// earns a little, with diminishing returns and a cap per window so it cannot be farmed.
+    pub(super) fn wildlife_killed(&mut self, body: &Body) {
+        if body.kind != BodyKind::Creature || body.follower || body.consumed {
+            return;
+        }
+        let Some(st) = self.fauna.stances.get(&body.id).copied() else {
+            return;
+        };
+        if self.civ_standing(st.tid) == Standing::Fallen {
+            return;
+        }
+        let Some(civ) = self.civ_territories.get(&st.tid).copied() else {
+            return;
+        };
+        let name = civ.name(self.seed);
+        let now = self.time;
+        let (delta, text, rarity) = match st.disposition {
+            Disposition::Friendly => (
+                -t::FRIEND_KILL_COST * st.affinity,
+                format!("{name}  - they valued this herd"),
+                upgrades::Rarity::Rare,
+            ),
+            Disposition::Hostile => {
+                let credit = self.fauna.credit.entry(st.tid).or_default();
+                if now - credit.start > t::GAIN_WINDOW {
+                    *credit = Credit {
+                        start: now,
+                        ..Credit::default()
+                    };
+                }
+                let want = t::HOSTILE_KILL_GAIN
+                    * -st.affinity
+                    * t::GAIN_DIMINISH.powi(credit.kills as i32);
+                let gain = want.min((t::GAIN_CAP - credit.earned).max(0.0));
+                credit.kills += 1;
+                credit.earned += gain;
+                (
+                    gain,
+                    format!("{name}  - they thank you"),
+                    upgrades::Rarity::Common,
+                )
+            }
+            Disposition::Neutral => return,
+        };
+        if delta == 0.0 {
+            return;
+        }
+        self.shift_regard(st.tid, delta);
+        if now >= self.fauna.banner_until {
+            self.fauna.banner_until = now + t::KILL_BANNER_EVERY;
+            self.notify(text, rarity);
+        }
+    }
+
+    /// The wildlife near the ship that a civilization of the territory it is in has a view on,
+    /// nearest first: (species name, disposition), hostile and friendly only, at most
+    /// `TAG_COUNT`.
+    pub fn fauna_tags(&self) -> Vec<(String, Disposition)> {
+        let (Some(civ), Some(ship)) = (self.territory, self.player().map(|p| p.position)) else {
+            return Vec::new();
+        };
+        let mut seen: Vec<(f32, u64, String, Disposition)> = Vec::new();
+        for b in self.bodies.iter().filter(|b| {
+            b.active
+                && b.kind == BodyKind::Creature
+                && !b.follower
+                && !self.civ_lineages.contains_key(&b.species)
+                && self.apex_of(b).is_none()
+        }) {
+            let d = b.position.distance_squared(ship);
+            if d > t::TAG_RANGE * t::TAG_RANGE || seen.iter().any(|s| s.1 == b.species) {
+                continue;
+            }
+            let a = affinity::affinity(
+                self.seed,
+                b.species,
+                &b.genome,
+                &civ,
+                b.position / world::SECTOR_SIZE,
+            );
+            let disposition = Disposition::of(a);
+            if disposition != Disposition::Neutral {
+                seen.push((d, b.species, b.genome.name(), disposition));
+            }
+        }
+        seen.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        seen.into_iter()
+            .take(t::TAG_COUNT)
+            .map(|(_, _, n, d)| (n, d))
+            .collect()
+    }
+
+    /// How the wildlife of a sector in or beside a territory stands toward it, for the star
+    /// map: the civilization's name and the sector's mood.
+    pub fn sector_mood(&self, sector: SectorId) -> Option<(String, affinity::Mood)> {
+        let civ = crate::territory::nearby_territory(self.seed, sector)?;
+        let eco = crate::range::ecology(self.seed, sector);
+        Some((
+            civ.name(self.seed),
+            affinity::mood(self.seed, &eco, &civ, sector),
+        ))
     }
 
     /// Per tick: rescan now and then, then let hostile wildlife bite and defenders strike.
@@ -750,5 +873,104 @@ mod tests {
         }
         assert!(game.bodies.len() < MAX_BODIES);
         assert!(game.civ_strength(capital.id) <= 3 * crate::simulation::civ::CIV_CAP);
+    }
+
+    /// Stages a creature of `want` disposition beside a member, scans, and has the ship kill it.
+    fn kill_one(game: &mut Game, t: &Territory, want: Disposition) {
+        let species = species_that_is(want, brute(), t, SPOT);
+        let wild = spawn(game, &species, SPOT + Vec2::new(250.0, 0.0));
+        game.scan_fauna();
+        assert!(game.fauna.stances.contains_key(&wild));
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == wild)
+            .unwrap()
+            .health = 0.0;
+        set_player(game, Vec2::ZERO, Vec2::ZERO);
+        game.step(DT, Input::default());
+    }
+
+    #[test]
+    fn killing_a_friendly_herd_costs_regard_and_says_so() {
+        let t = horde();
+        let mut game = stage(t);
+        member_at(&mut game, &t, SPOT);
+        let before = game.civ_regard(t.id);
+        kill_one(&mut game, &t, Disposition::Friendly);
+        let after = game.civ_regard(t.id);
+        assert!(after < before - 0.5, "{before} -> {after}");
+        assert!(after >= before - t::FRIEND_KILL_COST - 0.01);
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.contains("valued this herd"))
+        );
+    }
+
+    #[test]
+    fn killing_a_hostile_species_earns_a_little_but_cannot_be_farmed() {
+        let t = horde();
+        let mut game = stage(t);
+        member_at(&mut game, &t, SPOT);
+        let before = game.civ_regard(t.id);
+        kill_one(&mut game, &t, Disposition::Hostile);
+        let first = game.civ_regard(t.id) - before;
+        assert!(
+            first > 0.0 && first <= t::HOSTILE_KILL_GAIN + 0.01,
+            "{first}"
+        );
+        assert!(game.notices.iter().any(|n| n.text.contains("thank you")));
+        let mut last = first;
+        for _ in 0..40 {
+            let was = game.civ_regard(t.id);
+            kill_one(&mut game, &t, Disposition::Hostile);
+            let gain = game.civ_regard(t.id) - was;
+            // Never more than the first, and shrinking on the whole.
+            assert!(gain <= first + 0.01);
+            last = gain;
+        }
+        let total = game.civ_regard(t.id) - before;
+        assert!(total <= t::GAIN_CAP + 0.01, "farmed {total}");
+        assert!(last < first);
+        // A new window pays again.
+        game.time += t::GAIN_WINDOW + 1.0;
+        let was = game.civ_regard(t.id);
+        kill_one(&mut game, &t, Disposition::Hostile);
+        assert!(game.civ_regard(t.id) > was);
+    }
+
+    #[test]
+    fn neutral_kills_and_far_kills_cost_nothing() {
+        let t = horde();
+        let mut game = stage(t);
+        member_at(&mut game, &t, SPOT);
+        let species = species_that_is(Disposition::Neutral, brute(), &t, SPOT);
+        let wild = spawn(&mut game, &species, SPOT + Vec2::new(250.0, 0.0));
+        game.scan_fauna();
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == wild)
+            .unwrap()
+            .health = 0.0;
+        let before = game.civ_regard(t.id);
+        game.step(DT, Input::default());
+        assert_eq!(game.civ_regard(t.id), before);
+    }
+
+    #[test]
+    fn the_hud_tags_and_the_star_map_read_the_same_affinities() {
+        let t = horde();
+        let mut game = stage(t);
+        game.territory = Some(t);
+        let friendly = species_that_is(Disposition::Friendly, brute(), &t, SPOT);
+        let hostile = species_that_is(Disposition::Hostile, brute(), &t, SPOT);
+        spawn(&mut game, &friendly, SPOT);
+        spawn(&mut game, &hostile, SPOT + Vec2::new(50.0, 0.0));
+        let tags = game.fauna_tags();
+        assert!(tags.iter().any(|t| t.1 == Disposition::Friendly));
+        assert!(tags.iter().any(|t| t.1 == Disposition::Hostile));
+        let mood = game.sector_mood(t.capital);
+        assert!(mood.is_some());
+        assert_eq!(game.sector_mood(SectorId::ORIGIN), None);
     }
 }

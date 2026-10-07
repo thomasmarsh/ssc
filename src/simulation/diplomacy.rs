@@ -200,7 +200,7 @@ impl Game {
     }
 
     /// Lowers (or, negative, raises) regard and announces any tier change.
-    fn shift_regard(&mut self, territory: u64, delta: f32) {
+    pub(super) fn shift_regard(&mut self, territory: u64, delta: f32) {
         let Some(r) = self.regard_mut(territory) else {
             return;
         };

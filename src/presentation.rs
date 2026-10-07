@@ -387,6 +387,23 @@ fn hud_lines(game: &Game) -> String {
 /// The HUD line for the territory the ship is in: its name, what it asks of the ship and
 /// where its raid clock stands. Empty outside any territory.
 fn territory_line(game: &Game) -> String {
+    let line = territory_status(game);
+    if line.is_empty() {
+        return line;
+    }
+    // Wildlife near the ship that this civilization has a view on, hostile or friendly.
+    let tags = game.fauna_tags();
+    if tags.is_empty() {
+        return line;
+    }
+    let tags: Vec<String> = tags
+        .iter()
+        .map(|(name, d)| format!("{name} {}", d.label().to_uppercase()))
+        .collect();
+    format!("{line}\nWILDLIFE  {}", tags.join("   "))
+}
+
+fn territory_status(game: &Game) -> String {
     use ssc::simulation::{RaidStage, Tier};
     use ssc::world::Standing;
     let Some(report) = game.territory_report() else {
@@ -1168,6 +1185,21 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
     if entry.is_some() {
         detail.push((
             format!("REGION  {}\n", game.region_of(cursor.sector).name),
+            light,
+        ));
+    }
+    // How the wildlife of a charted sector in or beside a claim regards that civilization.
+    if entry.is_some()
+        && let Some((name, mood)) = game.sector_mood(cursor.sector)
+        && let Some(read) = mood.read()
+    {
+        detail.push((
+            format!(
+                "WILDLIFE toward {name}: {}   ({:.0}% hostile, {:.0}% friendly)\n",
+                read.to_uppercase(),
+                mood.hostile * 100.0,
+                mood.friendly * 100.0
+            ),
             light,
         ));
     }

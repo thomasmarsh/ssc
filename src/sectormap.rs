@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 4;
+pub const GENERATOR_VERSION: u32 = 5;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
@@ -129,6 +129,9 @@ pub struct Cell {
     /// Outpost bases of a civilization in this sector.
     pub outposts: u32,
     pub apex: Option<(Rank, String, apex::Archetype)>,
+    /// For a sector in or beside a territory: that civilization and how this sector's wildlife
+    /// stands toward it (see `affinity`).
+    pub mood: Option<(Territory, crate::affinity::Mood)>,
 }
 
 /// Samples sector `id` through the same functions the game uses.
@@ -167,6 +170,8 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
         }
     }
     let apex = apex::rank(seed, id).map(|r| (r, apex::name(seed, id), apex::archetype(seed, id)));
+    let mood = crate::territory::nearby_territory(seed, id)
+        .map(|t| (t, crate::affinity::mood(seed, &eco, &t, id)));
     Cell {
         id,
         ring: ring(id),
@@ -202,6 +207,7 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
         capital,
         outposts,
         apex,
+        mood,
     }
 }
 
@@ -367,6 +373,24 @@ impl Map {
         Ok(map)
     }
 
+    fn intern_territory(&mut self, t: &Territory) {
+        if self.territory_index.contains_key(&t.id) {
+            return;
+        }
+        self.territory_index.insert(t.id, self.territories.len());
+        self.territories.push(TerritoryRow {
+            name: t.name(self.options.seed),
+            shape: t.shape.label(),
+            strength: t.strength,
+            menace: t.menace(),
+            tier: t.fort_tier(),
+            capital: (t.capital.x, t.capital.y),
+            radius: t.radius,
+            color: hex(t.color(self.options.seed)),
+            peaceful: t.peaceful(),
+        });
+    }
+
     fn intern(&mut self, cell: &Cell) {
         for s in &cell.species {
             if !self.species_index.contains_key(&s.lineage) {
@@ -394,21 +418,11 @@ impl Map {
             self.regions
                 .push((cell.region.name.clone(), kind_index(cell.region.kind)));
         }
-        if let Some(t) = &cell.territory
-            && !self.territory_index.contains_key(&t.id)
-        {
-            self.territory_index.insert(t.id, self.territories.len());
-            self.territories.push(TerritoryRow {
-                name: t.name(self.options.seed),
-                shape: t.shape.label(),
-                strength: t.strength,
-                menace: t.menace(),
-                tier: t.fort_tier(),
-                capital: (t.capital.x, t.capital.y),
-                radius: t.radius,
-                color: hex(t.color(self.options.seed)),
-                peaceful: t.peaceful(),
-            });
+        if let Some(t) = &cell.territory {
+            self.intern_territory(t);
+        }
+        if let Some((t, _)) = &cell.mood {
+            self.intern_territory(t);
         }
         if let Some((rank, name, archetype)) = &cell.apex {
             self.apex_index.insert(cell.id, self.apexes.len());
@@ -427,7 +441,9 @@ impl Map {
     /// region index, species `[[index, weight, isolation]...]`, creatures, asteroids, bases, wells
     /// `[[dx, dy]...]`, planetoids `[[radius, renewable, dx, dy]...]`, territory index or -1,
     /// capital 0/1, outposts, apex index or -1, diversity cap, belt depth, biome cell index,
-    /// oasis 0/1.
+    /// oasis 0/1, then the wildlife's affinity read (0 none, 1 neutral, 2 friendly, 3 hostile,
+    /// 4 mixed), its hostile share, its friendly share and the territory index it is read
+    /// against (-1 for none).
     pub fn row_json(&self, index: usize) -> String {
         let c = &self.cells[index];
         let mut o = String::new();
@@ -475,15 +491,29 @@ impl Map {
             .territory
             .map_or(-1, |t| self.territory_index[&t.id] as i64);
         let apex = self.apex_index.get(&c.id).map_or(-1, |i| *i as i64);
+        let (mood, mood_civ) = match &c.mood {
+            Some((t, m)) => (
+                match m.read() {
+                    None => 1,
+                    Some("friendly") => 2,
+                    Some("hostile") => 3,
+                    Some(_) => 4,
+                },
+                self.territory_index[&t.id] as i64,
+            ),
+            None => (0, -1),
+        };
         let _ = write!(
             o,
-            "],{territory},{},{},{apex},{:.2},{:.2},{},{}]",
+            "],{territory},{},{},{apex},{:.2},{:.2},{},{},{mood},{:.2},{:.2},{mood_civ}]",
             u8::from(c.capital),
             c.outposts,
             c.capacity,
             c.belt,
             self.biome_index[&c.biome_key],
-            u8::from(c.oasis)
+            u8::from(c.oasis),
+            c.mood.as_ref().map_or(0.0, |m| m.1.hostile),
+            c.mood.as_ref().map_or(0.0, |m| m.1.friendly),
         );
         o
     }
@@ -644,6 +674,30 @@ mod tests {
         ] {
             assert!(!page.contains(banned), "external reference: {banned}");
         }
+    }
+
+    #[test]
+    fn the_affinity_layer_reads_the_game_function_beside_territories_only() {
+        let seed = SEED;
+        let mut read = 0;
+        for x in -30..30 {
+            for y in -30..30 {
+                let id = SectorId { x, y };
+                let cell = sample_cell(seed, id);
+                let near = crate::territory::nearby_territory(seed, id);
+                assert_eq!(cell.mood.is_some(), near.is_some());
+                if let Some((t, m)) = cell.mood {
+                    assert_eq!(Some(t), near);
+                    assert_eq!(m, crate::affinity::mood(seed, &ecology(seed, id), &t, id));
+                    assert!((0.0..=1.0).contains(&m.hostile) && m.hostile + m.friendly <= 1.001);
+                    read += 1;
+                }
+            }
+        }
+        assert!(read > 20, "too few sectors beside a claim: {read}");
+        assert!(sample_cell(seed, SectorId::ORIGIN).mood.is_none());
+        let html = render(small(9, 9)).unwrap();
+        assert!(html.contains("data-layer=\"affinity\""));
     }
 
     #[test]

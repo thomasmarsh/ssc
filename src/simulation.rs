@@ -1572,6 +1572,7 @@ impl Game {
             if kind != BodyKind::Player {
                 self.civ_destroyed(body);
                 self.civ_killed(body);
+                self.wildlife_killed(body);
                 self.apex_slain(body);
                 self.drop_loot(body);
                 self.siphon(body);

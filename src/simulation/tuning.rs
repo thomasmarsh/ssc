@@ -409,3 +409,19 @@ pub const STRIKE_DAMAGE: f32 = 9.0;
 pub const STRIKE_PERIOD_MIN: f32 = 0.8;
 pub const TURRET_DEFEND_RANGE: f32 = 950.0;
 pub const TURRET_STRIKE: f32 = 16.0;
+
+/// Killing wildlife near a civilization's people (see `wildlife::wildlife_killed`). A kill of a
+/// species the civilization is friendly to costs `FRIEND_KILL_COST` regard times its affinity
+/// (0.3 to 1). A kill of a hostile one earns `HOSTILE_KILL_GAIN` times how much it is hated,
+/// times `GAIN_DIMINISH` for each earlier kill in the window, at most `GAIN_CAP` per civilization
+/// per `GAIN_WINDOW` seconds, so it cannot be farmed. A banner at most every `KILL_BANNER_EVERY`.
+pub const FRIEND_KILL_COST: f32 = 3.0;
+pub const HOSTILE_KILL_GAIN: f32 = 1.5;
+pub const GAIN_DIMINISH: f32 = 0.7;
+pub const GAIN_CAP: f32 = 6.0;
+pub const GAIN_WINDOW: f32 = 300.0;
+pub const KILL_BANNER_EVERY: f32 = 4.0;
+/// The HUD names up to `TAG_COUNT` species within `TAG_RANGE` of the ship, hostile or friendly to
+/// the territory it is in.
+pub const TAG_COUNT: usize = 3;
+pub const TAG_RANGE: f32 = 2600.0;
