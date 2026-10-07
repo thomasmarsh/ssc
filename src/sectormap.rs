@@ -227,7 +227,6 @@ fn family_label(family: Family) -> &'static str {
     match family {
         Family::Fatso => "Fatso",
         Family::Bogey => "Bogey",
-        Family::Smarty => "Smarty",
         Family::Lunatic => "Lunatic",
         Family::Leech => "Leech",
         Family::Wild => "Wild",

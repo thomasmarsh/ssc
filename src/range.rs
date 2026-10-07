@@ -21,7 +21,7 @@
 //!
 //! The species catalog is endless: depth is cut into tiers of `TIER` rings and every tier
 //! rolls `SLOTS_PER_TIER` species (a few generalists, some regional, most endemic) whose
-//! depth centre falls in it. The five classics are fixed entries beside them.
+//! depth centre falls in it. The four wild classics are fixed entries beside them.
 
 use crate::biome::{Biome, BiomeKind, biome};
 use crate::genome::{Diet, GenePool, Genome, PoolEntry, Species, Weapon};
@@ -102,9 +102,11 @@ pub const RANK_SOFTNESS: f32 = 0.06;
 pub const PRESENCE_FADE: (f32, f32) = (0.03, 0.12);
 /// What the sector's species list drops after the fade.
 pub const MIN_PRESENCE: f32 = 0.01;
-/// The Smarty's debut on ring 3 (see `Distribution::debut`): its strength, how many more
-/// rings it lasts, the noise frequency and the noise band that switches it on.
-pub const SMARTY_DEBUT: f32 = 0.75;
+/// The Lunatic's debut on ring 3 (see `Distribution::debut`): its strength, how many more
+/// rings it lasts, the noise frequency and the noise band that switches it on. Learners
+/// (Smarties and any brain-driven species) are not part of the wild at all: only
+/// civilizations think.
+pub const LUNATIC_DEBUT: f32 = 0.6;
 pub const DEBUT_RINGS: u32 = 3;
 pub const DEBUT_FREQUENCY: f32 = 0.5;
 pub const DEBUT_NOISE: (f32, f32) = (0.3, 0.5);
@@ -117,7 +119,7 @@ pub const RELIC_FREQUENCY: f32 = 0.3;
 pub const RELIC_RISE: f32 = 3.0;
 
 /// Rings at which the classics' intro span ends at full strength: Fatsos, then Bogeys and
-/// Smarties, then Lunatics and Leeches. Each fades out over the next five rings.
+/// Bogeys, then Lunatics and Leeches. Each fades out over the next five rings.
 pub const CLASSIC_END: (f32, f32, f32) = (7.0, 9.0, 10.0);
 
 /// Ring 3, where blending begins, may hold this many species at least; the floor slides
@@ -126,7 +128,7 @@ pub const OPENING_DIVERSITY: f32 = 3.0;
 pub const OPENING_SLOPE: f32 = 0.5;
 /// How strongly a species' favourite biome pulls the character its genome is sampled from.
 pub const FOUNDER_PULL: f32 = 0.4;
-/// How picky the five classics are about country (they stay broad).
+/// How picky the four classics are about country (they stay broad).
 pub const CLASSIC_PICKY: f32 = 0.3;
 /// An oasis (a planetoid inside a belt) restores life to this share of an unmasked sector,
 /// and holds at most `OASIS_CAPACITY` species.
@@ -244,12 +246,11 @@ pub fn regional_noise(seed: u64, key: SpeciesKey, channel: u64, at: Vec2, freque
     value_noise(seed ^ NICHE_SALT ^ key, channel, at * frequency)
 }
 
-/// The five classic species and the wild ones.
+/// The classic species (the wild four; the Smarty lives on only as a civilization's kin) and the wild ones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
     Fatso,
     Bogey,
-    Smarty,
     Lunatic,
     Leech,
     /// A sampled species of its own.
@@ -257,19 +258,13 @@ pub enum Family {
 }
 
 impl Family {
-    pub const CLASSICS: [Family; 5] = [
-        Family::Fatso,
-        Family::Bogey,
-        Family::Smarty,
-        Family::Lunatic,
-        Family::Leech,
-    ];
+    pub const CLASSICS: [Family; 4] =
+        [Family::Fatso, Family::Bogey, Family::Lunatic, Family::Leech];
 
     fn species(self) -> Option<Species> {
         Some(match self {
             Self::Fatso => Species::fatso(),
             Self::Bogey => Species::bogey(),
-            Self::Smarty => Species::smarty(),
             Self::Lunatic => Species::lunatic(),
             Self::Leech => Species::leech(),
             Self::Wild => return None,
@@ -277,26 +272,25 @@ impl Family {
     }
 
     /// The nearest ring a classic species is allowed at: Fatsos from ring 1, Bogeys from
-    /// ring 2, then Smarties and Lunatics from ring 3 and Leeches from 4.
+    /// ring 2, then Lunatics from ring 3 and Leeches from 4.
     pub fn min_ring(self) -> u32 {
         match self {
             Self::Fatso => 1,
             Self::Bogey => 2,
-            Self::Smarty | Self::Lunatic | Self::Wild => 3,
+            Self::Lunatic | Self::Wild => 3,
             Self::Leech => 4,
         }
     }
 }
 
 /// The nearest ring a sampled genome is allowed at: plain creatures from ring 3, then
-/// bodies with joints, cords and flinging, then predators, learners and heavy armament.
+/// bodies with joints, cords and flinging, then predators and heavy armament.
 pub fn wild_min_ring(genome: &Genome) -> u32 {
     let mut ring = Family::Wild.min_ring();
     if genome.is_jointed() || genome.weapon == Weapon::Tether || genome.fling_strength() >= 0.5 {
         ring = ring.max(4);
     }
     if genome.diet == Diet::Hunt
-        || genome.learner > 0.3
         || matches!(
             genome.weapon,
             Weapon::Needles | Weapon::Spiral | Weapon::Nova | Weapon::Missile
@@ -354,7 +348,7 @@ pub struct Distribution {
     /// Where the lineage began, in sector units (a classic begins at HOME).
     pub anchor: Vec2,
     /// A ring-3 debut: the abundance a species is given by its own fine noise on ring 3,
-    /// fading to nothing over `DEBUT_RINGS` more (zero for everyone but the Smarty).
+    /// fading to nothing over `DEBUT_RINGS` more (zero for everyone but the Lunatic).
     pub debut: f32,
     /// The share of sectors beyond the intro span that still hold the species, as endemic-like
     /// pockets (zero for sampled species, which have no afterlife to speak of).
@@ -362,22 +356,13 @@ pub struct Distribution {
 }
 
 impl Distribution {
-    /// One of the five classics: fixed, hand-placed niches.
+    /// One of the four classics: fixed, hand-placed niches.
     pub fn classic(family: Family) -> Self {
         // The intro span: full strength until `end`, gone `fall` rings later; `relic` is the
         // share of sectors that keep the species afterwards (see `relic_at`).
         let (start, rise, end, fall, breadth, spread, relic) = match family {
             Family::Fatso => (0.0, 1.5, CLASSIC_END.0, 5.0, 0.9, Spread::Generalist, 0.12),
             Family::Bogey => (1.0, 3.0, CLASSIC_END.1, 5.0, 0.92, Spread::Generalist, 0.14),
-            Family::Smarty => (
-                1.5,
-                1.5,
-                CLASSIC_END.1 - 1.0,
-                5.0,
-                0.6,
-                Spread::Regional,
-                0.13,
-            ),
             Family::Lunatic => (2.5, 5.0, CLASSIC_END.2, 5.0, 0.5, Spread::Regional, 0.12),
             Family::Leech => (3.5, 6.0, CLASSIC_END.2, 5.0, 0.42, Spread::Regional, 0.12),
 
@@ -399,14 +384,13 @@ impl Distribution {
             favourite: match family {
                 Family::Fatso => BiomeKind::Grazing,
                 Family::Bogey => BiomeKind::Plains,
-                Family::Smarty => BiomeKind::Keen,
                 Family::Lunatic => BiomeKind::Brutish,
                 _ => BiomeKind::Predator,
             },
             picky: CLASSIC_PICKY,
             anchor: Vec2::ZERO,
-            debut: if family == Family::Smarty {
-                SMARTY_DEBUT
+            debut: if family == Family::Lunatic {
+                LUNATIC_DEBUT
             } else {
                 0.0
             },
@@ -1055,8 +1039,8 @@ mod tests {
     }
 
     /// The hard rules of the opening: HOME is a sanctuary, ring 1 holds only Fatsos, ring 2
-    /// holds Fatsos and Bogeys in every sector (no seed-directional slices), and Smarties
-    /// first appear on ring 3.
+    /// holds Fatsos and Bogeys in every sector (no seed-directional slices), and Lunatics
+    /// first appear on ring 3. Nothing wild ever learns.
     #[test]
     fn the_start_rings_follow_the_rules() {
         for seed in SEEDS {
@@ -1076,11 +1060,11 @@ mod tests {
             assert!(
                 on_three
                     .iter()
-                    .any(|id| has(&ecology(seed, *id), Species::smarty())),
-                "seed {seed}: Smarties never appear on ring three"
+                    .any(|id| has(&ecology(seed, *id), Species::lunatic())),
+                "seed {seed}: Lunatics never appear on ring three"
             );
             for id in sectors(2) {
-                assert!(!has(&ecology(seed, id), Species::smarty()));
+                assert!(!has(&ecology(seed, id), Species::lunatic()));
             }
         }
     }
@@ -1636,7 +1620,7 @@ mod tests {
     fn classics_fade_into_the_catalog_after_the_intro() {
         let band = |lo: u32, hi: u32| {
             let (mut presences, mut classic, mut count, mut with) = (0, 0, 0, 0);
-            let mut per = [0_u32; 5];
+            let mut per = [0_u32; 4];
             for seed in SEEDS {
                 for id in sectors(hi as i32).filter(|id| (lo..=hi).contains(&ring(*id))) {
                     let eco = ecology(seed, id);

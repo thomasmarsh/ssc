@@ -198,7 +198,7 @@ impl Game {
                 Archetype::Maelstrom => {
                     self.maelstrom(index, &mut state, dt, distance, alert, enraged);
                 }
-                // The rest is in the genes: cords, the learner's brain, the spiral, and the
+                // The rest is in the genes: cords, the pack's perfect lead, the spiral, and the
                 // bulwark's plates (see `guard`).
                 Archetype::Lasher | Archetype::Bulwark | Archetype::Hunter | Archetype::Warden => {}
             }
@@ -889,9 +889,9 @@ mod tests {
         assert_eq!(lasher.weapon, crate::genome::Weapon::Tether);
         assert!(lasher.cord_strength >= 5.0 && lasher.cord_slack >= 1500.0);
         assert!(lasher.cord_hardness >= 6.0 && lasher.cord_drag >= 0.5);
-        // A learning pack leader.
+        // A pack leader that leads its shots perfectly; nothing wild has a brain.
         let hunter = g(Archetype::Hunter);
-        assert!(hunter.learner >= 0.9 && hunter.alarm >= 700.0);
+        assert!(hunter.learner == 0.0 && hunter.lead >= 1.0 && hunter.alarm >= 700.0);
         assert_eq!(hunter.social, crate::genome::Social::Pack);
         // Negative mass and a hard fling.
         let storm = g(Archetype::Maelstrom);

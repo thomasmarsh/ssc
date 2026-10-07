@@ -1624,12 +1624,12 @@ mod tests {
 
     #[test]
     fn ring_one_holds_only_fatsos_and_ring_two_only_fatsos_and_bogeys() {
-        let (fatso, bogey, smarty) = (
+        let (fatso, bogey, lunatic) = (
             Species::fatso().lineage,
             Species::bogey().lineage,
-            Species::smarty().lineage,
+            Species::lunatic().lineage,
         );
-        let (mut fatsos, mut bogeys, mut smarties) = (0, 0, 0);
+        let (mut fatsos, mut bogeys, mut lunatics) = (0, 0, 0);
         for seed in [0x535343, 1, 42, 7, 99] {
             for x in -2..=2 {
                 for y in -2..=2 {
@@ -1668,23 +1668,23 @@ mod tests {
                 }
             }
         }
-        // Smarties wait for ring three, where they debut.
+        // Lunatics wait for ring three, where they debut.
         for seed in [0x535343, 1, 42, 7, 99] {
             for x in -3..=3 {
                 for y in -3..=3 {
                     let id = SectorId { x, y };
                     if crate::range::ring(id) == 3 {
-                        smarties += lineages(&generate(seed, id))
+                        lunatics += lineages(&generate(seed, id))
                             .iter()
-                            .filter(|l| **l == smarty)
+                            .filter(|l| **l == lunatic)
                             .count();
                     }
                 }
             }
         }
         assert!(
-            fatsos > 50 && bogeys > 50 && smarties > 5,
-            "{fatsos} {bogeys} {smarties}"
+            fatsos > 50 && bogeys > 50 && lunatics > 5,
+            "{fatsos} {bogeys} {lunatics}"
         );
     }
 

@@ -920,15 +920,9 @@ impl Genome {
             _ => Fecundity::Prolific,
         };
 
-        // Learning comes last, from one more draw: keen, technological places breed the
-        // creatures that study the ship, and only hunters that engage it have use for that.
-        let roll = rng.f32();
-        let engages = g.fear != Fear::Player && g.trigger != Trigger::Harm;
-        if engages && roll < 0.04 + 0.3 * above(tech) {
-            let fract = (roll * 97.0).fract();
-            g.learner = 0.35 + 0.65 * fract;
-            g.learn_rate = 0.3 + 0.7 * (fract * 31.0).fract();
-        }
+        // Learning used to come from this draw. Wild life no longer learns (only civilization
+        // members think, see `territory`), but the draw stays so later genes keep their stream.
+        let _learning = rng.f32();
 
         // Rooting comes last, from one more draw: a minority of species cling to rocks, more
         // in crowded, calm places. Most rooters only cling while young; a body without a
@@ -1898,28 +1892,20 @@ mod tests {
     }
 
     #[test]
-    fn learners_are_rare_in_the_wild_keen_where_tech_is_high_and_valid() {
-        let count = |tech: f32| {
+    fn nothing_sampled_in_the_wild_learns_and_the_old_learners_still_breed_true() {
+        for tech in [0.2, 0.95] {
             let params = SectorParams {
                 tech,
                 ..SectorParams::HOME
             };
             let mut rng = Rng::new(31);
-            let mut learners = 0;
             for _ in 0..3000 {
                 let g = Genome::sample(&mut rng, &params);
                 assert_eq!(g, g.limited());
-                if g.learner > 0.0 {
-                    learners += 1;
-                    assert!((0.35..=1.0).contains(&g.learner) && g.learn_rate > 0.0);
-                }
+                assert_eq!(g.learner, 0.0, "only civilization members learn");
             }
-            learners
-        };
-        let (dull, keen) = (count(0.2), count(0.95));
-        assert!(dull > 20 && dull < 400, "{dull}");
-        assert!(keen > dull * 2, "{keen} vs {dull}");
-        // Only Smarty learns at HOME, and offspring of learners stay valid learners.
+        }
+        // The old Smarty still learns (a civilization's kin), and offspring of learners stay valid learners.
         assert!(Genome::smarty().learner > 0.0);
         assert_eq!(Genome::bogey().learner + Genome::fatso().learner, 0.0);
         let mut rng = Rng::new(5);

@@ -262,8 +262,6 @@ impl Archetype {
                 g.fire_period = 2.2;
                 g.shot_speed = 420.0;
                 g.weapon_range = 900.0;
-                g.learner = 1.0;
-                g.learn_rate = 1.0;
                 g.lead = 1.0;
                 g.social = Social::Pack;
                 g.alarm = 700.0;

@@ -42,7 +42,7 @@ pub enum BiomeKind {
     Predator,
     /// Strange, exotic lands.
     Strange,
-    /// Keen, clever lands (learners and gunners).
+    /// Keen, clever lands (gunners; the home of civilizations' kin, never of wild learners).
     Keen,
     /// Rough country of flingers and brawlers.
     Brutish,
