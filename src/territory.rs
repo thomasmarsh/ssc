@@ -55,6 +55,25 @@ pub const OUTPOST_DEPTH: (f32, f32) = (3.4, 4.6);
 const OUTPOST_RADIUS: (f32, f32) = (1.1, 1.7);
 const OUTPOST_STRENGTH: f32 = 0.35;
 
+// ---- tuning: the density gradient ---------------------------------------------------
+
+/// How far beyond a territory's nominal radius the gradient reaches zero, in sectors.
+pub const GRADIENT_PAD: f32 = 0.6;
+/// Closeness (0 at the rim, 1 at the capital) below which a sector is the fringe (scouts
+/// only, no stations) and above which it is the core (outposts may be warded, fortified).
+pub const FRINGE_BELOW: f32 = 0.3;
+pub const CORE_ABOVE: f32 = 0.6;
+/// How far toward the capital (or outward at the rim) a sector's groups lean, as a share
+/// of the sector's room.
+const LEAN: f32 = 1.0;
+/// A scout party at the fringe, then (at closeness 0 and 1) a patrol and an outlying
+/// post's garrison, in members before the strength factor.
+pub const SCOUT_MEMBERS: f32 = 2.0;
+pub const PATROL_MEMBERS: (f32, f32) = (2.0, 3.5);
+pub const POST_MEMBERS: (f32, f32) = (2.0, 3.0);
+/// Chance that a sector past the fringe holds an outlying post, at closeness 0 and 1.
+pub const POST_CHANCE: (f32, f32) = (0.1, 0.5);
+
 /// What a civilization fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CivShape {
@@ -336,6 +355,16 @@ impl Territory {
             CivRole::Elder => (self.id ^ 0xE1DE_E1DE_0000_0003) | 1,
             _ => self.id,
         }
+    }
+
+    /// How close to the heart of the civilization `sector` is, in [0, 1]: 1 at the capital,
+    /// falling smoothly to 0 `GRADIENT_PAD` sectors past the nominal radius. People, posts and
+    /// walls thicken with it, so the rim is scouts and the middle is a city.
+    pub fn closeness(&self, sector: SectorId) -> f32 {
+        let (dx, dy) = (sector.x - self.capital.x, sector.y - self.capital.y);
+        let d = Vec2::new(dx as f32, dy as f32).length();
+        let t = (1.0 - d / (self.radius + GRADIENT_PAD)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
     }
 
     /// Nominal danger of the territory relative to ordinary fauna at the same depth: scales
@@ -691,32 +720,51 @@ pub fn civ_spawns(
         return;
     }
 
-    // Elsewhere in the territory: an outpost near the capital more often than at the rim,
-    // and patrols everywhere.
-    let near = Vec2::new((id.x - t.capital.x) as f32, (id.y - t.capital.y) as f32).length();
-    let outpost = if t.peaceful() {
+    // Elsewhere in the territory the population follows the gradient (see `closeness`): scouts
+    // alone at the fringe, outlying posts and patrols toward the middle, the dense core
+    // around the capital. Everything leans toward the capital with closeness and outward
+    // at the rim.
+    let c = t.closeness(id);
+    let lerp = |range: (f32, f32)| range.0 + (range.1 - range.0) * c;
+    let toward = (t.capital.center() - center).normalize_or_zero();
+    let lean = (c - FRINGE_BELOW) * extent * LEAN;
+    let place = |rng: &mut Rng| {
+        let at = place(rng) + toward * lean;
+        let limit = SECTOR_SIZE / 2.0 - 200.0;
+        center + (at - center).clamp(Vec2::splat(-limit), Vec2::splat(limit))
+    };
+    let outpost = if t.peaceful() || c < FRINGE_BELOW {
         0.0
     } else {
-        (0.7 - 0.12 * near).clamp(0.15, 0.7)
+        lerp(POST_CHANCE)
     };
     let mut fortify = None;
     if rng.chance(outpost) {
         let seat = place(&mut rng);
         station(out, &mut rng, CivRole::Outpost, seat);
-        for _ in 0..share(3.0) {
+        for _ in 0..share(lerp(POST_MEMBERS)) {
             let at = scatter(&mut rng, seat, 380.0);
             add(out, member, CivRole::Member, at);
         }
-        if t.shape != CivShape::Horde {
+        if t.shape != CivShape::Horde && c >= CORE_ABOVE {
             let at = scatter(&mut rng, seat, 260.0);
             add(out, warrior, CivRole::Warrior, at);
         }
         fortify = Some(seat);
     }
-    let patrols = rng.int(1, 2) as f32;
-    for _ in 0..patrols as u32 {
+    let patrols = if c < FRINGE_BELOW {
+        1
+    } else {
+        rng.int(1, 1 + (c * 2.0).round() as u32)
+    };
+    for _ in 0..patrols {
         let heart = place(&mut rng);
-        for _ in 0..share(2.0) {
+        let size = if c < FRINGE_BELOW {
+            SCOUT_MEMBERS
+        } else {
+            lerp(PATROL_MEMBERS)
+        };
+        for _ in 0..share(size) {
             let at = scatter(&mut rng, heart, 200.0);
             add(out, member, CivRole::Member, at);
         }
@@ -1046,6 +1094,116 @@ mod tests {
                     "{id:?} strength {} at depth {depth}",
                     t.strength
                 );
+            }
+        }
+    }
+
+    /// Per sector of the territories of a few seeds: (closeness, people, stations, walls).
+    fn census() -> Vec<(f32, usize, usize, usize, bool, bool)> {
+        let mut out = Vec::new();
+        for seed in [SEED, 1, 42, 99, 7] {
+            for (id, t) in all_territories(seed, 40) {
+                if t.peaceful() {
+                    continue;
+                }
+                let spawns = crate::world::generate(seed, id);
+                let mine = |f: &dyn Fn(CivRole) -> bool| {
+                    spawns
+                        .iter()
+                        .filter(|s| s.civ.is_some_and(|c| c.territory == t.id && f(c.role)))
+                        .count()
+                };
+                out.push((
+                    t.closeness(id),
+                    mine(&|r| matches!(r, CivRole::Member | CivRole::Warrior | CivRole::Elder)),
+                    mine(&|r| matches!(r, CivRole::Capital | CivRole::Outpost)),
+                    mine(&|r| matches!(r, CivRole::Wall | CivRole::Turret)),
+                    id == t.capital,
+                    crate::world::bodies_used(&spawns) + 4 < SECTOR_BODY_BUDGET,
+                ));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn closeness_is_one_at_the_capital_and_falls_smoothly_to_the_rim() {
+        for (id, t) in all_territories(SEED, 40) {
+            let c = t.closeness(id);
+            assert!((0.0..=1.0).contains(&c));
+            assert_eq!(c == 1.0, id == t.capital, "{id:?}");
+        }
+        let (_, t) = all_territories(SEED, 40)[0];
+        let at = |d: i32| {
+            t.closeness(SectorId {
+                x: t.capital.x + d,
+                y: t.capital.y,
+            })
+        };
+        assert!(at(0) > at(1) && at(1) > at(2) && at(2) >= at(3));
+        assert_eq!(at(4), 0.0);
+    }
+
+    #[test]
+    fn people_thicken_toward_the_heart_and_the_fringe_holds_only_scouts() {
+        let census = census();
+        let mean = |lo: f32, hi: f32| {
+            let band: Vec<f32> = census
+                .iter()
+                .filter(|c| (lo..hi).contains(&c.0) && !c.4)
+                .map(|c| c.1 as f32)
+                .collect();
+            assert!(band.len() > 10, "{lo}..{hi}: {}", band.len());
+            band.iter().sum::<f32>() / band.len() as f32
+        };
+        let (fringe, mid, core) = (
+            mean(0.0, FRINGE_BELOW),
+            mean(FRINGE_BELOW, CORE_ABOVE),
+            mean(CORE_ABOVE, 1.0),
+        );
+        let capitals: Vec<f32> = census.iter().filter(|c| c.4).map(|c| c.1 as f32).collect();
+        let capital = capitals.iter().sum::<f32>() / capitals.len() as f32;
+        assert!(
+            fringe < mid && mid < core && core < capital,
+            "{fringe} {mid} {core} {capital}"
+        );
+        assert!(
+            fringe <= 3.0 && capital > 3.0 * fringe,
+            "{fringe} vs {capital}"
+        );
+        // The fringe is scouts (a party, never stations or walls); the rest is the city.
+        for (c, people, stations, walls, capital, room) in &census {
+            if *c < FRINGE_BELOW {
+                // (A sector the wildlife has already filled to its body budget has no room.)
+                assert!(*people >= 1 || !*room, "no scouts at closeness {c}");
+                assert!(*stations == 0 && *walls == 0, "buildings at the rim {c}");
+            }
+            if *capital {
+                assert!(*stations >= 1);
+            }
+        }
+        assert!(
+            census
+                .iter()
+                .any(|c| c.0 >= FRINGE_BELOW && c.0 < 1.0 && c.2 > 0),
+            "outlying posts exist past the fringe"
+        );
+    }
+
+    #[test]
+    fn a_sector_never_holds_a_crowd_of_one_civilization() {
+        for seed in [SEED, 1, 42] {
+            for (id, t) in all_territories(seed, 30) {
+                let people = crate::world::generate(seed, id)
+                    .iter()
+                    .filter(|s| {
+                        s.civ.is_some_and(|c| {
+                            c.territory == t.id
+                                && !matches!(c.role, CivRole::Wall | CivRole::Turret)
+                        })
+                    })
+                    .count();
+                assert!(people <= 24, "{id:?}: {people}");
             }
         }
     }

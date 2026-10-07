@@ -3509,7 +3509,7 @@ fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
         let sweep = 0.7 + 2.0 * skill;
         let start = time * 1.6 + body.id as f32 * 2.3;
         let ring = r * 1.55 + 5.0;
-        let alpha = 0.16 + 0.5 * skill;
+        let alpha = 0.3 + 0.5 * skill;
         let steps = 10;
         let arc = (0..=steps).map(|i| {
             let angle = start + sweep * i as f32 / steps as f32;
