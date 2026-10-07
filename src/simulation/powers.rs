@@ -67,19 +67,26 @@ impl JamTell {
 #[derive(Clone, Debug, Default)]
 pub struct PowerState {
     /// Seconds until the next blink.
-    clock: f32,
+    pub(super) clock: f32,
     /// Blinks made, keying the landing stream.
-    uses: u32,
-    blink: Option<BlinkTell>,
+    pub(super) uses: u32,
+    pub(super) blink: Option<BlinkTell>,
     /// The last hop: from, to, and age.
-    trail: Option<(Vec2, Vec2, f32)>,
+    pub(super) trail: Option<(Vec2, Vec2, f32)>,
     /// The lead-in chime has been given for this phased window.
-    cued: bool,
-    jam: Option<JamTell>,
-    jam_clock: f32,
+    pub(super) cued: bool,
+    pub(super) jam: Option<JamTell>,
+    pub(super) jam_clock: f32,
     /// A glare's eyes are opening: seconds left.
-    glare: Option<f32>,
-    jams: u32,
+    pub(super) glare: Option<f32>,
+    pub(super) jams: u32,
+    /// Repel: the cycle clock last step, and seconds since the last shove.
+    pub(super) repel_u: f32,
+    pub(super) shove_age: f32,
+    /// Devour: bulk (1 is the body as made), the pocket well held, and the made size.
+    pub(super) bulk: f32,
+    pub(super) pocket: f32,
+    pub(super) base: Option<(f32, f32, f32)>,
 }
 
 /// Everything the adapter needs to draw a body's power.
@@ -94,6 +101,14 @@ pub struct PowerView {
     pub glare: f32,
     /// A hullpick about to fire: 0 (not charging) to 1 (about to fire).
     pub bypass_charge: f32,
+    /// A pushwhale inhaling: 0 to 1 over the inhale, and seconds since its last shove.
+    pub inhale: f32,
+    pub shove_age: f32,
+    /// A tidegorger's bulk and pocket well.
+    pub bulk: f32,
+    pub pocket: f32,
+    /// How far a lenswyrm's radar blip is drawn from the truth.
+    pub blip: Vec2,
 }
 
 impl Game {
@@ -108,6 +123,11 @@ impl Game {
             glare: state
                 .and_then(|s| s.glare)
                 .map_or(0.0, |left| (1.0 - left / power::GLARE_TELL).clamp(0.0, 1.0)),
+            inhale: state.map_or(0.0, |s| self.inhale_of(&body.genome, s)),
+            shove_age: state.map_or(f32::MAX, |s| s.shove_age),
+            bulk: state.map_or(1.0, |s| s.bulk),
+            pocket: state.map_or(0.0, |s| s.pocket),
+            blip: self.lens_blip(body),
             bypass_charge: if body.genome.bypass_share() > 0.0
                 && body.alert
                 && body.fire_cooldown > 0.0
@@ -133,6 +153,8 @@ impl Game {
         let ship = self.player().map(|p| p.position);
         let mut live: Vec<u64> = Vec::new();
         let mut cues: Vec<Cue> = Vec::new();
+        let warp_owner = self.warp_owners();
+        let mut eaten: Vec<u64> = Vec::new();
         for index in 0..self.bodies.len() {
             let body = &self.bodies[index];
             if body.kind != BodyKind::Creature {
@@ -153,7 +175,14 @@ impl Game {
                 && !body.consumed
                 && !body.follower
                 && (Power::Emp.active(&g) || Power::Confuse.active(&g) || Power::Glare.active(&g));
-            if phase.is_none() && !blinks && !jammer {
+            let fielder = body.active
+                && !body.consumed
+                && !body.follower
+                && (Power::Repel.active(&g)
+                    || Power::Warp.active(&g)
+                    || Power::Lens.active(&g)
+                    || Power::Devour.active(&g));
+            if phase.is_none() && !blinks && !jammer && !fielder {
                 self.bodies[index].phased = false;
                 continue;
             }
@@ -163,6 +192,8 @@ impl Game {
                 // The first use waits a moment, so a creature does not act the instant it loads.
                 clock: 0.6 + 0.4 * (id % 5) as f32,
                 jam_clock: 1.0 + 0.4 * (id % 5) as f32,
+                shove_age: f32::MAX,
+                bulk: 1.0,
                 ..PowerState::default()
             });
             match phase {
@@ -193,9 +224,16 @@ impl Game {
                 }
                 self.step_jammer(index, &mut state, dt, ship, &mut cues);
             }
+            if fielder {
+                eaten.extend(self.step_fields(index, &mut state, dt, &warp_owner, &mut cues));
+            }
             self.power_state.insert(id, state);
         }
         self.power_state.retain(|id, _| live.contains(id));
+        // Rocks swallowed this step go together, after the loop (they shift body indices).
+        eaten.sort_unstable();
+        eaten.dedup();
+        self.consume(&eaten);
         for cue in cues {
             self.cue(cue);
         }

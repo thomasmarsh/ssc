@@ -843,6 +843,10 @@ fn smoke_run(
             "argus" => Genome::argus(),
             "gloomfeeder" => Genome::gloomfeeder(),
             "dizzard" => Genome::dizzard(),
+            "pushwhale" => Genome::pushwhale(),
+            "tarbloom" => Genome::tarbloom(),
+            "lenswyrm" => Genome::lenswyrm(),
+            "tidegorger" => Genome::tidegorger(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
@@ -901,6 +905,8 @@ fn smoke_run(
                     .power_view(b)
                     .blink
                     .is_some_and(|t| t.progress() > 0.5)
+                    || session.game.power_view(b).shove_age.clamp(0.2, 0.3)
+                        == session.game.power_view(b).shove_age
                     || session
                         .game
                         .power_view(b)

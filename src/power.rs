@@ -94,6 +94,46 @@ pub const DIM_FLOOR: f32 = 0.35;
 pub const DIM_NOTICE: f32 = 0.7;
 /// How long after its last shot a ship counts as "firing" for the dark.
 pub const DIM_FIRING: f32 = 1.0;
+/// Repel (Pushwhale): outward acceleration `REPEL_FORCE * s * (1 - d/reach)^2`, never more than
+/// `ESCAPE` of the ship's thrust; shots bend away by `FIELD_BEND` rad/s; before each shove it
+/// inhales for `REPEL_INHALE` s (the field reverses to `REPEL_PULL` of itself: the telegraph),
+/// then a ring shoves everything inside by `REPEL_SHOVE * s` (fading to the rim); the ring
+/// shows for `SHOVE_RING`. Negative-mass bodies are pushed `REPEL_LIGHT` times harder.
+pub const REPEL_FORCE: f32 = 420.0;
+pub const REPEL_INHALE: f32 = 1.0;
+pub const REPEL_PULL: f32 = 0.35;
+pub const REPEL_SHOVE: f32 = 600.0;
+pub const REPEL_LIGHT: f32 = 1.5;
+pub const SHOVE_RING: f32 = 0.7;
+pub const ESCAPE: f32 = 0.6;
+pub const FIELD_BEND: f32 = 0.436;
+/// Warp (Tarbloom): inside the bubble (radius `power_reach`) bodies and shots run at
+/// `1 - WARP_SLOW * s` (never under `WARP_FLOOR`); a haste bubble runs hostile shots and
+/// creatures' fire at `1 + WARP_HASTE * s`. `WARP_RATE` is how fast a body settles to it.
+pub const WARP_SLOW: f32 = 0.45;
+pub const WARP_FLOOR: f32 = 0.55;
+pub const WARP_HASTE: f32 = 0.4;
+pub const WARP_RATE: f32 = 4.0;
+/// Lens (Lenswyrm): a pocket well of `LENS_PULL * s` of a full one out to
+/// `power_reach * LENS_REACH`; its radar blip is drawn up to `LENS_BLIP` units off.
+pub const LENS_PULL: f32 = 0.4;
+pub const LENS_REACH: f32 = 0.8;
+pub const LENS_BLIP: f32 = 120.0;
+/// Devour (Tidegorger): each rock eaten adds `DEVOUR_GROW` to its bulk (up to `1 + DEVOUR_BULK
+/// * s`; hull, radius and mass scale together); from gene value `DEVOUR_WELL_FROM` it also
+/// eats a still, weak well (pull at most `DEVOUR_WELL_PULL`) it touches at `DEVOUR_WELL_RATE`
+/// of the well per second, gaining a pocket well (at most `POCKET_MAX` of a full one, reach
+/// `POCKET_REACH`). If it dies holding at least `POCKET_RELEASE` the well is released where it
+/// died and fades over `RELEASE_LIFE` seconds.
+pub const DEVOUR_GROW: f32 = 0.03;
+pub const DEVOUR_BULK: f32 = 2.0;
+pub const DEVOUR_WELL_FROM: f32 = 0.6;
+pub const DEVOUR_WELL_RATE: f32 = 0.08;
+pub const DEVOUR_WELL_PULL: f32 = 1.4;
+pub const POCKET_MAX: f32 = 1.0;
+pub const POCKET_REACH: f32 = 450.0;
+pub const POCKET_RELEASE: f32 = 0.3;
+pub const RELEASE_LIFE: f32 = 90.0;
 /// Killing a carrier of a built power pays this much more bounty (by tier) and rolls one
 /// extra drop with this chance and a little luck.
 pub const BOUNTY_BONUS: (f32, f32) = (1.25, 1.5);
@@ -314,6 +354,10 @@ impl Power {
                 | Self::Glare
                 | Self::Dim
                 | Self::Confuse
+                | Self::Repel
+                | Self::Warp
+                | Self::Lens
+                | Self::Devour
         )
     }
 
@@ -337,6 +381,10 @@ impl Power {
             Self::Glare => [1.0, 0.85, 0.35],
             Self::Dim => [0.55, 0.45, 0.8],
             Self::Confuse => [1.0, 0.4, 0.8],
+            Self::Repel => [0.8, 0.9, 1.0],
+            Self::Warp => [0.4, 0.7, 1.0],
+            Self::Lens => [0.7, 1.0, 0.85],
+            Self::Devour => [0.8, 1.0, 0.5],
             _ => [0.9, 0.9, 0.9],
         }
     }
@@ -615,6 +663,20 @@ fn style(g: &mut Genome, power: Power) {
             g.sides = 4;
             g.aspect = 1.4;
         }
+        Power::Repel => {
+            g.radius = g.radius.max(34.0);
+            g.speed = g.speed.min(70.0);
+        }
+        Power::Warp => {
+            g.radius = g.radius.max(26.0);
+            g.speed = g.speed.min(50.0);
+        }
+        Power::Devour => {
+            g.diet = crate::genome::Diet::Rocks;
+            g.radius = g.radius.max(34.0);
+            g.speed = g.speed.min(60.0);
+            g.hull = g.hull.max(120.0);
+        }
         Power::Bypass => {
             if !matches!(g.weapon, Weapon::Projectile | Weapon::Needles) {
                 g.weapon = Weapon::Projectile;
@@ -730,6 +792,60 @@ impl Genome {
             hull: 60.0,
             radius: 18.0,
             speed: 40.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Pushwhale (repel): a slow barrel that breathes everything away.
+    pub fn pushwhale() -> Self {
+        Self {
+            repel: 0.75,
+            power_reach: 420.0,
+            power_period: 7.0,
+            radius: 38.0,
+            hull: 90.0,
+            speed: 50.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Tarbloom (warp, negative: a slow bubble).
+    pub fn tarbloom() -> Self {
+        Self {
+            warp: -0.7,
+            power_reach: 360.0,
+            radius: 28.0,
+            hull: 90.0,
+            speed: 40.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Lenswyrm (lens): its head pulls and bends.
+    pub fn lenswyrm() -> Self {
+        Self {
+            lens: 0.85,
+            power_reach: 520.0,
+            radius: 12.0,
+            hull: 55.0,
+            speed: 80.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Tidegorger (devour): a drifting stomach that eats rocks and weak wells.
+    pub fn tidegorger() -> Self {
+        Self {
+            devour: 0.7,
+            diet: crate::genome::Diet::Rocks,
+            mass: 120.0,
+            radius: 40.0,
+            hull: 160.0,
+            speed: 55.0,
             weapon: Weapon::None,
             ..Self::default()
         }

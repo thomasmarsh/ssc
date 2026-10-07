@@ -57,10 +57,16 @@ pub enum Sound {
     GlareFlash,
     /// A jammed control pressed: a flat buzz.
     Refused,
+    /// A pushwhale inhaling: a low swell that rises before the shove.
+    Inhale,
+    /// The shove: a deep thump with a rushing tail.
+    Shove,
+    /// A gorger swallowing: a wet low gulp.
+    Gulp,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 37] = [
+    pub const ALL: [Sound; 40] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -98,6 +104,9 @@ impl Sound {
         Sound::JamHit,
         Sound::GlareFlash,
         Sound::Refused,
+        Sound::Inhale,
+        Sound::Shove,
+        Sound::Gulp,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -423,6 +432,33 @@ impl Sound {
                     (sine(f, t) * 0.5 + sine(f * 1.5, t) * 0.3) * decay(t, 0.09)
                 });
                 lowpass(&mut v, 6000.0);
+                v
+            }
+            Sound::Inhale => {
+                let mut noise = Noise::new(307);
+                let mut v = voice(1.05, |t, _| {
+                    let rise = (t / 1.0).min(1.0);
+                    let swell = rise * rise;
+                    (sine(sweep(rise, 70.0, 150.0), t) * 0.7 + noise.next() * 0.25) * swell
+                });
+                lowpass(&mut v, 900.0);
+                v
+            }
+            Sound::Shove => {
+                let mut noise = Noise::new(311);
+                let mut v = voice(0.6, |t, _| {
+                    let thump = sine(sweep((t / 0.25).min(1.0), 130.0, 40.0), t) * decay(t, 0.2);
+                    thump + noise.next() * 0.5 * decay(t, 0.25)
+                });
+                lowpass(&mut v, 1400.0);
+                v
+            }
+            Sound::Gulp => {
+                let mut v = voice(0.26, |t, _| {
+                    let f = sweep((t / 0.2).min(1.0), 180.0, 70.0);
+                    (sine(f, t) + sine(f * 0.5, t) * 0.6) * decay(t, 0.1)
+                });
+                lowpass(&mut v, 700.0);
                 v
             }
             Sound::Refused => {

@@ -347,7 +347,7 @@ impl Game {
     }
 
     /// Removes eaten rocks without shattering them, remembering that they are gone.
-    fn consume(&mut self, taken: &[u64]) {
+    pub(super) fn consume(&mut self, taken: &[u64]) {
         if taken.is_empty() {
             return;
         }

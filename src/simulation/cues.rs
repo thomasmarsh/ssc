@@ -93,6 +93,17 @@ pub enum Cue {
     PhaseSolid {
         at: Vec2,
     },
+    /// A pushwhale starts to inhale (the shove follows), and the shove itself.
+    Inhale {
+        at: Vec2,
+    },
+    Shove {
+        at: Vec2,
+    },
+    /// A tidegorger swallowed something.
+    Devour {
+        at: Vec2,
+    },
     /// A jammer (emp or confusion) began to charge: a rising whine at `at`.
     JamTell {
         at: Vec2,

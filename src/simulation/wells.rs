@@ -22,6 +22,9 @@ pub struct WellRun {
     pub holding: bool,
     /// `Game::time` of the last update.
     last: f32,
+    /// How much of the well has been eaten (0 whole, 1 gone), and how fast it fades by itself.
+    pub eaten: f32,
+    pub decay: f32,
 }
 
 impl WellRun {
@@ -34,6 +37,8 @@ impl WellRun {
             since_hop: f32::MAX,
             holding: false,
             last: f32::NEG_INFINITY,
+            eaten: 0.0,
+            decay: 0.0,
         }
     }
 
@@ -128,8 +133,18 @@ impl Game {
                 moved / dt
             };
             body.position = pose.position;
+            // What a gorger has eaten (or time has faded) is gone from the pull.
+            run.eaten = (run.eaten + run.decay * dt).min(1.0);
+            let whole = 1.0 - run.eaten;
+            pose.strength *= whole;
+            pose.reach *= 0.5 + 0.5 * whole;
+            pose.core *= whole;
             run.pose = pose;
             run.last = time;
+            if run.eaten >= 1.0 {
+                body.health = 0.0;
+                body.consumed = true;
+            }
         }
         for at in flashes {
             self.effect(at, 120.0, 0.8, EffectKind::Respawn);

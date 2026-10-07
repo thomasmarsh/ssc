@@ -19,6 +19,7 @@ mod dash;
 mod diplomacy;
 mod ecology;
 pub mod feel;
+mod fields;
 mod food;
 mod fortress;
 mod growth;
@@ -308,6 +309,8 @@ pub struct Bullet {
     pub pith: f32,
     /// Bodies already pierced, so a shot inside one does not strike it every tick.
     struck: [u64; 4],
+    /// The speed factor a time bubble has applied to it (1 outside one).
+    warped: f32,
     /// Already tested against the parry shield (it rolls once per shot).
     parried: bool,
 }
@@ -330,6 +333,7 @@ impl Bullet {
             fragile: false,
             pith: 0.0,
             struck: [0; 4],
+            warped: 1.0,
             parried: false,
         }
     }
@@ -1656,6 +1660,11 @@ impl Game {
         let mut lost_player = None;
         for body in &destroyed {
             let (kind, position, radius) = (body.kind, body.position, body.radius);
+            if body.kind == BodyKind::Creature
+                && let Some(pocket) = self.power_state.get(&body.id).map(|s| s.pocket)
+            {
+                self.release_pocket(position, pocket);
+            }
             if body.consumed {
                 // Eaten or starved: gone without a bang, a score or a drop.
                 self.effect(position, radius, 0.25, EffectKind::Impact);

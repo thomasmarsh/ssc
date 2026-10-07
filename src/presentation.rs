@@ -3527,6 +3527,8 @@ fn draw_radar(
             continue;
         }
         let mut offset = (body.position - origin) * scale;
+        // A lenswyrm's blip is drawn off the truth (the lens bends the light).
+        offset += game.lens_blip(body) * scale;
         if jam.glitch > 0.0 {
             // The glare: real blips swim.
             let u = |n: i32| crate::glitchview::unit(jam.seed, index as i32 + n, step) - 0.5;

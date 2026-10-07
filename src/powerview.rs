@@ -143,6 +143,129 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
                 );
             }
         }
+        Power::Repel => {
+            let reach = body.genome.power_reach;
+            // Faint field rings drifting outward, spaced wider with distance.
+            for k in 0..4 {
+                let u = (time * 0.35 + k as f32 / 4.0).fract();
+                let ring = r * 1.3 + (reach - r * 1.3) * u * u;
+                gizmos
+                    .circle_2d(p, ring, tint.with_alpha(0.28 * (1.0 - u)))
+                    .resolution(40);
+            }
+            if view.inhale > 0.0 {
+                // Breathing in: a pale ring closes from the rim onto the body.
+                let ring = reach - (reach - r * 1.5) * view.inhale;
+                gizmos
+                    .circle_2d(p, ring, Color::WHITE.with_alpha(0.25 + 0.6 * view.inhale))
+                    .resolution(48);
+            }
+            if view.shove_age < ssc::power::SHOVE_RING {
+                let u = view.shove_age / ssc::power::SHOVE_RING;
+                gizmos
+                    .circle_2d(
+                        p,
+                        r + (reach - r) * u,
+                        Color::WHITE.with_alpha(0.9 * (1.0 - u)),
+                    )
+                    .resolution(48);
+                gizmos
+                    .circle_2d(
+                        p,
+                        r + (reach - r) * u * 0.9,
+                        tint.with_alpha(0.5 * (1.0 - u)),
+                    )
+                    .resolution(48);
+            }
+        }
+        Power::Warp => {
+            // A shimmering bubble: orange rim for haste, blue for slow, drifting dashes and a
+            // slow swirl inside.
+            let reach = body.genome.power_reach;
+            let rim = if body.genome.warp < 0.0 {
+                Color::srgb(0.35, 0.65, 1.0)
+            } else {
+                Color::srgb(1.0, 0.6, 0.2)
+            };
+            let spin = if body.genome.warp < 0.0 { 0.1 } else { 0.9 };
+            gizmos
+                .circle_2d(p, reach, rim.with_alpha(0.35 + 0.15 * shimmer))
+                .resolution(64);
+            dotted_circle(
+                gizmos,
+                p,
+                reach - 6.0,
+                rim.with_alpha(0.75),
+                36,
+                time * spin,
+            );
+            dotted_circle(
+                gizmos,
+                p,
+                reach * 0.62,
+                rim.with_alpha(0.25),
+                24,
+                -time * spin * 0.7,
+            );
+            for k in 0..3 {
+                let a = time * spin * 0.6 + k as f32 * TAU / 3.0;
+                gizmos.linestrip_2d(
+                    (0..8).map(|j| {
+                        let t = j as f32 / 7.0;
+                        p + Vec2::from_angle(a + t * 1.4) * (reach * (0.25 + 0.3 * t))
+                    }),
+                    rim.with_alpha(0.22),
+                );
+            }
+        }
+        Power::Lens => {
+            // A ring of stretched stars around the head, and the edge of the pull.
+            let reach = body.genome.power_reach * ssc::power::LENS_REACH;
+            dotted_circle(gizmos, p, reach, tint.with_alpha(0.2), 40, time * 0.1);
+            for k in 0..10 {
+                let a = time * 0.4 + k as f32 * TAU / 10.0;
+                let d = Vec2::from_angle(a);
+                gizmos.line_2d(
+                    p + d * (r * 2.6 + 6.0),
+                    p + d * (r * 2.6 + 6.0) + Vec2::new(-d.y, d.x) * (6.0 + 4.0 * shimmer),
+                    tint.with_alpha(0.7),
+                );
+            }
+            gizmos
+                .circle_2d(p, r * 3.4 + 4.0 * shimmer, tint.with_alpha(0.3))
+                .resolution(32);
+        }
+        Power::Devour => {
+            // An open mouth ring with teeth; a green swirl inside once a well is held.
+            gizmos
+                .circle_2d(p, r * 0.8, tint.with_alpha(0.6))
+                .resolution(24);
+            for k in 0..12 {
+                let a = k as f32 * TAU / 12.0 + time * 0.2;
+                let d = Vec2::from_angle(a);
+                gizmos.line_2d(p + d * (r * 0.8), p + d * (r * 0.8 - 5.0), tint);
+            }
+            if view.pocket > 0.0 {
+                for k in 0..3 {
+                    let a = time * 2.0 + k as f32 * TAU / 3.0;
+                    gizmos.linestrip_2d(
+                        (0..7).map(|j| {
+                            let t = j as f32 / 6.0;
+                            p + Vec2::from_angle(a + t * 2.0) * (r * 0.7 * t)
+                        }),
+                        Color::srgb(0.3, 1.0, 0.5).with_alpha(0.4 + 0.5 * view.pocket),
+                    );
+                }
+                dotted_circle(
+                    gizmos,
+                    p,
+                    ssc::power::POCKET_REACH * view.pocket,
+                    Color::srgb(0.3, 1.0, 0.5).with_alpha(0.25),
+                    30,
+                    time * 0.2,
+                );
+            }
+        }
         Power::Glare => eyes(gizmos, p, r, time, view.glare.max(0.15), tint),
         Power::Dim => {
             // A bright thin rim, two bright eyes, and the edge of the dark.

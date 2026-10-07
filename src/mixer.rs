@@ -171,6 +171,30 @@ fn spec(cue: &Cue) -> Spec {
             at: Some(at),
         },
         Cue::Refused => ship(Sound::Refused, 0.5, 0.0),
+        Cue::Inhale { at } => Spec {
+            sound: Sound::Inhale,
+            gain: 0.7,
+            reach: Some(1500.0),
+            priority: Priority::Ship,
+            detune: 0.0,
+            at: Some(at),
+        },
+        Cue::Shove { at } => Spec {
+            sound: Sound::Shove,
+            gain: 0.85,
+            reach: Some(1500.0),
+            priority: Priority::Ship,
+            detune: 0.02,
+            at: Some(at),
+        },
+        Cue::Devour { at } => Spec {
+            sound: Sound::Gulp,
+            gain: 0.5,
+            reach: Some(1000.0),
+            priority: Priority::Explosion,
+            detune: 0.05,
+            at: Some(at),
+        },
         Cue::Deflect { at, .. } => Spec {
             sound: Sound::Deflect,
             gain: 0.55,
@@ -223,6 +247,9 @@ fn interval(sound: Sound) -> f32 {
         Sound::JamHit => 0.3,
         Sound::GlareFlash => 0.3,
         Sound::Refused => 0.25,
+        Sound::Inhale => 1.0,
+        Sound::Shove => 0.4,
+        Sound::Gulp => 0.15,
     }
 }
 
