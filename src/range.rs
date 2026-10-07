@@ -109,6 +109,17 @@ pub const DEBUT_RINGS: u32 = 3;
 pub const DEBUT_FREQUENCY: f32 = 0.5;
 pub const DEBUT_NOISE: (f32, f32) = (0.3, 0.5);
 
+/// The classics' afterlife (see `Distribution::relic`): beyond their intro span they live on as
+/// endemic-like pockets. Strength of a pocket, the noise frequency per sector (small islands)
+/// and how many rings the pockets take to rise as the intro span fades.
+pub const RELIC_PEAK: f32 = 0.8;
+pub const RELIC_FREQUENCY: f32 = 0.3;
+pub const RELIC_RISE: f32 = 3.0;
+
+/// Rings at which the classics' intro span ends at full strength: Fatsos, then Bogeys and
+/// Smarties, then Lunatics and Leeches. Each fades out over the next five rings.
+pub const CLASSIC_END: (f32, f32, f32) = (7.0, 9.0, 10.0);
+
 /// Ring 3, where blending begins, may hold this many species at least; the floor slides
 /// down by `OPENING_SLOPE` per ring beyond it.
 pub const OPENING_DIVERSITY: f32 = 3.0;
@@ -200,6 +211,7 @@ const DEBUT_CHANNEL: u64 = 13;
 const CLINE_CHANNEL: u64 = 400;
 const PATCH_SALT: u64 = 0x9A7C_4000_0000_0045;
 const POCKET_CHANNEL: u64 = 12;
+const RELIC_CHANNEL: u64 = 14;
 const KEY_SALT: u64 = 0x5BEC_1E50_0000_003F;
 
 fn smooth(t: f32) -> f32 {
@@ -344,17 +356,30 @@ pub struct Distribution {
     /// A ring-3 debut: the abundance a species is given by its own fine noise on ring 3,
     /// fading to nothing over `DEBUT_RINGS` more (zero for everyone but the Smarty).
     pub debut: f32,
+    /// The share of sectors beyond the intro span that still hold the species, as endemic-like
+    /// pockets (zero for sampled species, which have no afterlife to speak of).
+    pub relic: f32,
 }
 
 impl Distribution {
     /// One of the five classics: fixed, hand-placed niches.
     pub fn classic(family: Family) -> Self {
-        let (start, rise, end, fall, breadth, spread) = match family {
-            Family::Fatso => (0.0, 1.5, 20.0, 16.0, 0.9, Spread::Generalist),
-            Family::Bogey => (1.0, 3.0, 26.0, 14.0, 0.92, Spread::Generalist),
-            Family::Smarty => (1.5, 1.5, 22.0, 12.0, 0.6, Spread::Regional),
-            Family::Lunatic => (2.5, 5.0, 26.0, 14.0, 0.5, Spread::Regional),
-            Family::Leech => (3.5, 6.0, 26.0, 14.0, 0.42, Spread::Regional),
+        // The intro span: full strength until `end`, gone `fall` rings later; `relic` is the
+        // share of sectors that keep the species afterwards (see `relic_at`).
+        let (start, rise, end, fall, breadth, spread, relic) = match family {
+            Family::Fatso => (0.0, 1.5, CLASSIC_END.0, 5.0, 0.9, Spread::Generalist, 0.12),
+            Family::Bogey => (1.0, 3.0, CLASSIC_END.1, 5.0, 0.92, Spread::Generalist, 0.14),
+            Family::Smarty => (
+                1.5,
+                1.5,
+                CLASSIC_END.1 - 1.0,
+                5.0,
+                0.6,
+                Spread::Regional,
+                0.13,
+            ),
+            Family::Lunatic => (2.5, 5.0, CLASSIC_END.2, 5.0, 0.5, Spread::Regional, 0.12),
+            Family::Leech => (3.5, 6.0, CLASSIC_END.2, 5.0, 0.42, Spread::Regional, 0.12),
 
             Family::Wild => unreachable!("wild species are rolled, not placed"),
         };
@@ -385,6 +410,7 @@ impl Distribution {
             } else {
                 0.0
             },
+            relic,
         }
     }
 
@@ -434,6 +460,7 @@ impl Distribution {
             picky,
             anchor: Vec2::from_angle(angle) * centre,
             debut: 0.0,
+            relic: 0.0,
         }
     }
 
@@ -444,13 +471,51 @@ impl Distribution {
         up * down
     }
 
+    /// Whether a classic at depth `d` is past its intro span, where only its relic pockets live.
+    fn in_afterlife(&self, d: f32) -> bool {
+        self.relic > 0.0 && d >= self.end + self.fall
+    }
+
+    /// The patch mask at depth `d`: its noise channel, frequency and the share of the band it
+    /// covers. A classic past its intro span has the small islands of its afterlife instead.
+    fn mask_spec(&self, d: f32) -> (u64, f32, f32) {
+        if self.in_afterlife(d) {
+            (RELIC_CHANNEL, RELIC_FREQUENCY, self.relic)
+        } else {
+            (
+                MASK_CHANNEL,
+                self.patch_frequency,
+                lerp(MASK_COVER.0, MASK_COVER.1, self.breadth),
+            )
+        }
+    }
+
     /// The patch mask at `at`: where the species' own noise clears its threshold.
     pub fn mask(&self, seed: u64, at: Vec2) -> f32 {
-        let n = regional_noise(seed, self.key, MASK_CHANNEL, at, self.patch_frequency);
+        let (channel, frequency, cover) = self.mask_spec(at.length());
+        self.cut(seed, channel, frequency, cover, at)
+    }
+
+    /// The species' noise `channel` cut so that it covers a share `cover` of the plane.
+    fn cut(&self, seed: u64, channel: u64, frequency: f32, cover: f32, at: Vec2) -> f32 {
+        let n = regional_noise(seed, self.key, channel, at, frequency);
         // A logistic stand-in for the normal CDF: `quantile` is roughly uniform in [0, 1].
         let quantile = 1.0 / (1.0 + (-1.702 * (n - 0.5) / MASK_NOISE_SD).exp());
-        let cover = lerp(MASK_COVER.0, MASK_COVER.1, self.breadth);
         smooth(((quantile - (1.0 - cover)) / MASK_SOFT).clamp(0.0, 1.0))
+    }
+
+    /// What is left of a classic beyond its intro span: endemic-like pockets (a few percent of
+    /// sectors) that rise as the intro fades and never end.
+    fn relic_at(&self, seed: u64, at: Vec2) -> f32 {
+        if self.relic <= 0.0 {
+            return 0.0;
+        }
+        let rise =
+            smooth(((at.length() - self.end - self.fall * 0.5) / RELIC_RISE).clamp(0.0, 1.0));
+        if rise <= 0.0 {
+            return 0.0;
+        }
+        RELIC_PEAK * rise * self.cut(seed, RELIC_CHANNEL, RELIC_FREQUENCY, self.relic, at)
     }
 
     /// The species' own fine pockets: a multiplier in [1 - pocket, 1].
@@ -468,12 +533,10 @@ impl Distribution {
     pub fn abundance_in(&self, seed: u64, id: SectorId, biome: &Biome) -> f32 {
         let at = at_of(id);
         let profile = self.depth_profile(at.length());
-        if profile <= 0.0 {
-            return 0.0;
-        }
         let liking = biome.affinity(self.favourite, self.picky);
         let natural = self.peak * profile * self.mask(seed, at) * self.pockets(seed, at) * liking;
-        natural.max(self.debut_at(seed, id, at))
+        let relic = self.relic_at(seed, at) * liking;
+        natural.max(relic).max(self.debut_at(seed, id, at))
     }
 
     /// The ring-3 debut of a species that has one.
@@ -498,16 +561,16 @@ impl Distribution {
             id: 0,
             isolation: 0.0,
         };
-        let f = self.patch_frequency;
+        let (channel, f, cover) = self.mask_spec(at_of(id).length());
         let p = at_of(id) * f;
-        let cover = lerp(MASK_COVER.0, MASK_COVER.1, self.breadth).clamp(0.001, 0.999);
+        let cover = cover.clamp(0.001, 0.999);
         let q = 1.0 - cover;
         let threshold = 0.5 + MASK_NOISE_SD / 1.702 * (q / (1.0 - q)).ln();
         let value = |v: (i32, i32)| {
             regional_noise(
                 seed,
                 self.key,
-                MASK_CHANNEL,
+                channel,
                 Vec2::new(v.0 as f32, v.1 as f32),
                 1.0,
             )
@@ -657,7 +720,7 @@ fn candidates(seed: u64, id: SectorId) -> Vec<Distribution> {
             out.push(Distribution::wild(seed, tier, slot));
         }
     }
-    out.retain(|c| c.depth_profile(d) > 0.0);
+    out.retain(|c| c.depth_profile(d) > 0.0 || c.relic_at(seed, at_of(id)) > 0.0);
     out
 }
 
@@ -1147,14 +1210,12 @@ mod tests {
         for seed in SEEDS {
             let land = habitat(seed, &bogey);
             let present = land.iter().filter(|(_, p)| *p).count() as f32 / land.len() as f32;
+            // The Bogey's intro span is short now, so only its breadth is judged here; the
+            // pockets of absence are looked for in the catalog's generalists below.
             assert!(present > 0.6, "seed {seed}: Bogeys only fill {present}");
-            assert!(
-                present < 0.99,
-                "seed {seed}: no pockets of absence ({present})"
-            );
         }
         // Every generalist of the catalog behaves so.
-        let mut checked = 0;
+        let (mut checked, mut pockets) = (0, 0);
         for tier in 3..9 {
             for slot in 0..SLOTS_PER_TIER {
                 let d = Distribution::wild(SEED, tier, slot);
@@ -1168,9 +1229,14 @@ mod tests {
                 checked += 1;
                 let present = land.iter().filter(|(_, p)| *p).count() as f32 / land.len() as f32;
                 assert!(present > 0.45, "{d:?}: only {present}");
+                pockets += usize::from(present < 0.99);
             }
         }
         assert!(checked > 0, "no generalist to check");
+        assert!(
+            pockets > 0,
+            "no pockets of absence in {checked} generalists"
+        );
     }
 
     /// Endemic species are few and isolated: a small share of their band, in a handful of
@@ -1561,6 +1627,55 @@ mod tests {
             for id in sectors(2) {
                 assert_eq!(d.genome_at(SEED, id, &d.patch(SEED, id)), home);
             }
+        }
+    }
+
+    /// The classics belong to the opening: they hold most presences through the intro rings,
+    /// blend into the catalog by ring 12, and beyond that live on only as rare pockets.
+    #[test]
+    fn classics_fade_into_the_catalog_after_the_intro() {
+        let band = |lo: u32, hi: u32| {
+            let (mut presences, mut classic, mut count, mut with) = (0, 0, 0, 0);
+            let mut per = [0_u32; 5];
+            for seed in SEEDS {
+                for id in sectors(hi as i32).filter(|id| (lo..=hi).contains(&ring(*id))) {
+                    let eco = ecology(seed, id);
+                    count += 1;
+                    let mut any = false;
+                    for p in &eco.presence {
+                        presences += 1;
+                        if let Some(i) = Family::CLASSICS.iter().position(|f| *f == p.family) {
+                            classic += 1;
+                            per[i] += 1;
+                            any = true;
+                        }
+                    }
+                    with += u32::from(any);
+                }
+            }
+            let share = classic as f32 / presences.max(1) as f32;
+            let each = per.map(|n| n as f32 / count as f32);
+            (share, with as f32 / count as f32, each)
+        };
+        let (intro, ..) = band(3, 8);
+        let (blend, ..) = band(9, 12);
+        let (late, late_sectors, each) = band(13, 40);
+        assert!(intro > 0.5, "the classics own the intro: {intro}");
+        assert!(
+            blend < intro * 0.5 && blend > late,
+            "ring 9 to 12 blends: {intro} {blend} {late}"
+        );
+        assert!(late < 0.1, "classics are {late} of far presences");
+        assert!(
+            late_sectors < 0.25,
+            "{late_sectors} of far sectors hold one"
+        );
+        // Each classic is still out there, a couple of percent of sectors, as pockets.
+        for (family, share) in Family::CLASSICS.iter().zip(each) {
+            assert!(
+                (0.005..0.06).contains(&share),
+                "{family:?} holds {share} of far sectors"
+            );
         }
     }
 }
