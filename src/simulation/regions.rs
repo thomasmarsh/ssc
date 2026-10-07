@@ -21,6 +21,8 @@ pub struct RegionState {
     candidate: Option<(u64, f32)>,
     /// Seconds since the last banner.
     since_banner: f32,
+    /// Game time the current region was committed to (the HUD fades its tag from here).
+    entered: f32,
 }
 
 impl Game {
@@ -70,6 +72,12 @@ impl Game {
             self.notify(text, upgrades::Rarity::Epic);
         }
         self.region.current = Some(entered);
+        self.region.entered = self.time;
+    }
+
+    /// Game time the announced region was entered.
+    pub(super) fn region_entered(&self) -> f32 {
+        self.region.entered
     }
 
     /// The region the ship is announced to be in (none before the first tick).

@@ -1,4 +1,5 @@
 mod audio;
+mod hud;
 mod nebula;
 mod presentation;
 
@@ -150,7 +151,13 @@ pub struct Session {
     pub input: Input,
     pub paused: bool,
     pub slow: bool,
+    /// The radar stays on (otherwise it shows while the details are open).
     pub radar: bool,
+    /// The details panel is latched open (F3); holding Tab opens it too.
+    pub details: bool,
+    pub tab_held: bool,
+    /// The full key list (F1).
+    pub help: bool,
     /// Edge arrows toward offscreen threats and minerals.
     pub arrows: bool,
     pub camera_view: CameraView,
@@ -166,6 +173,13 @@ pub struct Session {
     recorded: bool,
 }
 
+impl Session {
+    /// Whether the details panel (and the radar with it) is showing.
+    pub fn details_open(&self) -> bool {
+        self.details || self.tab_held
+    }
+}
+
 impl Default for Session {
     fn default() -> Self {
         Self {
@@ -173,7 +187,10 @@ impl Default for Session {
             input: Input::default(),
             paused: false,
             slow: false,
-            radar: true,
+            radar: false,
+            details: false,
+            tab_held: false,
+            help: false,
             arrows: true,
             camera_view: CameraView::default(),
             style: RenderStyle::default(),
@@ -228,12 +245,16 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_systems(Startup, (presentation::setup, nebula::setup, audio::setup))
+        .add_systems(
+            Startup,
+            (presentation::setup, hud::setup, nebula::setup, audio::setup),
+        )
         .add_systems(FixedUpdate, simulate)
         .add_systems(
             Update,
             (
                 controls,
+                hud::apply_ui_scale,
                 camera,
                 apply_style,
                 nebula::update,
@@ -241,6 +262,8 @@ fn main() {
                 audio::play_cues,
                 presentation::draw,
                 presentation::update_hud,
+                presentation::scroll_panels,
+                hud::update_texts,
                 presentation::update_summary,
                 presentation::update_chart,
                 smoke_run,
@@ -296,8 +319,13 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyS) {
         session.slow = !session.slow;
     }
-    if keys.just_pressed(KeyCode::Tab) {
-        session.radar = !session.radar;
+    // Tab held shows the details (and the radar); F3 latches them; F1 is the full key list.
+    session.tab_held = keys.pressed(KeyCode::Tab);
+    if keys.just_pressed(KeyCode::F3) {
+        session.details = !session.details;
+    }
+    if keys.just_pressed(KeyCode::F1) {
+        session.help = !session.help;
     }
     if keys.just_pressed(KeyCode::KeyT)
         || gamepads
@@ -431,7 +459,7 @@ fn controls(
         session.paused = false;
         session.slow = false;
     }
-    if keys.just_pressed(KeyCode::F1) {
+    if keys.just_pressed(KeyCode::F11) {
         window.mode = if window.mode == WindowMode::Windowed {
             WindowMode::BorderlessFullscreen(MonitorSelection::Current)
         } else {
@@ -599,7 +627,12 @@ fn camera(
         game.player()
             .map_or(game.focus, |ship| ship.position + ship.velocity * 0.3)
     };
-    let smoothing = 1.0 - (-6.0 * time.delta_secs()).exp();
+    // Bounded smoke runs render far faster than real time: snap instead of trailing.
+    let smoothing = if std::env::var_os("SSC_SMOKE_FRAMES").is_some() {
+        1.0
+    } else {
+        1.0 - (-6.0 * time.delta_secs()).exp()
+    };
     let (transform, projection) = &mut *view;
     let current = transform.translation.truncate();
     // Snap sector framing and the return to close view, keeping the ship visible.
@@ -678,6 +711,12 @@ fn smoke_run(
             _ => session.style,
         };
     }
+    // SSC_DETAILS=1, SSC_HELP=1 and SSC_RADAR=1 open the details, the key list and the radar.
+    if run.frames == 0 {
+        session.details |= std::env::var_os("SSC_DETAILS").is_some();
+        session.help |= std::env::var_os("SSC_HELP").is_some();
+        session.radar |= std::env::var_os("SSC_RADAR").is_some();
+    }
     // Smoke runs can start somewhere interesting: SSC_TELEPORT="x,y" (invulnerable).
     if run.frames == 0
         && let Some((x, y)) = std::env::var("SSC_TELEPORT")
@@ -687,6 +726,40 @@ fn smoke_run(
     {
         session.game.teleport(Vec2::new(x, y));
         session.game.player_invulnerability = 1e9;
+    }
+    // SSC_OUTPOST=1: start at the early outpost's capital (standing meter, tithe seat).
+    if run.frames == 0 && std::env::var_os("SSC_OUTPOST").is_some() {
+        let capital = ssc::territory::outpost(session.game.seed()).capital;
+        session.game.teleport(capital.center());
+        session.game.player_invulnerability = 1e9;
+    }
+    // SSC_HURT=<fraction>: set hull and shield to that fraction (to check the rings).
+    // SSC_ABILITIES=1: unlock parry and dash, then use them so their rings are cooling.
+    if run.frames == 6
+        && let Some(fraction) = std::env::var("SSC_HURT")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+        && let Some(ship) = session
+            .game
+            .bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+    {
+        ship.health = ship.max_health * fraction;
+        ship.shield = ship.max_shield * fraction * 0.6;
+    }
+    if std::env::var_os("SSC_ABILITIES").is_some() {
+        use ssc::simulation::skills::Skill;
+        match run.frames {
+            2 => {
+                session.game.loadout.skills.raise(Skill::Parry);
+                session.game.loadout.skills.raise(Skill::Dash);
+            }
+            8 => {
+                session.game.dash(None);
+            }
+            _ => {}
+        }
     }
     // SSC_PING=1: ping once the world has settled, to check the ring and echo markers.
     if run.frames == 20 && std::env::var_os("SSC_PING").is_some() {

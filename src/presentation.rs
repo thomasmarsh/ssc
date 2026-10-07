@@ -22,18 +22,24 @@ pub const VIEW_HEIGHT: f32 = 900.0;
 const RADAR_RANGE: f32 = 3000.0;
 const RADAR_RADIUS: f32 = 110.0;
 
-const CYAN: Color = Color::srgb(0.28, 0.94, 0.92);
-const MUTED: Color = Color::srgb(0.36, 0.49, 0.62);
+pub(crate) const CYAN: Color = Color::srgb(0.28, 0.94, 0.92);
+pub(crate) const MUTED: Color = Color::srgb(0.36, 0.49, 0.62);
 
 #[derive(Component)]
 pub struct Hud;
 #[derive(Component)]
 pub struct Overlay;
+/// The on-demand details panel (hold Tab, or F3 to latch it) and the full key list (F1).
 #[derive(Component)]
-pub struct Legend;
-/// The banner that announces a weapon switch or a dry fall-back.
+pub struct DetailsPanel;
 #[derive(Component)]
-pub struct ArsenalFlash;
+pub struct HelpPanel;
+/// A panel that scrolls with the mouse wheel while it is showing.
+#[derive(Component)]
+pub struct Scrollable;
+/// The help panel's scrolling body (its height follows the window).
+#[derive(Component)]
+pub struct HelpBody;
 /// One line of the pickup feed (newest last), a span so each can take its rarity's color.
 #[derive(Component)]
 pub struct FeedLine(usize);
@@ -64,13 +70,19 @@ const CHART_COLS: i32 = 11;
 const CHART_ROWS: i32 = 9;
 const CHART_DETAIL: usize = 12;
 const CHART_SPANS: usize = 1 + (CHART_COLS * CHART_ROWS) as usize + CHART_DETAIL;
-const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
+pub(crate) const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
 const FEED_LINES: usize = 5;
 /// Bench panel rows: the tab strip, up to nine rows and the footer hint.
 const BENCH_LINES: usize = 11;
 /// Panel rows: five slots, a header and up to eleven profiles, a header and up to nine
 /// boosts, a header and three materials. Rows with nothing to say are empty (no height).
+/// Where the ship panel's lines divide into its two columns: gear and arsenal, then the rig.
+const RIG_SPLIT: usize = Slot::ALL.len() + 1 + Profile::ALL.len() + 1 + 9;
+/// The details and help panels sit between the top row and the bottom cluster (UI pixels) and
+/// scroll with the mouse wheel when the window is too small to show them whole.
+const DETAILS_TOP: f32 = 100.0;
+const DETAILS_BOTTOM: f32 = 118.0;
 const RIG_LINES: usize = Slot::ALL.len()
     + 1
     + Profile::ALL.len()
@@ -81,6 +93,33 @@ const RIG_LINES: usize = Slot::ALL.len()
     + 1
     + Material::ALL.len()
     + 3;
+
+/// The full key list behind F1.
+const HELP_TEXT: &str = "\
+KEYS   (F1 closes)
+
+FLY     UP thrust    DOWN brake    LEFT / RIGHT turn
+FIRE    SPACE or A, or hold the left mouse button to aim and fire
+MINE    hold M          SWITCH WEAPON  [ ] or 1-9
+PARRY   D               DASH  SHIFT           PING  X
+LAND    L land / deploy / lift off       BENCH  E (landed)
+TITHE   O (near a civilization's seat)   REPAIR  R    PAD KIT  K
+BEACON  H      STAR MAP  G      BOOSTS  B      INSURE  I
+
+SEE     hold TAB details + radar     F3 latch details     T edge arrows
+GAME    P pause    ENTER restart    ESC quit    F11 fullscreen
+VIEW    C camera    V render style    U reduce effects    N mute    S slow motion
+
+GAMEPAD  sticks fly and aim    R2 mine    L1 / R1 weapon    D-pad right parry
+         L3 dash    R3 ping    Y boosts    B land    X repair    D-pad up kit
+         D-pad left star map    Select bench / tithe    START arrows
+
+READING THE HUD
+Rings on the ship: outer cyan arc = shield, ten green segments = hull.
+Bottom: weapon (arc = fuel, dots = level, ticks = owned), parry / dash / ping
+rings (arc fills as they recover, lock = not bought yet, dashed red = no shield),
+three bars = metal, volatiles, crystal.  Top left: threat pips.  Top right: score,
+chain bar, lives.  Gold = apex.  Red edge arrow = hunting, blue = calm.";
 
 /// SSC_OFFSCREEN=1: render into an image instead of the window (for screenshots when the
 /// display is asleep or locked, where a window renders black).
@@ -102,45 +141,123 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         Msaa::Sample4,
     ));
     if std::env::var_os("SSC_OFFSCREEN").is_some() {
+        // SSC_OFFSCREEN_SIZE=1280x720 picks the image size (default 1800x1200).
+        let (width, height) = std::env::var("SSC_OFFSCREEN_SIZE")
+            .ok()
+            .and_then(|v| {
+                let (w, h) = v.split_once('x')?;
+                Some((w.parse().ok()?, h.parse().ok()?))
+            })
+            .unwrap_or((1800, 1200));
         let image = Image::new_target_texture(
-            1800,
-            1200,
+            width,
+            height,
             bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
             None,
         );
         let handle = images.add(image);
-        camera.insert(bevy::camera::RenderTarget::Image(handle.clone().into()));
+        // The UI follows the default UI camera, which must be told when it has no window.
+        camera.insert((
+            bevy::camera::RenderTarget::Image(handle.clone().into()),
+            bevy::ui::IsDefaultUiCamera,
+        ));
         commands.insert_resource(Offscreen(handle));
     }
-    commands.spawn((
-        Text::new("SSC   /   DEEP SPACE"),
-        TextFont::from_font_size(23.0),
-        TextColor(CYAN),
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(28),
-            top: px(22),
-            ..default()
-        },
-    ));
-    commands.spawn((
-        Hud,
-        Text::new(""),
-        TextFont::from_font_size(15.0),
-        TextColor(Color::srgb(0.82, 0.88, 0.95)),
-        Node {
-            position_type: PositionType::Absolute,
-            left: px(28),
-            top: px(59),
-            ..default()
-        },
-    ));
-    commands.spawn((
-        Text::new("ARROWS  fly / brake    A / SPACE  fire    MOUSE  aim + fire    [ ]  switch weapon (1-9 pick)    B  boosts    hold M  mine    O  tithe at a seat\nR  repair    K  pad kit    L  deploy / land / lift off    E  bench: 1-7 tab, [ ] pick, F do, Q take    I  insure\nPAD  L/R weapon  Y  boosts  R2  mine  L2/A  brake  X  repair  D-UP  kit  B  land  D-DN  insure  SELECT  bench/tithe  START  arrows  R3  ping\nD / D-RIGHT  parry    SHIFT / L3  dash    (locked until bought at the bench, tab 6)\nG / D-LEFT  star map    H  beacon (bench)    bench tab 7  sonar upgrades\nC  camera    U  reduce effects    P  pause    S  slow motion    TAB  radar    T  edge arrows    X  ping    N  mute    ENTER  restart    ESC  quit"),
-        TextFont::from_font_size(13.0),
-        TextColor(MUTED),
-        Node { position_type: PositionType::Absolute, left: px(28), bottom: px(22), ..default() },
-    ));
+    // The on-demand details (hold Tab or F3): the situation, the ship's gear and the rig, in
+    // three columns over a dim backdrop. Nothing here is needed to fly; it is for looking up.
+    commands
+        .spawn((
+            DetailsPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(16),
+                top: px(DETAILS_TOP),
+                max_width: percent(96),
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                align_items: AlignItems::FlexStart,
+                align_content: AlignContent::FlexStart,
+                column_gap: px(26),
+                padding: UiRect::axes(px(16), px(12)),
+                border: UiRect::all(px(1)),
+                overflow: Overflow::scroll_y(),
+                display: Display::None,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.012, 0.022, 0.045, 0.9)),
+            BorderColor::all(Color::srgba(0.28, 0.94, 0.92, 0.35)),
+            ScrollPosition::default(),
+            Scrollable,
+            GlobalZIndex(10),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Hud,
+                Text::new(""),
+                TextFont::from_font_size(13.0),
+                TextColor(Color::srgb(0.82, 0.88, 0.95)),
+                Node {
+                    width: px(300),
+                    ..default()
+                },
+            ));
+            for (first, last) in [(0, RIG_SPLIT), (RIG_SPLIT, RIG_LINES)] {
+                panel
+                    .spawn((
+                        Text::new(""),
+                        TextFont::from_font_size(13.0),
+                        Node {
+                            width: px(300),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|column| {
+                        for line in first..last {
+                            column.spawn((
+                                RigLine(line),
+                                TextSpan::new(""),
+                                TextFont::from_font_size(13.0),
+                                TextColor(MUTED),
+                            ));
+                        }
+                    });
+            }
+        });
+    // The full key list (F1): every binding and the color legend, on a dim backdrop.
+    commands
+        .spawn((
+            HelpPanel,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                right: px(0),
+                top: px(DETAILS_TOP),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::FlexStart,
+                display: Display::None,
+                ..default()
+            },
+            GlobalZIndex(30),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Node {
+                    padding: UiRect::axes(px(26), px(16)),
+                    border: UiRect::all(px(1)),
+                    max_width: percent(96),
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.012, 0.022, 0.045)),
+                BorderColor::all(Color::srgba(0.28, 0.94, 0.92, 0.45)),
+                ScrollPosition::default(),
+                Scrollable,
+                HelpBody,
+                Text::new(HELP_TEXT),
+                TextFont::from_font_size(13.0),
+                TextColor(Color::srgb(0.82, 0.88, 0.95)),
+            ));
+        });
     commands.spawn((
         Overlay,
         Text::new(""),
@@ -161,8 +278,9 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             TextLayout::justify(Justify::Center),
             Node {
                 position_type: PositionType::Absolute,
-                width: percent(100),
-                bottom: px(92),
+                left: percent(4),
+                width: percent(92),
+                bottom: px(172),
                 ..default()
             },
         ))
@@ -176,40 +294,6 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                 ));
             }
         });
-    commands
-        .spawn((
-            Text::new(""),
-            TextFont::from_font_size(13.0),
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(28),
-                top: px(150),
-                ..default()
-            },
-        ))
-        .with_children(|panel| {
-            for line in 0..RIG_LINES {
-                panel.spawn((
-                    RigLine(line),
-                    TextSpan::new(""),
-                    TextFont::from_font_size(13.0),
-                    TextColor(MUTED),
-                ));
-            }
-        });
-    commands.spawn((
-        ArsenalFlash,
-        Text::new(""),
-        TextFont::from_font_size(22.0),
-        TextColor(CYAN),
-        TextLayout::justify(Justify::Center),
-        Node {
-            position_type: PositionType::Absolute,
-            width: percent(100),
-            bottom: px(205),
-            ..default()
-        },
-    ));
     // The landing prompt and the hidden/exposed banner: above the ship, clear of the HUD.
     commands.spawn((
         PadBanner,
@@ -321,30 +405,9 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                 }
             });
         });
-    commands.spawn((
-        Legend,
-        Text::new(""),
-        TextFont::from_font_size(12.0),
-        TextColor(MUTED),
-        TextLayout::justify(Justify::Right),
-        Node {
-            position_type: PositionType::Absolute,
-            right: px(28),
-            top: px(28),
-            ..default()
-        },
-    ));
 }
 
-type FlashOnly = (
-    With<ArsenalFlash>,
-    Without<RigLine>,
-    Without<FeedLine>,
-    Without<BenchLine>,
-    Without<Hud>,
-    Without<Overlay>,
-    Without<Legend>,
-);
+type HelpBodyOnly = (With<HelpBody>, Without<HelpPanel>, Without<DetailsPanel>);
 type BenchSpan = (
     &'static mut TextSpan,
     &'static mut TextColor,
@@ -356,16 +419,8 @@ type BannerOnly = (
     Without<BenchLine>,
     Without<RigLine>,
     Without<FeedLine>,
-    Without<ArsenalFlash>,
     Without<Hud>,
     Without<Overlay>,
-    Without<Legend>,
-);
-type LegendOnly = (
-    With<Legend>,
-    Without<Hud>,
-    Without<Overlay>,
-    Without<ArsenalFlash>,
 );
 
 fn rarity_color(rarity: Rarity) -> Color {
@@ -491,13 +546,13 @@ fn territory_status(game: &Game) -> String {
 }
 
 /// The colour of everything apex: the world crown, the radar ring, the arrow and the HUD line.
-const APEX_GOLD: Color = Color::srgb(1.0, 0.82, 0.22);
+pub(crate) const APEX_GOLD: Color = Color::srgb(1.0, 0.82, 0.22);
 /// The crown of an apex that has passed its phase change.
-const APEX_ENRAGED: Color = Color::srgb(1.0, 0.36, 0.25);
-const DRY_RED: Color = Color::srgb(1.0, 0.42, 0.34);
+pub(crate) const APEX_ENRAGED: Color = Color::srgb(1.0, 0.36, 0.25);
+pub(crate) const DRY_RED: Color = Color::srgb(1.0, 0.42, 0.34);
 const OWNED: Color = Color::srgb(0.62, 0.72, 0.82);
 
-fn material_color(kind: Material) -> Color {
+pub(crate) fn material_color(kind: Material) -> Color {
     let [r, g, b] = kind.color();
     Color::srgb(r, g, b)
 }
@@ -689,8 +744,8 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
     lines
 }
 
-const PAD_GREEN: Color = Color::srgb(0.4, 1.0, 0.65);
-const PAD_AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
+pub(crate) const PAD_GREEN: Color = Color::srgb(0.4, 1.0, 0.65);
+pub(crate) const PAD_AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
 /// The pad rows of the ship panel: how many pads stand and kits wait, and the state of the
 /// landing or the repair.
@@ -825,7 +880,7 @@ fn bench_lines(game: &Game) -> Vec<(String, Color)> {
 }
 
 /// The brief banner after a weapon switch or a dry fall-back, with its fade.
-fn arsenal_banner(game: &Game) -> (String, Color) {
+pub(crate) fn arsenal_banner(game: &Game) -> (String, Color) {
     if game.arsenal_flash <= 0.0 {
         return (String::new(), CYAN);
     }
@@ -846,24 +901,43 @@ fn arsenal_banner(game: &Game) -> (String, Color) {
     )
 }
 
+/// Scrolls the open details or help panel with the mouse wheel.
+pub fn scroll_panels(
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    session: Res<Session>,
+    mut panels: Query<&mut ScrollPosition, With<Scrollable>>,
+) {
+    let mut delta = 0.0;
+    for event in wheel.read() {
+        delta += match event.unit {
+            bevy::input::mouse::MouseScrollUnit::Line => event.y * 28.0,
+            bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
+        };
+    }
+    if delta == 0.0 || !(session.details_open() || session.help) {
+        return;
+    }
+    for mut position in &mut panels {
+        position.0.y = (position.0.y - delta).max(0.0);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn update_hud(
     session: Res<Session>,
-    mut flash: Single<(&mut Text, &mut TextColor), FlashOnly>,
     mut feed: Query<(&mut TextSpan, &mut TextColor, &FeedLine), Without<RigLine>>,
     mut rig: Query<(&mut TextSpan, &mut TextColor, &RigLine), Without<FeedLine>>,
     mut pad_text: Single<(&mut Text, &mut TextColor), BannerOnly>,
     mut bench: Query<BenchSpan, BenchOnly>,
     mut hud: Single<&mut Text, (With<Hud>, Without<Overlay>)>,
     mut overlay: Single<&mut Text, (With<Overlay>, Without<Hud>)>,
-    mut legend: Single<&mut Text, LegendOnly>,
+    mut details_node: Single<&mut Node, (With<DetailsPanel>, Without<HelpPanel>)>,
+    mut help_node: Single<&mut Node, (With<HelpPanel>, Without<DetailsPanel>)>,
+    mut help_body: Single<&mut Node, HelpBodyOnly>,
+    camera: Single<&Camera, With<Camera2d>>,
+    ui_scale: Res<UiScale>,
 ) {
     let game = &session.game;
-    let (banner, tint) = arsenal_banner(game);
-    if flash.0.0 != banner {
-        flash.0.0 = banner;
-    }
-    flash.1.0 = tint;
     let (text, tint) = pad_banner(game);
     if pad_text.0.0 != text {
         pad_text.0.0 = text;
@@ -885,79 +959,32 @@ pub fn update_hud(
             }
         }
     }
-    // Species have no fixed names: list the most common ones nearby, as their genes spell them.
-    let mut census: Vec<(u64, String, usize)> = Vec::new();
-    for body in game
-        .bodies
-        .iter()
-        .filter(|b| b.active && b.kind == BodyKind::Creature && !b.follower)
-    {
-        match census.iter_mut().find(|c| c.0 == body.species) {
-            Some(entry) => entry.2 += 1,
-            None => census.push((body.species, body.genome.name().to_uppercase(), 1)),
+    let details = session.details_open();
+    // Between the top row and the bottom cluster, whatever the window: the panels scroll.
+    let room = camera
+        .logical_viewport_size()
+        .map_or(600.0, |size| {
+            size.y / ui_scale.0 - DETAILS_TOP - DETAILS_BOTTOM
+        })
+        .max(120.0);
+    if details_node.max_height != px(room) {
+        details_node.max_height = px(room);
+        help_body.max_height = px(room);
+    }
+    let want = |on: bool| if on { Display::Flex } else { Display::None };
+    if details_node.display != want(details) {
+        details_node.display = want(details);
+    }
+    if help_node.display != want(session.help) {
+        help_node.display = want(session.help);
+    }
+    if details {
+        let status = situation_text(&session);
+        if hud.0 != status {
+            hud.0 = status;
         }
     }
-    census.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
-    let listing = census
-        .iter()
-        .take(6)
-        .map(|(_, name, n)| format!("{name} x{n}"))
-        .collect::<Vec<_>>()
-        .join("   ");
-    let listing = format!("{listing}\nBASE / magenta   GRAVITY WELL / green");
-    if legend.0 != listing {
-        legend.0 = listing;
-    }
-    let sector = game.sector();
-    let params = game.params();
-    let (health, shield) = game
-        .player()
-        .map_or((0.0, 0.0), |ship| (ship.health, ship.shield));
-    let flags = [
-        game.latched_cord().map(|cord| {
-            let meter = (cord.tension * 8.0).round() as usize;
-            let gauge = format!("[{}{}]", "#".repeat(meter), ".".repeat(8 - meter.min(8)));
-            if cord.cord.strength >= STRONG_CORD || cord.cord.slack > 450.0 {
-                format!("   /   GRIPPED {gauge} - shoot the cord, you cannot break away")
-            } else {
-                format!("   /   TETHERED {gauge} - shoot the cord or break away")
-            }
-        }),
-        session.slow.then(|| "   /   SLOW MOTION".to_string()),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<String>();
-    let (power, threat) = (game.power(), game.threat());
-    let status = format!(
-        "SECTOR ({}, {}) {}   /   {} HOSTILES NEARBY   /   SCORE {:06}   /   VIEW {}   STYLE {}\nHULL {:3.0}   SHIELD {:3.0}   LIVES {}{}\nSHIP POWER x{:.1}   THREAT x{:.1}   {}{}\nDANGER {:3.0}%   AGGRESSION {:3.0}%   DENSITY {:3.0}%   DISTORTION {:3.0}%   TECH {:3.0}%   SWARM {:3.0}%",
-        sector.x,
-        sector.y,
-        game.region()
-            .map_or(String::new(), |r| r.name.to_uppercase()),
-        game.active_enemies(),
-        game.score,
-        session.camera_view.label(),
-        session.style.label(),
-        health,
-        shield,
-        game.lives,
-        flags,
-        power,
-        threat,
-        standing(power, threat),
-        hud_lines(game),
-        100.0 * params.danger,
-        100.0 * params.aggression,
-        100.0 * params.density,
-        100.0 * params.distortion,
-        100.0 * params.tech,
-        100.0 * params.swarm,
-    );
-    if hud.0 != status {
-        hud.0 = status;
-    }
-    let now = rig_lines(game);
+    let now = if details { rig_lines(game) } else { Vec::new() };
     for (mut span, mut color, line) in &mut rig {
         if let Some((text, tint)) = now.get(line.0) {
             if span.0 != *text {
@@ -966,7 +993,12 @@ pub fn update_hud(
             color.0 = *tint;
         }
     }
-    let count = game.notices.len();
+    // Toasts give way to the panels: both would claim the middle of the screen.
+    let count = if details || session.help {
+        0
+    } else {
+        game.notices.len()
+    };
     for (mut span, mut color, line) in &mut feed {
         // Newest at the bottom; older lines sit above and fade as they expire.
         let shown = (line.0 + count)
@@ -997,6 +1029,77 @@ pub fn update_hud(
     if overlay.0 != message {
         overlay.0 = message;
     }
+}
+
+/// The situation column of the details panel: place, standing, power against threat, the
+/// sector's latent parameters and the species around. Everything the always-visible HUD
+/// leaves out, one short line at a time.
+fn situation_text(session: &Session) -> String {
+    let game = &session.game;
+    let sector = game.sector();
+    let params = game.params();
+    let (health, shield) = game
+        .player()
+        .map_or((0.0, 0.0), |ship| (ship.health, ship.shield));
+    let (power, threat) = (game.power(), game.threat());
+    let mut text = format!(
+        "DETAILS   (hold TAB, F3 latches)\n\nSECTOR ({}, {})   {}\n{} HOSTILES NEARBY   SCORE {:06}\nHULL {:.0}   SHIELD {:.0}   LIVES {}\nVIEW {}   STYLE {}\n\nSHIP POWER x{:.1}   THREAT x{:.1}\n{}\n\nDANGER {:3.0}%   AGGRESSION {:3.0}%\nDENSITY {:3.0}%   DISTORTION {:3.0}%\nTECH {:3.0}%   SWARM {:3.0}%",
+        sector.x,
+        sector.y,
+        game.region()
+            .map_or(String::new(), |r| r.name.to_uppercase()),
+        game.active_enemies(),
+        game.score,
+        health,
+        shield,
+        game.lives,
+        session.camera_view.label(),
+        session.style.label(),
+        power,
+        threat,
+        standing(power, threat),
+        100.0 * params.danger,
+        100.0 * params.aggression,
+        100.0 * params.density,
+        100.0 * params.distortion,
+        100.0 * params.tech,
+        100.0 * params.swarm,
+    );
+    if let Some(cord) = game.latched_cord() {
+        let meter = (cord.tension * 8.0).round() as usize;
+        let gauge = format!("[{}{}]", "#".repeat(meter), ".".repeat(8 - meter.min(8)));
+        text.push_str(
+            &if cord.cord.strength >= STRONG_CORD || cord.cord.slack > 450.0 {
+                format!("\n\nGRIPPED {gauge}\nshoot the cord, you cannot break away")
+            } else {
+                format!("\n\nTETHERED {gauge}\nshoot the cord or break away")
+            },
+        );
+    }
+    if session.slow {
+        text.push_str("\n\nSLOW MOTION");
+    }
+    text.push_str(&hud_lines(game));
+    // Species have no fixed names: list the most common ones nearby, as their genes spell them.
+    let mut census: Vec<(u64, String, usize)> = Vec::new();
+    for body in game
+        .bodies
+        .iter()
+        .filter(|b| b.active && b.kind == BodyKind::Creature && !b.follower)
+    {
+        match census.iter_mut().find(|c| c.0 == body.species) {
+            Some(entry) => entry.2 += 1,
+            None => census.push((body.species, body.genome.name().to_uppercase(), 1)),
+        }
+    }
+    census.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+    if !census.is_empty() {
+        text.push_str("\n\nNEARBY");
+        for (_, name, n) in census.iter().take(6) {
+            text.push_str(&format!("\n{name} x{n}"));
+        }
+    }
+    text
 }
 
 /// The lines of the summary panel, or none when it should be hidden: the full run at game
@@ -1473,7 +1576,7 @@ fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
 }
 
 /// A civilization's tint lifted a little so dark pigments still read on the dark backdrop.
-fn lifted(tint: Option<[f32; 3]>) -> Color {
+pub(crate) fn lifted(tint: Option<[f32; 3]>) -> Color {
     match tint {
         Some([r, g, b]) => {
             let up = |c: f32| c + (1.0 - c) * 0.3;
@@ -1981,7 +2084,8 @@ fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
 
 pub fn draw(
     session: Res<Session>,
-    view: Single<(&Transform, &Projection), With<Camera2d>>,
+    view: Single<(&Transform, &Projection, &Camera), With<Camera2d>>,
+    ui_scale: Res<UiScale>,
     mut gizmos: Gizmos,
 ) {
     let game = &session.game;
@@ -1990,6 +2094,14 @@ pub fn draw(
         Projection::Orthographic(p) => p.area.half_size(),
         _ => Vec2::new(900.0, 450.0),
     };
+    // The HUD is laid out in UI pixels (logical pixels over the UI scale): world units per
+    // pixel follow from the view.
+    let viewport = view
+        .2
+        .logical_viewport_size()
+        .unwrap_or(Vec2::new(1200.0, 800.0));
+    let screen = crate::hud::Screen::new(camera, half, viewport, ui_scale.0);
+    let window = screen.size;
     let sky = if session.reduce_effects {
         ssc::backdrop::Backdrop::NEUTRAL
     } else {
@@ -2446,17 +2558,24 @@ pub fn draw(
     draw_beacons(&mut gizmos, game, camera, half);
     draw_wrecks(&mut gizmos, game, camera, half);
     draw_guides(&mut gizmos, game, camera, half, session.arrows);
-    if session.radar {
-        // The scope keeps its on-screen size as the world view zooms out.
-        let ui_scale = half.y * 2.0 / VIEW_HEIGHT;
+    if !game.game_over {
+        let hud = game.hud();
+        if let Some(ship) = game.player() {
+            crate::hud::draw_ship_rings(&mut gizmos, &hud, ship, &screen, game.time);
+        }
+        crate::hud::draw_hud(&mut gizmos, game, &hud, &screen, game.time);
+    }
+    // The radar: always on if the setting says so, else while the details are open and there
+    // is room beside them. Mid-right, clear of the corners and the bottom cluster.
+    if session.radar || (session.details_open() && window.x >= 1180.0) {
+        let radius = RADAR_RADIUS * screen.scale;
         draw_radar(
             &mut gizmos,
             game,
-            camera
-                + Vec2::new(half.x, -half.y)
-                + Vec2::new(-1.0, 1.0) * (RADAR_RADIUS + 24.0) * ui_scale,
-            ui_scale,
+            screen.at(window.x - 24.0 - RADAR_RADIUS, window.y / 2.0),
+            screen.scale,
         );
+        let _ = radius;
     }
 }
 

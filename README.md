@@ -43,7 +43,8 @@ See [docs/UNIVERSE.md](docs/UNIVERSE.md#sector-map-built) for the options and wh
 - **Mouse**: aim at the cursor while holding the left button to fire
 - **P / Pause**: pause
 - **S**: toggle slow motion
-- **Tab**: toggle radar
+- **Tab (hold) / F3 (latch)**: the details panel (the situation, the ship's gear and rig, the sector's latent parameters, territory, wildlife and apex lines) and the radar. The always-visible HUD is geometric: hull and shield rings around the ship, a weapon icon with a fuel arc and level pips, parry, dash and ping rings, three cargo bars, five threat pips, the score with a chain bar and a compact place line; see [docs/FLOW.md](docs/FLOW.md). The mouse wheel scrolls the panels in a small window.
+- **F1**: the full key list and a key to the HUD
 - **T / Start (pad)**: toggle edge arrows toward the nearest offscreen creatures (blue calm, red hunting, a ringed tint for a civilization's) and minable rocks and loose materials (diamonds in the material's color). At most four creature and three mineral arrows, nearest first, fading with distance; a flock shares one arrow.
 - **D / D-pad right (pad)**: parry, a later upgrade (locked at the start, refused with no cost until bought at the bench's RIG tab, 6; needs a Rare or better plating fitted). A forward arc shield for a third of a second that stops about 70 percent of the hostile shots that enter it (some of a barrage always leaks through), costs 15 shield and has a 1.6 second cooldown. A shot stopped in the first 0.12 seconds is sent back at 1.5 times its damage and refunds 8 shield. More levels block more and cool down faster.
 - **Shift / L3 (pad)**: dash, a later upgrade (locked at the start, refused with no cost until bought at the bench's RIG tab; needs a Rare or better engine fitted). A jump of 240 units toward the left stick, or where the ship faces without one, for 8 shield with a 1.2 second cooldown and 0.3 seconds of invulnerability. It stops short of the first rock, planetoid, fortress wall or station in the way, so it never lands inside one, and it snaps a weak latched cord. More levels reach farther and cool down faster.
@@ -58,7 +59,7 @@ See [docs/UNIVERSE.md](docs/UNIVERSE.md#sector-map-built) for the options and wh
 - **I / D-pad down (pad)**: insurance toggle (on by default). On: a death with a pad on the map pays 10 metal to keep the best part, and when the last ship is lost the run leaves a legacy: 25 percent of the ore it mined (per material, at most 120 each) goes into the next run's hold, and your best weapon profile (never the stock gun) starts the next run at level 2 at most. Off: 10 percent, at most 40 each, and no weapon. Parts, upgrades and pads never carry. The summary panel and the first seconds of the next run show what was carried.
 - **Wrecks**: the last ship also leaves a wreck where it died, holding the hold's contents (up to 150 of each material) and its best part. Fly within 140 units of it in a later run to recover it (a full hold leaves the rest). A wreck inside a living civilization's territory is looted after 240 to 480 seconds of play, fixed by the seed; at most three wrecks wait, the oldest is lost. It shows on the radar, as a red edge arrow and on the star map (W).
 - **Enter**: restart (after a lost run it applies the legacy; restarting mid-run earns none)
-- **F1**: toggle fullscreen
+- **F11**: toggle fullscreen
 - **Esc**: quit
 
 ## Project layout

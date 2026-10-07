@@ -18,10 +18,12 @@ mod cues;
 mod dash;
 mod diplomacy;
 mod ecology;
+pub mod feel;
 mod food;
 mod fortress;
 mod growth;
 mod guide;
+pub mod hud;
 mod impact;
 mod legacy;
 mod loot;
@@ -466,6 +468,8 @@ pub struct Game {
     sanctuary: bool,
     /// The region the ship is in, announced with hysteresis (see `regions`).
     region: regions::RegionState,
+    /// The score chain; see `feel`.
+    streak: feel::Streak,
 }
 
 impl Game {
@@ -535,6 +539,7 @@ impl Game {
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
             sanctuary: true,
             region: regions::RegionState::default(),
+            streak: feel::Streak::default(),
             seed,
             rng: Rng::new(seed),
             loot: Rng::new(seed ^ loot::LOOT_SALT),
@@ -620,6 +625,7 @@ impl Game {
         let mut ship_before = self.player().map(|p| (p.shield, p.health));
         self.time += dt;
         self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
+        self.streak.tick(dt);
         for effect in &mut self.effects {
             effect.remaining -= dt;
         }
@@ -1544,14 +1550,21 @@ impl Game {
                 .base
                 .as_ref()
                 .is_some_and(|b| b.kind == BaseKind::Turret);
-            self.score = self.score.saturating_add(match kind {
+            let bounty = match kind {
                 BodyKind::Creature => (body.genome.bounty * body.genes.threat) as u64,
                 BodyKind::Asteroid if body.rock == RockKind::Wall => 0,
                 BodyKind::Asteroid => 25,
                 BodyKind::Base if turret => (60.0 * body.genes.threat) as u64,
                 BodyKind::Base => 500,
                 _ => 0,
-            });
+            };
+            // Kills chain: another within the window multiplies the score (never the damage).
+            let earned = if bounty > 0 && kind != BodyKind::Asteroid {
+                (bounty as f32 * self.streak.link()) as u64
+            } else {
+                bounty
+            };
+            self.score = self.score.saturating_add(earned);
             match kind {
                 BodyKind::Player => lost_player = Some(position),
                 BodyKind::Asteroid if body.rock == RockKind::Crystal => {
@@ -2610,7 +2623,33 @@ mod tests {
             }
         }
         game.step(DT, Input::default());
-        assert_eq!(game.score, 225);
+        // Two kills in one step chain: the second pays the first link's step on top.
+        assert!(game.score > 225 && game.score <= (225.0 * feel::streak_multiplier(2)) as u64);
+        assert_eq!(
+            game.streak_view().map(|(m, _)| m),
+            Some(feel::streak_multiplier(2))
+        );
+    }
+
+    #[test]
+    fn a_lone_kill_pays_its_plain_bounty() {
+        let mut game = empty_game();
+        spawn(&mut game, &Species::bogey(), Vec2::new(0.0, 2000.0));
+        for body in &mut game.bodies {
+            if body.kind == BodyKind::Creature {
+                body.health = 0.0;
+            }
+        }
+        let bounty = game
+            .bodies
+            .iter()
+            .find(|b| b.kind == BodyKind::Creature)
+            .map(|b| (b.genome.bounty * b.genes.threat) as u64)
+            .unwrap();
+        game.step(DT, Input::default());
+        assert!(bounty > 0);
+        assert_eq!(game.score, bounty);
+        assert_eq!(game.streak_view(), None);
     }
 
     #[test]

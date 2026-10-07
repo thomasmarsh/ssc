@@ -184,6 +184,7 @@ impl Game {
         if turned > 0 && !self.parry.perfected {
             self.parry.perfected = true;
             self.run.perfect_parries += 1;
+            self.streak.link();
             self.parry.cooldown = (self.parry.cooldown - t::PARRY_PERFECT_COOLDOWN_REFUND).max(0.0);
             self.parry.stop = t::PARRY_HITSTOP;
             self.parry.flash = t::PARRY_FLASH;

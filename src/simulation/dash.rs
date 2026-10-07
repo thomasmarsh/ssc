@@ -170,6 +170,7 @@ impl Game {
             return;
         }
         self.dash.grazed = true;
+        self.streak.link();
         self.dash.stacks = (self.dash.stacks + 1).min(t::DASH_BOOST_STACKS);
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.shield = (ship.shield + t::DASH_GRAZE_REFUND).min(ship.max_shield);
