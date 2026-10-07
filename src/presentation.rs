@@ -381,6 +381,17 @@ fn standing(power: f32, threat: f32) -> &'static str {
 /// Extra HUD lines under the ship status: the territory, then the nearest apex elder.
 fn hud_lines(game: &Game) -> String {
     let mut text = territory_line(game);
+    // The base ping's answer: the nearest civilization, its bearing and how far in sectors.
+    if let Some(near) = game.nearest_civilization() {
+        const POINTS: [&str; 8] = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"];
+        let octant = ((near.direction.y.atan2(near.direction.x) / std::f32::consts::FRAC_PI_4)
+            .round() as i32)
+            .rem_euclid(8) as usize;
+        text.push_str(&format!(
+            "\n> NEAREST  {}  {:.1} SECTORS {}",
+            near.name, near.sectors, POINTS[octant]
+        ));
+    }
     if let Some(apex) = game.apex_report() {
         let lesser = if apex.rank == ssc::apex::Rank::Lesser {
             " (lesser)"
@@ -2546,6 +2557,20 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
                 .circle_2d(at - d * size * 0.2, size * 1.5, color.with_alpha(0.5))
                 .resolution(14);
         }
+        // The arrow to the nearest civilization is a double chevron inside a wide ring.
+        if matches!(bearing.kind, GuideKind::Echo(EchoKind::Nearest, _)) {
+            gizmos.linestrip_2d(
+                [
+                    back - d * size * 0.9 + side * size * 0.8,
+                    tip - d * size * 0.9,
+                    back - d * size * 0.9 - side * size * 0.8,
+                ],
+                color,
+            );
+            gizmos
+                .circle_2d(at - d * size * 0.2, size * 1.8, color.with_alpha(0.35))
+                .resolution(14);
+        }
         // A beacon's arrow wears a bar across its tail, like a mast.
         if bearing.kind == GuideKind::Beacon {
             gizmos.line_2d(
@@ -2569,7 +2594,7 @@ fn draw_guides(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2, arrow
 fn echo_color(kind: EchoKind, tint: Option<[f32; 3]>) -> Color {
     match kind {
         EchoKind::Planetoid => Color::srgb(0.95, 0.8, 0.5),
-        EchoKind::Civilization | EchoKind::Fortress => lifted(tint),
+        EchoKind::Civilization | EchoKind::Fortress | EchoKind::Nearest => lifted(tint),
         EchoKind::Pad => PAD_GREEN,
         EchoKind::PadAlert => PAD_AMBER,
         EchoKind::Lode => tint.map_or(Color::srgb(0.95, 0.8, 0.5), |[r, g, b]| {
@@ -2706,6 +2731,14 @@ fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
             EchoKind::Fortress => {
                 gizmos.lineloop_2d(square(size), c);
                 gizmos.lineloop_2d(square(size * 0.55), c);
+            }
+            EchoKind::Nearest => {
+                // The nearest civilization's long-range blip: a crosshair in its tint.
+                gizmos.circle_2d(at, size * 1.3, c).resolution(32);
+                gizmos.circle_2d(at, size * 0.6, c).resolution(20);
+                for d in [Vec2::X, Vec2::Y, -Vec2::X, -Vec2::Y] {
+                    gizmos.line_2d(at + d * size * 1.3, at + d * size * 2.0, c);
+                }
             }
             EchoKind::Pad | EchoKind::PadAlert => {
                 gizmos.lineloop_2d(

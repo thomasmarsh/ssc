@@ -2,6 +2,7 @@
 //! the simulated bodies; the adapter draws the result as arrows on the screen edge and owns
 //! nothing else. Nothing in the rules reads it.
 
+use super::ping::EchoKind;
 use super::{BodyKind, Game, extent_in_view};
 use crate::simulation::mining::Material;
 use crate::world::RockKind;
@@ -157,7 +158,7 @@ impl Game {
         let Some(ship) = self.player().map(|p| p.position) else {
             return Vec::new();
         };
-        let found = self
+        let all: Vec<Bearing> = self
             .echoes()
             .filter(|(e, _)| !extent_in_view(e.position, 0.0, center, half, 0.0))
             .filter_map(|(e, fade)| {
@@ -170,7 +171,28 @@ impl Game {
                 })
             })
             .collect();
-        pick_nearest(found, MAX_ECHO_ARROWS)
+        // The bearing to the nearest civilization always gets its arrow, however far it is;
+        // a seat or fortress echo pointing the same way is that same civilization.
+        let is_nearest = |b: &Bearing| matches!(b.kind, GuideKind::Echo(EchoKind::Nearest, _));
+        let (far, rest): (Vec<Bearing>, Vec<Bearing>) = all.into_iter().partition(is_nearest);
+        let far = pick_nearest(far, 1);
+        let rest = rest
+            .into_iter()
+            .filter(|b| {
+                let seat = matches!(
+                    b.kind,
+                    GuideKind::Echo(EchoKind::Civilization | EchoKind::Fortress, _)
+                );
+                !(seat
+                    && far
+                        .iter()
+                        .any(|f| f.direction.dot(b.direction) > MERGE_ANGLE.cos()))
+            })
+            .collect();
+        let mut out = far;
+        let room = MAX_ECHO_ARROWS.saturating_sub(out.len());
+        out.extend(pick_nearest(rest, room));
+        out
     }
 }
 

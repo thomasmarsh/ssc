@@ -274,6 +274,140 @@ pub fn territory(seed: u64, sector: SectorId) -> Option<Territory> {
     (!covers(seed, &early, t.capital)).then_some(t)
 }
 
+// ---- the nearest civilization (what the base ping answers) ---------------------------
+
+/// Cells the nearest-civilization search may reach out from the ship's own cell: 24 cells
+/// are 240 sectors, far beyond any plausible gap (about half the cells hold a territory).
+pub const SEARCH_CELLS: i32 = 24;
+
+/// A civilization a search found: the territory, the sector of it nearest the searcher (the
+/// capital's, if the searcher is already inside) and the distance in world units to that
+/// sector's nearest edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Nearest {
+    pub territory: Territory,
+    pub sector: SectorId,
+    pub distance: f32,
+}
+
+/// What the nearest-civilization search remembers: the sectors each territory cell holds
+/// (generation is pure, so this only saves work). Create one per `Game`.
+#[derive(Default)]
+pub struct SeatCache {
+    cells: std::collections::HashMap<(i32, i32), Option<Held>>,
+    early: Option<(u64, Territory, Vec<SectorId>)>,
+}
+
+/// A territory and the sectors it holds.
+type Held = (Territory, Vec<SectorId>);
+
+/// The sectors a territory holds, scanned over its bounding box.
+fn sectors_of(seed: u64, t: &Territory) -> Vec<SectorId> {
+    let reach = (t.radius * (1.0 + EDGE_NOISE * 0.5)).ceil() as i32 + 1;
+    let mut out = Vec::new();
+    for dx in -reach..=reach {
+        for dy in -reach..=reach {
+            let id = SectorId {
+                x: t.capital.x + dx,
+                y: t.capital.y + dy,
+            };
+            if territory(seed, id).is_some_and(|found| found.id == t.id) {
+                out.push(id);
+            }
+        }
+    }
+    out
+}
+
+/// Distance from `from` to the nearest edge of `sector`'s square (zero inside it).
+fn box_distance(from: Vec2, sector: SectorId) -> f32 {
+    let half = Vec2::splat(SECTOR_SIZE / 2.0);
+    let outside = ((from - sector.center()).abs() - half).max(Vec2::ZERO);
+    outside.length()
+}
+
+/// The civilization nearest `from` that `skip` does not rule out (a fallen one, say), found
+/// by searching the territory lattice outward cell ring by cell ring and stopping once no
+/// farther ring can hold anything nearer. Deterministic (ties go to the lower id) and
+/// bounded by `SEARCH_CELLS`. A searcher inside a territory is given that territory's capital.
+pub fn nearest_civilization(
+    seed: u64,
+    from: Vec2,
+    cache: &mut SeatCache,
+    skip: &dyn Fn(&Territory) -> bool,
+) -> Option<Nearest> {
+    let mut best: Option<Nearest> = None;
+    let consider = |best: &mut Option<Nearest>, t: &Territory, sectors: &[SectorId]| {
+        if skip(t) {
+            return;
+        }
+        let found = sectors
+            .iter()
+            .map(|s| (*s, box_distance(from, *s)))
+            .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+        let Some((mut sector, distance)) = found else {
+            return;
+        };
+        if distance == 0.0 {
+            sector = t.capital;
+        }
+        let candidate = Nearest {
+            territory: *t,
+            sector,
+            distance,
+        };
+        let better = best.is_none_or(|b: Nearest| {
+            distance < b.distance || (distance == b.distance && t.id < b.territory.id)
+        });
+        if better {
+            *best = Some(candidate);
+        }
+    };
+    if cache.early.as_ref().is_none_or(|(s, ..)| *s != seed) {
+        let early = outpost(seed);
+        cache.early = Some((seed, early, sectors_of(seed, &early)));
+    }
+    if let Some((_, t, sectors)) = &cache.early {
+        consider(&mut best, t, sectors);
+    }
+    let own = cell_of(SectorId::containing(from));
+    let cell_size = (TERRITORY_CELL as f32) * SECTOR_SIZE;
+    for k in 0..=SEARCH_CELLS {
+        // A cell k rings out is at least k - 1 cells away.
+        if let Some(b) = best
+            && (k - 1).max(0) as f32 * cell_size > b.distance
+        {
+            break;
+        }
+        for dx in -k..=k {
+            for dy in -k..=k {
+                if dx.abs().max(dy.abs()) != k {
+                    continue;
+                }
+                let cell = SectorId {
+                    x: own.x + dx,
+                    y: own.y + dy,
+                };
+                let entry = cache.cells.entry((cell.x, cell.y)).or_insert_with(|| {
+                    let (t, accept) = in_cell(seed, cell)?;
+                    let early = outpost(seed);
+                    // The same acceptance `territory` applies, judged once per cell.
+                    let kept = t.capital.chebyshev_distance(SectorId::ORIGIN) > 2
+                        && Vec2::new(t.capital.x as f32, t.capital.y as f32).length()
+                            >= TERRITORY_MIN_DEPTH
+                        && accept < ACCEPT_FLOOR + (1.0 - ACCEPT_FLOOR) * fit(seed, t.capital)
+                        && !covers(seed, &early, t.capital);
+                    kept.then(|| (t, sectors_of(seed, &t)))
+                });
+                if let Some((t, sectors)) = entry {
+                    consider(&mut best, t, sectors);
+                }
+            }
+        }
+    }
+    best
+}
+
 /// The territory holding `sector`, else the first of its eight neighbours' (a fixed order) that
 /// lies in one: the civilization whose wildlife a place beside a claim is read against.
 pub fn nearby_territory(seed: u64, sector: SectorId) -> Option<Territory> {
@@ -1206,5 +1340,70 @@ mod tests {
                 assert!(people <= 24, "{id:?}: {people}");
             }
         }
+    }
+
+    fn nearest_from(seed: u64, from: Vec2) -> Option<Nearest> {
+        nearest_civilization(seed, from, &mut SeatCache::default(), &|_| false)
+    }
+
+    #[test]
+    fn the_nearest_civilization_is_deterministic_and_the_outpost_is_found_from_home() {
+        for seed in [SEED, 1, 42, 99, 7, 123] {
+            let first = nearest_from(seed, Vec2::ZERO).expect("something is always out there");
+            assert_eq!(Some(first), nearest_from(seed, Vec2::ZERO));
+            // A warm cache gives the same answer as a cold one.
+            let mut cache = SeatCache::default();
+            let skip = |_: &Territory| false;
+            let warm = nearest_civilization(seed, Vec2::ZERO, &mut cache, &skip);
+            assert_eq!(
+                warm,
+                nearest_civilization(seed, Vec2::ZERO, &mut cache, &skip)
+            );
+            assert_eq!(warm, Some(first));
+            // From HOME the first civilization is the early outpost, a few sectors out.
+            assert_eq!(first.territory.id, outpost(seed).id);
+            assert!(first.distance < 5.0 * SECTOR_SIZE, "{}", first.distance);
+        }
+    }
+
+    #[test]
+    fn the_nearest_civilization_really_is_the_nearest() {
+        for seed in [SEED, 42, 7] {
+            let all = all_territories(seed, 70);
+            for from in [
+                Vec2::new(30.0, -2000.0) * 6.0,
+                Vec2::new(-24.0, 31.0) * SECTOR_SIZE,
+                Vec2::new(55.0, 12.0) * SECTOR_SIZE,
+                Vec2::new(-5.0, -40.0) * SECTOR_SIZE,
+            ] {
+                let truth = all
+                    .iter()
+                    .map(|(id, _)| box_distance(from, *id))
+                    .fold(f32::INFINITY, f32::min);
+                let found = nearest_from(seed, from).unwrap();
+                assert_eq!(found.distance, truth, "seed {seed} from {from:?}");
+                assert!(territory(seed, found.sector).is_some_and(|t| t.id == found.territory.id));
+            }
+        }
+    }
+
+    #[test]
+    fn the_search_reaches_far_skips_the_fallen_and_goes_nearest_first() {
+        // Far from HOME the search still finds a civilization within the cap.
+        let far = Vec2::new(800.0, -800.0) * SECTOR_SIZE;
+        let near = nearest_from(SEED, far).expect("a far civilization");
+        assert!(near.distance < SEARCH_CELLS as f32 * TERRITORY_CELL as f32 * SECTOR_SIZE);
+        // Ruling the nearest out gives the next one, never a nearer one.
+        let mut cache = SeatCache::default();
+        let skip_it = |t: &Territory| t.id == near.territory.id;
+        let next = nearest_civilization(SEED, far, &mut cache, &skip_it).unwrap();
+        assert_ne!(next.territory.id, near.territory.id);
+        assert!(next.distance >= near.distance);
+        // Inside a territory the answer is its capital sector.
+        let (id, t) = all_territories(SEED, 40)[3];
+        let inside = nearest_from(SEED, id.center()).unwrap();
+        assert_eq!(inside.distance, 0.0);
+        assert_eq!(inside.territory.id, t.id);
+        assert_eq!(inside.sector, t.capital);
     }
 }

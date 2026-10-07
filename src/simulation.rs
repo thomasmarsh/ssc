@@ -64,7 +64,7 @@ pub use pads::{
     Bench, BenchPanel, BenchRow, BenchTab, HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP,
     Pad, PadHint, PadKey, PadState, STASH_CAP, price_text,
 };
-pub use ping::{ECHO_LIFE, Echo, EchoKind, PING_COOLDOWN, PING_RANGE, RING_SPEED};
+pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RANGE, RING_SPEED};
 pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};

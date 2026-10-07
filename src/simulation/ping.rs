@@ -5,6 +5,11 @@
 //! Echoes are information only: nothing in the rules reads them, and a ping costs nothing but
 //! its cooldown.
 //!
+//! The base ping always also answers with the nearest living civilization, wherever it is
+//! (`EchoKind::Nearest`, found by `territory::nearest_civilization`, searched out to
+//! `territory::SEARCH_CELLS`): a long-range bearing blip that carries its distance in
+//! sectors, however far the ring itself reaches.
+//!
 //! The base ping is what the ship starts with. Bench upgrades (`skills`) stretch its reach,
 //! speed it up, shorten its cooldown and widen its answer, and four reveal tiers, each bought
 //! once, add echo kinds: pads the enemy has found, rich lodes and renewable planetoids, nests
@@ -15,7 +20,7 @@ use super::skills::Skill;
 use super::tuning as t;
 use super::{BodyKind, Cue, Game};
 use crate::genome::Niche;
-use crate::territory::{CivRole, Standing};
+use crate::territory::{CivRole, SeatCache, Standing};
 use crate::world::{self, RockKind, SECTOR_SIZE, SectorId, Spawn};
 use bevy::prelude::Vec2;
 use std::collections::HashMap;
@@ -42,6 +47,9 @@ pub enum EchoKind {
     Civilization,
     /// A civilization's capital, walled.
     Fortress,
+    /// The nearest civilization wherever it lies: a bearing blip at the nearest sector of its
+    /// territory (its capital's, from inside); `weight` is the distance in sectors.
+    Nearest,
     /// One of the player's own landing pads.
     Pad,
     /// One of the player's pads that the enemy has found (pad watch).
@@ -62,6 +70,7 @@ impl EchoKind {
             Self::Planetoid => CAP_PLANETOID,
             Self::Civilization => CAP_CIVILIZATION,
             Self::Fortress => CAP_FORTRESS,
+            Self::Nearest => 1,
             Self::Pad => CAP_PAD,
             Self::PadAlert => t::CAP_PAD_ALERT,
             Self::Lode => t::CAP_LODE,
@@ -101,6 +110,19 @@ pub struct Echo {
     sounded: bool,
 }
 
+/// The nearest civilization as the ship's last ping reported it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NearestReport {
+    pub name: String,
+    pub tint: [f32; 3],
+    /// Distance from the ship now, in sectors.
+    pub sectors: f32,
+    /// Unit direction from the ship (zero when it is on top of it).
+    pub direction: Vec2,
+    /// Remaining brightness in (0, 1].
+    pub fade: f32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ring {
     pub origin: Vec2,
@@ -131,6 +153,7 @@ pub struct PingState {
     pub(super) ring: Option<Ring>,
     pub(super) echoes: Vec<Echo>,
     cache: HashMap<SectorId, Vec<Site>>,
+    seats: SeatCache,
 }
 
 impl PingState {
@@ -341,6 +364,28 @@ impl Game {
                 }
             }
         }
+        // The nearest civilization, however far: it sounds when the ring reaches it, or as
+        // the ring dies for one beyond its range.
+        let seed = self.seed;
+        let mut seats = std::mem::take(&mut self.ping.seats);
+        let fallen =
+            |t: &crate::territory::Territory| t.standing(self.civ_fall(t.id)) == Standing::Fallen;
+        let nearest = crate::territory::nearest_civilization(seed, origin, &mut seats, &fallen);
+        self.ping.seats = seats;
+        if let Some(near) = nearest {
+            let position = near.sector.center();
+            let distance = position.distance(origin);
+            found.push(Echo {
+                kind: EchoKind::Nearest,
+                position,
+                radius: 0.0,
+                tint: Some(near.territory.color(seed)),
+                weight: distance / SECTOR_SIZE,
+                renewable: false,
+                born: self.time + distance.min(range) / speed,
+                sounded: false,
+            });
+        }
         for pad in self.pads() {
             let position = self.pad_position(pad);
             let distance = position.distance(origin);
@@ -414,6 +459,21 @@ impl Game {
     /// How far the ring in flight travels, for fading it (the base range without one).
     pub fn ping_ring_range(&self) -> f32 {
         self.ping.ring.map_or(PING_RANGE, |r| r.range)
+    }
+
+    /// What the sounded nearest-civilization echo says: who, how far in sectors and which
+    /// way from the ship, while it lingers.
+    pub fn nearest_civilization(&self) -> Option<NearestReport> {
+        let ship = self.player()?.position;
+        let (echo, fade) = self.echoes().find(|(e, _)| e.kind == EchoKind::Nearest)?;
+        let territory = world::territory(self.seed, SectorId::containing(echo.position))?;
+        Some(NearestReport {
+            name: territory.name(self.seed),
+            tint: echo.tint.unwrap_or([0.8, 0.8, 0.8]),
+            sectors: echo.position.distance(ship) / SECTOR_SIZE,
+            direction: (echo.position - ship).normalize_or_zero(),
+            fade,
+        })
     }
 
     /// Echoes that have sounded, with their remaining brightness in (0, 1].
@@ -567,7 +627,10 @@ mod tests {
         game.teleport(at);
         game.ping.cooldown = 0.0;
         assert!(game.ping());
-        game.ping.echoes.clone()
+        // The nearest-civilization bearing is exempt from the ring's range (tested apart).
+        let mut echoes = game.ping.echoes.clone();
+        echoes.retain(|e| e.kind != EchoKind::Nearest);
+        echoes
     }
 
     #[test]
@@ -770,5 +833,89 @@ mod tests {
         let (mut a, mut b) = (skilled(&skills), skilled(&skills));
         let at = Vec2::new(-20_000.0, 9_000.0);
         assert_eq!(kinds_after_ping(&mut a, at), kinds_after_ping(&mut b, at));
+    }
+
+    #[test]
+    fn the_base_ping_always_names_the_nearest_civilization_and_how_far() {
+        for seed in [42_u64, 7, 99] {
+            let mut game = empty_game();
+            game.seed = seed;
+            let at = Vec2::new(-90.0, 140.0) * SECTOR_SIZE;
+            game.bodies[0].position = at;
+            assert!(game.ping());
+            let echo = game
+                .ping
+                .echoes
+                .iter()
+                .find(|e| e.kind == EchoKind::Nearest)
+                .copied()
+                .expect("the nearest civilization answers wherever the ship is");
+            let truth =
+                crate::territory::nearest_civilization(seed, at, &mut Default::default(), &|_| {
+                    false
+                })
+                .unwrap();
+            assert_eq!(echo.position, truth.sector.center());
+            assert!((echo.weight - echo.position.distance(at) / SECTOR_SIZE).abs() < 1e-3);
+            assert!(echo.tint.is_some());
+            // It sounds no later than the ring runs out, however far the thing is.
+            assert!(echo.born - game.time <= PING_RANGE / RING_SPEED + 1e-3);
+            run(&mut game, PING_RANGE / RING_SPEED + 0.5);
+            let report = game
+                .nearest_civilization()
+                .expect("reported while it lingers");
+            assert!((report.sectors - echo.weight).abs() < 0.05);
+            assert!((report.direction.length() - 1.0).abs() < 1e-3);
+            let bearings = game.echo_bearings(at, Vec2::new(900.0, 500.0));
+            assert!(
+                matches!(
+                    bearings.first().map(|b| b.kind),
+                    Some(GuideKind::Echo(EchoKind::Nearest, _))
+                ),
+                "the arrow to the nearest civilization leads"
+            );
+        }
+    }
+
+    #[test]
+    fn from_home_the_base_ping_finds_the_early_outpost() {
+        let mut game = empty_game();
+        assert!(game.ping());
+        let echo = game
+            .ping
+            .echoes
+            .iter()
+            .find(|e| e.kind == EchoKind::Nearest)
+            .expect("an outpost lies near HOME");
+        let outpost = crate::territory::outpost(game.seed);
+        assert!(
+            world::territory(game.seed, SectorId::containing(echo.position))
+                .is_some_and(|t| t.id == outpost.id)
+        );
+        assert!(echo.weight < 5.0, "{} sectors", echo.weight);
+    }
+
+    #[test]
+    fn a_fallen_civilization_is_not_the_nearest_any_more() {
+        let mut game = empty_game();
+        let outpost = crate::territory::outpost(game.seed);
+        game.civ_fall.insert(
+            outpost.id,
+            crate::territory::Fall {
+                capital: true,
+                elder: true,
+            },
+        );
+        assert!(game.ping());
+        let echo = game
+            .ping
+            .echoes
+            .iter()
+            .find(|e| e.kind == EchoKind::Nearest)
+            .expect("another one is found");
+        assert!(
+            world::territory(game.seed, SectorId::containing(echo.position))
+                .is_some_and(|t| t.id != outpost.id)
+        );
     }
 }

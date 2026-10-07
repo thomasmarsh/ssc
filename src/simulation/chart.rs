@@ -305,6 +305,10 @@ impl Game {
 
     /// A sounded echo teaches the chart what it answered with.
     pub(super) fn chart_learn_echo(&mut self, echo: &Echo) {
+        // The nearest-civilization blip is a bearing, not a place the chart can name.
+        if echo.kind == EchoKind::Nearest {
+            return;
+        }
         let territory = match echo.kind {
             EchoKind::Civilization | EchoKind::Fortress => {
                 world::territory(self.seed, SectorId::containing(echo.position)).map(|t| t.id)
@@ -405,7 +409,7 @@ impl Game {
                             e.civ = Some(reading);
                         }
                     }
-                    EchoKind::Pad | EchoKind::PadAlert => {}
+                    EchoKind::Pad | EchoKind::PadAlert | EchoKind::Nearest => {}
                 }
             }
             out.insert(id, e);
