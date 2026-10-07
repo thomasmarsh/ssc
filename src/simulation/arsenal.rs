@@ -27,6 +27,65 @@ pub enum Profile {
     Blast,
 }
 
+/// The kind of damage a profile deals, for adaptive resistance: tough enemies and apexes harden
+/// against the family that has hurt them most lately (see `adapt`). Four families, so a ship
+/// with a couple of guns can always switch to one that has not been spammed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Family {
+    /// Plain pellets and whatever fans, flanks or seeks with them.
+    Kinetic,
+    /// Needle swarms: many thin hits.
+    Needle,
+    /// The lance: shots that pass through (the bypass family).
+    Lance,
+    /// Missiles, mines, novas and bursts: area damage.
+    Explosive,
+}
+
+impl Family {
+    pub const ALL: [Family; 4] = [Self::Kinetic, Self::Needle, Self::Lance, Self::Explosive];
+
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|f| *f == self).unwrap_or(0)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Kinetic => "KINETIC",
+            Self::Needle => "NEEDLE",
+            Self::Lance => "LANCE",
+            Self::Explosive => "EXPLOSIVE",
+        }
+    }
+
+    /// The tint of the family's pip on a hull bar, as sRGB.
+    pub fn tint(self) -> [f32; 3] {
+        match self {
+            Self::Kinetic => [1.0, 0.82, 0.3],
+            Self::Needle => [0.4, 0.9, 1.0],
+            Self::Lance => [0.95, 0.95, 1.0],
+            Self::Explosive => [1.0, 0.5, 0.25],
+        }
+    }
+}
+
+/// How a profile's shots carry over distance: full damage out to the sweet spot, then a mild
+/// falloff over `FALLOFF_SPAN` more, down to `floor` of the damage and never below (a far hit
+/// still hurts). Numbers live with the profile so the tradeoff reads at a glance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Reach {
+    pub sweet: f32,
+    pub floor: f32,
+}
+
+impl Reach {
+    /// The damage multiplier at `distance` travelled.
+    pub fn at(self, distance: f32) -> f32 {
+        let past = ((distance - self.sweet) / super::tuning::FALLOFF_SPAN).clamp(0.0, 1.0);
+        1.0 - (1.0 - self.floor) * past
+    }
+}
+
 /// How a profile is billed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Billing {
@@ -70,6 +129,48 @@ impl Profile {
             Self::Homing => "HOMING",
             Self::Pierce => "LANCE",
             Self::Blast => "BLAST",
+        }
+    }
+
+    /// The damage family the profile's hits belong to.
+    pub fn family(self) -> Family {
+        match self {
+            Self::Stock | Self::Spread | Self::Broadside | Self::Tail | Self::Homing => {
+                Family::Kinetic
+            }
+            Self::Needles => Family::Needle,
+            Self::Pierce => Family::Lance,
+            Self::Missiles | Self::Mines | Self::Nova | Self::Blast => Family::Explosive,
+        }
+    }
+
+    /// Where the profile's shots are at their best and how much they keep far away.
+    pub fn reach(self) -> Reach {
+        let (sweet, floor) = match self {
+            Self::Stock => (800.0, 0.6),
+            Self::Spread => (450.0, 0.45),
+            Self::Needles => (500.0, 0.4),
+            Self::Missiles => (1300.0, 0.8),
+            Self::Mines => (300.0, 1.0),
+            Self::Nova => (400.0, 0.7),
+            Self::Broadside | Self::Tail => (600.0, 0.55),
+            Self::Homing => (1000.0, 0.7),
+            Self::Pierce => (1100.0, 0.55),
+            Self::Blast => (800.0, 0.6),
+        };
+        Reach { sweet, floor }
+    }
+
+    /// How hard the profile kicks the ship per trigger pull, relative to the stock gun (see
+    /// `tuning::RECOIL`): the lance and the blast are heavy, a needle burst is not.
+    pub fn recoil(self) -> f32 {
+        match self {
+            Self::Pierce => 1.6,
+            Self::Blast => 1.3,
+            Self::Stock | Self::Homing => 1.0,
+            Self::Spread | Self::Broadside | Self::Tail => 0.7,
+            Self::Needles => 0.4,
+            Self::Missiles | Self::Mines | Self::Nova => 0.0,
         }
     }
 
@@ -459,6 +560,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn every_profile_has_a_family_a_sweet_spot_and_a_falloff_that_never_reaches_zero() {
+        let mut seen = std::collections::HashSet::new();
+        for profile in Profile::ALL {
+            seen.insert(profile.family());
+            let reach = profile.reach();
+            assert!(
+                reach.sweet >= 250.0 && (0.3..=1.0).contains(&reach.floor),
+                "{profile:?}"
+            );
+            // Full damage inside the sweet spot, then a slide that never rises and has a floor.
+            assert_eq!(reach.at(0.0), 1.0);
+            assert_eq!(reach.at(reach.sweet), 1.0);
+            let mut last = 1.0;
+            for step in 0..=200 {
+                let m = reach.at(reach.sweet + step as f32 * 30.0);
+                assert!(
+                    m <= last + 1e-6 && m >= reach.floor - 1e-6 && m > 0.0,
+                    "{profile:?}"
+                );
+                last = m;
+            }
+            assert!((reach.at(1e6) - reach.floor).abs() < 1e-6);
+            assert!(profile.recoil() >= 0.0);
+        }
+        assert_eq!(seen.len(), Family::ALL.len(), "every family has a profile");
+        // The long guns trade damage for reach: the lance keeps its sweet spot longest of the
+        // direct guns, the shotgun and needles lose theirs soonest.
+        assert!(Profile::Pierce.reach().sweet > Profile::Stock.reach().sweet);
+        assert!(Profile::Spread.reach().sweet < Profile::Stock.reach().sweet);
+        assert!(Profile::Needles.reach().floor < Profile::Stock.reach().floor);
     }
 
     #[test]

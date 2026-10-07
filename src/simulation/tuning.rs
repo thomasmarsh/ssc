@@ -23,6 +23,68 @@ pub const FIZZLE_SALT: u64 = 0xF122_1E00_0000_0071;
 /// A fizzled dash or parry costs nothing but locks the ability for this long.
 pub const FIZZLE_LOCK: f32 = 0.6;
 
+// ---- sniping counters (see `adapt`, `apexes` and `Profile::reach`) ---------------------------
+
+/// Distance over which a shot's damage slides from full (at its profile's sweet spot) to the
+/// profile's floor (see `arsenal::Reach`).
+pub const FALLOFF_SPAN: f32 = 1400.0;
+/// A heavy gun kicks the ship: an impulse per trigger pull of `RECOIL_PER_DAMAGE` units of
+/// speed for each point of damage a shot has above the stock gun's, times the profile's weight,
+/// at most `RECOIL_CAP`. Heavy shots are also slower: their speed is `1 / (1 + HEAVY_SLOW * (d /
+/// stock - 1))` of the stat, never under `HEAVY_SLOW_FLOOR`, so a big gun's shot can be led and
+/// dodged and its reach shrinks a little.
+pub const RECOIL_PER_DAMAGE: f32 = 0.2;
+pub const RECOIL_CAP: f32 = 28.0;
+pub const HEAVY_SLOW: f32 = 0.06;
+pub const HEAVY_SLOW_FLOOR: f32 = 0.6;
+/// Adaptive resistance. A creature adapts when its hull plus shield is at least
+/// `ADAPT_MIN_POOL` (every apex does). Each hit adds `ADAPT_GAIN * dealt / pool` to the meter of
+/// its damage family (so a third of the pool dealt by one family fills it), up to one. The
+/// resistance is `ADAPT_MAX * meter` of the damage: it never goes beyond `ADAPT_MAX`, so a hit
+/// always lands for `1 - ADAPT_MAX`. A meter bleeds `ADAPT_DECAY` a second, and `ADAPT_IDLE_DECAY`
+/// more once its family has not hit for `ADAPT_IDLE` seconds, so switching guns relieves it.
+pub const ADAPT_MIN_POOL: f32 = 420.0;
+pub const ADAPT_GAIN: f32 = 3.0;
+pub const ADAPT_MAX: f32 = 0.55;
+pub const ADAPT_DECAY: f32 = 0.02;
+pub const ADAPT_IDLE: f32 = 1.5;
+pub const ADAPT_IDLE_DECAY: f32 = 0.09;
+/// A hull bar shows a family's pip from this meter up.
+pub const ADAPT_SHOWN: f32 = 0.08;
+/// Apex range closers. An apex counts as sniped once the ship has hurt it from beyond
+/// `SNIPE_RANGE` (it was hit within `SNIPE_WINDOW` seconds) for `SNIPE_AFTER` seconds in all
+/// (it bleeds off at half speed otherwise); it then lunges: a planted `LUNGE_WINDUP`, then
+/// `LUNGE_TIME` seconds at `LUNGE_SPEED` along the ship.
+pub const SNIPE_RANGE: f32 = 1000.0;
+pub const SNIPE_WINDOW: f32 = 1.2;
+pub const SNIPE_AFTER: f32 = 5.0;
+pub const LUNGE_WINDUP: f32 = 0.7;
+pub const LUNGE_TIME: f32 = 1.0;
+pub const LUNGE_SPEED: f32 = 720.0;
+/// Apex barrage: a telegraphed fan of slow shots at a ship beyond `BARRAGE_RANGE`, every
+/// (calm, enraged) seconds after `BARRAGE_WINDUP` of warning; `BARRAGE_SHOTS` (more when
+/// enraged), each `BARRAGE_SPEED` fast and of `BARRAGE_SHARE` of a pellet, reaching
+/// `BARRAGE_REACH`. The fan aims where the ship will be (a lead of `BARRAGE_LEAD` seconds).
+pub const BARRAGE_RANGE: f32 = 1100.0;
+pub const BARRAGE_EVERY: (f32, f32) = (8.0, 5.0);
+pub const BARRAGE_WINDUP: f32 = 1.2;
+pub const BARRAGE_SHOTS: (u8, u8) = (9, 13);
+pub const BARRAGE_SPEED: f32 = 360.0;
+pub const BARRAGE_SHARE: f32 = 1.2;
+pub const BARRAGE_REACH: f32 = 1800.0;
+pub const BARRAGE_LEAD: f32 = 0.5;
+/// A bubble (on a Warden, and on every elder of a realm that shields them): shots from beyond
+/// `BUBBLE_RANGE` of the elder leak `BUBBLE_LEAK` of their damage; a lance shot passes whole. A
+/// shot from inside the range hurts the bubble as well: `BUBBLE_BREAK` of the elder's pool of it
+/// in close damage breaks the bubble for `BUBBLE_DOWN` seconds, then it re-forms whole.
+pub const BUBBLE_RANGE: f32 = 520.0;
+pub const BUBBLE_LEAK: f32 = 0.15;
+pub const BUBBLE_BREAK: f32 = 0.1;
+pub const BUBBLE_DOWN: f32 = 9.0;
+/// A bubble that has not been hit up close for `BUBBLE_REST` seconds mends this much a second.
+pub const BUBBLE_REST: f32 = 3.0;
+pub const BUBBLE_MEND: f32 = 0.05;
+
 // ---- rocks ---------------------------------------------------------------------------------
 
 /// How much tougher free rocks are against the ship's own weapons (its shots, blasts and

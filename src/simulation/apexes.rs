@@ -14,6 +14,8 @@ pub struct ApexInfo {
     pub name: String,
     pub rank: Rank,
     pub archetype: Archetype,
+    /// Wears a regenerating bubble (a Warden always; every elder of a realm that shields them).
+    pub bubbled: bool,
 }
 
 /// What an apex is doing right now beyond ordinary steering.
@@ -27,6 +29,13 @@ enum Move {
     Charge(f32, Vec2),
     /// A maelstrom dragging the ship in: seconds left.
     Pull(f32),
+    /// Any elder that has been sniped, planted and squaring up before a lunge: seconds left and
+    /// the aim.
+    LungeWind(f32, Vec2),
+    /// The lunge itself: seconds left and the heading.
+    Lunge(f32, Vec2),
+    /// Planted and aiming a long-range barrage at where the ship will be: seconds left and the aim.
+    BarrageWind(f32, Vec2),
 }
 
 /// The live state of one apex body, kept apart from `Body` (only apexes pay for it).
@@ -39,6 +48,15 @@ pub struct ApexState {
     mv: Move,
     /// Living members of a queen's retinue.
     pub escorts: Vec<u64>,
+    /// Seconds the ship has spent hurting it from afar (see `tuning::SNIPE_AFTER`).
+    sniped: f32,
+    /// Seconds until the next barrage.
+    barrage_clock: f32,
+    /// How much of its bubble has been broken by close hits (0 whole, 1 broken), seconds the
+    /// bubble stays down, and seconds since a close hit.
+    bubble_hurt: f32,
+    bubble_down: f32,
+    bubble_rest: f32,
 }
 
 // ---- tuning: phases and signature moves ------------------------------------------------
@@ -71,6 +89,14 @@ const PULL_RANGE: f32 = 1600.0;
 const GUARD_COS: f32 = 0.26;
 const GUARD_LEAK: f32 = 0.12;
 
+/// Whether an archetype lacks a closer of its own and so lunges when sniped.
+fn lunges(archetype: Archetype) -> bool {
+    matches!(
+        archetype,
+        Archetype::Queen | Archetype::Bulwark | Archetype::Hunter | Archetype::Warden
+    )
+}
+
 fn pick<T: Copy>(pair: (T, T), enraged: bool) -> T {
     if enraged { pair.1 } else { pair.0 }
 }
@@ -97,6 +123,33 @@ pub(super) fn guard(
     }
 }
 
+/// What a friendly shot meets on an elder: the bulwark's plated front (`guard`) and a bubble
+/// (shots from beyond `BUBBLE_RANGE` leak `BUBBLE_LEAK`, a lance passes whole, a close shot
+/// goes through and hurts the bubble). Returns the share of damage that lands and whether the
+/// shot counts against the bubble.
+pub(super) fn shield_factor(
+    apexes: &BTreeMap<(SectorId, u32), ApexInfo>,
+    states: &HashMap<u64, ApexState>,
+    body: &Body,
+    bullet: &Bullet,
+) -> (f32, bool) {
+    let arc = guard(apexes, states, body, bullet.velocity);
+    let Some(info) = body.origin.and_then(|key| apexes.get(&key)) else {
+        return (arc, false);
+    };
+    if !info.bubbled || states.get(&body.id).is_some_and(|s| s.bubble_down > 0.0) {
+        return (arc, false);
+    }
+    if bullet.pierce > 0 {
+        return (arc, false);
+    }
+    if bullet.origin.distance(body.position) <= t::BUBBLE_RANGE + body.radius {
+        (arc, true)
+    } else {
+        (arc * t::BUBBLE_LEAK, false)
+    }
+}
+
 /// The HUD's account of the nearest apex.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ApexReport {
@@ -109,6 +162,10 @@ pub struct ApexReport {
     pub alert: bool,
     pub archetype: Archetype,
     pub enraged: bool,
+    /// Resistance meters by damage family (see `adapt`), in `Family::ALL` order.
+    pub resist: [f32; 4],
+    /// The bubble's integrity from 1 (whole) to 0 (broken), None for an elder without one.
+    pub bubble: Option<f32>,
 }
 
 impl Game {
@@ -117,6 +174,7 @@ impl Game {
     pub(super) fn register_apex(&mut self, id: SectorId, index: u32, rank: Rank, body: &mut Body) {
         let name = apex::name(self.seed, id).to_uppercase();
         let archetype = apex::archetype(self.seed, id);
+        let bubbled = apex::has_bubble(self.seed, id, archetype);
         let ring = crate::range::ring(id);
         body.max_health = apex::hull(archetype, rank, ring);
         body.health = body.max_health;
@@ -128,6 +186,7 @@ impl Game {
                 name,
                 rank,
                 archetype,
+                bubbled,
             },
         );
     }
@@ -187,6 +246,8 @@ impl Game {
             }
             let enraged = state.enraged;
             state.clock -= dt;
+            Self::mend_bubble(&mut state, dt);
+            self.closers(index, &mut state, dt, ship, archetype, alert, enraged);
             match archetype {
                 Archetype::Juggernaut => {
                     self.juggernaut(index, &mut state, dt, to_ship, alert, enraged);
@@ -205,6 +266,159 @@ impl Game {
             }
             self.apex_state.insert(id, state);
         }
+    }
+
+    /// A bubble that has been broken re-forms whole after `BUBBLE_DOWN` seconds; one that has
+    /// been left alone mends a little a second.
+    fn mend_bubble(state: &mut ApexState, dt: f32) {
+        if state.bubble_down > 0.0 {
+            state.bubble_down -= dt;
+            if state.bubble_down <= 0.0 {
+                state.bubble_hurt = 0.0;
+            }
+        } else if state.bubble_hurt > 0.0 {
+            state.bubble_rest += dt;
+            if state.bubble_rest > t::BUBBLE_REST {
+                state.bubble_hurt = (state.bubble_hurt - t::BUBBLE_MEND * dt).max(0.0);
+            }
+        }
+    }
+
+    /// A close shot (`damage` landed) hurt the bubble of apex `id`.
+    pub(super) fn bubble_hit(&mut self, id: u64, damage: f32) {
+        let Some(body) = self.bodies.iter().find(|b| b.id == id) else {
+            return;
+        };
+        let pool = (body.max_health + body.max_shield).max(1.0);
+        let at = body.position;
+        let radius = body.radius;
+        let state = self.apex_state.entry(id).or_default();
+        if state.bubble_down > 0.0 {
+            return;
+        }
+        state.bubble_rest = 0.0;
+        state.bubble_hurt = (state.bubble_hurt + damage / (pool * t::BUBBLE_BREAK)).min(1.0);
+        if state.bubble_hurt >= 1.0 {
+            state.bubble_down = t::BUBBLE_DOWN;
+            self.effect(at, radius * 3.0, 0.7, EffectKind::Explosion);
+            self.notify("BUBBLE BROKEN".to_string(), Rarity::Rare);
+        }
+    }
+
+    /// The bubble of an apex body: its integrity from 1 to 0, None when it has none.
+    pub fn apex_bubble(&self, body: &Body) -> Option<f32> {
+        let info = self.apex_of(body)?;
+        if !info.bubbled {
+            return None;
+        }
+        let state = self.apex_state.get(&body.id);
+        Some(if state.is_some_and(|s| s.bubble_down > 0.0) {
+            0.0
+        } else {
+            1.0 - state.map_or(0.0, |s| s.bubble_hurt)
+        })
+    }
+
+    /// The range closers: what makes holding a safe distance a poor plan. An elder that has been
+    /// hurt from beyond `SNIPE_RANGE` for `SNIPE_AFTER` seconds lunges at the ship (the ones
+    /// without a closer of their own: a juggernaut charges, a phantom blinks, a lasher reels and a
+    /// maelstrom pulls already), and any elder with the ship beyond `BARRAGE_RANGE` plants and
+    /// sends a telegraphed fan of slow shots at where the ship will be.
+    #[allow(clippy::too_many_arguments)]
+    fn closers(
+        &mut self,
+        index: usize,
+        state: &mut ApexState,
+        dt: f32,
+        ship: (Vec2, Vec2),
+        archetype: Archetype,
+        alert: bool,
+        enraged: bool,
+    ) {
+        let (at, hurt) = {
+            let b = &self.bodies[index];
+            (b.position, b.since_hit < t::SNIPE_WINDOW)
+        };
+        let to_ship = ship.0 - at;
+        let distance = to_ship.length();
+        if hurt && distance > t::SNIPE_RANGE {
+            state.sniped += dt;
+        } else {
+            state.sniped = (state.sniped - 0.5 * dt).max(0.0);
+        }
+        state.barrage_clock -= dt;
+        let radius = self.bodies[index].radius;
+        state.mv = match state.mv {
+            Move::Idle if alert && state.sniped >= t::SNIPE_AFTER && lunges(archetype) => {
+                state.sniped = 0.0;
+                self.effect(at, radius * 2.6, t::LUNGE_WINDUP, EffectKind::Respawn);
+                Move::LungeWind(t::LUNGE_WINDUP, to_ship.normalize_or_zero())
+            }
+            Move::Idle
+                if alert
+                    && distance > t::BARRAGE_RANGE
+                    && state.barrage_clock <= 0.0
+                    && state.clock <= 0.0 =>
+            {
+                let lead = ship.0 + ship.1 * t::BARRAGE_LEAD;
+                let aim = (lead - at).normalize_or_zero();
+                self.effect(at, radius * 2.8, t::BARRAGE_WINDUP, EffectKind::Respawn);
+                for k in 1..=3 {
+                    self.effect(
+                        at + aim * (300.0 * k as f32),
+                        26.0,
+                        t::BARRAGE_WINDUP,
+                        EffectKind::Pair,
+                    );
+                }
+                Move::BarrageWind(t::BARRAGE_WINDUP, aim)
+            }
+            Move::LungeWind(left, _) if left > dt => {
+                let body = &mut self.bodies[index];
+                body.velocity *= 0.8;
+                let aim = to_ship.normalize_or_zero();
+                body.angle = aim.y.atan2(aim.x);
+                Move::LungeWind(left - dt, aim)
+            }
+            Move::LungeWind(_, aim) => Move::Lunge(t::LUNGE_TIME, aim),
+            Move::Lunge(left, aim) if left > dt => {
+                let body = &mut self.bodies[index];
+                body.velocity = aim * t::LUNGE_SPEED;
+                body.angle = aim.y.atan2(aim.x);
+                Move::Lunge(left - dt, aim)
+            }
+            Move::Lunge(..) => {
+                self.bodies[index].velocity *= 0.3;
+                state.clock = state.clock.max(1.5);
+                Move::Idle
+            }
+            Move::BarrageWind(left, aim) if left > dt => {
+                let body = &mut self.bodies[index];
+                body.velocity *= 0.85;
+                body.angle = aim.y.atan2(aim.x);
+                Move::BarrageWind(left - dt, aim)
+            }
+            Move::BarrageWind(_, aim) => {
+                let (origin, sharp) = {
+                    let b = &self.bodies[index];
+                    (b.position + aim * (b.radius + 8.0), b.genes.sharpness())
+                };
+                let shots = pick(t::BARRAGE_SHOTS, enraged);
+                let muzzle = weapons::Muzzle {
+                    origin,
+                    aim,
+                    velocity: Vec2::ZERO,
+                    reach: t::BARRAGE_REACH,
+                    shot_speed: t::BARRAGE_SPEED,
+                    sharpness: sharp * t::BARRAGE_SHARE,
+                    pith: 0.0,
+                };
+                self.discharge(crate::genome::Weapon::Projectile, shots, &muzzle, 0.0);
+                state.barrage_clock = pick(t::BARRAGE_EVERY, enraged);
+                Move::Idle
+            }
+            other => other,
+        };
     }
 
     /// The phase change: faster, quicker on the trigger and stinging harder (a bulwark also
@@ -391,6 +605,8 @@ impl Game {
                 alert: b.alert,
                 archetype: info.archetype,
                 enraged: self.apex_enraged(b),
+                resist: self.resistance_of(b.id).unwrap_or([0.0; 4]),
+                bubble: self.apex_bubble(b),
             })
             .filter(|r| r.distance <= t::APEX_HUD_RANGE)
             .min_by(|a, b| a.distance.total_cmp(&b.distance))
@@ -1135,6 +1351,457 @@ mod tests {
                 .filter(|b| b.kind == BodyKind::Creature && SectorId::containing(b.position) == *q)
                 .count();
             assert!(creatures <= 2 * world::SECTOR_BODY_BUDGET as usize);
+        }
+    }
+
+    // ---- slice: counters to safe-distance sniping ---------------------------------------
+
+    /// A ship with a big gun: six times the damage, a long reach and a quick shot, and a hull
+    /// and shield that can take a real fight (so the damage it takes is the metric).
+    fn big_gun(game: &mut Game) {
+        game.stats.damage = Stats::BASE.damage * 6.0;
+        game.stats.shot_life = Stats::BASE.shot_life * 2.5;
+        game.stats.shot_speed = Stats::BASE.shot_speed * 1.5;
+        let ship = game
+            .bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap();
+        (ship.max_health, ship.health) = (3000.0, 3000.0);
+        (ship.max_shield, ship.shield) = (900.0, 900.0);
+        game.player_invulnerability = 0.0;
+    }
+
+    /// What a parked sniper got out of a duel.
+    struct Duel {
+        /// The elder's hull left, 0 to 1, and when it died (if it did).
+        health: f32,
+        killed_at: Option<f32>,
+        /// Hull and shield the ship lost.
+        taken: f32,
+        /// The most the elder had hardened against kinetic fire, and whether it ever lunged or
+        /// planted a barrage.
+        resisted: f32,
+        lunged: bool,
+        barraged: bool,
+    }
+
+    /// The ship sits `gap` from the elder with the big gun, aims at it and never moves.
+    fn parked_duel(archetype: Archetype, gap: f32, seconds: f32) -> Duel {
+        let (mut game, spot, id) = arena(archetype, gap);
+        big_gun(&mut game);
+        let mut d = Duel {
+            health: 1.0,
+            killed_at: None,
+            taken: 0.0,
+            resisted: 0.0,
+            lunged: false,
+            barraged: false,
+        };
+        let mut t = 0.0;
+        while t < seconds && game.player().is_some() {
+            let Some(apex) = game.bodies.iter().find(|b| b.id == id) else {
+                d.killed_at = Some(t);
+                break;
+            };
+            let aim = (apex.position - spot).normalize_or_zero();
+            if let Some(m) = game.resistance_of(id) {
+                d.resisted = d.resisted.max(m[0]);
+            }
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(
+                0.05,
+                Input {
+                    fire: true,
+                    aim_direction: Some(aim),
+                    ..Input::default()
+                },
+            );
+            if let Some(state) = game.apex_state.get(&id) {
+                d.lunged |= matches!(state.mv, Move::LungeWind(..) | Move::Lunge(..));
+                d.barraged |= matches!(state.mv, Move::BarrageWind(..));
+            }
+            t += 0.05;
+        }
+        d.health = game
+            .bodies
+            .iter()
+            .find(|b| b.id == id)
+            .map_or(0.0, |b| b.health / b.max_health);
+        d.taken = game.run.damage_taken;
+        d
+    }
+
+    /// The headline: a ship with a big gun parked far from an elder cannot just blast it. In 90
+    /// seconds of fire, against the pack hunter and the swarm queen (the elders that used to
+    /// let a sniper be), either the elder survives, or it takes at least 30 seconds to bring
+    /// down and the ship loses at least 600 hull and shield (a sixth of what the big ship
+    /// carries) on the way. The elder also visibly hardens against the gun that is hurting it,
+    /// and it uses a closer (a lunge) or a barrage along the way.
+    #[test]
+    fn a_big_gun_parked_at_long_range_cannot_kill_an_elder_for_free() {
+        for archetype in [Archetype::Hunter, Archetype::Queen] {
+            let duel = parked_duel(archetype, 3000.0, 90.0);
+            match duel.killed_at {
+                None => assert!(duel.health > 0.0, "{archetype:?}"),
+                Some(at) => {
+                    assert!(at >= 30.0, "{archetype:?} fell in only {at:.1} s");
+                    assert!(
+                        duel.taken >= 600.0,
+                        "{archetype:?} fell and the ship took only {:.0}",
+                        duel.taken
+                    );
+                }
+            }
+            assert!(
+                duel.resisted >= 0.4,
+                "{archetype:?} never hardened: {}",
+                duel.resisted
+            );
+            assert!(duel.lunged || duel.barraged, "{archetype:?} used no closer");
+        }
+    }
+
+    /// Each counter is tunable and none is a wall: sniped from far away the hunter still dies to a
+    /// real campaign, because every number leaves a hit worth something.
+    #[test]
+    fn the_counters_leave_every_hit_worth_something() {
+        use crate::simulation::arsenal::Profile;
+        for profile in Profile::ALL {
+            assert!(profile.reach().floor >= 0.35);
+        }
+        const { assert!(t::ADAPT_MAX <= 0.6 && t::BUBBLE_LEAK >= 0.1) };
+        const { assert!(t::HEAVY_SLOW_FLOOR >= 0.5 && t::RECOIL_CAP <= 40.0) };
+    }
+
+    /// A far shot lands for less than a near one (its profile's falloff), a heavy one is slower,
+    /// and the gun kicks the ship; none of it applies to a stock ship's first upgrades.
+    #[test]
+    fn range_costs_damage_and_heavy_guns_kick_and_slow() {
+        use crate::simulation::arsenal::Profile;
+        use crate::simulation::{heavy_shot, recoil_of};
+        // A stock gun neither kicks nor slows.
+        assert_eq!(recoil_of(Stats::BASE.damage, Profile::Stock), 0.0);
+        assert_eq!(heavy_shot(Stats::BASE.damage), 1.0);
+        // Heavier shots are slower and kick harder, both bounded.
+        let (mut slow, mut kick) = (1.0, 0.0);
+        for k in 1..=40 {
+            let damage = Stats::BASE.damage * k as f32 / 4.0;
+            let (s, r) = (heavy_shot(damage), recoil_of(damage, Profile::Stock));
+            assert!(s <= slow + 1e-6 && s >= t::HEAVY_SLOW_FLOOR - 1e-6);
+            assert!(r + 1e-6 >= kick && r <= t::RECOIL_CAP + 1e-6);
+            (slow, kick) = (s, r);
+        }
+        assert!(slow < 0.75 && kick == t::RECOIL_CAP);
+        assert!(recoil_of(200.0, Profile::Pierce) > recoil_of(200.0, Profile::Needles));
+        assert_eq!(recoil_of(200.0, Profile::Missiles), 0.0);
+        // In play: one shot at a near tough target and one at a far one.
+        let dealt = |gap: f32| -> f32 {
+            let mut game = crate::simulation::tests::empty_game();
+            game.stats.shot_life = 8.0;
+            let mut species = Species::bogey();
+            species.genome.hull = 5000.0;
+            species.genome.speed = 0.0;
+            species.genome.cruise = 0.0;
+            species.genome.weapon = crate::genome::Weapon::None;
+            let target = crate::simulation::tests::spawn(&mut game, &species, Vec2::new(gap, 0.0));
+            game.step(
+                0.02,
+                Input {
+                    fire: true,
+                    aim_direction: Some(Vec2::X),
+                    ..Input::default()
+                },
+            );
+            for _ in 0..(8.0 / 0.02) as usize {
+                set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+                game.step(
+                    0.02,
+                    Input {
+                        aim_direction: Some(Vec2::X),
+                        ..Input::default()
+                    },
+                );
+                game.bodies
+                    .iter_mut()
+                    .find(|b| b.id == target)
+                    .unwrap()
+                    .position = Vec2::new(gap, 0.0);
+            }
+            game.run.damage_dealt
+        };
+        let (near, far) = (dealt(400.0), dealt(2600.0));
+        assert!(
+            far < near * 0.8 && far > near * 0.4,
+            "near {near}, far {far}"
+        );
+    }
+
+    #[test]
+    fn a_bubble_turns_far_shots_and_breaks_under_close_ones() {
+        let (mut game, _, id) = arena(Archetype::Warden, 1200.0);
+        let body = apex_body(&game, id).clone();
+        assert!(
+            game.apex_of(&body).unwrap().bubbled,
+            "a warden wears a bubble"
+        );
+        assert_eq!(game.apex_bubble(&body), Some(1.0));
+        let shot = |from: Vec2, pierce: u8| {
+            let mut b = Bullet::friendly(from, (body.position - from).normalize() * 600.0, 3.0);
+            b.pierce = pierce;
+            b
+        };
+        let far = body.position + Vec2::new(0.0, 1500.0);
+        let near = body.position + Vec2::new(0.0, 300.0);
+        let (f_far, close_far) =
+            shield_factor(&game.apexes, &game.apex_state, &body, &shot(far, 0));
+        let (f_near, close_near) =
+            shield_factor(&game.apexes, &game.apex_state, &body, &shot(near, 0));
+        let (f_lance, close_lance) =
+            shield_factor(&game.apexes, &game.apex_state, &body, &shot(far, 1));
+        // A warden has no plated front: only the bubble is in play.
+        assert!((f_far - t::BUBBLE_LEAK).abs() < 1e-6 && !close_far);
+        assert!(
+            (f_near - 1.0).abs() < 1e-6 && close_near,
+            "a close shot goes through"
+        );
+        assert!(
+            (f_lance - 1.0).abs() < 1e-6 && !close_lance,
+            "a lance passes whole"
+        );
+        // Close damage wears the bubble down, and it breaks, stays down and re-forms.
+        let pool = body.max_health + body.max_shield;
+        game.bubble_hit(id, pool * t::BUBBLE_BREAK * 0.5);
+        let half = game.apex_bubble(apex_body(&game, id)).unwrap();
+        assert!((half - 0.5).abs() < 0.02, "{half}");
+        game.bubble_hit(id, pool * t::BUBBLE_BREAK);
+        assert_eq!(game.apex_bubble(apex_body(&game, id)), Some(0.0));
+        let body = apex_body(&game, id).clone();
+        let (f_down, _) = shield_factor(&game.apexes, &game.apex_state, &body, &shot(far, 0));
+        assert_eq!(f_down, 1.0, "no bubble while it is down");
+        game.player_invulnerability = 1e9;
+        for _ in 0..((t::BUBBLE_DOWN + 1.0) / 0.1) as usize {
+            set_player(
+                &mut game,
+                body.position + Vec2::new(0.0, 5000.0),
+                Vec2::ZERO,
+            );
+            game.step(0.1, Input::default());
+        }
+        assert_eq!(
+            game.apex_bubble(apex_body(&game, id)),
+            Some(1.0),
+            "it re-forms whole"
+        );
+    }
+
+    /// Holds an elder at `at` and still (a test's way of saying it cannot close the distance).
+    fn pin(game: &mut Game, id: u64, at: Vec2) {
+        if let Some(b) = game.bodies.iter_mut().find(|b| b.id == id) {
+            b.position = at;
+            b.velocity = Vec2::ZERO;
+        }
+    }
+
+    /// A barrage is a telegraphed, slow, evenly spaced fan: a full second of warning, shots a
+    /// ship can outrun, and gaps between them wider than the ship at the range it was sent from.
+    #[test]
+    fn a_barrage_is_telegraphed_slow_and_has_gaps() {
+        let (mut game, spot, id) = arena(Archetype::Hunter, 2000.0);
+        let anchor = apex_body(&game, id).position;
+        let mut warned = None;
+        let mut fired = 0.0;
+        let mut shots: Vec<(Vec2, Vec2)> = Vec::new();
+        for k in 0..(60.0 / 0.05) as usize {
+            // The elder is held where it is, as if it could not close the distance.
+            pin(&mut game, id, anchor);
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+            let now = k as f32 * 0.05;
+            let state = game.apex_state.get(&id);
+            if warned.is_none() && state.is_some_and(|s| matches!(s.mv, Move::BarrageWind(..))) {
+                warned = Some(now);
+            }
+            if warned.is_some() && shots.is_empty() {
+                // The barrage's own shots: slow and many, fired in one go.
+                let slow: Vec<_> = game
+                    .bullets
+                    .iter()
+                    .filter(|b| {
+                        !b.friendly && b.velocity.length() > 300.0 && b.velocity.length() < 400.0
+                    })
+                    .map(|b| (b.position, b.velocity))
+                    .collect();
+                if slow.len() >= usize::from(t::BARRAGE_SHOTS.0) {
+                    fired = now;
+                    shots = slow;
+                }
+            }
+            if !shots.is_empty() {
+                break;
+            }
+        }
+        let warned = warned.expect("a barrage was telegraphed");
+        assert!(
+            fired - warned >= t::BARRAGE_WINDUP - 0.2,
+            "warned {warned}, fired {fired}"
+        );
+        assert!(shots.len() >= usize::from(t::BARRAGE_SHOTS.0));
+        // Neighbouring shots are far enough apart, once they have flown to the ship, to fly between.
+        let mut angles: Vec<f32> = shots.iter().map(|(_, v)| v.to_angle()).collect();
+        angles.sort_by(f32::total_cmp);
+        let gap = angles
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .filter(|g| *g > 0.01)
+            .fold(f32::MAX, f32::min);
+        let ship_radius = game.player().unwrap().radius;
+        assert!(gap * 1500.0 > 2.0 * ship_radius + 20.0, "gap {gap} rad");
+        assert!(
+            shots
+                .iter()
+                .all(|(_, v)| v.length() <= t::BARRAGE_SPEED + 40.0)
+        );
+    }
+
+    /// An elder sniped from afar lunges at the ship, planted and telegraphed first.
+    #[test]
+    fn a_sniped_elder_lunges() {
+        let (mut game, spot, id) = arena(Archetype::Hunter, 2400.0);
+        big_gun(&mut game);
+        let anchor = apex_body(&game, id).position;
+        let (mut wound, mut fastest) = (false, 0.0_f32);
+        for _ in 0..(60.0 / 0.05) as usize {
+            pin(&mut game, id, anchor);
+            let Some(apex) = game.bodies.iter().find(|b| b.id == id) else {
+                break;
+            };
+            let aim = (apex.position - spot).normalize_or_zero();
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(
+                0.05,
+                Input {
+                    fire: true,
+                    aim_direction: Some(aim),
+                    ..Input::default()
+                },
+            );
+            let state = game.apex_state.get(&id);
+            wound |= state.is_some_and(|s| matches!(s.mv, Move::LungeWind(..)));
+            if state.is_some_and(|s| matches!(s.mv, Move::Lunge(..))) {
+                fastest = fastest.max(apex_body(&game, id).velocity.length());
+            }
+        }
+        assert!(wound, "a lunge was telegraphed");
+        assert!(fastest >= t::LUNGE_SPEED * 0.9, "{fastest}");
+    }
+
+    /// The elders of a realm carry its signature: blinks in the veil, jams in the dead reach, a
+    /// pull in the crush; nothing in the starter realm.
+    #[test]
+    fn a_realm_stamps_its_elders() {
+        use crate::power::Power;
+        let carriers = |realm: &str, power: Power| -> (usize, usize) {
+            let kind = crate::realm::RealmKind::by_id(realm).unwrap();
+            let (mut with, mut all) = (0, 0);
+            for x in (-400..=400).step_by(2) {
+                for y in (-400..=400).step_by(2) {
+                    let id = SectorId { x, y };
+                    let (_, k, i) = crate::realm::identity(SEED, id);
+                    if k != kind || i < 0.95 || crate::apex::rank(SEED, id) != Some(Rank::Major) {
+                        continue;
+                    }
+                    let Some(spawn) = world::generate(SEED, id).pop().filter(|s| s.apex.is_some())
+                    else {
+                        continue;
+                    };
+                    all += 1;
+                    with += usize::from(power.active(&spawn.species.unwrap().genome));
+                }
+            }
+            (with, all)
+        };
+        let (blink, all) = carriers("veil", Power::Blink);
+        assert!(
+            all >= 8 && blink * 2 >= all,
+            "{blink} of {all} veil elders blink"
+        );
+        let (lens, all) = carriers("crush", Power::Lens);
+        assert!(
+            all >= 5 && lens * 2 >= all,
+            "{lens} of {all} crush elders draw in"
+        );
+        let jams = |realm: &str| -> (usize, usize) {
+            let kind = crate::realm::RealmKind::by_id(realm).unwrap();
+            let (mut with, mut all) = (0, 0);
+            for x in (-400..=400).step_by(2) {
+                for y in (-400..=400).step_by(2) {
+                    let id = SectorId { x, y };
+                    let (_, k, i) = crate::realm::identity(SEED, id);
+                    if k != kind || i < 0.95 || crate::apex::rank(SEED, id) != Some(Rank::Major) {
+                        continue;
+                    }
+                    let Some(spawn) = world::generate(SEED, id).pop().filter(|s| s.apex.is_some())
+                    else {
+                        continue;
+                    };
+                    all += 1;
+                    with += usize::from(crate::realm::carries_jam(&spawn.species.unwrap().genome));
+                }
+            }
+            (with, all)
+        };
+        let (jam, all) = jams("dead_reach");
+        assert!(
+            all >= 5 && jam * 2 >= all,
+            "{jam} of {all} dead reach elders jam"
+        );
+        // The starter realm stamps nothing: rings 5 to 14 hold elders with only their own moves.
+        for x in -14..=14 {
+            for y in -14..=14 {
+                let id = SectorId { x, y };
+                if crate::apex::rank(SEED, id) != Some(Rank::Major) {
+                    continue;
+                }
+                if let Some(spawn) = world::generate(SEED, id).pop().filter(|s| s.apex.is_some()) {
+                    let g = spawn.species.unwrap().genome;
+                    assert!(
+                        !crate::realm::carries_jam(&g)
+                            || crate::range::ring(id) >= crate::apex::JAM_STAMP_RING
+                    );
+                    assert!(!Power::Lens.active(&g) && !Power::Split.active(&g));
+                }
+            }
+        }
+    }
+
+    /// Iron tide shields every elder with a bubble, and favours the lance, which passes it.
+    #[test]
+    fn the_iron_tide_bubbles_every_elder() {
+        let iron = crate::realm::RealmKind::by_id("iron_tide").unwrap();
+        let (mut bubbled, mut all) = (0, 0);
+        for x in (-450..=450).step_by(2) {
+            for y in (-450..=450).step_by(2) {
+                let id = SectorId { x, y };
+                let (_, k, i) = crate::realm::identity(SEED, id);
+                if k == iron && i >= 0.95 && crate::apex::rank(SEED, id).is_some() {
+                    all += 1;
+                    bubbled += usize::from(crate::apex::has_bubble(
+                        SEED,
+                        id,
+                        crate::apex::archetype(SEED, id),
+                    ));
+                }
+            }
+        }
+        assert!(all >= 5 && bubbled == all, "{bubbled} of {all}");
+        // Elsewhere only a warden has one.
+        for x in -20..=20 {
+            for y in -20..=20 {
+                let id = SectorId { x, y };
+                let a = crate::apex::archetype(SEED, id);
+                assert_eq!(crate::apex::has_bubble(SEED, id, a), a == Archetype::Warden);
+            }
         }
     }
 }

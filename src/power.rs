@@ -554,6 +554,21 @@ pub struct Carried {
     pub strength: f32,
 }
 
+/// Stamps `power` on a genome (an elder's, by realm): the gene at `strength` and the shared
+/// parameters near the power's typical ones. A power that is not built, or a body plan that
+/// cannot carry it, is left off. Returns whether it was stamped.
+pub fn stamp(g: &mut Genome, power: Power, strength: f32) -> bool {
+    if !power.built() || !power.fits(g) {
+        return false;
+    }
+    power.set(g, strength);
+    let (period, reach, hold) = power.spec().typical;
+    g.power_period = period;
+    g.power_reach = reach;
+    g.power_hold = hold;
+    true
+}
+
 /// The chance a swarm swallows a shot that enters it.
 pub fn cloud_density(g: &Genome) -> f32 {
     CLOUD_DENSITY.0 + CLOUD_DENSITY.1 * Power::Cloud.strength(g)

@@ -484,6 +484,32 @@ fn hud_lines(game: &Game) -> String {
             if apex.enraged { "   ENRAGED" } else { "" },
             if apex.alert { "   HUNTING YOU" } else { "" }
         ));
+        let hardened: Vec<String> = ssc::simulation::arsenal::Family::ALL
+            .into_iter()
+            .zip(apex.resist)
+            .filter(|(_, m)| *m >= ssc::simulation::tuning::ADAPT_SHOWN)
+            .map(|(f, m)| {
+                format!(
+                    "{} -{:.0}%",
+                    f.label(),
+                    100.0 * ssc::simulation::tuning::ADAPT_MAX * m
+                )
+            })
+            .collect();
+        if !hardened.is_empty() {
+            text.push_str(&format!(
+                "\n  HARDENED  {}   (switch guns with [ ])",
+                hardened.join("  ")
+            ));
+        }
+        match apex.bubble {
+            Some(b) if b > 0.0 => text.push_str(&format!(
+                "\n  BUBBLE {:.0}%   (close shots break it, a lance passes)",
+                100.0 * b
+            )),
+            Some(_) => text.push_str("\n  BUBBLE DOWN"),
+            None => {}
+        }
     }
     text
 }
@@ -1685,6 +1711,44 @@ fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
     );
 }
 
+/// What an elder or a tough creature has hardened against, and its bubble. A pip per damage
+/// family above its hull (in the family's tint, bigger and brighter the more resistance), so the
+/// player can see which gun has stopped working; an elder's bubble is a pale ring that thins as
+/// close shots wear it and breaks into a dashed one.
+fn draw_resistance(gizmos: &mut Gizmos, game: &Game, body: &Body) {
+    use ssc::simulation::arsenal::Family;
+    let (p, r) = (body.position, body.radius);
+    if let Some(meters) = game.resistance_of(body.id) {
+        for (k, family) in Family::ALL.into_iter().enumerate() {
+            let meter = meters[k];
+            if meter < ssc::simulation::tuning::ADAPT_SHOWN {
+                continue;
+            }
+            let [cr, cg, cb] = family.tint();
+            let at = p + Vec2::new((k as f32 - 1.5) * 11.0, r * 1.9 + 12.0);
+            gizmos
+                .circle_2d(
+                    at,
+                    2.0 + 3.5 * meter,
+                    Color::srgba(cr, cg, cb, 0.35 + 0.6 * meter),
+                )
+                .resolution(10);
+        }
+    }
+    if let Some(integrity) = game.apex_bubble(body) {
+        let color = Color::srgba(0.75, 0.9, 1.0, 0.15 + 0.5 * integrity);
+        if integrity > 0.0 {
+            gizmos.circle_2d(p, r * 2.05, color).resolution(36);
+        } else {
+            for k in 0..12 {
+                let a = k as f32 * std::f32::consts::TAU / 12.0 + game.time;
+                let (from, to) = (Vec2::from_angle(a), Vec2::from_angle(a + 0.25));
+                gizmos.line_2d(p + from * r * 2.05, p + to * r * 2.05, color);
+            }
+        }
+    }
+}
+
 /// A civilization's tint lifted a little so dark pigments still read on the dark backdrop.
 pub(crate) fn lifted(tint: Option<[f32; 3]>) -> Color {
     match tint {
@@ -2416,6 +2480,9 @@ pub fn draw(
                     Color::srgba(0.3, 0.75, 1.0, 0.15 + fraction * 0.5),
                 )
                 .resolution(24);
+        }
+        if body.kind == BodyKind::Creature && !body.follower {
+            draw_resistance(&mut gizmos, game, body);
         }
     }
     draw_walls(&mut gizmos, game, camera, half);

@@ -287,6 +287,7 @@ impl Game {
     /// and shake rocks apart.
     pub(super) fn explode(&mut self, at: Vec2, radius: f32, amount: f32, friendly: bool) {
         let invulnerability = self.player_invulnerability;
+        let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             let reaches = body.position.distance(at) < radius + body.radius;
             if !reaches {
@@ -295,7 +296,14 @@ impl Game {
             if friendly {
                 // A phased body is out of reach of a nova and a mine.
                 if body.kind != BodyKind::Player && !body.phased {
-                    let dealt = damage(body, armored(body, amount, true), 0.0);
+                    let resist = self
+                        .adapt
+                        .get(&body.id)
+                        .map_or(1.0, |r| r.scale(super::arsenal::Family::Explosive));
+                    let dealt = damage(body, armored(body, amount * resist, true), 0.0);
+                    if super::adapt::adaptive(body, &self.apexes) {
+                        blast_hits.push((body.id, dealt, body.max_health + body.max_shield));
+                    }
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
                     }
@@ -315,6 +323,9 @@ impl Game {
                     _ => {}
                 }
             }
+        }
+        for (id, dealt, pool) in blast_hits {
+            self.note_family_hit(id, super::arsenal::Family::Explosive, dealt, pool);
         }
         self.effect(at, radius * 0.7, 0.45, EffectKind::Explosion);
     }
@@ -357,6 +368,7 @@ impl Game {
                 let mut missile =
                     Bullet::friendly(position + aim * 22.0, velocity + aim * 380.0, 2.8 * reach);
                 missile.damage = stats.damage * 1.6;
+                missile.profile = Some(super::arsenal::Profile::Missiles);
                 missile.radius = 5.0;
                 missile.shape = Shape::Missile;
                 missile.homing = 3;
@@ -398,6 +410,7 @@ impl Game {
                 let aim = Vec2::from_angle(phase + k as f32 * TAU / ring as f32);
                 let mut orb = Bullet::friendly(position + aim * 20.0, aim * 520.0, 0.9 * reach);
                 orb.damage = stats.damage * 0.5;
+                orb.profile = Some(super::arsenal::Profile::Nova);
                 orb.shape = Shape::Orb;
                 self.bullets.push(orb);
             }

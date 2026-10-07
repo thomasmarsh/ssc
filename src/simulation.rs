@@ -5,6 +5,7 @@
 //! player's active region are generated on demand and simulated; bodies elsewhere are
 //! frozen, and sectors far from the player are dropped and regenerated on return.
 
+mod adapt;
 mod apexes;
 mod arms;
 pub mod arsenal;
@@ -56,6 +57,7 @@ mod weapons;
 mod wells;
 mod wildlife;
 
+pub use adapt::Resist;
 pub use apexes::{ApexInfo, ApexReport};
 pub use brain::Brain;
 pub use chain::{Chain, Part};
@@ -324,6 +326,10 @@ pub struct Bullet {
     pub fragile: bool,
     /// The share of a hostile shot's damage that skips the ship's shield (a hullpick's bolt).
     pub pith: f32,
+    /// Where the shot left (for its falloff and a bubble's range), and the profile of the
+    /// ship's gun that fired it (None for anything else: no falloff, no adaptive resistance).
+    pub origin: Vec2,
+    pub profile: Option<arsenal::Profile>,
     /// Bodies already pierced, so a shot inside one does not strike it every tick.
     struck: [u64; 4],
     /// The speed factor a time bubble has applied to it (1 outside one).
@@ -351,6 +357,8 @@ impl Bullet {
             burst: 0.0,
             fragile: false,
             pith: 0.0,
+            origin: position,
+            profile: None,
             struck: [0; 4],
             warped: 1.0,
             rolled: 0,
@@ -528,6 +536,8 @@ pub struct Game {
     region: regions::RegionState,
     /// The realm the ship is in, announced with hysteresis (see `realms`).
     realms: realms::RealmState,
+    /// Adaptive resistance of tough creatures and elders, by body id (see `adapt`).
+    adapt: BTreeMap<u64, adapt::Resist>,
     /// The score chain; see `feel`.
     streak: feel::Streak,
     /// Hit stops, direction marks and the events the screen reacts to; see `feel`.
@@ -612,6 +622,7 @@ impl Game {
             sanctuary: true,
             region: regions::RegionState::default(),
             realms: realms::RealmState::default(),
+            adapt: BTreeMap::new(),
             streak: feel::Streak::default(),
             feel: feel::FeelState::default(),
             lure: lure::LureState::default(),
@@ -804,6 +815,7 @@ impl Game {
         self.update_tethers(dt);
         self.update_chains(dt);
         self.update_apexes(dt);
+        self.update_adapt(dt);
         self.update_powers(dt);
         // After steering, so a remora's drift to a calm ship wins over its shyness.
         self.update_parasites(dt, input.fire);
@@ -1166,6 +1178,7 @@ impl Game {
         }
         let stats = self.stats;
         let reach = self.realm_effects().weapon_range;
+        let active = self.loadout.arsenal.active;
         let Some(player) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
             return;
         };
@@ -1201,6 +1214,12 @@ impl Game {
             let (position, velocity, radius) = (player.position, player.velocity, player.radius);
             // A realm of dust shortens how far a shot flies (see `realm::Effects`).
             let shot_life = stats.shot_life * reach;
+            // A heavy gun is slow to leave and kicks the ship (see `tuning::RECOIL_PER_DAMAGE`).
+            let heavy = heavy_shot(stats.damage);
+            let kick = recoil_of(stats.damage, active);
+            if kick > 0.0 {
+                player.velocity -= Vec2::from_angle(player.angle) * kick;
+            }
             // A needler trades rate of fire for a dense burst.
             player.fire_cooldown = stats.fire_period * if stats.needles > 0 { 1.5 } else { 1.0 };
             for (offset, share, shape) in volley(&stats, &mut self.rng) {
@@ -1209,7 +1228,7 @@ impl Game {
                 }
                 let aim = Vec2::from_angle(player.angle + offset);
                 let needle = shape == Shape::Needle;
-                let speed = stats.shot_speed * if needle { 1.5 } else { 1.0 };
+                let speed = stats.shot_speed * heavy * if needle { 1.5 } else { 1.0 };
                 let mut shot = Bullet::friendly(
                     position + aim * (radius + 5.0),
                     velocity + aim * speed,
@@ -1223,6 +1242,7 @@ impl Game {
                 shot.pierce = stats.pierce;
                 shot.homing = stats.homing;
                 shot.blast = stats.blast;
+                shot.profile = Some(active);
                 self.bullets.push(shot);
             }
         }
@@ -1467,6 +1487,8 @@ impl Game {
         let mut grazes = Vec::new();
         // Where a hullpick's bolt reached the ship's hull (a dull tick, not a chirp).
         let mut piths: Vec<Vec2> = Vec::new();
+        let mut family_hits: Vec<(u64, arsenal::Family, f32, f32)> = Vec::new();
+        let mut bubble_hits: Vec<(u64, f32)> = Vec::new();
         // Seekers home on hostile creatures and bases; gather them only if any are in flight.
         let targets: Vec<Vec2> = if self.bullets.iter().any(|b| b.friendly && b.homing > 0) {
             self.bodies
@@ -1588,16 +1610,32 @@ impl Game {
                 }
             }
             if let Some((index, fraction)) = hit {
-                // A bulwark's plated front turns most of the ship's fire away.
-                let guarded = if bullet.friendly {
-                    apexes::guard(
+                // A bulwark's plated front and an elder's bubble turn the ship's fire away; a
+                // far shot loses damage to its profile's falloff; a tough creature has built
+                // resistance to the family that has been hurting it.
+                let at = previous.lerp(bullet.position, fraction);
+                let (guarded, bubble_close) = if bullet.friendly {
+                    apexes::shield_factor(
                         &self.apexes,
                         &self.apex_state,
                         &self.bodies[index],
-                        bullet.velocity,
+                        bullet,
                     )
                 } else {
-                    1.0
+                    (1.0, false)
+                };
+                let (reach, family, adaptive) = match (bullet.friendly, bullet.profile) {
+                    (true, Some(profile)) => {
+                        let target = &self.bodies[index];
+                        let family = profile.family();
+                        (
+                            profile.reach().at(bullet.origin.distance(at))
+                                * self.adapt.get(&target.id).map_or(1.0, |r| r.scale(family)),
+                            Some(family),
+                            adapt::adaptive(target, &self.apexes),
+                        )
+                    }
+                    _ => (1.0, None, false),
                 };
                 let body = &mut self.bodies[index];
                 if dashing && !bullet.friendly && body.kind == BodyKind::Player {
@@ -1613,7 +1651,7 @@ impl Game {
                             body,
                             bullet.damage
                                 * if bullet.friendly {
-                                    boost * guarded
+                                    boost * guarded * reach
                                 } else {
                                     1.0
                                 },
@@ -1633,6 +1671,12 @@ impl Game {
                 if bullet.friendly && matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                     self.run.damage_dealt += dealt;
                 }
+                if let (true, Some(family)) = (adaptive, family) {
+                    family_hits.push((body.id, family, dealt, body.max_health + body.max_shield));
+                }
+                if bubble_close {
+                    bubble_hits.push((body.id, bullet.damage * boost * guarded * reach));
+                }
                 if bullet.friendly && dealt > 0.0 && diplomacy::civil_target(body) {
                     self.civ_hits.push((body.id, dealt));
                 }
@@ -1640,7 +1684,6 @@ impl Game {
                     body.velocity +=
                         bullet.velocity.normalize_or_zero() * (180.0 / body.mass) * mass_sign(body);
                 }
-                let at = previous.lerp(bullet.position, fraction);
                 if bullet.blast > 0 {
                     blasts.push((
                         at,
@@ -1678,6 +1721,12 @@ impl Game {
                     impacts.push(at);
                 }
             }
+        }
+        for (id, family, dealt, pool) in family_hits {
+            self.note_family_hit(id, family, dealt, pool);
+        }
+        for (id, amount) in bubble_hits {
+            self.bubble_hit(id, amount);
         }
         // Fragile shots (missiles) are destroyed by any friendly shot that reaches them.
         let fragile: Vec<usize> = self
@@ -1737,6 +1786,7 @@ impl Game {
             self.cue(Cue::Pith { at });
         }
         let invulnerability = self.player_invulnerability;
+        let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();
         for (at, radius, amount, direct, friendly) in blasts {
             for body in self
                 .bodies
@@ -1747,7 +1797,16 @@ impl Game {
                     continue;
                 }
                 if friendly && body.kind != BodyKind::Player && !body.phased {
-                    let dealt = damage(body, armored(body, amount * boost, true), 0.0);
+                    // Area damage is one family: a creature that has hardened against it takes less.
+                    let resist = self
+                        .adapt
+                        .get(&body.id)
+                        .map_or(1.0, |r| r.scale(arsenal::Family::Explosive));
+                    let adaptive = adapt::adaptive(body, &self.apexes);
+                    let dealt = damage(body, armored(body, amount * boost * resist, true), 0.0);
+                    if adaptive {
+                        blast_hits.push((body.id, dealt, body.max_health + body.max_shield));
+                    }
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
                     }
@@ -1759,6 +1818,9 @@ impl Game {
                 }
             }
             self.effect(at, radius * 0.6, 0.3, EffectKind::Explosion);
+        }
+        for (id, dealt, pool) in blast_hits {
+            self.note_family_hit(id, arsenal::Family::Explosive, dealt, pool);
         }
         for position in impacts {
             self.effect(position, 16.0, 0.22, EffectKind::Impact);
@@ -2204,6 +2266,18 @@ fn ram_contact(ship: &mut Body, other: &mut Body, closing_speed: f32, invulnerab
         }
     }
     0.0
+}
+
+/// The speed share of a shot of `damage` (heavier shots are slower: see `tuning::HEAVY_SLOW`).
+pub(crate) fn heavy_shot(damage: f32) -> f32 {
+    let over = (damage / Stats::BASE.damage - 1.0).max(0.0);
+    (1.0 / (1.0 + tuning::HEAVY_SLOW * over)).max(tuning::HEAVY_SLOW_FLOOR)
+}
+
+/// The speed a trigger pull of `damage` per shot kicks the ship with, for the profile `active`.
+pub(crate) fn recoil_of(damage: f32, active: arsenal::Profile) -> f32 {
+    ((damage - Stats::BASE.damage).max(0.0) * tuning::RECOIL_PER_DAMAGE * active.recoil())
+        .min(tuning::RECOIL_CAP)
 }
 
 /// The shots one trigger pull sends out: (angle from the nose, share of full damage).

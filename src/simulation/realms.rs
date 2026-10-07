@@ -123,11 +123,7 @@ impl Game {
                     .join("   "),
             );
         }
-        if changes.is_empty() && r.spec().primary.is_empty() {
-            lines.push(r.spec().blurb.to_uppercase());
-        } else if !r.spec().blurb.is_empty() {
-            lines.push(r.spec().blurb.to_string());
-        }
+        lines.push(r.spec().blurb.to_string());
         lines
     }
 

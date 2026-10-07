@@ -536,6 +536,39 @@ pub fn draw_apex(g: &mut Gizmos, game: &Game, s: &Screen, y: f32) {
         6.0,
         color.with_alpha(0.9),
     );
+    // Resistance: a pip per damage family under the bar, in the family's tint, bigger the more
+    // the elder has hardened against it (switch guns to relieve it); a bubble: a thin bar
+    // under them that drains as close shots wear it.
+    for (k, family) in ssc::simulation::arsenal::Family::ALL
+        .into_iter()
+        .enumerate()
+    {
+        let meter = apex.resist[k];
+        if meter < ssc::simulation::tuning::ADAPT_SHOWN {
+            continue;
+        }
+        let [r, gr, b] = family.tint();
+        disc(
+            g,
+            s,
+            Vec2::new(x0 + 8.0 + k as f32 * 18.0, y + 11.0),
+            2.0 + 2.5 * meter,
+            Color::srgb(r, gr, b).with_alpha(0.4 + 0.6 * meter),
+        );
+    }
+    if let Some(integrity) = apex.bubble {
+        let bubble = Color::srgb(0.75, 0.9, 1.0);
+        outline_box(g, s, x0 + width - 41.0, y + 7.0, 42.0, 5.0, DIM);
+        solid_box(
+            g,
+            s,
+            x0 + width - 40.0,
+            y + 8.0,
+            40.0 * integrity.clamp(0.0, 1.0),
+            3.0,
+            bubble.with_alpha(0.8),
+        );
+    }
 }
 
 // ---- the next lure -----------------------------------------------------------------------

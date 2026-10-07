@@ -470,6 +470,42 @@ fn stamp_special(g: &mut Genome, rank: Rank, archetype: Archetype, ring: u32) {
     }
 }
 
+/// Whether the elder of sector `id` wears a regenerating bubble: a Warden always, and every
+/// elder of a realm that shields them (the iron tide) where the realm is strong. See
+/// `simulation::apexes::shield_factor`.
+pub fn has_bubble(seed: u64, id: SectorId, archetype: Archetype) -> bool {
+    let realm = crate::realm::weighting(seed, id);
+    archetype == Archetype::Warden
+        || (realm.spec().bubbled && realm.intensity >= crate::realm::STAMP_FROM)
+}
+
+/// The strength of a power a realm stamps on its elders, and the share of major elders in a
+/// stamping realm that carry one.
+pub const REALM_STAMP_STRENGTH: f32 = 0.75;
+pub const REALM_STAMP_SHARE: f32 = 0.7;
+
+/// A realm's signature power (see `realm::Spec::stamps`) on a major elder that carries none yet:
+/// blinks in the veil, jams in the dead reach, drawing-in in the crush. Pure, on its own hash.
+fn stamp_realm(g: &mut Genome, seed: u64, id: SectorId, rank: Rank, archetype: Archetype) {
+    // A phantom keeps its blink; any other elder's stray power gives way to the realm's.
+    if rank != Rank::Major || archetype == Archetype::Phantom {
+        return;
+    }
+    let realm = crate::realm::weighting(seed, id);
+    let h = hash2(seed ^ APEX_SALT ^ 0x57, id.x, id.y);
+    let unit = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
+    if unit(0) >= REALM_STAMP_SHARE {
+        return;
+    }
+    if let Some(power) = realm.stamp(unit(16)) {
+        let before = *g;
+        g.clear_powers();
+        if !crate::power::stamp(g, power, REALM_STAMP_STRENGTH) {
+            *g = before;
+        }
+    }
+}
+
 /// Appends the sector's apex, if it has one and the pool offers a species to grow it from.
 /// Called last, so nothing earlier moves.
 pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &mut Vec<Spawn>) {
@@ -482,6 +518,9 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
     let mut rng = Rng::new(hash2(seed ^ APEX_SALT ^ 0xA5, id.x, id.y));
     let source = pool.any(&mut rng);
     let mut genome = elder(source.genome, &mut rng, rank, archetype(seed, id));
+    // The realm's signature first, then the archetype's own jam stamps over it (the stronger
+    // power wins where both land).
+    stamp_realm(&mut genome, seed, id, rank, archetype(seed, id));
     stamp_special(
         &mut genome,
         rank,

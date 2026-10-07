@@ -294,6 +294,8 @@ pub struct Spec {
     pub archetypes: &'static [(Archetype, f32)],
     /// Powers an elder of this realm is likely to carry (see `apex`): the realm's signature.
     pub stamps: &'static [Power],
+    /// Every elder of this realm wears a regenerating bubble (see `apexes::shield_factor`).
+    pub bubbled: bool,
 }
 
 /// What a realm kind is, as an index into `CATALOG`.
@@ -319,6 +321,7 @@ pub const CATALOG: [Spec; 10] = [
         biomes: &[],
         archetypes: &[],
         stamps: &[],
+        bubbled: false,
     },
     Spec {
         id: "veil",
@@ -346,6 +349,7 @@ pub const CATALOG: [Spec; 10] = [
         biomes: &[(BiomeKind::Strange, 2.0), (BiomeKind::Keen, 1.5)],
         archetypes: &[(Archetype::Phantom, 3.0), (Archetype::Hunter, 2.0)],
         stamps: &[Power::Blink],
+        bubbled: false,
     },
     Spec {
         id: "dead_reach",
@@ -374,6 +378,7 @@ pub const CATALOG: [Spec; 10] = [
             (Archetype::Phantom, 2.0),
         ],
         stamps: &[Power::Emp, Power::Glare, Power::Confuse],
+        bubbled: false,
     },
     Spec {
         id: "crush",
@@ -399,7 +404,8 @@ pub const CATALOG: [Spec; 10] = [
         },
         biomes: &[(BiomeKind::Brutish, 2.0)],
         archetypes: &[(Archetype::Maelstrom, 3.0), (Archetype::Juggernaut, 1.5)],
-        stamps: &[Power::Repel, Power::Lens],
+        stamps: &[Power::Lens],
+        bubbled: false,
     },
     Spec {
         id: "hive",
@@ -428,6 +434,7 @@ pub const CATALOG: [Spec; 10] = [
         biomes: &[(BiomeKind::Plains, 3.0), (BiomeKind::Grazing, 2.0)],
         archetypes: &[(Archetype::Queen, 4.0), (Archetype::Lasher, 2.5)],
         stamps: &[Power::Split],
+        bubbled: false,
     },
     Spec {
         id: "iron_tide",
@@ -456,6 +463,7 @@ pub const CATALOG: [Spec; 10] = [
         biomes: &[(BiomeKind::Hardy, 3.0), (BiomeKind::Brutish, 2.0)],
         archetypes: &[(Archetype::Bulwark, 4.0), (Archetype::Juggernaut, 2.5)],
         stamps: &[Power::Bypass],
+        bubbled: true,
     },
     Spec {
         id: "glass_seas",
@@ -484,6 +492,7 @@ pub const CATALOG: [Spec; 10] = [
         biomes: &[(BiomeKind::Plains, 2.0), (BiomeKind::Open, 1.5)],
         archetypes: &[(Archetype::Queen, 2.0), (Archetype::Phantom, 2.0)],
         stamps: &[Power::Phase],
+        bubbled: false,
     },
     Spec {
         id: "quiet_gold",
@@ -512,6 +521,7 @@ pub const CATALOG: [Spec; 10] = [
         biomes: &[(BiomeKind::Grazing, 2.0), (BiomeKind::Plains, 1.5)],
         archetypes: &[],
         stamps: &[],
+        bubbled: false,
     },
     Spec {
         id: "hungry_deep",
@@ -543,7 +553,8 @@ pub const CATALOG: [Spec; 10] = [
             (Archetype::Lasher, 2.0),
             (Archetype::Juggernaut, 1.5),
         ],
-        stamps: &[Power::Latch, Power::Blink],
+        stamps: &[Power::Blink],
+        bubbled: false,
     },
     Spec {
         id: "bright_silence",
@@ -574,7 +585,8 @@ pub const CATALOG: [Spec; 10] = [
             (Archetype::Juggernaut, 2.0),
             (Archetype::Hunter, 1.5),
         ],
-        stamps: &[Power::Blink, Power::Repel],
+        stamps: &[Power::Blink, Power::Lens],
+        bubbled: false,
     },
 ];
 
