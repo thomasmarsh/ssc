@@ -5,7 +5,8 @@
 //! civilizations, which `Territory::name` shares), so they are a pure function of the seed
 //! and a sector, with the same name everywhere the same range dominates.
 
-use crate::range::{ecology, ring};
+use crate::biome::BiomeKind;
+use crate::range::{Spread, ecology, ring};
 use crate::world::{SectorId, hash2};
 use std::fmt::Write as _;
 
@@ -16,6 +17,10 @@ pub const CONFLUENCE_SPECIES: usize = 5;
 /// Below this life a sector is a sparse gap; a planetoid there makes an oasis.
 pub const GAP_LIFE: f32 = 0.2;
 pub const OASIS_LIFE: f32 = 0.35;
+/// Inside a rock belt this deep a place is a belt whatever else is true of it.
+pub const BELT_DEPTH: f32 = 0.5;
+/// A regional or endemic species this abundant names its own country.
+pub const NICHE_NAMES_AT: f32 = 0.5;
 /// A rock belt is rich in matter and short of life.
 pub const BELT_MATTER: f32 = 0.65;
 pub const BELT_LIFE: f32 = 0.45;
@@ -105,12 +110,6 @@ pub struct Region {
     pub kind: RegionKind,
 }
 
-/// What a dominant range is called (picked from its identity, so it never changes with the
-/// drift of the genome across the range).
-const WILD_WORDS: [&str; 8] = [
-    "Drifts", "Steppe", "Marches", "Wilds", "Shoals", "Meadows", "Expanse", "Pastures",
-];
-
 /// The name of a civilization with its title, from its identity (shared with
 /// `Territory::name`): harsh syllables, then the shape's word.
 pub fn civ_name(id: u64, title: &str) -> String {
@@ -145,13 +144,16 @@ pub fn region(seed: u64, id: SectorId) -> Region {
         .filter(|p| p.weight >= CONFLUENCE_WEIGHT)
         .count();
     let (kind, key, suffix) = if crowd >= CONFLUENCE_SPECIES {
-        let lead = &eco.presence[0];
-        let key = named(
-            1,
-            (lead.center.x * 8.0) as i32,
-            (lead.center.y * 8.0) as i32,
-        );
+        let key = named(1, eco.biome.key as i32, (eco.biome.key >> 32) as i32);
         (RegionKind::Confluence, key, "Confluence".to_string())
+    } else if eco.oasis {
+        let (bx, by) = block(id);
+        (RegionKind::Oasis, named(2, bx, by), "Oasis".to_string())
+    } else if eco.belt >= BELT_DEPTH
+        || (eco.matter >= BELT_MATTER && eco.life < BELT_LIFE && !eco.presence.is_empty())
+    {
+        let (bx, by) = block(id);
+        (RegionKind::Belt, named(4, bx, by), "Belt".to_string())
     } else if eco.presence.is_empty() || eco.life < GAP_LIFE {
         if crate::world::has_planetoid(seed, id) && eco.life < OASIS_LIFE {
             let (bx, by) = block(id);
@@ -160,21 +162,19 @@ pub fn region(seed: u64, id: SectorId) -> Region {
             let (bx, by) = block(id);
             (RegionKind::Gap, named(3, bx, by), "Reach".to_string())
         }
-    } else if eco.matter >= BELT_MATTER && eco.life < BELT_LIFE {
-        let (bx, by) = block(id);
-        (RegionKind::Belt, named(4, bx, by), "Belt".to_string())
-    } else if crate::world::has_planetoid(seed, id) && eco.life < OASIS_LIFE {
-        let (bx, by) = block(id);
-        (RegionKind::Oasis, named(2, bx, by), "Oasis".to_string())
     } else {
+        // A strong specialist names its own country; otherwise the biome cell does. Both
+        // end in the biome's word.
         let lead = &eco.presence[0];
-        let key = named(
-            5 ^ lead.species.lineage,
-            (lead.center.x * 8.0) as i32,
-            (lead.center.y * 8.0) as i32,
-        );
-        let word = WILD_WORDS[((key >> 17) % WILD_WORDS.len() as u64) as usize];
-        (RegionKind::Wild, key, word.to_string())
+        if lead.spread != Spread::Generalist && lead.weight >= NICHE_NAMES_AT {
+            let key = named(5 ^ lead.species.lineage, 0, 0);
+            let kinds = BiomeKind::ALL;
+            let word = kinds[((key >> 17) % kinds.len() as u64) as usize].word();
+            (RegionKind::Wild, key, word.to_string())
+        } else {
+            let key = named(6, eco.biome.key as i32, (eco.biome.key >> 32) as i32);
+            (RegionKind::Wild, key, eco.biome.kind.word().to_string())
+        }
     };
     let mut name = soft_name(key);
     let _ = write!(name, " {suffix}");

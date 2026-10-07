@@ -9,18 +9,21 @@
 //!   parameter, `breadth`, slides a species from broad (a low threshold: present nearly
 //!   everywhere its depth allows, with the odd pocket of absence) to endemic (a high
 //!   threshold: isolated islands);
-//! - an affinity for the local character of the land (slot for biomes, see below).
+//! - an affinity for the local biome (`biome`: Voronoi cells of country, each species favouring
+//!   one kind more or less strictly), and a few fine pockets of its own.
 //!
 //! A sector then keeps only its strongest few species. A low-frequency diversity field sets
 //! how many (usually 2 to 4, rarely up to 6), and the weakest survivor fades out across the
 //! cutoff so a border is a slope and never a switch. Everything is a pure function of the
-//! master seed and a sector; nothing is stored. See `docs/UNIVERSE.md`, "Niches and the
+//! master seed and a sector; nothing is stored. Rock belts (ridges of a slow noise field)
+//! multiply life toward zero, and a planetoid inside one restores a small oasis. See `docs/UNIVERSE.md`, "Niches and the
 //! ecology field".
 //!
 //! The species catalog is endless: depth is cut into tiers of `TIER` rings and every tier
 //! rolls `SLOTS_PER_TIER` species (a few generalists, some regional, most endemic) whose
 //! depth centre falls in it. The five classics are fixed entries beside them.
 
+use crate::biome::{Biome, BiomeKind, biome};
 use crate::genome::{Diet, GenePool, Genome, PoolEntry, Species, Weapon};
 use crate::world::{Rng, SectorId, hash2, latent_base, value_noise};
 use bevy::prelude::Vec2;
@@ -110,6 +113,16 @@ pub const DEBUT_NOISE: (f32, f32) = (0.3, 0.5);
 /// down by `OPENING_SLOPE` per ring beyond it.
 pub const OPENING_DIVERSITY: f32 = 3.0;
 pub const OPENING_SLOPE: f32 = 0.5;
+/// How strongly a species' favourite biome pulls the character its genome is sampled from.
+pub const FOUNDER_PULL: f32 = 0.4;
+/// How picky the five classics are about country (they stay broad).
+pub const CLASSIC_PICKY: f32 = 0.3;
+/// An oasis (a planetoid inside a belt) restores life to this share of an unmasked sector,
+/// and holds at most `OASIS_CAPACITY` species.
+pub const OASIS_RESTORE: f32 = 0.4;
+pub const OASIS_CAPACITY: f32 = 2.2;
+/// A belt this deep or more can hold an oasis.
+pub const OASIS_BELT: f32 = 0.3;
 /// The most species any sector may hold.
 pub const MAX_SPECIES: usize = 6;
 
@@ -297,6 +310,10 @@ pub struct Distribution {
     pub pocket: f32,
     /// Most the species reaches even at full strength.
     pub peak: f32,
+    /// The kind of country the species favours and how picky it is about it (0 lives
+    /// anywhere, 1 only in its own kind).
+    pub favourite: BiomeKind,
+    pub picky: f32,
     /// Where the lineage began, in sector units (a classic begins at HOME).
     pub anchor: Vec2,
     /// A ring-3 debut: the abundance a species is given by its own fine noise on ring 3,
@@ -329,6 +346,14 @@ impl Distribution {
             patch_frequency: lerp(PATCH_FREQUENCY.0, PATCH_FREQUENCY.1, breadth),
             pocket: 0.15,
             peak: 1.0,
+            favourite: match family {
+                Family::Fatso => BiomeKind::Grazing,
+                Family::Bogey => BiomeKind::Plains,
+                Family::Smarty => BiomeKind::Keen,
+                Family::Lunatic => BiomeKind::Brutish,
+                _ => BiomeKind::Predator,
+            },
+            picky: CLASSIC_PICKY,
             anchor: Vec2::ZERO,
             debut: if family == Family::Smarty {
                 SMARTY_DEBUT
@@ -362,6 +387,12 @@ impl Distribution {
         let peak = rng.range(0.65, 1.0);
         let angle = rng.range(0.0, TAU);
         let key = (rng.next_u64() | 1) & !(1 << 63) | (1 << 62);
+        let favourite = BiomeKind::ALL[rng.int(0, BiomeKind::ALL.len() as u32 - 1) as usize];
+        let picky = match spread {
+            Spread::Generalist => rng.range(0.1, 0.35),
+            Spread::Regional => rng.range(0.3, 0.7),
+            Spread::Endemic => rng.range(0.4, 0.9),
+        };
         Self {
             key,
             family: Family::Wild,
@@ -374,6 +405,8 @@ impl Distribution {
             patch_frequency: lerp(PATCH_FREQUENCY.0, PATCH_FREQUENCY.1, breadth),
             pocket,
             peak,
+            favourite,
+            picky,
             anchor: Vec2::from_angle(angle) * centre,
             debut: 0.0,
         }
@@ -403,12 +436,18 @@ impl Distribution {
 
     /// Abundance before the diversity cap, in [0, 1], at sector `id`.
     pub fn abundance(&self, seed: u64, id: SectorId) -> f32 {
+        self.abundance_in(seed, id, &biome(seed, id))
+    }
+
+    /// `abundance` in a biome already looked up.
+    pub fn abundance_in(&self, seed: u64, id: SectorId, biome: &Biome) -> f32 {
         let at = at_of(id);
         let profile = self.depth_profile(at.length());
         if profile <= 0.0 {
             return 0.0;
         }
-        let natural = self.peak * profile * self.mask(seed, at) * self.pockets(seed, at);
+        let liking = biome.affinity(self.favourite, self.picky);
+        let natural = self.peak * profile * self.mask(seed, at) * self.pockets(seed, at) * liking;
         natural.max(self.debut_at(seed, id, at))
     }
 
@@ -441,7 +480,16 @@ impl Distribution {
                     x: self.anchor.x.round() as i32,
                     y: self.anchor.y.round() as i32,
                 };
-                Genome::sample(&mut rng, &latent_base(seed, node))
+                // The founding place is the species' favourite country: its character
+                // pulls the sampled parameters.
+                let mut params = latent_base(seed, node);
+                let c = self.favourite.character();
+                let pull = |v: f32, to: f32| v + (to - v) * FOUNDER_PULL;
+                params.aggression = pull(params.aggression, c.aggression);
+                params.swarm = pull(params.swarm, c.swarm);
+                params.tech = pull(params.tech, c.tech);
+                params.distortion = pull(params.distortion, c.distortion);
+                Genome::sample(&mut rng, &params)
             })
         })
     }
@@ -529,7 +577,7 @@ fn cap(abundance: Vec<(Distribution, f32)>, k: f32) -> Vec<(Distribution, f32)> 
 }
 
 /// Who lives at a sector and how abundant each is, after the depth ramp and the cap.
-fn weights(seed: u64, id: SectorId) -> Vec<(Distribution, f32)> {
+fn weights(seed: u64, id: SectorId, oasis: bool) -> Vec<(Distribution, f32)> {
     match ring(id) {
         0 => Vec::new(),
         1 => vec![(Distribution::classic(Family::Fatso), RING_ONE_FATSOS)],
@@ -538,17 +586,25 @@ fn weights(seed: u64, id: SectorId) -> Vec<(Distribution, f32)> {
             (Distribution::classic(Family::Fatso), RING_TWO_FATSOS),
         ],
         r => {
-            let barren = 1.0 - BELT_KILL * belt(seed, at_of(id));
+            let kill = BELT_KILL * belt(seed, at_of(id));
+            let barren = 1.0
+                - if oasis {
+                    kill * (1.0 - OASIS_RESTORE)
+                } else {
+                    kill
+                };
+            let here = biome(seed, id);
             let all: Vec<(Distribution, f32)> = candidates(seed, id)
                 .into_iter()
                 .filter(|c| r >= c.family.min_ring())
                 .filter_map(|c| {
-                    let a = c.abundance(seed, id) * barren;
+                    let a = c.abundance_in(seed, id, &here) * barren;
                     (a > 0.0).then_some((c, a))
                 })
                 .filter(|(c, _)| r >= c.floor(seed))
                 .collect();
-            cap(all, capacity(seed, id))
+            let k = capacity(seed, id);
+            cap(all, if oasis { k.min(OASIS_CAPACITY) } else { k })
         }
     }
 }
@@ -575,6 +631,12 @@ pub struct Ecology {
     pub matter: f32,
     /// How many species the diversity field would allow here, as a real number.
     pub diversity: f32,
+    /// The country the sector lies in.
+    pub biome: Biome,
+    /// A planetoid in a rock belt holds a small patch of life here.
+    pub oasis: bool,
+    /// How deep inside a rock belt the sector is, in [0, 1].
+    pub belt: f32,
 }
 
 impl Ecology {
@@ -638,7 +700,7 @@ pub fn matter(seed: u64, id: SectorId, life: f32) -> f32 {
 
 /// How life-rich a sector is in [0, 1].
 pub fn life(seed: u64, id: SectorId) -> f32 {
-    life_of(&weights(seed, id))
+    life_of(&weights(seed, id, false))
 }
 
 /// Life and matter for a sector, without building any species.
@@ -650,9 +712,18 @@ pub fn fields(seed: u64, id: SectorId) -> (f32, f32) {
 /// The full ecology of a sector. HOME holds no creatures.
 pub fn ecology(seed: u64, id: SectorId) -> Ecology {
     let at = at_of(id);
-    let weights = weights(seed, id);
-    let life = life_of(&weights);
     let ring = ring(id);
+    // A planetoid inside a belt is an oasis: a small patch of life in the quiet.
+    let oasis = ring >= 3 && belt(seed, at) >= OASIS_BELT && crate::world::has_planetoid(seed, id);
+    let weights = weights(seed, id, oasis);
+    // `life` is the belt's own (it feeds the sector's parameters, which decide the
+    // planetoid); the oasis only restores who lives there.
+    let life = if oasis {
+        life(seed, id)
+    } else {
+        life_of(&weights)
+    };
+
     let presence = weights
         .into_iter()
         .map(|(d, weight)| {
@@ -687,6 +758,9 @@ pub fn ecology(seed: u64, id: SectorId) -> Ecology {
         life,
         matter: matter(seed, id, life),
         diversity: capacity(seed, id),
+        biome: biome(seed, id),
+        oasis,
+        belt: belt(seed, at),
     }
 }
 
@@ -1118,5 +1192,111 @@ mod tests {
         let correlation = cov / (sx * sy).sqrt();
         assert!(correlation < -0.25, "{correlation}");
         assert!(correlation > -0.9, "{correlation}");
+    }
+
+    /// Rock belts mask life: deep inside one almost nothing lives, and belts have to be
+    /// there at all (a minority of the map, but present).
+    #[test]
+    fn belts_are_nearly_barren_and_a_minority() {
+        let (mut deep, mut life, mut total, mut belts) = (0, 0.0, 0, 0);
+        for seed in SEEDS {
+            for id in sectors(60).filter(|id| ring(*id) >= 6) {
+                total += 1;
+                let b = belt(seed, at_of(id));
+                belts += usize::from(b > 0.0);
+                if b > 0.9 && !crate::world::has_planetoid(seed, id) {
+                    deep += 1;
+                    let eco = ecology(seed, id);
+                    life += eco.life;
+                    assert!(
+                        eco.presence.iter().all(|p| p.weight < 0.15),
+                        "{id:?}: {:?}",
+                        eco.presence.iter().map(|p| p.weight).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+        assert!(deep > 100, "{deep} deep belt sectors");
+        assert!(
+            life / (deep as f32) < 0.08,
+            "belts hold life {}",
+            life / deep as f32
+        );
+        let share = belts as f32 / total as f32;
+        assert!((0.05..0.4).contains(&share), "belts cover {share}");
+    }
+
+    /// A planetoid inside a belt restores a small local patch of life (an oasis).
+    #[test]
+    fn planetoids_in_belts_hold_oases() {
+        let (mut oases, mut populated) = (0, 0);
+        for seed in SEEDS {
+            for id in sectors(60).filter(|id| ring(*id) >= 6) {
+                let eco = ecology(seed, id);
+                if belt(seed, at_of(id)) >= OASIS_BELT && crate::world::has_planetoid(seed, id) {
+                    assert!(eco.oasis, "{id:?}");
+                    oases += 1;
+                    populated += usize::from(!eco.presence.is_empty());
+                    assert!(eco.presence.len() <= 3, "an oasis is small");
+                } else {
+                    assert!(!eco.oasis);
+                }
+            }
+        }
+        assert!(oases >= 10, "{oases} oases");
+        assert!(
+            populated as f32 > oases as f32 * 0.6,
+            "{populated} of {oases} oases hold life"
+        );
+    }
+
+    /// A picky species takes to its favourite country and shuns the one least like it.
+    #[test]
+    fn species_prefer_their_favourite_biome() {
+        use crate::biome::BiomeKind;
+        let mut checked = 0;
+        for tier in 3..10 {
+            for slot in 0..SLOTS_PER_TIER {
+                let d = Distribution::wild(SEED, tier, slot);
+                if d.picky < 0.6 || d.breadth < 0.4 {
+                    continue;
+                }
+                let worst = BiomeKind::ALL
+                    .into_iter()
+                    .min_by(|a, b| {
+                        d.favourite
+                            .affinity(*a)
+                            .total_cmp(&d.favourite.affinity(*b))
+                    })
+                    .unwrap();
+                let (mut home, mut away) = (0.0, 0.0);
+                let (mut n_home, mut n_away) = (0, 0);
+                for id in sectors(70) {
+                    let b = crate::biome::biome(SEED, id);
+                    if b.margin() < 4.0 || d.depth_profile(at_of(id).length()) < 0.99 {
+                        continue;
+                    }
+                    let a = d.abundance_in(SEED, id, &b);
+                    if b.kind == d.favourite {
+                        home += a;
+                        n_home += 1;
+                    } else if b.kind == worst {
+                        away += a;
+                        n_away += 1;
+                    }
+                }
+                if n_home < 40 || n_away < 40 {
+                    continue;
+                }
+                checked += 1;
+                assert!(
+                    home / n_home as f32 > 1.5 * away / n_away as f32,
+                    "{d:?}: {} at home, {} away",
+                    home / n_home as f32,
+                    away / n_away as f32
+                );
+            }
+        }
+        assert!(checked >= 3, "only {checked} species checked");
     }
 }

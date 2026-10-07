@@ -1,5 +1,6 @@
 //! Deterministic gameplay, independent of the desktop renderer.
 pub mod apex;
+pub mod biome;
 pub mod fortress;
 pub mod genome;
 pub mod mixer;

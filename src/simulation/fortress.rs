@@ -572,6 +572,12 @@ mod tests {
             panic!()
         };
         game.bullets.clear();
+        // Wildlife is not what is being judged (an ecosystem Bastion or a gunner species
+        // living in the capital's sector shoots at the ship): only the fallen
+        // civilization's turrets are.
+        game.bodies.retain(|b| {
+            b.kind != BodyKind::Creature && (b.kind != BodyKind::Base || b.fort.is_some())
+        });
         for _ in 0..300 {
             set_player(
                 &mut game,

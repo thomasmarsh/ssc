@@ -1588,8 +1588,8 @@ mod tests {
         // No code places a serpent: a long spine plus a wave gene turns up on its own, in
         // sectors well away from home, and never at HOME.
         let mut slitherers = 0;
-        for x in -14..=14 {
-            for y in -14..=14 {
+        for x in -20..=20 {
+            for y in -20..=20 {
                 for s in generate(0x535343, SectorId { x, y }) {
                     if let Some(sp) = s.species {
                         let slithers = sp.genome.segments >= 4 && sp.genome.wave >= 0.8;
