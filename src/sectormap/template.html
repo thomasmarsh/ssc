@@ -63,6 +63,19 @@ details{margin-top:14px}summary{cursor:pointer;color:var(--mute);font-size:12px;
 .crown{fill:var(--gold);stroke:var(--ink)}
 .dtext{fill:var(--ink);font-weight:600;pointer-events:none}
 .dmute{fill:var(--mute);pointer-events:none}
+#sum{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:flex-end;padding:6px 16px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--mute)}
+#sum b{color:var(--ink);font-weight:600}
+#sum .hist{display:flex;align-items:flex-end;gap:3px;height:38px}
+#sum .hist div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:10px;width:22px}
+#sum .hist i{display:block;width:100%;background:var(--accent);border-radius:2px 2px 0 0;min-height:1px}
+#sum .sw{width:10px;height:10px;border-radius:2px;display:inline-block}
+#sum .bk{display:flex;gap:4px;flex-wrap:wrap}
+#sum .bk span{display:inline-flex;gap:3px;align-items:center}
+select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:2px 4px;max-width:15em}
+.sprow{cursor:pointer}.sprow:hover{background:var(--bg)}
+.belt{fill:none;stroke:var(--ink);stroke-width:.05;opacity:.5}
+.oasis{fill:none;stroke:var(--ok);stroke-width:1.6;vector-effect:non-scaling-stroke}
+.bedge{fill:none;stroke:var(--accent);stroke-width:1.6;vector-effect:non-scaling-stroke;opacity:.7}
 svg.lo .lod{display:none}
 svg.lo2 .lod2{display:none}
 @media (max-width:760px){
@@ -79,7 +92,11 @@ svg.lo2 .lod2{display:none}
  <span class="meta">seed <b id="h-seed"></b> &middot; generator v<b id="h-ver"></b> &middot; <b id="h-grid"></b> &middot; <span id="h-note"></span></span>
 </header>
 <div id="bar">
- <label><input type="checkbox" data-layer="ranges" checked><span class="sw" style="background:linear-gradient(90deg,#4a8,#58c,#c85)"></span>ranges</label>
+ <label><input type="checkbox" data-layer="ranges" checked><span class="sw" style="background:linear-gradient(90deg,#4a8,#58c,#c85)"></span>species</label>
+ <label>show <select id="sf" aria-label="Show where one species lives"><option value="">all species</option></select></label>
+ <label><input type="checkbox" data-layer="diversity"><span class="sw" style="background:linear-gradient(90deg,#fff0,#d33)"></span>diversity</label>
+ <label><input type="checkbox" data-layer="biomes"><span class="sw" style="background:linear-gradient(90deg,#8bc,#cb8,#b8c)"></span>biomes</label>
+ <label><input type="checkbox" data-layer="belts" checked>belts</label>
  <label><input type="checkbox" data-layer="life" checked>life</label>
  <label><input type="checkbox" data-layer="rock" checked>rock</label>
  <label><input type="checkbox" data-layer="regions" checked>regions</label>
@@ -91,6 +108,7 @@ svg.lo2 .lod2{display:none}
  <label><input type="checkbox" data-layer="grid">grid</label>
  <form id="jump"><input type="text" id="jx" placeholder="x,y" aria-label="Jump to sector x,y" inputmode="text" autocomplete="off"><button type="submit">Go</button></form>
 </div>
+<div id="sum"></div>
 <div id="main">
  <div id="stage">
   <svg id="svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sector map"></svg>
@@ -107,9 +125,9 @@ const D=/*DATA*/;
 const NS="http://www.w3.org/2000/svg";
 const $=s=>document.querySelector(s);
 const cols=D.cols,rows=D.rows,cells=D.cells;
-const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14;
-const KINDS=["Home","Range","Confluence","Belt","Reach","Oasis","Civilization"];
-const FORMS=["the peaceful start, no creatures","a dominant species range","many ranges converge (rare, biodiverse)","a rock-rich band with little life","a sparse gap between ranges","a planetoid with life around it in the middle of nowhere","a civilization's territory"];
+const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14,CAPY=15,BELT=16,BIO=17,OAS=18;
+const KINDS=["Home","Wild","Confluence","Belt","Reach","Oasis","Civilization"];
+const FORMS=["the peaceful start, no creatures","a country of wildlife, named for its biome or a strong specialist","many species converge (rare, biodiverse)","a rock-rich band with little life","a sparse gap with little life","a planetoid with life around it in the middle of nowhere","a civilization's territory"];
 const hc=-D.x0,hr=D.y1; /* HOME's cell */
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const cellAt=(c,r)=>(c>=0&&c<cols&&r>=0&&r<rows)?cells[r*cols+c]:null;
@@ -125,13 +143,14 @@ const pat=el("pattern",{id:"hatch",width:".22",height:".22",patternUnits:"userSp
 el("line",{x1:"0",y1:"0",x2:"0",y2:".22",class:"hatch"},pat);
 const world=el("g",{},svg);
 const G={};
-["fill","rock","hatch","tfill","regions","conf","tedge","grid","rings","wells","planets","civs","apex","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
-G.hatch.setAttribute("class","lod2");
+["fill","bio","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
+G.hatch.setAttribute("class","lod2");G.belt.setAttribute("class","lod");
 ["wells","planets","civs","apex","home"].forEach(n=>G[n].setAttribute("class","lod"));
 G.grid.setAttribute("class","lod2");G.regions.setAttribute("class","lod2");
 
-const layers={ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,grid:false};
-const showMap={rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],grid:["grid"]};
+const layers={ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,grid:false,diversity:false,biomes:false,belts:true};
+let filter=-1; /* species index shown alone, or -1 */
+const showMap={diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],grid:["grid"]};
 function applyLayers(){for(const l in showMap)for(const g of showMap[l])G[g].style.display=layers[l]?"":"none"}
 
 const dark=()=>matchMedia("(prefers-color-scheme: dark)").matches;
@@ -142,30 +161,43 @@ function fillColor(hue,life){
  else{l=d?30:72;s=hue<0?6:45}
  return"hsl("+(hue<0?220:hue)+","+s.toFixed(0)+"%,"+l.toFixed(1)+"%)";
 }
-function leadHue(row){return(layers.ranges&&row[SP].length)?D.species[row[SP][0][0]][1]:-1}
+function leadHue(row){if(filter>=0)return D.species[filter][1];return(layers.ranges&&row[SP].length)?D.species[row[SP][0][0]][1]:-1}
+function filterWeight(row){for(const s of row[SP])if(s[0]===filter)return s[1];return 0}
+const BIOHUE=[200,130,95,0,285,45,25,170];
 
 function build(){
- for(const n of ["fill","rock","hatch","tfill","regions","conf","tedge","grid","rings","wells","planets","civs","apex","home"])G[n].textContent="";
+ for(const n of ["fill","bio","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","home"])G[n].textContent="";
+ const divs=[[],[],[],[],[],[],[]],bio=new Map(),bedge=[],belts=[];
  /* range hue by life level */
  const fills=new Map(),rocks=[[],[],[],[]],hatch=[],conf=[],tf=new Map(),tedge=new Map(),redge=[];
  const rect=(c,r)=>"M"+c+" "+r+"h1v1h-1z";
  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
   const row=cells[r*cols+c];
-  const hue=leadHue(row),lb=Math.min(5,Math.floor(row[LIFE]*6));
+  let hue=leadHue(row),lb=Math.min(5,Math.floor(row[LIFE]*6));
+  if(filter>=0){const w=filterWeight(row);if(w<=0){hue=-1;lb=0}else lb=Math.min(5,Math.max(1,Math.ceil(w*6)))}
   const key=hue+"|"+lb;
   let a=fills.get(key);if(!a){a=[];fills.set(key,a)}a.push(rect(c,r));
   const m=row[MAT];
   if(m>=.4){rocks[m<.55?0:m<.7?1:m<.85?2:3].push(rect(c,r))}
   if(row[KIND]===3)hatch.push(rect(c,r));
+  if(row[RING]>0){divs[Math.min(6,row[SP].length)].push(rect(c,r));
+   const bk=D.biomes[row[BIO]];let ba=bio.get(bk);if(!ba){ba=[];bio.set(bk,ba)}ba.push(rect(c,r))}
+  if(row[BELT]>=.5)belts.push("M"+c+" "+r+"l1 1M"+(c+1)+" "+r+"l-1 1");
+  if(row[OAS])belts.push("M"+(c+.5)+" "+(r+.2)+"m-.12 0a.12 .12 0 1 0 .24 0a.12 .12 0 1 0 -.24 0");
   if(row[KIND]===2)conf.push("M"+(c+.07)+" "+(r+.07)+"h.86v.86h-.86z");
   const t=row[TER];
   if(t>=0){let a2=tf.get(t);if(!a2){a2=[];tf.set(t,a2)}a2.push(rect(c,r))}
   const rt=cellAt(c+1,r),bt=cellAt(c,r+1);
-  if(rt){if(rt[REG]!==row[REG])redge.push("M"+(c+1)+" "+r+"v1");edge(tedge,t,rt[TER],"M"+(c+1)+" "+r+"v1")}
-  if(bt){if(bt[REG]!==row[REG])redge.push("M"+c+" "+(r+1)+"h1");edge(tedge,t,bt[TER],"M"+c+" "+(r+1)+"h1")}
+  if(rt){if(rt[BIO]!==row[BIO])bedge.push("M"+(c+1)+" "+r+"v1");if(rt[REG]!==row[REG])redge.push("M"+(c+1)+" "+r+"v1");edge(tedge,t,rt[TER],"M"+(c+1)+" "+r+"v1")}
+  if(bt){if(bt[BIO]!==row[BIO])bedge.push("M"+c+" "+(r+1)+"h1");if(bt[REG]!==row[REG])redge.push("M"+c+" "+(r+1)+"h1");edge(tedge,t,bt[TER],"M"+c+" "+(r+1)+"h1")}
  }
  function edge(map,a,b,seg){if(a===b)return;for(const t of[a,b]){if(t<0)continue;let x=map.get(t);if(!x){x=[];map.set(t,x)}x.push(seg)}}
  for(const[key,list]of fills){const[h,lb]=key.split("|").map(Number);el("path",{d:list.join(""),fill:fillColor(h,(lb+.5)/6)},G.fill)}
+ divs.forEach((l,i)=>{if(l.length&&i>0)el("path",{d:l.join(""),fill:"#d33","fill-opacity":(i*.13).toFixed(2)},G.div)});
+ if(divs[0].length)el("path",{d:divs[0].join(""),fill:"#000","fill-opacity":".18"},G.div);
+ for(const[k,l]of bio)el("path",{d:l.join(""),fill:"hsl("+BIOHUE[k]+",60%,"+(dark()?"45%":"55%")+")","fill-opacity":".3"},G.bio);
+ if(bedge.length)el("path",{d:bedge.join(""),class:"bedge"},G.bedge);
+ if(belts.length){const cr=belts.filter(x=>x.indexOf("a")<0),oa=belts.filter(x=>x.indexOf("a")>=0);if(cr.length)el("path",{d:cr.join(""),class:"belt"},G.belt);if(oa.length)el("path",{d:oa.join(""),class:"oasis"},G.belt)}
  const ops=[.08,.16,.27,.4];
  rocks.forEach((l,i)=>{if(l.length)el("path",{d:l.join(""),class:"rock","fill-opacity":ops[i]},G.rock)});
  if(hatch.length)el("path",{d:hatch.join(""),fill:"url(#hatch)",opacity:".7"},G.hatch);
@@ -284,17 +316,19 @@ function describe(cr,full){
  let h='<h2>'+esc(reg[0])+'</h2><div class="sub">sector ('+x+', '+y+') &middot; centre ('+(x*D.size)+', '+(y*D.size)+') &middot; ring '+row[RING]+'</div>';
  h+='<div class="row"><span class="k">Form</span><span><b>'+KINDS[row[KIND]]+'</b>'+(full?' - '+FORMS[row[KIND]]:'')+'</span></div>';
  if(row[KIND]===0)h+='<div class="row ok"><b>HOME - peaceful, no creatures, a planetoid to land on</b></div>';
+ else{const bk=D.biomeKinds[D.biomes[row[BIO]]];h+='<div class="row"><span class="k">Biome</span><span>'+esc(bk[0])+' <span class="sub">cell #'+row[BIO]+'</span></span></div>'}
  const sp=row[SP];
  if(sp.length){
   const lead=D.species[sp[0][0]];
-  h+='<div class="row"><span class="k">Range</span><span><span class="dot" style="background:hsl('+lead[1]+',60%,50%)"></span> '+esc(lead[0])+' ('+esc(lead[2])+')</span></div>';
-  h+='<h3>Species ('+sp.length+')'+(row[KIND]===2?' <span class="gold">convergence</span>':'')+'</h3>';
+  h+='<div class="row"><span class="k">Lead</span><span><span class="dot" style="background:hsl('+lead[1]+',60%,50%)"></span> '+esc(lead[0])+' ('+esc(lead[2])+', '+esc(lead[5])+')</span></div>';
+  h+='<h3>Species ('+sp.length+' of up to '+row[CAPY].toFixed(1)+')'+(row[KIND]===2?' <span class="gold">convergence</span>':'')+'</h3>';
   const lim=full?sp.length:6;
-  for(let i=0;i<Math.min(lim,sp.length);i++){const s=D.species[sp[i][0]];h+='<div class="row"><span class="dot" style="background:'+s[4]+'"></span><span style="min-width:6em">'+esc(s[0])+'</span>'+bar(sp[i][1])+' <span class="sub">'+Math.round(sp[i][1]*100)+'% '+esc(s[2])+', '+esc(s[3])+'</span></div>'}
+  for(let i=0;i<Math.min(lim,sp.length);i++){const s=D.species[sp[i][0]];h+='<div class="row sprow" data-sp="'+sp[i][0]+'" title="Click to show only where this species lives"><span class="dot" style="background:'+s[4]+'"></span><span style="min-width:6em">'+esc(s[0])+'</span>'+bar(sp[i][1])+' <span class="sub">'+Math.round(sp[i][1]*100)+'% '+esc(s[5])+(sp[i][2]>0?', isolate '+Math.round(sp[i][2]*100)+'%':'')+', likes '+esc(D.biomeKinds[s[6]][0])+'</span></div>'}
   if(sp.length>lim)h+='<div class="sub">and '+(sp.length-lim)+' more</div>';
- }else if(row[KIND]!==0)h+='<div class="row"><span class="k">Range</span><span class="sub">no species range reaches here</span></div>';
+ }else if(row[KIND]!==0)h+='<div class="row"><span class="k">Species</span><span class="sub">none live here'+(row[BELT]>=.3?' (rock belt)':'')+'</span></div>';
  h+='<h3>Ground</h3>';
  h+='<div class="row"><span class="k">Life</span>'+bar(row[LIFE])+' <span>'+row[LIFE].toFixed(2)+' <span class="sub">'+lifeWord(row[LIFE])+'</span></span></div>';
+ if(row[BELT]>0)h+='<div class="row"><span class="k">Belt</span>'+bar(row[BELT])+' <span>'+row[BELT].toFixed(2)+(row[OAS]?' <span class="ok">oasis: a planetoid restores a little life</span>':'')+'</span></div>';
  h+='<div class="row"><span class="k">Rock</span>'+bar(row[MAT])+' <span>'+row[MAT].toFixed(2)+' <span class="sub">'+rockWord(row[MAT])+'</span></span></div>';
  const pl=row[PLA];
  h+='<div class="row"><span class="k">Bodies</span><span>'+row[CRE]+' creatures, '+row[AST]+' asteroids, '+pl.length+' planetoid'+(pl.length===1?'':'s')+(row[WELL].length?', '+row[WELL].length+' gravity well'+(row[WELL].length===1?'':'s'):'')+(row[BAS]?', '+row[BAS]+' base'+(row[BAS]===1?'':'s'):'')+'</span></div>';
@@ -318,22 +352,27 @@ function showTip(e,cr){
  tip.style.left=Math.max(4,x)+"px";tip.style.top=Math.max(4,y)+"px";
 }
 const LEGEND='<details open><summary>Legend</summary><div class="leg">'
-+'<svg viewBox="0 0 30 20"><rect width="10" height="20" fill="hsl(150,55%,45%)"/><rect x="10" width="10" height="20" fill="hsl(210,55%,45%)"/><rect x="20" width="10" height="20" fill="hsl(25,55%,45%)"/></svg><span>Hue: the dominant species range (stable per range); grey where none reaches</span>'
++'<svg viewBox="0 0 30 20"><rect width="10" height="20" fill="hsl(150,55%,45%)"/><rect x="10" width="10" height="20" fill="hsl(210,55%,45%)"/><rect x="20" width="10" height="20" fill="hsl(25,55%,45%)"/></svg><span>Hue: the most abundant species here (stable per species); grey where none lives. Pick one in the dropdown, or click a species in a pinned sector, to see only where it lives</span>'
 +'<div class="ramp" style="background:linear-gradient(90deg,hsl(220,8%,16%),hsl(150,60%,48%))"></div><span>Tint: life density, empty to biodiverse</span>'
 +'<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="var(--rock)" fill-opacity=".45"/><path d="M0 20L20 0M10 20L30 0M20 20L30 10M0 10L10 0" stroke="var(--rock)" stroke-width="2"/></svg><span>Brown shade: rock density; hatched where the region is a belt</span>'
-+'<svg viewBox="0 0 30 20"><rect x="3" y="3" width="24" height="14" fill="none" stroke="var(--gold)" stroke-width="2"/></svg><span>Gold border: confluence, 4+ species strongly present</span>'
++'<svg viewBox="0 0 30 20"><rect x="3" y="3" width="24" height="14" fill="none" stroke="var(--gold)" stroke-width="2"/></svg><span>Gold border: confluence, 5+ species strongly present</span>'
 +'<svg viewBox="0 0 30 20"><rect x="2" y="2" width="26" height="16" fill="none" stroke="var(--ring)" stroke-dasharray="4 3"/></svg><span>Dashed square: Moore ring from HOME, numbered</span>'
 +'<svg viewBox="0 0 30 20"><path d="M15 3L26 10L15 17L4 10z" fill="#c33" fill-opacity=".8" stroke="var(--ink)"/></svg><span>Civilization capital (pips: fort tier), outlined in its tint; triangles are outposts</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="7" fill="var(--panel)" stroke="var(--ok)" stroke-width="2.5"/><circle cx="15" cy="10" r="2.5" fill="var(--ok)"/></svg><span>The early outpost, peaceful</span>'
++'<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#d33" fill-opacity=".5"/></svg><span>Diversity layer: redder is more species in the sector (0 darkens)</span>'
++'<svg viewBox="0 0 30 20"><rect width="15" height="20" fill="hsl(200,60%,55%)" fill-opacity=".5"/><rect x="15" width="15" height="20" fill="hsl(25,60%,55%)" fill-opacity=".5"/><path d="M15 0V20" stroke="var(--accent)" stroke-width="2"/></svg><span>Biome layer: tint by kind of country, blue line at cell borders</span>'
++'<svg viewBox="0 0 30 20"><path d="M0 0L30 20M0 20L30 0" stroke="var(--ink)" stroke-width="1.5" opacity=".6"/><circle cx="15" cy="10" r="4" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Belt: crossed lines (deep rock belt, life near zero); green ring: an oasis</span>'
 +'<svg viewBox="0 0 30 20"><path d="M5 17V6L10 11L15 3L20 11L25 6V17z" fill="var(--gold)" stroke="var(--ink)"/></svg><span>Apex elder (small and faint: a lesser one)</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="5" fill="var(--rock)" stroke="var(--ink)"/><circle cx="15" cy="10" r="8" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Planetoid (size by radius); green ring: renewable</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6" fill="none" stroke="var(--well)" stroke-width="2"/><circle cx="15" cy="10" r="2" fill="var(--well)"/></svg><span>Gravity well</span>'
 +'<svg viewBox="0 0 30 20"><path d="M15 2L27 11h-4v7H7v-7H3z" fill="var(--accent)"/></svg><span>HOME, sector (0,0)</span>'
 +'</div><p class="sub">Drag to pan, wheel or pinch to zoom, click or tap a sector to pin it. North (+y) is up. Zoom in for species counts, coordinates and fort tiers.</p></details>';
+function setFilter(i){filter=i;$("#sf").value=i<0?"":String(i);build()}
 function panel(){
  const p=$("#panel");
  p.innerHTML=(pinned?describe(pinned,true)+'<p><button id="unpin">Unpin</button></p>':'<h2>No sector pinned</h2><div class="sub">Click or tap a sector for details. Hover shows a quick tip.</div>')+LEGEND;
  const u=$("#unpin");if(u)u.onclick=()=>{pin(null)};
+ for(const r of p.querySelectorAll(".sprow"))r.onclick=()=>setFilter(filter===+r.dataset.sp?-1:+r.dataset.sp);
 }
 function pin(cr,center){
  pinned=cr;place(pinBox,cr);panel();
@@ -391,6 +430,24 @@ for(const cb of document.querySelectorAll("[data-layer]"))cb.addEventListener("c
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change",build);
 new ResizeObserver(()=>{const oldFit=fitK;measure();if(Math.abs(oldFit-fitK)>.01&&Math.abs(v.k-oldFit)<.01)fit()}).observe(stage);
 
+/* species dropdown, sorted by how many sectors hold each */
+const counts=D.species.map(()=>0);for(const row of cells)for(const s of row[SP])counts[s[0]]++;
+const order=D.species.map((s,i)=>i).sort((a,b)=>counts[b]-counts[a]||a-b);
+for(const i of order){const o=document.createElement("option");o.value=i;o.textContent=D.species[i][0]+" ("+D.species[i][5]+", "+counts[i]+")";$("#sf").appendChild(o)}
+$("#sf").onchange=e=>{filter=e.target.value===""?-1:+e.target.value;build()};
+/* summary: how diverse the map is, and what covers it */
+(function(){
+ const n=cells.length,hist=[0,0,0,0,0,0,0];let life=0,belt=0,oasis=0,sectors=0;const bk=D.biomeKinds.map(()=>0);
+ const spread={generalist:0,regional:0,endemic:0};
+ for(const row of cells){if(row[RING]===0)continue;sectors++;hist[Math.min(6,row[SP].length)]++;life+=row[LIFE];if(row[BELT]>=.5)belt++;if(row[OAS])oasis++;bk[D.biomes[row[BIO]]]++}
+ for(const s of D.species)spread[s[5]]++;
+ const mx=Math.max(1,...hist);
+ let h='<span>species per sector<div class="hist">'+hist.map((c,i)=>'<div title="'+c+' sectors hold '+i+(i===6?'+':'')+' species"><i style="height:'+Math.round(c/mx*28)+'px"></i>'+i+(i===6?'+':'')+'</div>').join("")+'</div></span>';
+ h+='<span><b>'+D.species.length+'</b> species seen (<b>'+spread.generalist+'</b> generalist, <b>'+spread.regional+'</b> regional, <b>'+spread.endemic+'</b> endemic)</span>';
+ h+='<span>mean life <b>'+(life/Math.max(1,sectors)).toFixed(2)+'</b> &middot; deep belts <b>'+Math.round(belt/Math.max(1,sectors)*100)+'%</b> &middot; oases <b>'+oasis+'</b> &middot; biome cells <b>'+D.biomes.length+'</b></span>';
+ h+='<span class="bk">'+bk.map((c,i)=>c?'<span><i class="sw" style="background:hsl('+BIOHUE[i]+',60%,50%)"></i>'+esc(D.biomeKinds[i][0])+' '+Math.round(c/Math.max(1,sectors)*100)+'%</span>':'').join("")+'</span>';
+ $("#sum").innerHTML=h;
+})();
 measure();build();fit();panel();
 const h=location.hash.match(/^#(-?\d+),(-?\d+)$/);
 if(h&&inGrid(+h[1],+h[2]))pin([+h[1]-D.x0,D.y1-+h[2]],true);

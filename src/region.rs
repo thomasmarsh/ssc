@@ -149,8 +149,9 @@ pub fn region(seed: u64, id: SectorId) -> Region {
     } else if eco.oasis {
         let (bx, by) = block(id);
         (RegionKind::Oasis, named(2, bx, by), "Oasis".to_string())
-    } else if eco.belt >= BELT_DEPTH
-        || (eco.matter >= BELT_MATTER && eco.life < BELT_LIFE && !eco.presence.is_empty())
+    } else if ring(id) >= 3
+        && (eco.belt >= BELT_DEPTH
+            || (eco.matter >= BELT_MATTER && eco.life < BELT_LIFE && !eco.presence.is_empty()))
     {
         let (bx, by) = block(id);
         (RegionKind::Belt, named(4, bx, by), "Belt".to_string())

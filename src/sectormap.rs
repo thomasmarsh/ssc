@@ -7,8 +7,9 @@
 //! the game rules: nothing here is read by the simulation.
 
 use crate::apex::{self, Rank};
+use crate::biome::BiomeKind;
 use crate::genome::Niche;
-use crate::range::{Family, ecology, ring};
+use crate::range::{Family, Spread, ecology, ring};
 use crate::region::{Region, RegionKind, region};
 use crate::simulation::{BodyKind, renewable};
 use crate::territory::{CivRole, Territory, territory};
@@ -17,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 1;
+pub const GENERATOR_VERSION: u32 = 2;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
@@ -83,6 +84,10 @@ pub struct SpeciesAt {
     pub niche: Niche,
     pub weight: f32,
     pub color: [f32; 3],
+    pub spread: Spread,
+    pub favourite: BiomeKind,
+    /// How isolated its population here is, in [0, 1] (zero on the continent).
+    pub isolation: f32,
 }
 
 /// A planetoid: size, whether it regrows, and where it sits in the sector (fractions of a
@@ -102,6 +107,13 @@ pub struct Cell {
     pub ring: u32,
     pub life: f32,
     pub matter: f32,
+    /// Species the diversity cap allows here (a real number) and how deep in a rock belt.
+    pub capacity: f32,
+    pub belt: f32,
+    /// The biome cell (stable key) and its kind; an oasis holds life inside a belt.
+    pub biome_key: u64,
+    pub biome: BiomeKind,
+    pub oasis: bool,
     pub region: Region,
     /// Most abundant first.
     pub species: Vec<SpeciesAt>,
@@ -160,6 +172,11 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
         ring: ring(id),
         life: eco.life,
         matter: eco.matter,
+        capacity: eco.diversity,
+        belt: eco.belt,
+        biome_key: eco.biome.key,
+        biome: eco.biome.kind,
+        oasis: eco.oasis,
         region: region(seed, id),
         species: eco
             .presence
@@ -171,6 +188,9 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
                 niche: p.species.genome.niche(),
                 weight: p.weight,
                 color: p.species.genome.color(),
+                spread: p.spread,
+                favourite: p.favourite,
+                isolation: p.patch.isolation,
             })
             .collect(),
         creatures,
@@ -205,6 +225,14 @@ fn family_label(family: Family) -> &'static str {
         Family::Lunatic => "Lunatic",
         Family::Leech => "Leech",
         Family::Wild => "Wild",
+    }
+}
+
+fn spread_label(spread: Spread) -> &'static str {
+    match spread {
+        Spread::Generalist => "generalist",
+        Spread::Regional => "regional",
+        Spread::Endemic => "endemic",
     }
 }
 
@@ -247,7 +275,9 @@ pub struct Map {
     pub options: MapOptions,
     pub cells: Vec<Cell>,
     /// Lineage to index, in first-seen order.
-    species: Vec<(u64, String, u32, &'static str, &'static str, String)>,
+    species: Vec<SpeciesRow>,
+    biomes: Vec<u32>,
+    biome_index: HashMap<u64, usize>,
     species_index: HashMap<u64, usize>,
     regions: Vec<(String, u32)>,
     region_index: HashMap<u64, usize>,
@@ -256,6 +286,18 @@ pub struct Map {
     apexes: Vec<(String, &'static str)>,
     apex_index: HashMap<SectorId, usize>,
 }
+
+/// A species of the table: lineage, name, hue, family, niche, colour, spread, favourite biome.
+type SpeciesRow = (
+    u64,
+    String,
+    u32,
+    &'static str,
+    &'static str,
+    String,
+    &'static str,
+    usize,
+);
 
 struct TerritoryRow {
     name: String,
@@ -309,6 +351,8 @@ impl Map {
             cells: Vec::new(),
             species: Vec::new(),
             species_index: HashMap::new(),
+            biomes: Vec::new(),
+            biome_index: HashMap::new(),
             regions: Vec::new(),
             region_index: HashMap::new(),
             territories: Vec::new(),
@@ -335,8 +379,14 @@ impl Map {
                     family_label(s.family),
                     niche_label(s.niche),
                     hex(s.color),
+                    spread_label(s.spread),
+                    s.favourite.index(),
                 ));
             }
+        }
+        if !self.biome_index.contains_key(&cell.biome_key) {
+            self.biome_index.insert(cell.biome_key, self.biomes.len());
+            self.biomes.push(cell.biome.index() as u32);
         }
         if !self.region_index.contains_key(&cell.region.key) {
             self.region_index
@@ -373,9 +423,10 @@ impl Map {
     }
 
     /// One cell's JSON row. Layout (read by `template.html`): ring, life, matter, region kind,
-    /// region index, species `[[index, weight]...]`, creatures, asteroids, bases, wells
+    /// region index, species `[[index, weight, isolation]...]`, creatures, asteroids, bases, wells
     /// `[[dx, dy]...]`, planetoids `[[radius, renewable, dx, dy]...]`, territory index or -1,
-    /// capital 0/1, outposts, apex index or -1.
+    /// capital 0/1, outposts, apex index or -1, diversity cap, belt depth, biome cell index,
+    /// oasis 0/1.
     pub fn row_json(&self, index: usize) -> String {
         let c = &self.cells[index];
         let mut o = String::new();
@@ -392,7 +443,11 @@ impl Map {
             if i > 0 {
                 o.push(',');
             }
-            let _ = write!(o, "[{},{:.3}]", self.species_index[&s.lineage], s.weight);
+            let _ = write!(
+                o,
+                "[{},{:.3},{:.2}]",
+                self.species_index[&s.lineage], s.weight, s.isolation
+            );
         }
         let _ = write!(o, "],{},{},{},[", c.creatures, c.asteroids, c.bases);
         for (i, (dx, dy)) in c.wells.iter().enumerate() {
@@ -421,9 +476,13 @@ impl Map {
         let apex = self.apex_index.get(&c.id).map_or(-1, |i| *i as i64);
         let _ = write!(
             o,
-            "],{territory},{},{},{apex}]",
+            "],{territory},{},{},{apex},{:.2},{:.2},{},{}]",
             u8::from(c.capital),
-            c.outposts
+            c.outposts,
+            c.capacity,
+            c.belt,
+            self.biome_index[&c.biome_key],
+            u8::from(c.oasis)
         );
         o
     }
@@ -442,7 +501,9 @@ impl Map {
             origin.x,
             origin.y + o.rows as i32 - 1
         );
-        for (i, (_, name, hue, family, niche, color)) in self.species.iter().enumerate() {
+        for (i, (_, name, hue, family, niche, color, spread, favourite)) in
+            self.species.iter().enumerate()
+        {
             if i > 0 {
                 j.push(',');
             }
@@ -454,7 +515,27 @@ impl Map {
             json_str(&mut j, niche);
             j.push(',');
             json_str(&mut j, color);
+            j.push(',');
+            json_str(&mut j, spread);
+            let _ = write!(j, ",{favourite}]");
+        }
+        j.push_str("],\"biomeKinds\":[");
+        for (i, kind) in BiomeKind::ALL.iter().enumerate() {
+            if i > 0 {
+                j.push(',');
+            }
+            j.push('[');
+            json_str(&mut j, kind.label());
+            j.push(',');
+            json_str(&mut j, kind.word());
             j.push(']');
+        }
+        j.push_str("],\"biomes\":[");
+        for (i, kind) in self.biomes.iter().enumerate() {
+            if i > 0 {
+                j.push(',');
+            }
+            let _ = write!(j, "{kind}");
         }
         j.push_str("],\"regions\":[");
         for (i, (name, kind)) in self.regions.iter().enumerate() {
@@ -579,6 +660,12 @@ mod tests {
             assert_eq!(cell.matter, eco.matter);
             assert_eq!(cell.species.len(), eco.presence.len());
             assert_eq!(
+                (cell.capacity, cell.belt, cell.oasis),
+                (eco.diversity, eco.belt, eco.oasis)
+            );
+            assert_eq!(cell.biome, eco.biome.kind);
+            assert!(cell.species.len() <= crate::range::MAX_SPECIES);
+            assert_eq!(
                 cell.creatures as usize,
                 spawns
                     .iter()
@@ -604,6 +691,37 @@ mod tests {
             }
         }
         assert!(checked_territory, "the window should hold a territory");
+    }
+
+    /// The page carries the niche model: biome kinds and cells, per-species spread and
+    /// favourite, and the diversity, belt, biome and oasis columns of every row.
+    #[test]
+    fn the_page_carries_biomes_diversity_belts_and_species_filters() {
+        let map = Map::build(small(41, 41)).unwrap();
+        let data = map.data_json();
+        for key in [
+            "\"biomeKinds\"",
+            "\"biomes\"",
+            "\"generalist\"",
+            "\"species\"",
+        ] {
+            assert!(data.contains(key), "{key}");
+        }
+        assert!(data.contains("\"regional\"") || data.contains("\"endemic\""));
+        let html = map.html();
+        for hook in [
+            "id=\"sf\"",
+            "data-layer=\"diversity\"",
+            "data-layer=\"biomes\"",
+            "id=\"sum\"",
+        ] {
+            assert!(html.contains(hook), "{hook}");
+        }
+        // Every row ends with capacity, belt, biome cell and oasis after the apex column.
+        let row = map.row_json(10);
+        let fields: Vec<&str> = row.trim_end_matches(']').rsplitn(5, ',').collect();
+        assert_eq!(fields.len(), 5, "{row}");
+        assert!(map.biomes.len() >= 2 && map.biomes.iter().all(|k| *k < 8));
     }
 
     #[test]

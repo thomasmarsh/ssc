@@ -119,10 +119,12 @@ pub const FOUNDER_PULL: f32 = 0.4;
 pub const CLASSIC_PICKY: f32 = 0.3;
 /// An oasis (a planetoid inside a belt) restores life to this share of an unmasked sector,
 /// and holds at most `OASIS_CAPACITY` species.
-pub const OASIS_RESTORE: f32 = 0.4;
+pub const OASIS_RESTORE: f32 = 0.25;
 pub const OASIS_CAPACITY: f32 = 2.2;
-/// A belt this deep or more can hold an oasis.
+/// A belt this deep or more can hold an oasis, and only this share of its planetoids do
+/// (a planetoid's own roll), so belts stay mostly bare.
 pub const OASIS_BELT: f32 = 0.3;
+pub const OASIS_SHARE: f32 = 0.4;
 /// The most species any sector may hold.
 pub const MAX_SPECIES: usize = 6;
 
@@ -757,6 +759,8 @@ pub struct Presence {
     pub center: Vec2,
     /// The population it belongs to here (names its region, see `region`).
     pub patch: Patch,
+    /// The country the species favours.
+    pub favourite: BiomeKind,
 }
 
 /// What a sector's ecology is: who lives there, how much life it holds, how rock-rich it is.
@@ -853,7 +857,10 @@ pub fn ecology(seed: u64, id: SectorId) -> Ecology {
     let at = at_of(id);
     let ring = ring(id);
     // A planetoid inside a belt is an oasis: a small patch of life in the quiet.
-    let oasis = ring >= 3 && belt(seed, at) >= OASIS_BELT && crate::world::has_planetoid(seed, id);
+    let oasis = ring >= 3
+        && belt(seed, at) >= OASIS_BELT
+        && (hash2(seed ^ BELT_SALT, id.x, id.y) >> 40) as f32 / 16_777_216.0 < OASIS_SHARE
+        && crate::world::has_planetoid(seed, id);
     let weights = weights(seed, id, oasis);
     // `life` is the belt's own (it feeds the sector's parameters, which decide the
     // planetoid); the oasis only restores who lives there.
@@ -878,6 +885,7 @@ pub fn ecology(seed: u64, id: SectorId) -> Ecology {
                 spread: d.spread,
                 center: d.anchor,
                 patch,
+                favourite: d.favourite,
             }
         })
         .collect();
@@ -1357,21 +1365,28 @@ mod tests {
     /// A planetoid inside a belt restores a small local patch of life (an oasis).
     #[test]
     fn planetoids_in_belts_hold_oases() {
-        let (mut oases, mut populated) = (0, 0);
+        let (mut oases, mut populated, mut candidates) = (0, 0, 0);
         for seed in SEEDS {
             for id in sectors(60).filter(|id| ring(*id) >= 6) {
                 let eco = ecology(seed, id);
-                if belt(seed, at_of(id)) >= OASIS_BELT && crate::world::has_planetoid(seed, id) {
-                    assert!(eco.oasis, "{id:?}");
+                let candidate =
+                    belt(seed, at_of(id)) >= OASIS_BELT && crate::world::has_planetoid(seed, id);
+                candidates += usize::from(candidate);
+                if eco.oasis {
+                    // Only a planetoid in a belt makes one, and it is small.
+                    assert!(candidate, "{id:?}");
                     oases += 1;
                     populated += usize::from(!eco.presence.is_empty());
                     assert!(eco.presence.len() <= 3, "an oasis is small");
-                } else {
-                    assert!(!eco.oasis);
                 }
             }
         }
         assert!(oases >= 10, "{oases} oases");
+        let share = oases as f32 / candidates as f32;
+        assert!(
+            (0.2..0.6).contains(&share),
+            "{oases} of {candidates} planetoids"
+        );
         assert!(
             populated as f32 > oases as f32 * 0.6,
             "{populated} of {oases} oases hold life"
