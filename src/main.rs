@@ -847,6 +847,8 @@ fn smoke_run(
             "tarbloom" => Genome::tarbloom(),
             "lenswyrm" => Genome::lenswyrm(),
             "tidegorger" => Genome::tidegorger(),
+            "splitter" => Genome::splitter(),
+            "murmur" => Genome::murmur(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {

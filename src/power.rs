@@ -134,6 +134,26 @@ pub const POCKET_MAX: f32 = 1.0;
 pub const POCKET_REACH: f32 = 450.0;
 pub const POCKET_RELEASE: f32 = 0.3;
 pub const RELEASE_LIFE: f32 = 90.0;
+/// Split (Splitter): pieces appear `SPLIT_TELL` s after the death, two (three from gene value
+/// `SPLIT_TRIPLE`), each with a third of the hull (at least `SPLIT_MIN_HULL`), `SPLIT_SIZE` of
+/// the radius (at least `SPLIT_MIN_RADIUS`), `SPLIT_SPEED` of the speed, `SPLIT_BOUNTY` of the
+/// bounty, flung apart at about `SPLIT_FLING`; at most `SPLIT_QUEUE` wait at once.
+pub const SPLIT_TELL: f32 = 0.4;
+pub const SPLIT_TRIPLE: f32 = 0.7;
+pub const SPLIT_MIN_HULL: f32 = 8.0;
+pub const SPLIT_SIZE: f32 = 0.7;
+pub const SPLIT_MIN_RADIUS: f32 = 6.0;
+pub const SPLIT_SPEED: f32 = 1.15;
+pub const SPLIT_BOUNTY: f32 = 0.3;
+pub const SPLIT_FLING: f32 = 160.0;
+pub const SPLIT_QUEUE: usize = 12;
+/// Cloud (Murmur): a shot entering the radius is swallowed with chance
+/// `CLOUD_DENSITY.0 + CLOUD_DENSITY.1 * s`; otherwise it passes and only the core (`CLOUD_CORE`
+/// of the radius) takes damage. Area damage ignores all that. The ship inside the cloud takes
+/// `CLOUD_STING.0 + CLOUD_STING.1 * s` damage a second (once, not per mote). Bodies pass through.
+pub const CLOUD_DENSITY: (f32, f32) = (0.25, 0.35);
+pub const CLOUD_CORE: f32 = 0.3;
+pub const CLOUD_STING: (f32, f32) = (10.0, 6.0);
 /// Killing a carrier of a built power pays this much more bounty (by tier) and rolls one
 /// extra drop with this chance and a little luck.
 pub const BOUNTY_BONUS: (f32, f32) = (1.25, 1.5);
@@ -358,6 +378,8 @@ impl Power {
                 | Self::Warp
                 | Self::Lens
                 | Self::Devour
+                | Self::Split
+                | Self::Cloud
         )
     }
 
@@ -385,6 +407,8 @@ impl Power {
             Self::Warp => [0.4, 0.7, 1.0],
             Self::Lens => [0.7, 1.0, 0.85],
             Self::Devour => [0.8, 1.0, 0.5],
+            Self::Split => [0.8, 0.8, 0.8],
+            Self::Cloud => [0.95, 0.85, 0.4],
             _ => [0.9, 0.9, 0.9],
         }
     }
@@ -470,6 +494,11 @@ pub struct Carried {
     pub power: Power,
     /// Effect strength in [0, 1] (see `Power::strength`).
     pub strength: f32,
+}
+
+/// The chance a swarm swallows a shot that enters it.
+pub fn cloud_density(g: &Genome) -> f32 {
+    CLOUD_DENSITY.0 + CLOUD_DENSITY.1 * Power::Cloud.strength(g)
 }
 
 impl Genome {
@@ -671,6 +700,14 @@ fn style(g: &mut Genome, power: Power) {
             g.radius = g.radius.max(26.0);
             g.speed = g.speed.min(50.0);
         }
+        Power::Cloud => {
+            g.radius = g.radius.max(50.0);
+            g.hull = g.hull.max(90.0);
+        }
+        Power::Split => {
+            g.radius = g.radius.max(20.0);
+            g.hull = g.hull.max(60.0);
+        }
         Power::Devour => {
             g.diet = crate::genome::Diet::Rocks;
             g.radius = g.radius.max(34.0);
@@ -846,6 +883,30 @@ impl Genome {
             radius: 40.0,
             hull: 160.0,
             speed: 55.0,
+            weapon: Weapon::None,
+            ..Self::default()
+        }
+    }
+
+    /// A Splitter (split): a fat bag that becomes two.
+    pub fn splitter() -> Self {
+        Self {
+            split: 0.5,
+            hull: 90.0,
+            radius: 24.0,
+            weapon: Weapon::Projectile,
+            ..Self::default()
+        }
+    }
+
+    /// A Murmur (cloud): a sky of motes that is one animal.
+    pub fn murmur() -> Self {
+        Self {
+            cloud: 0.8,
+            radius: 60.0,
+            hull: 120.0,
+            speed: 150.0,
+            contact_damage: 12.0,
             weapon: Weapon::None,
             ..Self::default()
         }

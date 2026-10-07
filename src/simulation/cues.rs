@@ -100,6 +100,10 @@ pub enum Cue {
     Shove {
         at: Vec2,
     },
+    /// A splitter died and is about to come apart.
+    Split {
+        at: Vec2,
+    },
     /// A tidegorger swallowed something.
     Devour {
         at: Vec2,

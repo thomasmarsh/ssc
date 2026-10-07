@@ -266,6 +266,41 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
                 );
             }
         }
+        Power::Split => {
+            // A seam down the middle that brightens as the body nears its end.
+            let seam = game.seam(body);
+            let across = Vec2::new(-direction.y, direction.x);
+            gizmos.line_2d(
+                p - across * r * 1.05,
+                p + across * r * 1.05,
+                Color::WHITE.with_alpha(0.25 + 0.7 * seam),
+            );
+            if seam > 0.6 {
+                gizmos
+                    .circle_2d(p, r * (1.15 + 0.1 * shimmer), tint.with_alpha(0.6))
+                    .resolution(20);
+            }
+        }
+        Power::Cloud => {
+            // Motes in a slow swirl: ring, arrow or ball by the swarm's own beat; the edge
+            // is a faint ring, the density shows in how many there are.
+            let n = 14 + (ssc::power::cloud_density(&body.genome) * 40.0) as u32;
+            let beat = (time * 0.25 + body.id as f32).sin();
+            for k in 0..n {
+                let h = ssc::world::hash2(body.id, k as i32, 7);
+                let u = (h >> 40) as f32 / 16_777_216.0;
+                let v = ((h >> 16) & 0xFFFF) as f32 / 65535.0;
+                let ring = 0.45 + 0.55 * (u * 0.5 + 0.5 * beat.abs());
+                let a = v * TAU + time * (0.4 + u) * if k % 2 == 0 { 1.0 } else { -0.7 };
+                let at = p + Vec2::from_angle(a) * r * ring;
+                gizmos.line_2d(
+                    at,
+                    at + Vec2::from_angle(a + 1.6) * (5.0 + 5.0 * u),
+                    tint.with_alpha(0.55 + 0.4 * u),
+                );
+            }
+            dotted_circle(gizmos, p, r, tint.with_alpha(0.18), 32, time * 0.1);
+        }
         Power::Glare => eyes(gizmos, p, r, time, view.glare.max(0.15), tint),
         Power::Dim => {
             // A bright thin rim, two bright eyes, and the edge of the dark.

@@ -87,6 +87,9 @@ impl Game {
         if Power::Lens.active(&g) {
             self.step_lens(index, dt);
         }
+        if Power::Cloud.active(&g) {
+            self.step_cloud(index, dt);
+        }
         if Power::Devour.active(&g) {
             eaten = self.step_devour(index, state, dt, cues);
         }
@@ -181,6 +184,24 @@ impl Game {
             state.shove_age = 0.0;
             cues.push(Cue::Shove { at });
             let _ = shoved;
+        }
+    }
+
+    /// A swarm stings the ship while it is inside the cloud: a steady rate, not per contact.
+    fn step_cloud(&mut self, index: usize, dt: f32) {
+        let body = &self.bodies[index];
+        let (at, radius, g) = (body.position, body.radius, body.genome);
+        let s = Power::Cloud.strength(&g);
+        let dps = power::CLOUD_STING.0 + power::CLOUD_STING.1 * s;
+        let invulnerability = self.player_invulnerability;
+        if body.phased {
+            return;
+        }
+        if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
+            && ship.position.distance(at) < radius
+        {
+            let guard = ship.rig.guard;
+            damage(ship, dps * guard * dt, invulnerability);
         }
     }
 
@@ -769,5 +790,92 @@ mod tests {
             ..still(Genome::tidegorger())
         };
         assert!(g.devour < power::DEVOUR_WELL_FROM);
+    }
+}
+
+#[cfg(test)]
+mod swarm_tests {
+    use super::*;
+    use crate::genome::{Genome, Species};
+    use crate::simulation::tests::{DT, empty_game, set_player, spawn};
+
+    fn murmur() -> Genome {
+        Genome {
+            speed: 0.0,
+            cruise: 0.0,
+            trigger: crate::genome::Trigger::Harm,
+            ..Genome::murmur()
+        }
+    }
+
+    #[test]
+    fn a_swarm_swallows_about_its_density_of_shots_and_the_core_takes_the_rest() {
+        let mut game = empty_game();
+        let id = spawn(&mut game, &Species::of(murmur()), Vec2::new(0.0, 1000.0));
+        let g = murmur();
+        let density = power::cloud_density(&g);
+        assert!((0.25..=0.6).contains(&density));
+        let (mut absorbed, mut passed) = (0, 0);
+        for k in 0..200 {
+            game.bodies
+                .retain(|b| b.kind == BodyKind::Player || b.id == id);
+            game.bullets.clear();
+            // Aimed past the core (offset 30 of radius 60), so only the roll decides.
+            let y = 1030.0 + (k % 7) as f32 * 0.37;
+            game.bullets.push(Bullet::friendly(
+                Vec2::new(-90.0 + (k % 5) as f32 * 0.21, y),
+                Vec2::new(900.0, 0.0),
+                1.0,
+            ));
+            for _ in 0..12 {
+                game.step(DT, Input::default());
+            }
+            if game
+                .bullets
+                .iter()
+                .any(|b| b.friendly && b.position.x > 80.0)
+            {
+                passed += 1;
+            } else {
+                absorbed += 1;
+            }
+        }
+        let share = absorbed as f32 / (absorbed + passed) as f32;
+        assert!((share - density).abs() < 0.12, "{share} vs {density}");
+        let hull = game.bodies.iter().find(|b| b.id == id).unwrap().health;
+        assert_eq!(hull, g.hull, "shots off the core never hurt the hull");
+    }
+
+    #[test]
+    fn a_swarm_core_takes_shots_blasts_hurt_it_fully_and_it_stings_per_second() {
+        let mut game = empty_game();
+        let id = spawn(&mut game, &Species::of(murmur()), Vec2::new(0.0, 1000.0));
+        game.explode(Vec2::new(0.0, 1040.0), 40.0, 50.0, true);
+        let hurt = game.bodies.iter().find(|b| b.id == id).unwrap().health;
+        assert!(hurt < 120.0, "area damage ignores the density: {hurt}");
+        // The ship inside is stung at a steady rate, not per contact, and not bounced.
+        set_player(&mut game, Vec2::new(0.0, 1000.0), Vec2::ZERO);
+        game.player_invulnerability = 0.0;
+        let before = {
+            let p = game.player().unwrap();
+            p.health + p.shield
+        };
+        for _ in 0..(1.0 / DT) as usize {
+            game.bodies
+                .retain(|b| b.kind == BodyKind::Player || b.id == id);
+            game.step(DT, Input::default());
+        }
+        let p = game.player().unwrap();
+        let lost = before - (p.health + p.shield);
+        let s = Power::Cloud.strength(&murmur());
+        let dps = power::CLOUD_STING.0 + power::CLOUD_STING.1 * s;
+        assert!(
+            lost > dps * 0.5 && lost < dps * 1.6 * p.rig.guard.max(1.0) + 1.0,
+            "{lost} vs {dps}"
+        );
+        assert!(
+            p.position.distance(Vec2::new(0.0, 1000.0)) < 40.0,
+            "no bump"
+        );
     }
 }

@@ -181,6 +181,7 @@ impl Game {
                 && (Power::Repel.active(&g)
                     || Power::Warp.active(&g)
                     || Power::Lens.active(&g)
+                    || Power::Cloud.active(&g)
                     || Power::Devour.active(&g));
             if phase.is_none() && !blinks && !jammer && !fielder {
                 self.bodies[index].phased = false;

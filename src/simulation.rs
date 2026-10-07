@@ -41,6 +41,7 @@ mod regrow;
 mod root;
 pub mod run;
 pub mod skills;
+mod split;
 mod tether;
 mod titles;
 pub mod tuning;
@@ -311,6 +312,8 @@ pub struct Bullet {
     struck: [u64; 4],
     /// The speed factor a time bubble has applied to it (1 outside one).
     warped: f32,
+    /// The swarm that already rolled for this shot.
+    rolled: u64,
     /// Already tested against the parry shield (it rolls once per shot).
     parried: bool,
 }
@@ -334,6 +337,7 @@ impl Bullet {
             pith: 0.0,
             struck: [0; 4],
             warped: 1.0,
+            rolled: 0,
             parried: false,
         }
     }
@@ -456,6 +460,8 @@ pub struct Game {
     power_state: HashMap<u64, powers::PowerState>,
     /// Jams, confusion and the screen glitch on the ship; see `jam`.
     jam: jam::JamState,
+    /// The pieces of dead splitters waiting to fly apart; see `split`.
+    splits: Vec<split::Pending>,
     apex_rng: Rng,
     seed: u64,
     rng: Rng,
@@ -566,6 +572,7 @@ impl Game {
             apex_state: HashMap::new(),
             power_state: HashMap::new(),
             jam: jam::JamState::default(),
+            splits: Vec::new(),
             apex_rng: Rng::new(seed ^ crate::apex::APEX_SALT),
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
@@ -758,6 +765,7 @@ impl Game {
         self.update_chains(dt);
         self.update_apexes(dt);
         self.update_powers(dt);
+        self.update_splits(dt);
         self.fire_weapons();
         self.cue_new_shots(in_flight);
         self.update_wells(dt);
@@ -1255,6 +1263,11 @@ impl Game {
                 if a.phased || b.phased {
                     continue;
                 }
+                // A swarm is a cloud of motes, not a solid: bodies pass through it (and it
+                // stings the ship inside, see `fields`).
+                if is_cloud(a) || is_cloud(b) {
+                    continue;
+                }
                 if clings(a, b) {
                     continue;
                 }
@@ -1394,7 +1407,44 @@ impl Game {
         } else {
             Vec::new()
         };
+        // Swarms swallow some of the ship's shots as they enter (see `fields`).
+        let clouds: Vec<(u64, Vec2, f32, f32)> = self
+            .bodies
+            .iter()
+            .filter(|b| b.active && is_cloud(b))
+            .map(|b| {
+                (
+                    b.id,
+                    b.position,
+                    b.radius,
+                    crate::power::cloud_density(&b.genome),
+                )
+            })
+            .collect();
+        let seed = self.seed;
         for bullet in &mut self.bullets {
+            if bullet.friendly && !clouds.is_empty() {
+                for &(id, at, radius, density) in &clouds {
+                    if bullet.rolled == id || bullet.position.distance(at) >= radius {
+                        continue;
+                    }
+                    // One roll per shot per swarm, as it enters.
+                    bullet.rolled = id;
+                    let key =
+                        (bullet.position.x * 4.0) as i32 * 31 + (bullet.position.y * 4.0) as i32;
+                    let roll = (world::hash2(seed ^ 0xC10D, (id & 0x7FFF_FFFF) as i32, key) >> 40)
+                        as f32
+                        / 16_777_216.0;
+                    if roll < density {
+                        bullet.remaining = 0.0;
+                        impacts.push(bullet.position);
+                        break;
+                    }
+                }
+                if bullet.remaining <= 0.0 {
+                    continue;
+                }
+            }
             if bullet.friendly && bullet.homing > 0 {
                 steer_seeker(bullet, &targets, dt);
             } else if !bullet.friendly
@@ -1426,7 +1476,7 @@ impl Game {
                     previous,
                     bullet.position,
                     body.position,
-                    body.radius + bullet.radius,
+                    hit_radius(body) + bullet.radius,
                 ) && hit.is_none_or(|(_, best)| fraction < best)
                 {
                     hit = Some((index, fraction));
@@ -1660,6 +1710,7 @@ impl Game {
         let mut lost_player = None;
         for body in &destroyed {
             let (kind, position, radius) = (body.kind, body.position, body.radius);
+            self.split_dead(body);
             if body.kind == BodyKind::Creature
                 && let Some(pocket) = self.power_state.get(&body.id).map(|s| s.pocket)
             {
@@ -1976,6 +2027,20 @@ fn fling_strength(body: &Body) -> f32 {
 }
 
 /// -1 for negative-mass creatures, which gravity repels and shots pull.
+/// A swarm: one body drawn as a cloud of motes.
+fn is_cloud(body: &Body) -> bool {
+    body.kind == BodyKind::Creature && crate::power::Power::Cloud.active(&body.genome)
+}
+
+/// How far from its centre a shot must come to hurt the body: a swarm only feels the core.
+fn hit_radius(body: &Body) -> f32 {
+    if is_cloud(body) {
+        body.radius * crate::power::CLOUD_CORE
+    } else {
+        body.radius
+    }
+}
+
 fn mass_sign(body: &Body) -> f32 {
     if body.kind == BodyKind::Creature && body.genome.mass < 0.0 {
         -1.0

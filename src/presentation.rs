@@ -2209,7 +2209,14 @@ pub fn draw(
                 } else {
                     shown
                 };
-                draw_creature(&mut gizmos, game.time, body, shown);
+                if ssc::power::Power::Cloud.active(&body.genome) {
+                    // A swarm is its motes (see `powerview`) around a small bright core.
+                    gizmos
+                        .circle_2d(p, r * ssc::power::CLOUD_CORE, shown)
+                        .resolution(14);
+                } else {
+                    draw_creature(&mut gizmos, game.time, body, shown);
+                }
                 if let Some(back) = crate::powerview::afterimage(body) {
                     // A phased body trails a ghost of itself.
                     let mut ghost = body.clone();
