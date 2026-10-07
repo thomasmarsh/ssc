@@ -222,7 +222,9 @@ Follow the existing rings and keep the content gates; change what the player is 
 
 At most three simultaneous screen-level effects (shake, flash, vignette), none longer than 0.4 s except the low-hull vignette; no effect covers more than 20 percent of the screen with a bright colour; everything routes through the adapter and respects `U`.
 
-## 8. Asteroids as weapons: the Tow Rig
+## 8. Asteroids as weapons: the Tow Rig (superseded: see the end status)
+
+**Superseded.** The design below (hook, thruster pod, cord) was replaced by a simpler one: mine a rock, then crash into it in the direction you want it to go (SHOVE and PLATING; see "Status: shoving rocks" at the end). The limits and credit notes here still describe the instincts behind it.
 
 The obvious weapon in an asteroid field is steering asteroids into enemies. The groundwork exists: `src/simulation/impact.rs` computes `kinetic_damage(closing_speed, inverse_mass_a, inverse_mass_b)` as `0.00003 * 1/2 * reduced mass * (speed - 300)^2` capped at 160 (zero at or below 300 units per second, clamped at 1400), the contact solver applies it to every non-fling pair, the ship takes half, a pair that just struck is quiet for 0.35 s, a rock striking anything is not armoured (so a fast heavy rock cracks a fortress wall and a hard rock-on-rock hit breaks both) and `tether.rs` has the cord and `Link` machinery. UNIVERSE.md says it directly: "This is the groundwork for tethered asteroids; nothing tethers or slings them yet."
 
@@ -325,3 +327,14 @@ Written after the pass; the sections above stay as the review. Everything here i
 - The chain multiplies score only, so the existing kill test that expected a flat bounty now expects a chain after the second kill in a window.
 - Enter restarts only after the last ship is lost; mid-run restart is in the settings so a stray Enter at the bench cannot end a run.
 - Narrow windows (under about 700 pixels wide) drop trailing items from the hint line and wrap the details into scrolling rows; very small windows are not a target.
+
+## Status: shoving rocks (replaces the Tow Rig)
+
+The Tow Rig of section 8 (a hook, a cord, a thruster pod, a sling) is not built and is dropped in favour of something that already half worked: "just use mining and then crash into the thing you're mining in the direction you want to push it". Code: `src/simulation/shove.rs`; numbers in `tuning.rs` (`SHOVE_*`, `GRIP_*`, `WHIP_*`, `PLATING_*`).
+
+- **The ram.** The contact solver shares momentum by mass ratio for any free body (rocks, husks, loose creatures, so a flung rock chains into the next); anchored things (planetoids, walls, pinned stones, rooted life, bases) have no inverse mass and never move. SHOVE adds an extra push on the shoved body only (not the ship), a multiplier of 1 + 0.25 a level on the imparted momentum, aimed half toward the ship's travel, needing a closing speed of 120, capped at 240 (+40 a level) of extra speed, and once per body per 0.6 s. A rock the ship shoves is tagged for 5 s and held to a speed cap of 700 (+60 a level), as are rocks it strikes, so nothing tunnels through a wall at any level.
+- **The grip.** While the beam works a free rock, a one-sided soft spring pulls it in past 70 units of open space (up to 380 a second squared, +90 a level, less for heavy rocks), settles it at the slack without overshoot, breaks away past 190 (+25 a level) and lets go for 1.2 s after a ram. It never makes a rock faster than the faster of itself, the ship and 90, so a grip adds no energy and repeated beam grabs gain nothing. The beam keeps mining as before.
+- **The whip.** A dash that ends within 140 of a free rock ahead (inside a 41 degree cone) cracks it with an impulse of 4500 (+30 percent a level), capped at 520 of speed; the dash's invulnerability keeps the ship safe.
+- **PLATING.** The ship's half share of an impact is cut by 20 percent a level when the ship caused it (it supplied half the closing speed, or the other body was shoved), and from level 3 every collision by 15 percent a level from there. A rock's plain touch (12 hull) is not covered.
+- **Skills.** SHOVE and PLATING are locked at level 0 (shown on the RIG tab and as `locked` in the details panel), levels 1 to 4, prices from `tuning.rs` (metal builds, crystal tunes), kept through death and cleared on restart. PLATING needs SHOVE level 1 to buy.
+- **Not built:** pods, cords on rocks, guidance, a second rock, credit for a shoved rock's kills to the ship beyond the existing ram rules (a shoved rock is still a rock; regard and score follow existing impact rules).

@@ -39,6 +39,68 @@ pub const IMPACT_CAP: f32 = 160.0;
 pub const IMPACT_PLAYER_SHARE: f32 = 0.5;
 pub const IMPACT_PAIR_COOLDOWN: f32 = 0.35;
 
+// ---- shoving rocks (the SHOVE and PLATING skills; see `shove`) --------------------------------
+
+/// A free body (a rock, a husk, a drifting creature) the ship rams is shoved by the contact
+/// solver as usual (momentum by mass ratio). The SHOVE skill adds an extra push on the body
+/// only: the imparted momentum is multiplied by `1 + SHOVE_MULT_STEP * level`, along a blend
+/// of the contact normal and the ship's travel (`SHOVE_AIM`), needing a real closing speed of
+/// `SHOVE_MIN_CLOSING`. The extra speed is capped (`SHOVE_BONUS_DV` plus a step a level) and a
+/// body can take one extra push per `SHOVE_COOLDOWN` seconds, so the most a body can gain
+/// from repeated rams is bounded per second. A body the ship shoved (or that a shoved body
+/// struck) stays tagged for `SHOVE_TAG` seconds and is held to a speed cap
+/// (`SHOVE_SPEED_CAP` plus a step a level) so it cannot tunnel through a wall.
+pub const SHOVE_MULT_STEP: f32 = 0.25;
+pub const SHOVE_AIM: f32 = 0.5;
+pub const SHOVE_MIN_CLOSING: f32 = 120.0;
+pub const SHOVE_BONUS_DV: f32 = 240.0;
+pub const SHOVE_BONUS_DV_STEP: f32 = 40.0;
+pub const SHOVE_COOLDOWN: f32 = 0.6;
+pub const SHOVE_TAG: f32 = 5.0;
+pub const SHOVE_SPEED_CAP: f32 = 700.0;
+pub const SHOVE_SPEED_CAP_STEP: f32 = 60.0;
+/// The beam's grip on the rock it works: a one-sided soft spring on the rock (it never pushes
+/// back, so the ship can still ram it). Past `GRIP_SLACK` of open space between the hulls the
+/// rock is pulled in at `GRIP_PULL` a second per unit of stretch, at most `GRIP_ACCEL` (a
+/// step more a level, scaled down for heavy rocks against `GRIP_REF_MASS`) and its sideways drift
+/// relative to the ship is damped at `GRIP_DAMP` a second. It comes in no faster than the
+/// ship's pace plus `GRIP_APPROACH` a second per unit of stretch, so it settles at the slack. It never makes the rock faster than
+/// the fastest of itself, the ship and `GRIP_FLOOR`, so it cannot add energy. Beyond `GRIP_REACH` (plus a step
+/// a level) it breaks away and stays off for `GRIP_RETRY` seconds; a ram lets go for
+/// `GRIP_RELEASE` seconds so the shoved rock is not yanked back.
+pub const GRIP_SLACK: f32 = 70.0;
+pub const GRIP_PULL: f32 = 3.0;
+pub const GRIP_ACCEL: f32 = 380.0;
+pub const GRIP_ACCEL_STEP: f32 = 90.0;
+pub const GRIP_REF_MASS: f32 = 18.0;
+pub const GRIP_DAMP: f32 = 2.0;
+pub const GRIP_APPROACH: f32 = 3.0;
+pub const GRIP_FLOOR: f32 = 90.0;
+pub const GRIP_REACH: f32 = 190.0;
+pub const GRIP_REACH_STEP: f32 = 25.0;
+pub const GRIP_RETRY: f32 = 1.0;
+pub const GRIP_RELEASE: f32 = 1.2;
+/// A dash that ends next to a free rock (within `WHIP_REACH` of its face, inside a cone of
+/// `WHIP_CONE` as a cosine) cracks it like a whip: an impulse of `WHIP_IMPULSE` (more by
+/// `WHIP_STEP` a level) along the dash, so a light rock flies and a heavy one budges, at most
+/// `WHIP_DV` of speed. The dash's invulnerability keeps the ship safe.
+pub const WHIP_REACH: f32 = 140.0;
+pub const WHIP_CONE: f32 = 0.75;
+pub const WHIP_IMPULSE: f32 = 4500.0;
+pub const WHIP_STEP: f32 = 0.3;
+pub const WHIP_DV: f32 = 520.0;
+/// PLATING takes down the share of an impact the ship itself takes. Impacts it caused (it was
+/// the faster closer, or the other body is a shoved one) are cut by `PLATING_CAUSED_STEP` of the
+/// share a level; from `PLATING_ALL_FROM` every other collision is cut by `PLATING_ALL_STEP` a
+/// level from there.
+pub const PLATING_CAUSED_STEP: f32 = 0.2;
+pub const PLATING_ALL_FROM: u8 = 3;
+pub const PLATING_ALL_STEP: f32 = 0.15;
+/// First-level prices: metal builds, crystal tunes.
+pub const PRICE_SHOVE: [(Material, f32); 2] = [(Material::Metal, 35.0), (Material::Crystal, 8.0)];
+pub const PRICE_SHOVE_PLATING: [(Material, f32); 2] =
+    [(Material::Metal, 45.0), (Material::Crystal, 10.0)];
+
 // ---- the mining beam -----------------------------------------------------------------------
 
 /// How much of each material the hold carries before cargo upgrades.

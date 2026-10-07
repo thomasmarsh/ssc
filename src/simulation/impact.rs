@@ -34,8 +34,14 @@ pub(super) fn pair_key(a: u64, b: u64) -> (u64, u64) {
 
 /// Applies a strike of `raw` damage to both bodies; returns what the ship's side dealt to a
 /// creature or base (for the run record). The ship takes its share (nothing under a lunatic
-/// field) and deals as it does with its other weapons: a free rock shrugs most of it off.
-pub(super) fn strike(a: &mut Body, b: &mut Body, raw: f32, invulnerability: f32) -> f32 {
+/// field, less under PLATING: `player_factor`) and deals as it does with its other weapons: a free rock shrugs most of it off.
+pub(super) fn strike(
+    a: &mut Body,
+    b: &mut Body,
+    raw: f32,
+    invulnerability: f32,
+    player_factor: f32,
+) -> f32 {
     let mut dealt = 0.0;
     let amounts = [(&*a, &*b), (&*b, &*a)].map(|(target, other)| {
         // A planetoid is a gentle wall (see `contact_damage`): it hurts nothing that hits it.
@@ -45,7 +51,7 @@ pub(super) fn strike(a: &mut Body, b: &mut Body, raw: f32, invulnerability: f32)
             if target.rig.aura > 0 {
                 0.0
             } else {
-                raw * t::IMPACT_PLAYER_SHARE
+                raw * t::IMPACT_PLAYER_SHARE * player_factor
             }
         } else {
             armored(target, raw, other.kind == BodyKind::Player)

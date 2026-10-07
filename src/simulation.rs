@@ -41,6 +41,7 @@ mod regions;
 mod regrow;
 mod root;
 pub mod run;
+mod shove;
 pub mod skills;
 mod song;
 mod split;
@@ -288,6 +289,11 @@ pub struct Body {
     pub well: Option<WellRun>,
     /// Intangible this step (a phasing creature's other half): see `powers`.
     pub phased: bool,
+    /// Seconds left of being a shoved body (held to the shove speed cap), seconds until the
+    /// ship's ram may push it extra again, and seconds the beam's grip is let go; see `shove`.
+    shoved: f32,
+    shove_clock: f32,
+    grip_free: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -406,6 +412,8 @@ pub struct Game {
     /// Pairs of bodies that struck recently and the time until they may strike again; see
     /// `impact`.
     impact_gap: HashMap<(u64, u64), f32>,
+    /// The rock the beam's grip is holding right now, if any; see `shove`.
+    gripped: Option<u64>,
     parry_rng: Rng,
     /// The sonar ring, its echoes and their cache; see `ping`.
     ping: ping::PingState,
@@ -536,6 +544,7 @@ impl Game {
             parry: parry::ParryState::default(),
             dash: dash::DashState::default(),
             impact_gap: HashMap::new(),
+            gripped: None,
             parry_rng: Rng::new(seed ^ parry::PARRY_SALT),
             ping: ping::PingState::default(),
             chart: chart::ChartState::default(),
@@ -717,6 +726,9 @@ impl Game {
             body.panic = (body.panic - dt).max(0.0);
             body.since_hit += dt;
             body.provoked = (body.provoked - dt).max(0.0);
+            body.shoved = (body.shoved - dt).max(0.0);
+            body.shove_clock = (body.shove_clock - dt).max(0.0);
+            body.grip_free = (body.grip_free - dt).max(0.0);
             if body.since_hit > 2.0 && !(beaming && body.kind == BodyKind::Player) {
                 let rate = if body.kind == BodyKind::Player {
                     recharge
@@ -733,6 +745,7 @@ impl Game {
         let shots = (self.bullets.len(), self.mines.len());
         self.control_player(dt, input);
         let drained = self.update_mining(dt, input.mine);
+        self.update_grip(dt);
         self.update_regrowth(dt);
         if let Some(before) = ship_before.as_mut() {
             before.0 -= drained;
@@ -778,7 +791,11 @@ impl Game {
         self.cue_new_shots(in_flight);
         self.update_wells(dt);
         self.apply_gravity(dt);
+        let shove_cap = self.loadout.skills.shove_speed_cap();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
+            if body.shoved > 0.0 && body.kind == BodyKind::Asteroid {
+                body.velocity = body.velocity.clamp_length_max(shove_cap);
+            }
             if !is_fixed(body) {
                 body.position += body.velocity * dt;
             }
@@ -1244,6 +1261,7 @@ impl Game {
         let mut grazes = Vec::new();
         self.prune_impacts();
         let mut struck = Vec::new();
+        let skills = self.loadout.skills;
         for i in 0..self.bodies.len() {
             let (before, after) = self.bodies.split_at_mut(i + 1);
             let a = &mut before[i];
@@ -1338,9 +1356,11 @@ impl Game {
                         flings.push(victim.position);
                     }
                 } else if closing_speed < 0.0 {
+                    let caused = shove::ship_caused(a, b, normal, closing_speed);
                     let impulse = normal * (-1.7 * closing_speed / inverse_sum);
                     a.velocity -= impulse * inverse_a;
                     b.velocity += impulse * inverse_b;
+                    shove::on_contact(a, b, normal, closing_speed, impulse.length(), &skills);
                     // Fast strikes hurt both by speed and mass; a pair just struck is quiet.
                     let key = impact::pair_key(a.id, b.id);
                     let raw = if self.impact_gap.contains_key(&key) {
@@ -1351,7 +1371,8 @@ impl Game {
                     if raw > 0.0 {
                         self.impact_gap
                             .insert(key, self.time + tuning::IMPACT_PAIR_COOLDOWN);
-                        rammed += impact::strike(a, b, raw, invulnerability);
+                        let factor = skills.plating_factor(caused);
+                        rammed += impact::strike(a, b, raw, invulnerability, factor);
                         struck.push((a.position.lerp(b.position, 0.5), raw));
                     }
                 }
@@ -1930,6 +1951,9 @@ impl Game {
             brood_timer: 0.0,
             well: None,
             phased: false,
+            shoved: 0.0,
+            shove_clock: 0.0,
+            grip_free: 0.0,
         }
     }
 

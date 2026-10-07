@@ -40,6 +40,12 @@ pub enum Skill {
     /// A deployable beacon, one more standing per level; fast travel needs one. Locked until
     /// bought.
     Beacon,
+    /// Ramming a free rock (or any free body) hits harder, the beam's grip is stronger and a
+    /// dash cracks like a whip. Locked until bought.
+    Shove,
+    /// The ship takes less of the impacts it causes (and later of every collision). Needs
+    /// some SHOVE to buy. Locked until bought.
+    ShovePlating,
 }
 
 /// Which bench tab sells a skill.
@@ -50,7 +56,7 @@ pub enum SkillTab {
 }
 
 impl Skill {
-    pub const ALL: [Skill; 16] = [
+    pub const ALL: [Skill; 18] = [
         Self::BeamPower,
         Self::BeamRange,
         Self::Yield,
@@ -67,6 +73,8 @@ impl Skill {
         Self::EchoNests,
         Self::EchoPredators,
         Self::Beacon,
+        Self::Shove,
+        Self::ShovePlating,
     ];
 
     /// The bench tab that sells this skill.
@@ -100,6 +108,8 @@ impl Skill {
                     | Self::EchoNests
                     | Self::EchoPredators
                     | Self::Beacon
+                    | Self::Shove
+                    | Self::ShovePlating
             )
     }
 
@@ -125,6 +135,8 @@ impl Skill {
             Self::EchoNests => "NEST ECHO",
             Self::EchoPredators => "PREDATOR ECHO",
             Self::Beacon => "BEACON",
+            Self::Shove => "SHOVE",
+            Self::ShovePlating => "PLATING",
         }
     }
 
@@ -161,6 +173,15 @@ impl Skill {
             Self::EchoLodes => "rich lodes and renewable planetoids".to_string(),
             Self::EchoNests => "nests and egg clusters".to_string(),
             Self::EchoPredators => "how many predators roam a sector".to_string(),
+            Self::Shove => format!(
+                "ram a held rock to fling it: +{:.0}% push, longer grip, bigger dash whip",
+                t::SHOVE_MULT_STEP * 100.0
+            ),
+            Self::ShovePlating => format!(
+                "-{:.0}% damage from your own rams; level {}+ cuts every collision",
+                t::PLATING_CAUSED_STEP * 100.0,
+                t::PLATING_ALL_FROM
+            ),
             Self::Beacon => format!(
                 "deploy beacons (H) and jump back to one from the chart; {} more standing a level",
                 t::BEACONS_PER_LEVEL
@@ -186,6 +207,8 @@ impl Skill {
             Self::EchoNests => &t::PRICE_ECHO_NESTS,
             Self::EchoPredators => &t::PRICE_ECHO_PREDATORS,
             Self::Beacon => &t::PRICE_BEACON,
+            Self::Shove => &t::PRICE_SHOVE,
+            Self::ShovePlating => &t::PRICE_SHOVE_PLATING,
         }
     }
 
@@ -199,6 +222,14 @@ impl Skill {
         match self {
             Self::Parry => Some((Slot::Plating, Rarity::Rare)),
             Self::Dash => Some((Slot::Engine, Rarity::Rare)),
+            _ => None,
+        }
+    }
+
+    /// Another skill that must be owned before the first purchase.
+    pub fn prerequisite(self) -> Option<Skill> {
+        match self {
+            Self::ShovePlating => Some(Self::Shove),
             _ => None,
         }
     }
@@ -330,6 +361,47 @@ impl Skills {
     pub fn travel_charge_factor(&self) -> f32 {
         let n = self.level(Skill::Beacon).max(1);
         1.0 - t::TRAVEL_CHARGE_LEVEL_CUT * f32::from(n - 1)
+    }
+
+    /// Multiplier on the momentum a ram imparts to a free body (one while locked).
+    pub fn shove_mult(&self) -> f32 {
+        1.0 + t::SHOVE_MULT_STEP * self.steps(Skill::Shove)
+    }
+
+    /// Most speed one ram can add to a free body on top of the ordinary contact.
+    pub fn shove_bonus_dv(&self) -> f32 {
+        t::SHOVE_BONUS_DV + t::SHOVE_BONUS_DV_STEP * self.steps(Skill::Shove)
+    }
+
+    /// Speed limit of a body the ship shoved.
+    pub fn shove_speed_cap(&self) -> f32 {
+        t::SHOVE_SPEED_CAP + t::SHOVE_SPEED_CAP_STEP * self.steps(Skill::Shove)
+    }
+
+    /// The beam grip: open space past which it pulls, its pull cap and where it breaks away.
+    pub fn grip_accel(&self) -> f32 {
+        t::GRIP_ACCEL + t::GRIP_ACCEL_STEP * self.steps(Skill::Shove)
+    }
+
+    pub fn grip_reach(&self) -> f32 {
+        t::GRIP_REACH + t::GRIP_REACH_STEP * self.steps(Skill::Shove)
+    }
+
+    /// Impulse of a dash whip.
+    pub fn whip_impulse(&self) -> f32 {
+        t::WHIP_IMPULSE * (1.0 + t::WHIP_STEP * self.steps(Skill::Shove))
+    }
+
+    /// Share of an impact the ship takes, as a multiple of the ordinary share, when the ship
+    /// caused it (`caused`) or not.
+    pub fn plating_factor(&self, caused: bool) -> f32 {
+        let level = self.level(Skill::ShovePlating);
+        let cut = if caused {
+            t::PLATING_CAUSED_STEP * f32::from(level)
+        } else {
+            t::PLATING_ALL_STEP * f32::from(level.saturating_sub(t::PLATING_ALL_FROM - 1))
+        };
+        (1.0 - cut).max(0.0)
     }
 
     pub fn ping_extra_targets(&self) -> usize {

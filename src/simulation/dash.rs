@@ -126,6 +126,7 @@ impl Game {
         self.dash.window = t::DASH_INVULN;
         self.dash.grazed = false;
         self.dash_through(from, to, radius);
+        self.dash_whip(dir);
         // Weak cords cannot hold a ship that has just left.
         for tether in self.tethers.iter_mut().filter(|c| {
             c.kind == TetherKind::Latch && c.attached() && c.max_health <= SHEARS_INSTANT

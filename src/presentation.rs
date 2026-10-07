@@ -77,7 +77,7 @@ pub(crate) const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
 const FEED_LINES: usize = 5;
 /// Bench panel rows: the tab strip, up to nine rows and the footer hint.
-const BENCH_LINES: usize = 11;
+const BENCH_LINES: usize = 13;
 /// Panel rows: five slots, a header and up to eleven profiles, a header and up to nine
 /// boosts, a header and three materials. Rows with nothing to say are empty (no height).
 /// Where the ship panel's lines divide into its two columns: gear and arsenal, then the rig.
@@ -719,8 +719,18 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             ));
             continue;
         }
+        let lock = if level == 0 && skill.starts_locked() {
+            "  locked"
+        } else {
+            ""
+        };
         lines.push((
-            format!("{:<11}{}/{}\n", skill.label(), level, skill.max_level()),
+            format!(
+                "{:<11}{}/{}{lock}\n",
+                skill.label(),
+                level,
+                skill.max_level()
+            ),
             if level > 0 { OWNED } else { MUTED },
         ));
     }
@@ -889,7 +899,11 @@ fn bench_lines(game: &Game) -> Vec<(String, Color)> {
         })
         .collect();
     lines.push((format!("{}\n", tabs.join("  ")), PAD_GREEN));
-    for row in panel.rows.iter().take(BENCH_LINES - 2) {
+    // A long tab scrolls to keep the selected row on screen.
+    let visible = BENCH_LINES - 2;
+    let selected = panel.rows.iter().position(|r| r.selected).unwrap_or(0);
+    let first = (selected + 1).saturating_sub(visible);
+    for row in panel.rows.iter().skip(first).take(visible) {
         let marker = if row.selected { ">" } else { " " };
         let color = match (row.selected, row.ok) {
             (true, true) => CYAN,
@@ -2435,7 +2449,14 @@ pub fn draw(
     if let (Some(beam), Some(ship)) = (&game.beam, game.player())
         && let Some(rock) = game.body(beam.target)
     {
-        draw_beam(&mut gizmos, game.time, ship, rock, beam);
+        draw_beam(
+            &mut gizmos,
+            game.time,
+            ship,
+            rock,
+            beam,
+            game.gripped() == Some(beam.target),
+        );
     }
     for pickup in game.pickups.iter().filter(|p| {
         (p.position - camera)
@@ -3917,7 +3938,7 @@ fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
 /// The mining beam: a flickering line from the ship's nose to the rock's face, and a ring
 /// around the rock that fills as it is worked (for crystal, the harvest cycle, turning red
 /// as the burst nears).
-fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Beam) {
+fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Beam, held: bool) {
     let [r, g, b] = beam.material.color();
     let tint = Color::srgb(r, g, b);
     let direction = (beam.end - ship.position).normalize_or_zero();
@@ -3935,6 +3956,18 @@ fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Be
         gizmos.line_2d(beam.end, spark, tint.with_alpha(0.8));
     }
     let ring_radius = rock.radius + 9.0;
+    if held {
+        // The grip: four brackets turning slowly around the rock the beam is holding.
+        for k in 0..4 {
+            let start = time * 0.8 + k as f32 * std::f32::consts::FRAC_PI_2;
+            gizmos.linestrip_2d(
+                (0..=6).map(|i| {
+                    rock.position + Vec2::from_angle(start + i as f32 * 0.07) * (ring_radius + 7.0)
+                }),
+                tint.with_alpha(0.7),
+            );
+        }
+    }
     let warn = if beam.danger > 0.66 {
         Color::srgb(1.0, 0.3, 0.25)
     } else {

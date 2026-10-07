@@ -1493,6 +1493,11 @@ impl Game {
         if self.loadout.skills.level(skill) > 0 {
             return None;
         }
+        if let Some(pre) = skill.prerequisite()
+            && self.loadout.skills.level(pre) == 0
+        {
+            return Some(format!("{} LEVEL 1", pre.label()));
+        }
         let (slot, rarity) = skill.requirement()?;
         let met = self
             .loadout
@@ -1501,7 +1506,7 @@ impl Game {
             .any(|p| p.slot == slot && p.rarity >= rarity);
         (!met).then(|| {
             format!(
-                "{} {}",
+                "a {} {} fitted",
                 rarity.label().to_uppercase(),
                 slot.label().to_uppercase()
             )
@@ -1681,7 +1686,7 @@ impl Game {
                     let (text, ok) = match skill.price(level) {
                         Some(price) if gate.is_some() => (
                             format!(
-                                "{}  LOCKED  needs a {} fitted  {}",
+                                "{}  LOCKED  needs {}  {}",
                                 skill.label(),
                                 gate.unwrap_or_default(),
                                 price_text(&price)
