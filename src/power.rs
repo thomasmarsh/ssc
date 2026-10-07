@@ -1,0 +1,714 @@
+//! Rare powers: the shared gene block of the bestiary (see `docs/BESTIARY.md`).
+//!
+//! A power is a gene, never a creature kind. Twenty intensity genes and three shared
+//! parameters sit at the end of the genome's tail, all dormant (zero) by default. An intensity
+//! below `GATE` does nothing; above it the effect scales from 0 to 1. A species carries at most
+//! one power, chosen by one extra final draw in `Genome::sample`; an individual of any species
+//! may awaken one by chance from ring 3. Nothing here draws from a stream that places the
+//! original population: the species draw is the last draw of `sample`, and awakening reads a
+//! roll `individual_from` already made.
+
+use crate::genome::Genome;
+use crate::world::SectorParams;
+
+/// An intensity below this is dormant. Drift never reaches it from zero (the block is skipped
+/// by `Genome::drifted`) and a mutation cannot cross it in one step.
+pub const GATE: f32 = 0.3;
+/// Number of genes in the block: three shared parameters and twenty intensities.
+pub const POWER_GENES: usize = 23;
+/// Individuals awaken from this ring on (a quarter of the 1 percent outlier band: 1 in 400).
+pub const AWAKEN_RING: u32 = 3;
+/// Ring steps over which a power's weight ramps from zero to full past its first ring.
+pub const RAMP_RINGS: f32 = 3.0;
+/// Intensity of a sampled species' carriers and of an awakened individual.
+pub const SPECIES_INTENSITY: (f32, f32) = (0.55, 1.0);
+pub const AWAKENED_INTENSITY: (f32, f32) = (0.35, 0.6);
+/// A mutation never drops an intensity below this (so one step cannot erase a power).
+pub const MUTATION_FLOOR: f32 = GATE + 0.02;
+/// How sector character tilts a power's weight: `BIAS_BASE + BIAS_SLOPE * above(param)`.
+pub const BIAS_BASE: f32 = 0.75;
+pub const BIAS_SLOPE: f32 = 1.0;
+
+/// How serious a power is. Mild and Strange can awaken in individuals; Severe and Mythic come
+/// from lineages and apexes only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tier {
+    Mild,
+    Strange,
+    Severe,
+    Mythic,
+}
+
+impl Tier {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Mild => "mild",
+            Self::Strange => "strange",
+            Self::Severe => "severe",
+            Self::Mythic => "mythic",
+        }
+    }
+}
+
+/// The sector parameter a power's likelihood leans on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bias {
+    Tech,
+    Distortion,
+    Danger,
+    Swarm,
+    Aggression,
+    Calm,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Power {
+    Phase,
+    Repel,
+    Warp,
+    Lens,
+    Blink,
+    Bypass,
+    Emp,
+    Glare,
+    Mimic,
+    Latch,
+    Symbiote,
+    Cloud,
+    Devour,
+    Weave,
+    Song,
+    Dim,
+    Rift,
+    Sling,
+    Rune,
+    Split,
+}
+
+/// What a power is: its species rate (one in `n`), tier, first ring, bias and typical shared
+/// parameters (period, reach, hold) taken from the bestiary's specimens.
+struct Spec {
+    one_in: f32,
+    tier: Tier,
+    first_ring: u32,
+    bias: Bias,
+    typical: (f32, f32, f32),
+}
+
+impl Power {
+    pub const ALL: [Power; 20] = [
+        Self::Phase,
+        Self::Repel,
+        Self::Warp,
+        Self::Lens,
+        Self::Blink,
+        Self::Bypass,
+        Self::Emp,
+        Self::Glare,
+        Self::Mimic,
+        Self::Latch,
+        Self::Symbiote,
+        Self::Cloud,
+        Self::Devour,
+        Self::Weave,
+        Self::Song,
+        Self::Dim,
+        Self::Rift,
+        Self::Sling,
+        Self::Rune,
+        Self::Split,
+    ];
+
+    fn spec(self) -> Spec {
+        use Bias::*;
+        use Tier::*;
+        let s = |one_in, tier, first_ring, bias, typical| Spec {
+            one_in,
+            tier,
+            first_ring,
+            bias,
+            typical,
+        };
+        match self {
+            Self::Phase => s(330.0, Strange, 6, Tech, (4.0, 300.0, 1.0)),
+            Self::Repel => s(250.0, Strange, 7, Distortion, (7.0, 420.0, 1.0)),
+            Self::Warp => s(330.0, Strange, 7, Distortion, (5.0, 360.0, 1.0)),
+            Self::Lens => s(500.0, Mythic, 10, Distortion, (5.0, 520.0, 1.0)),
+            Self::Blink => s(125.0, Mild, 3, Tech, (3.4, 320.0, 1.0)),
+            Self::Bypass => s(200.0, Mild, 5, Tech, (5.0, 300.0, 1.0)),
+            Self::Emp => s(330.0, Severe, 7, Tech, (6.0, 320.0, 1.4)),
+            Self::Glare => s(250.0, Mild, 5, Tech, (5.5, 650.0, 1.6)),
+            Self::Mimic => s(250.0, Strange, 5, Danger, (5.0, 260.0, 1.0)),
+            Self::Latch => s(330.0, Strange, 6, Danger, (5.0, 200.0, 1.0)),
+            Self::Symbiote => s(160.0, Mild, 3, Calm, (5.0, 300.0, 3.0)),
+            Self::Cloud => s(200.0, Strange, 5, Swarm, (5.0, 300.0, 1.0)),
+            Self::Devour => s(330.0, Strange, 6, Danger, (5.0, 300.0, 1.0)),
+            Self::Weave => s(330.0, Strange, 6, Danger, (5.0, 700.0, 1.0)),
+            Self::Song => s(330.0, Strange, 6, Swarm, (4.0, 700.0, 1.0)),
+            Self::Dim => s(500.0, Strange, 8, Distortion, (5.0, 450.0, 1.0)),
+            Self::Rift => s(1000.0, Mythic, 10, Distortion, (14.0, 900.0, 4.0)),
+            Self::Sling => s(330.0, Strange, 6, Danger, (3.5, 750.0, 1.0)),
+            Self::Rune => s(250.0, Strange, 6, Tech, (5.0, 520.0, 1.0)),
+            Self::Split => s(180.0, Mild, 3, Aggression, (5.0, 300.0, 1.0)),
+        }
+    }
+
+    pub fn tier(self) -> Tier {
+        self.spec().tier
+    }
+
+    /// The nearest ring this power may appear at.
+    pub fn first_ring(self) -> u32 {
+        self.spec().first_ring
+    }
+
+    /// The share of sampled species that carry it, before ring and sector character.
+    pub fn rate(self) -> f32 {
+        1.0 / self.spec().one_in
+    }
+
+    /// The gene's name.
+    pub fn gene(self) -> &'static str {
+        match self {
+            Self::Phase => "phase",
+            Self::Repel => "repel",
+            Self::Warp => "warp",
+            Self::Lens => "lens",
+            Self::Blink => "blink",
+            Self::Bypass => "bypass",
+            Self::Emp => "emp",
+            Self::Glare => "glare",
+            Self::Mimic => "mimic",
+            Self::Latch => "latch",
+            Self::Symbiote => "symbiote",
+            Self::Cloud => "cloud",
+            Self::Devour => "devour",
+            Self::Weave => "weave",
+            Self::Song => "song",
+            Self::Dim => "dim",
+            Self::Rift => "rift",
+            Self::Sling => "sling",
+            Self::Rune => "rune",
+            Self::Split => "split",
+        }
+    }
+
+    /// The bestiary's name for a typical carrier.
+    pub fn creature(self) -> &'static str {
+        match self {
+            Self::Phase => "Veilwing",
+            Self::Repel => "Pushwhale",
+            Self::Warp => "Tarbloom",
+            Self::Lens => "Lenswyrm",
+            Self::Blink => "Skipjack",
+            Self::Bypass => "Hullpick",
+            Self::Emp => "Stormcap",
+            Self::Glare => "Argus Moth",
+            Self::Mimic => "Lurefish",
+            Self::Latch => "Hullworm",
+            Self::Symbiote => "Kindling Remora",
+            Self::Cloud => "Murmur",
+            Self::Devour => "Tidegorger",
+            Self::Weave => "Weaver",
+            Self::Song => "Dirgewhale",
+            Self::Dim => "Gloomfeeder",
+            Self::Rift => "Seamer",
+            Self::Sling => "Slinger",
+            Self::Rune => "Runekeeper",
+            Self::Split => "Splitter",
+        }
+    }
+
+    /// Whether the gene is signed (negative values select the other mode).
+    pub fn signed(self) -> bool {
+        matches!(self, Self::Warp | Self::Song)
+    }
+
+    /// Whether the simulation acts on this power yet (the others are carried but inert).
+    pub fn built(self) -> bool {
+        matches!(self, Self::Blink | Self::Phase | Self::Bypass)
+    }
+
+    /// The raw gene value.
+    pub fn value(self, g: &Genome) -> f32 {
+        match self {
+            Self::Phase => g.phase,
+            Self::Repel => g.repel,
+            Self::Warp => g.warp,
+            Self::Lens => g.lens,
+            Self::Blink => g.blink,
+            Self::Bypass => g.bypass,
+            Self::Emp => g.emp,
+            Self::Glare => g.glare,
+            Self::Mimic => g.mimic,
+            Self::Latch => g.latch,
+            Self::Symbiote => g.symbiote,
+            Self::Cloud => g.cloud,
+            Self::Devour => g.devour,
+            Self::Weave => g.weave,
+            Self::Song => g.song,
+            Self::Dim => g.dim,
+            Self::Rift => g.rift,
+            Self::Sling => g.sling,
+            Self::Rune => g.rune,
+            Self::Split => g.split,
+        }
+    }
+
+    pub fn set(self, g: &mut Genome, v: f32) {
+        match self {
+            Self::Phase => g.phase = v,
+            Self::Repel => g.repel = v,
+            Self::Warp => g.warp = v,
+            Self::Lens => g.lens = v,
+            Self::Blink => g.blink = v,
+            Self::Bypass => g.bypass = v,
+            Self::Emp => g.emp = v,
+            Self::Glare => g.glare = v,
+            Self::Mimic => g.mimic = v,
+            Self::Latch => g.latch = v,
+            Self::Symbiote => g.symbiote = v,
+            Self::Cloud => g.cloud = v,
+            Self::Devour => g.devour = v,
+            Self::Weave => g.weave = v,
+            Self::Song => g.song = v,
+            Self::Dim => g.dim = v,
+            Self::Rift => g.rift = v,
+            Self::Sling => g.sling = v,
+            Self::Rune => g.rune = v,
+            Self::Split => g.split = v,
+        }
+    }
+
+    /// Effect strength in [0, 1]: zero at and below the gate, one at full intensity.
+    pub fn strength(self, g: &Genome) -> f32 {
+        ((self.value(g).abs() - GATE) / (1.0 - GATE)).clamp(0.0, 1.0)
+    }
+
+    /// Whether the gene is above its gate.
+    pub fn active(self, g: &Genome) -> bool {
+        self.value(g).abs() >= GATE
+    }
+}
+
+/// A power a genome carries and how strongly.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Carried {
+    pub power: Power,
+    /// Effect strength in [0, 1] (see `Power::strength`).
+    pub strength: f32,
+}
+
+impl Genome {
+    /// The strongest power above its gate, if any. A species has at most one from its draw;
+    /// an awakened individual of a carrier species can have a second, and the stronger wins.
+    pub fn power(&self) -> Option<Carried> {
+        Power::ALL
+            .iter()
+            .filter(|p| p.active(self))
+            .map(|&power| Carried {
+                power,
+                strength: power.strength(self),
+            })
+            .max_by(|a, b| a.strength.total_cmp(&b.strength))
+    }
+
+    /// Effect strength of one power (zero when dormant).
+    pub fn power_strength(&self, power: Power) -> f32 {
+        power.strength(self)
+    }
+
+    /// Clears every power and restores the shared parameters: a civilization's people are
+    /// not monsters.
+    pub fn clear_powers(&mut self) {
+        let plain = Genome::default();
+        for power in Power::ALL {
+            power.set(self, 0.0);
+        }
+        self.power_period = plain.power_period;
+        self.power_reach = plain.power_reach;
+        self.power_hold = plain.power_hold;
+    }
+
+    /// Copies the whole block from `from` (a power travels whole in crossover).
+    pub fn take_powers_from(&mut self, from: &Genome) {
+        for power in Power::ALL {
+            power.set(self, power.value(from));
+        }
+        self.power_period = from.power_period;
+        self.power_reach = from.power_reach;
+        self.power_hold = from.power_hold;
+    }
+
+    /// The nearest ring this genome's power allows (zero without one).
+    pub fn power_ring(&self) -> u32 {
+        Power::ALL
+            .iter()
+            .filter(|p| p.active(self))
+            .map(|p| p.first_ring())
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+fn above(p: f32) -> f32 {
+    (p - 0.5).max(0.0) * 2.0
+}
+
+fn bias(power: Power, params: &SectorParams) -> f32 {
+    let lean = match power.spec().bias {
+        Bias::Tech => above(params.tech),
+        Bias::Distortion => above(params.distortion),
+        Bias::Danger => params.danger,
+        Bias::Swarm => above(params.swarm),
+        Bias::Aggression => above(params.aggression),
+        Bias::Calm => above(1.0 - params.aggression),
+    };
+    BIAS_BASE + BIAS_SLOPE * lean
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The species-level weight of each power at `params`: rate, times the ramp past its first
+/// ring, times the sector's lean.
+pub fn weights(params: &SectorParams) -> [f32; 20] {
+    let mut out = [0.0; 20];
+    for (slot, power) in out.iter_mut().zip(Power::ALL) {
+        let first = power.first_ring() as f32;
+        let ramp = smoothstep(first, first + RAMP_RINGS, params.depth);
+        *slot = power.rate() * ramp * bias(power, params);
+    }
+    out
+}
+
+fn lerp(lo: f32, hi: f32, t: f32) -> f32 {
+    lo + (hi - lo) * t
+}
+
+/// Writes `power` into `g` from a position `inner` in [0, 1) inside its band: intensity in
+/// `range`, shared parameters near the power's typical ones, all from fract chains so nothing
+/// is drawn.
+fn express(g: &mut Genome, power: Power, inner: f32, range: (f32, f32)) {
+    let part = (inner * 61.0).fract();
+    let (a, b, c) = (
+        (part * 37.0).fract(),
+        (part * 71.0).fract(),
+        (part * 113.0).fract(),
+    );
+    let mut v = lerp(range.0, range.1, a);
+    if power.signed() {
+        // Slow bubbles are common (3 in 4); dirge and chant are even.
+        let negative_share = if power == Power::Warp { 0.75 } else { 0.5 };
+        if b < negative_share {
+            v = -v;
+        }
+    }
+    power.set(g, v);
+    let (period, reach, hold) = power.spec().typical;
+    let wobble = |k: f32| 0.75 + 0.5 * (c * k).fract();
+    g.power_period = (period * wobble(3.0)).clamp(1.5, 14.0);
+    g.power_reach = (reach * wobble(5.0)).clamp(80.0, 900.0);
+    g.power_hold = (hold * wobble(7.0)).clamp(0.2, 4.0);
+}
+
+/// The one extra final draw of `Genome::sample`: partitions `roll` into one band per power,
+/// each as wide as its weight. At most one power per species.
+pub fn sample(g: &mut Genome, roll: f32, params: &SectorParams) {
+    let mut start = 0.0;
+    for (power, weight) in Power::ALL.into_iter().zip(weights(params)) {
+        if roll < start + weight {
+            express(g, power, (roll - start) / weight, SPECIES_INTENSITY);
+            return;
+        }
+        start += weight;
+    }
+}
+
+/// An individual wakes with a power: reads the roll `individual_from` already made, so it
+/// adds no draws. In the 1 percent outlier band, a quarter (1 in 400 individuals) awaken one
+/// Mild or Strange power that the ring allows, with a gentle intensity. Never below
+/// `AWAKEN_RING`, never for a creature that already carries a power or that learns (a
+/// civilization's people).
+pub fn awaken(mut g: Genome, roll: f32, ring: u32) -> Genome {
+    if ring < AWAKEN_RING || roll < 1.0 - crate::genome::OUTLIER_CHANCE || g.learner > 0.0 {
+        return g;
+    }
+    let slot = (roll * 997.0).fract();
+    if slot >= 0.25 || g.power().is_some() {
+        return g;
+    }
+    let inner = slot / 0.25;
+    let eligible: Vec<(Power, f32)> = Power::ALL
+        .into_iter()
+        .filter(|p| matches!(p.tier(), Tier::Mild | Tier::Strange) && p.first_ring() <= ring)
+        .map(|p| (p, p.rate()))
+        .collect();
+    let total: f32 = eligible.iter().map(|e| e.1).sum();
+    let mut at = inner * total;
+    for (power, rate) in eligible {
+        if at < rate {
+            express(&mut g, power, (at / rate).min(0.999), AWAKENED_INTENSITY);
+            break;
+        }
+        at -= rate;
+    }
+    g
+}
+
+/// Heritable drift of a carried block, for `Genome::mutate`: `step` supplies a signed jitter.
+/// Only intensities above the gate move, never below `MUTATION_FLOOR`, so a mutation cannot
+/// invent a power or erase one.
+pub fn mutate(g: &mut Genome, mut step: impl FnMut() -> f32) {
+    let mut any = false;
+    for power in Power::ALL {
+        if power.active(g) {
+            any = true;
+            let v = power.value(g);
+            let magnitude = (v.abs() + step()).clamp(MUTATION_FLOOR, 1.0);
+            power.set(g, magnitude.copysign(v));
+        }
+    }
+    if any {
+        g.power_period *= 1.0 + step();
+        g.power_reach *= 1.0 + step();
+        g.power_hold *= 1.0 + step();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::{Rng, latent};
+
+    fn far(depth: f32) -> SectorParams {
+        SectorParams {
+            depth,
+            danger: 0.9,
+            aggression: 0.5,
+            density: 0.5,
+            distortion: 0.5,
+            tech: 0.5,
+            swarm: 0.5,
+        }
+    }
+
+    fn species_rate(params: &SectorParams, n: u64) -> f32 {
+        let mut carriers = 0;
+        for i in 0..n {
+            let g = Genome::sample(&mut Rng::new(0xFEED_0000 + i), params);
+            if g.power().is_some() {
+                carriers += 1;
+            }
+        }
+        carriers as f32 / n as f32
+    }
+
+    #[test]
+    fn the_block_is_the_end_of_the_gene_list_and_defaults_dormant() {
+        let mut g = Genome::default();
+        assert!(g.power().is_none());
+        let n = g.genes().len();
+        // The block is the last POWER_GENES genes: reading them by index finds the shared
+        // defaults first and zeros after.
+        let tail: Vec<f32> = g.normalized()[n - POWER_GENES..].to_vec();
+        assert_eq!(tail.len(), POWER_GENES);
+        for p in Power::ALL {
+            assert_eq!(p.value(&g), 0.0, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn nothing_below_ring_three_carries_a_power_and_the_ramp_holds_the_tiers() {
+        for depth in [0.0_f32, 1.0, 2.0, 2.9] {
+            assert_eq!(species_rate(&far(depth), 3000), 0.0, "depth {depth}");
+        }
+        // At depth 4 only Mild powers can have weight (Blink, Symbiote, Split at ring 3).
+        let w = weights(&far(4.0));
+        for (p, w) in Power::ALL.iter().zip(w) {
+            if p.first_ring() >= 5 {
+                assert!(w < p.rate() * 0.1 || p.first_ring() == 5, "{p:?} {w}");
+            }
+            if p.first_ring() >= 7 {
+                assert_eq!(w, 0.0, "{p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn about_seven_percent_of_far_species_carry_one_power() {
+        let rate = species_rate(&far(40.0), 40_000);
+        assert!((0.05..0.09).contains(&rate), "species rate {rate}");
+        // And each carrier holds exactly one power above its gate.
+        for i in 0..20_000 {
+            let g = Genome::sample(&mut Rng::new(0xBEEF_0000 + i), &far(40.0));
+            let n = Power::ALL.iter().filter(|p| p.active(&g)).count();
+            assert!(n <= 1);
+            if let Some(c) = g.power() {
+                assert!(c.strength >= 0.35, "{c:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn rare_powers_are_rarer_than_mild_ones() {
+        let mut counts = [0u32; 20];
+        let n = 120_000;
+        for i in 0..n {
+            let g = Genome::sample(&mut Rng::new(0xCAFE_0000 + i), &far(40.0));
+            if let Some(c) = g.power() {
+                let idx = Power::ALL.iter().position(|p| *p == c.power).unwrap();
+                counts[idx] += 1;
+            }
+        }
+        let count = |p: Power| counts[Power::ALL.iter().position(|q| *q == p).unwrap()];
+        assert!(count(Power::Blink) > count(Power::Emp));
+        assert!(count(Power::Blink) > count(Power::Lens));
+        assert!(count(Power::Rift) < count(Power::Split));
+        // Blink: 1 in 125 before the sector's lean, so 0.4 to 1.6 percent either way.
+        let blink = count(Power::Blink) as f32 / n as f32;
+        assert!((0.004..0.016).contains(&blink), "blink {blink}");
+    }
+
+    #[test]
+    fn sampling_is_deterministic_and_leaves_every_older_gene_alone() {
+        let params = latent(0x53_5343, crate::world::SectorId { x: 12, y: 9 });
+        for i in 0..400u64 {
+            let a = Genome::sample(&mut Rng::new(i), &params);
+            let b = Genome::sample(&mut Rng::new(i), &params);
+            assert_eq!(a, b);
+            let mut cleared = a;
+            cleared.clear_powers();
+            assert!(cleared.power().is_none());
+        }
+    }
+
+    #[test]
+    fn hand_authored_genomes_and_home_carry_nothing() {
+        for g in [
+            Genome::bogey(),
+            Genome::lunatic(),
+            Genome::smarty(),
+            Genome::fatso(),
+            Genome::leech(),
+            Genome::serpent(),
+        ] {
+            assert!(g.power().is_none());
+            assert_eq!(g.power_ring(), 0);
+        }
+    }
+
+    #[test]
+    fn individuals_awaken_about_one_in_four_hundred_from_ring_three() {
+        let base = Genome::sample(&mut Rng::new(5), &far(40.0));
+        let mut base = base;
+        base.clear_powers();
+        let n = 400_000;
+        let (mut woke, mut early) = (0u32, 0u32);
+        for i in 0..n {
+            let mut rng = Rng::new(0xA11CE + i);
+            let g = base.individual_in(&mut rng, 9);
+            if g.power().is_some() {
+                woke += 1;
+                let c = g.power().unwrap();
+                assert!(matches!(c.power.tier(), Tier::Mild | Tier::Strange));
+                assert!((0.34..=0.61).contains(&c.power.value(&g).abs()));
+            }
+            let mut rng = Rng::new(0xA11CE + i);
+            if base.individual_in(&mut rng, 2).power().is_some() {
+                early += 1;
+            }
+        }
+        let rate = woke as f32 / n as f32;
+        assert!(
+            (1.0 / 400.0 * 0.8..1.0 / 400.0 * 1.2).contains(&rate),
+            "{rate}"
+        );
+        assert_eq!(early, 0);
+    }
+
+    #[test]
+    fn awakening_adds_no_draws_and_below_ring_three_is_the_plain_individual() {
+        let base = Genome::bogey();
+        for i in 0..2000u64 {
+            let plain = base.individual(&mut Rng::new(i));
+            let mut a = Rng::new(i);
+            let mut b = Rng::new(i);
+            assert_eq!(plain, base.individual_in(&mut a, 0));
+            // The rng ends in the same state whether or not the ring allows awakening.
+            let _ = base.individual_in(&mut b, 30);
+            assert_eq!(a.next_u64(), b.next_u64());
+        }
+    }
+
+    #[test]
+    fn a_dormant_gene_is_not_woken_by_drift_or_mutation() {
+        let mut g = Genome::sample(&mut Rng::new(9), &far(40.0));
+        g.clear_powers();
+        for k in 0..64 {
+            let drifted = g.drifted(7, 0.72, |i| if (i + k) % 2 == 0 { 1.0 } else { -1.0 });
+            assert!(drifted.power().is_none(), "drift woke a power");
+        }
+        let mut rng = Rng::new(3);
+        let mut m = g;
+        for _ in 0..500 {
+            m = m.mutate(&mut rng);
+            assert!(m.power().is_none());
+        }
+    }
+
+    #[test]
+    fn a_carried_power_survives_drift_and_mutation_but_is_not_erased_in_one_step() {
+        let g = Genome {
+            blink: 0.35,
+            warp: -0.4,
+            ..Genome::default()
+        };
+        let mut rng = Rng::new(11);
+        let mut m = g;
+        for _ in 0..2000 {
+            m = m.mutate(&mut rng);
+            assert!(m.blink >= MUTATION_FLOOR && m.blink <= 1.0, "{}", m.blink);
+            assert!(m.warp <= -MUTATION_FLOOR && m.warp >= -1.0, "{}", m.warp);
+        }
+        let drifted = g.drifted(7, 0.72, |_| -1.0);
+        assert_eq!(drifted.blink, g.blink);
+        assert_eq!(drifted.warp, g.warp);
+    }
+
+    #[test]
+    fn a_power_travels_whole_through_crossover() {
+        let mut carrier = Genome::bogey();
+        carrier.blink = 0.9;
+        carrier.power_period = 3.0;
+        carrier.power_reach = 400.0;
+        let plain = Genome::bogey();
+        let mut whole = 0;
+        let mut none = 0;
+        for i in 0..400 {
+            let mut rng = Rng::new(i);
+            let child = Genome::crossover(carrier, plain, &mut rng);
+            if child.blink >= GATE {
+                whole += 1;
+                assert!((child.blink - 0.9).abs() < 0.2, "{}", child.blink);
+                assert!((child.power_period - 3.0).abs() < 0.6);
+            } else {
+                none += 1;
+                assert_eq!(child.blink, 0.0);
+            }
+        }
+        assert!(whole > 100 && none > 100, "{whole} {none}");
+    }
+
+    #[test]
+    fn wild_species_with_a_power_never_live_inside_their_first_ring() {
+        let mut g = Genome::bogey();
+        g.phase = 0.8;
+        assert!(crate::range::wild_min_ring(&g) >= Power::Phase.first_ring());
+        g.phase = 0.0;
+        g.blink = 0.8;
+        assert_eq!(crate::range::wild_min_ring(&g), 3);
+    }
+}

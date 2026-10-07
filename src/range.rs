@@ -298,7 +298,7 @@ pub fn wild_min_ring(genome: &Genome) -> u32 {
     {
         ring = ring.max(5);
     }
-    ring
+    ring.max(genome.power_ring())
 }
 
 /// How wide a species reaches, and how patchy.

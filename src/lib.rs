@@ -6,6 +6,7 @@ pub mod biome;
 pub mod fortress;
 pub mod genome;
 pub mod mixer;
+pub mod power;
 pub mod range;
 pub mod region;
 pub mod sectormap;

@@ -59,6 +59,7 @@ details{margin-top:14px}summary{cursor:pointer;color:var(--mute);font-size:12px;
 .home{fill:var(--accent);stroke:var(--bg)}
 .planet{fill:var(--rock);stroke:var(--ink)}
 .renew{fill:none;stroke:var(--ok);stroke-width:2;vector-effect:non-scaling-stroke}
+.power{fill:#e0409a;stroke:var(--ink)}.pow{color:#e0409a}
 .well{fill:none;stroke:var(--well);stroke-width:1.6;vector-effect:non-scaling-stroke}
 .crown{fill:var(--gold);stroke:var(--ink)}
 .dtext{fill:var(--ink);font-weight:600;pointer-events:none}
@@ -106,6 +107,7 @@ svg.lo2 .lod2{display:none}
  <label><input type="checkbox" data-layer="planets" checked>planetoids</label>
  <label><input type="checkbox" data-layer="wells" checked>wells</label>
  <label><input type="checkbox" data-layer="apex" checked>apexes</label>
+ <label><input type="checkbox" data-layer="powers"><span class="sw" style="background:#e0409a"></span>powers</label>
  <label><input type="checkbox" data-layer="grid">grid</label>
  <form id="jump"><input type="text" id="jx" placeholder="x,y" aria-label="Jump to sector x,y" inputmode="text" autocomplete="off"><button type="submit">Go</button></form>
 </div>
@@ -126,7 +128,7 @@ const D=/*DATA*/;
 const NS="http://www.w3.org/2000/svg";
 const $=s=>document.querySelector(s);
 const cols=D.cols,rows=D.rows,cells=D.cells;
-const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14,CAPY=15,BELT=16,BIO=17,OAS=18,MOOD=19,MHOS=20,MFRI=21,MCIV=22;
+const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14,CAPY=15,BELT=16,BIO=17,OAS=18,MOOD=19,MHOS=20,MFRI=21,MCIV=22,POW=23;
 const KINDS=["Home","Wild","Confluence","Belt","Reach","Oasis","Civilization"];
 const FORMS=["the peaceful start, no creatures","a country of wildlife, named for its biome or a strong specialist","many species converge (rare, biodiverse)","a rock-rich band with little life","a sparse gap with little life","a planetoid with life around it in the middle of nowhere","a civilization's territory"];
 const hc=-D.x0,hr=D.y1; /* HOME's cell */
@@ -144,14 +146,14 @@ const pat=el("pattern",{id:"hatch",width:".22",height:".22",patternUnits:"userSp
 el("line",{x1:"0",y1:"0",x2:"0",y2:".22",class:"hatch"},pat);
 const world=el("g",{},svg);
 const G={};
-["fill","bio","aff","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
+["fill","bio","aff","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","powers","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
 G.hatch.setAttribute("class","lod2");G.belt.setAttribute("class","lod");
-["wells","planets","civs","apex","home"].forEach(n=>G[n].setAttribute("class","lod"));
+["wells","planets","civs","apex","powers","home"].forEach(n=>G[n].setAttribute("class","lod"));
 G.grid.setAttribute("class","lod2");G.regions.setAttribute("class","lod2");
 
-const layers={ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,grid:false,diversity:false,biomes:false,belts:true,affinity:false};
+const layers={ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,powers:false,grid:false,diversity:false,biomes:false,belts:true,affinity:false};
 let filter=-1; /* species index shown alone, or -1 */
-const showMap={affinity:["aff"],diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],grid:["grid"]};
+const showMap={affinity:["aff"],diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],powers:["powers"],grid:["grid"]};
 function applyLayers(){for(const l in showMap)for(const g of showMap[l])G[g].style.display=layers[l]?"":"none"}
 
 const dark=()=>matchMedia("(prefers-color-scheme: dark)").matches;
@@ -167,7 +169,7 @@ function filterWeight(row){for(const s of row[SP])if(s[0]===filter)return s[1];r
 const BIOHUE=[200,130,95,0,285,45,25,170];
 
 function build(){
- for(const n of ["fill","bio","aff","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","home"])G[n].textContent="";
+ for(const n of ["fill","bio","aff","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","powers","home"])G[n].textContent="";
  const divs=[[],[],[],[],[],[],[]],bio=new Map(),bedge=[],belts=[],aff=[[],[],[]];
  /* range hue by life level */
  const fills=new Map(),rocks=[[],[],[],[]],hatch=[],conf=[],tf=new Map(),tedge=new Map(),redge=[];
@@ -245,6 +247,10 @@ function buildIcons(){
    const px=c+.5+w[0],py=r+.5-w[1];
    el("circle",{cx:px,cy:py,r:.07,class:"well"},G.wells);
    el("circle",{cx:px,cy:py,r:.025,fill:"var(--well)"},G.wells);
+  }
+  if(row[POW]>0){
+   const px=c+.82,py=r+.2,q=.08+Math.min(row[POW],5)*.02;
+   el("path",{d:"M"+px+" "+(py-q)+"L"+(px+q)+" "+py+"L"+px+" "+(py+q)+"L"+(px-q)+" "+py+"z",class:"ico power"},G.powers);
   }
   if(row[TER]>=0){
    const t=D.territories[row[TER]],col=t[8],peace=t[9]===1;
@@ -326,9 +332,10 @@ function describe(cr,full){
   h+='<div class="row"><span class="k">Lead</span><span><span class="dot" style="background:hsl('+lead[1]+',60%,50%)"></span> '+esc(lead[0])+' ('+esc(lead[2])+', '+esc(lead[5])+')</span></div>';
   h+='<h3>Species ('+sp.length+' of up to '+row[CAPY].toFixed(1)+')'+(row[KIND]===2?' <span class="gold">convergence</span>':'')+'</h3>';
   const lim=full?sp.length:6;
-  for(let i=0;i<Math.min(lim,sp.length);i++){const s=D.species[sp[i][0]];h+='<div class="row sprow" data-sp="'+sp[i][0]+'" title="Click to show only where this species lives"><span class="dot" style="background:'+s[4]+'"></span><span style="min-width:6em">'+esc(s[0])+'</span>'+bar(sp[i][1])+' <span class="sub">'+Math.round(sp[i][1]*100)+'% '+esc(s[5])+(sp[i][2]>0?', isolate '+Math.round(sp[i][2]*100)+'%':'')+', likes '+esc(D.biomeKinds[s[6]][0])+'</span></div>'}
+  for(let i=0;i<Math.min(lim,sp.length);i++){const s=D.species[sp[i][0]];h+='<div class="row sprow" data-sp="'+sp[i][0]+'" title="Click to show only where this species lives"><span class="dot" style="background:'+s[4]+'"></span><span style="min-width:6em">'+esc(s[0])+'</span>'+bar(sp[i][1])+' <span class="sub">'+Math.round(sp[i][1]*100)+'% '+esc(s[5])+(sp[i][2]>0?', isolate '+Math.round(sp[i][2]*100)+'%':'')+', likes '+esc(D.biomeKinds[s[6]][0])+'</span>'+(s[7]?' <span class="pow" title="A rare power carried by the whole species">&#9670; '+esc(s[7])+'</span>':'')+'</div>'}
   if(sp.length>lim)h+='<div class="sub">and '+(sp.length-lim)+' more</div>';
  }else if(row[KIND]!==0)h+='<div class="row"><span class="k">Species</span><span class="sub">none live here'+(row[BELT]>=.3?' (rock belt)':'')+'</span></div>';
+ if(row[POW]>0)h+='<div class="row"><span class="k">Powers</span><span><span class="pow">&#9670; '+row[POW]+' creature'+(row[POW]===1?'':'s')+' here carry a rare power</span></span></div>';
  h+='<h3>Ground</h3>';
  h+='<div class="row"><span class="k">Life</span>'+bar(row[LIFE])+' <span>'+row[LIFE].toFixed(2)+' <span class="sub">'+lifeWord(row[LIFE])+'</span></span></div>';
  if(row[BELT]>0)h+='<div class="row"><span class="k">Belt</span>'+bar(row[BELT])+' <span>'+row[BELT].toFixed(2)+(row[OAS]?' <span class="ok">oasis: a planetoid restores a little life</span>':'')+'</span></div>';
@@ -372,6 +379,7 @@ const LEGEND='<details open><summary>Legend</summary><div class="leg">'
 +'<svg viewBox="0 0 30 20"><path d="M5 17V6L10 11L15 3L20 11L25 6V17z" fill="var(--gold)" stroke="var(--ink)"/></svg><span>Apex elder (small and faint: a lesser one)</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="5" fill="var(--rock)" stroke="var(--ink)"/><circle cx="15" cy="10" r="8" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Planetoid (size by radius); green ring: renewable</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6" fill="none" stroke="var(--well)" stroke-width="2"/><circle cx="15" cy="10" r="2" fill="var(--well)"/></svg><span>Gravity well</span>'
++'<svg viewBox="0 0 30 20"><path d="M15 3L22 10L15 17L8 10z" fill="#e0409a" stroke="var(--ink)" stroke-width="1.5"/></svg><span>Powers layer: creatures carrying a rare power (a species trait or an awakened individual)</span>'
 +'<svg viewBox="0 0 30 20"><path d="M15 2L27 11h-4v7H7v-7H3z" fill="var(--accent)"/></svg><span>HOME, sector (0,0)</span>'
 +'<svg viewBox="0 0 30 20"><defs><linearGradient id="nb"><stop offset="0" stop-color="hsl(150,55%,45%)" stop-opacity=".5"/><stop offset="1" stop-color="hsl(210,55%,45%)" stop-opacity=".5"/></linearGradient></defs><rect width="30" height="20" fill="url(#nb)"/></svg><span>In the game, the nebula behind the stars uses these same colours: range hue, life, rock brown, belts, oases, confluences and civilization tints. Press U in game to reduce effects</span>'
 +'</div><p class="sub">Drag to pan, wheel or pinch to zoom, click or tap a sector to pin it. North (+y) is up. Zoom in for species counts, coordinates and fort tiers.</p></details>';

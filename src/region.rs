@@ -220,7 +220,7 @@ mod tests {
             Default::default();
         for (_, r) in &regions {
             assert!(!r.name.is_empty() && r.name.is_ascii());
-            assert!(!r.name.contains('—') && r.name.chars().next().unwrap().is_uppercase());
+            assert!(!r.name.contains('\u{2014}') && r.name.chars().next().unwrap().is_uppercase());
             // One key, one name.
             assert_eq!(*by_key.entry(r.key).or_insert(&r.name), r.name);
             by_name.entry(&r.name).or_default().insert(r.key);

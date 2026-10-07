@@ -762,7 +762,7 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
                 id.x.wrapping_mul(4099).wrapping_add(index as i32),
                 id.y,
             ));
-            spawn.species = Some(species.individual(&mut variation));
+            spawn.species = Some(species.individual_in(&mut variation, ring));
         }
     }
 
@@ -911,7 +911,7 @@ fn root_residents(
                 id.x.wrapping_mul(4099).wrapping_add(out.len() as i32),
                 id.y,
             ));
-            let mut species = species.individual(&mut variation);
+            let mut species = species.individual_in(&mut variation, crate::range::ring(id));
             species.genome.radius = species.genome.radius.min(bound);
             let size = species.genome.radius;
             let angle = (0..10).find_map(|_| {

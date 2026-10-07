@@ -12,6 +12,7 @@
 //! draws from its own salted streams, never from the stream that places the original
 //! population.
 
+use crate::power::{self, POWER_GENES};
 use crate::world::{Rng, SectorParams, hash2};
 
 /// No creature has more bodies than this, however its genes combine.
@@ -222,6 +223,31 @@ genome! {
         cord_slack: 200.0, 3000.0, 200.0;
         cord_hardness: 1.0, 10.0, 2.0;
         cord_drag: 0.0, 1.0, 0.0;
+        // The rare-power block (see `power`): three shared parameters, then twenty
+        // intensities, all dormant at zero (below `power::GATE` nothing happens).
+        power_period: 1.5, 14.0, 5.0;
+        power_reach: 80.0, 900.0, 300.0;
+        power_hold: 0.2, 4.0, 1.0;
+        phase: 0.0, 1.0, 0.0;
+        repel: 0.0, 1.0, 0.0;
+        warp: -1.0, 1.0, 0.0;
+        lens: 0.0, 1.0, 0.0;
+        blink: 0.0, 1.0, 0.0;
+        bypass: 0.0, 1.0, 0.0;
+        emp: 0.0, 1.0, 0.0;
+        glare: 0.0, 1.0, 0.0;
+        mimic: 0.0, 1.0, 0.0;
+        latch: 0.0, 1.0, 0.0;
+        symbiote: 0.0, 1.0, 0.0;
+        cloud: 0.0, 1.0, 0.0;
+        devour: 0.0, 1.0, 0.0;
+        weave: 0.0, 1.0, 0.0;
+        song: -1.0, 1.0, 0.0;
+        dim: 0.0, 1.0, 0.0;
+        rift: 0.0, 1.0, 0.0;
+        sling: 0.0, 1.0, 0.0;
+        rune: 0.0, 1.0, 0.0;
+        split: 0.0, 1.0, 0.0;
     }
 }
 
@@ -445,7 +471,13 @@ impl Genome {
         if amplitude <= 0.0 {
             return self;
         }
+        // The power block never drifts: a species keeps its power (or its lack of one)
+        // wherever it lives, and a dormant gene cannot be pushed over its gate.
+        let first_power = self.genes().len() - POWER_GENES;
         for (index, gene) in self.genes().into_iter().enumerate() {
+            if index >= first_power {
+                continue;
+            }
             let signed = signed(index).clamp(-1.0, 1.0);
             match gene {
                 Gene::Real { v, lo, hi } => {
@@ -478,6 +510,14 @@ impl Genome {
     pub fn individual(self, rng: &mut Rng) -> Self {
         let roll = rng.f32();
         self.individual_from(rng, roll)
+    }
+
+    /// `individual` inside a ring: from `power::AWAKEN_RING` on, about 1 in 400 individuals
+    /// awaken a Mild or Strange power from the roll the outlier band already took (no extra
+    /// draws; below that ring this is exactly `individual`).
+    pub fn individual_in(self, rng: &mut Rng, ring: u32) -> Self {
+        let roll = rng.f32();
+        power::awaken(self.individual_from(rng, roll), roll, ring)
     }
 
     /// `individual` for a roll already made: below 0.95 a tiny jitter, up to 0.99 a wide one,
@@ -622,6 +662,7 @@ impl Genome {
             g.learner += triangle(rng);
             g.learn_rate *= 1.0 + triangle(rng);
         }
+        power::mutate(&mut g, || triangle(rng));
         let mut g = g.limited();
         g.lose = g.lose.max(g.sight);
         g.limited()
@@ -638,7 +679,14 @@ impl Genome {
         let mut child = a;
         {
             let (ga, gb) = (a.genes(), b.genes());
-            for (slot, (x, y)) in child.genes().into_iter().zip(ga.into_iter().zip(gb)) {
+            // The power block draws nothing here: it travels whole below.
+            let blended = ga.len() - POWER_GENES;
+            for (slot, (x, y)) in child
+                .genes()
+                .into_iter()
+                .zip(ga.into_iter().zip(gb))
+                .take(blended)
+            {
                 match (slot, x, y) {
                     (Gene::Real { v, .. }, Gene::Real { v: x, .. }, Gene::Real { v: y, .. }) => {
                         *v = *x + (*y - *x) * rng.f32();
@@ -685,6 +733,8 @@ impl Genome {
         child.detach_size = body.detach_size;
         child.detach_hunger = body.detach_hunger;
         child.detach_crowd = body.detach_crowd;
+        // So does a power: whole from the body-plan parent, never a feeble half.
+        child.take_powers_from(&body);
         let temper = pick(rng);
         child.social = temper.social;
         child.trigger = temper.trigger;
@@ -982,6 +1032,11 @@ impl Genome {
                 g.cord_hardness = lerp(2.0, 2.5, c);
             }
         }
+
+        // Rare powers come last, from one more draw (see `power`): about 7 percent of species
+        // far from home carry one, none inside ring 3.
+        let roll = rng.f32();
+        power::sample(&mut g, roll, params);
         g.limited()
     }
 
@@ -1259,6 +1314,14 @@ impl Species {
         }
     }
 
+    /// `individual` inside a ring (see `Genome::individual_in`).
+    pub fn individual_in(self, rng: &mut Rng, ring: u32) -> Self {
+        Self {
+            genome: self.genome.individual_in(rng, ring),
+            ..self
+        }
+    }
+
     /// The child of two members of one lineage: their genomes recombined, a generation on
     /// from the older parent. Mates of different lineages cannot cross; the child is then
     /// simply a mutated copy of `self`.
@@ -1472,10 +1535,11 @@ mod tests {
                 (g.segments, g.limbs, g.weapon),
                 (base.segments, base.limbs, base.weapon)
             );
-            // The rooting genes (five) and the cord genes (four, which only tetherers vary) do not
-            // vary here; measure over the rest.
+            // The rooting genes (five), the cord genes (four, which only tetherers vary) and the
+            // power block do not vary here; measure over the rest.
             let n = base.normalized().len() as f32;
-            let d = base.distance(&g) * n / (n - 9.0);
+            let still = 9.0 + POWER_GENES as f32;
+            let d = base.distance(&g) * n / (n - still);
             if d < 0.01 {
                 small += 1;
             } else if d < 0.028 {

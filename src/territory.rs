@@ -609,6 +609,8 @@ impl Territory {
             g.rage = 0.15;
             g.bounty = g.bounty.min(60.0);
         }
+        // A civilization's people are not monsters: no rare power, whatever the source drew.
+        g.clear_powers();
         Species {
             lineage: self.id,
             generation: 0,

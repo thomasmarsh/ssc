@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 5;
+pub const GENERATOR_VERSION: u32 = 6;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
@@ -88,6 +88,8 @@ pub struct SpeciesAt {
     pub favourite: BiomeKind,
     /// How isolated its population here is, in [0, 1] (zero on the continent).
     pub isolation: f32,
+    /// The rare power its genome carries, if any (see `power`).
+    pub power: Option<crate::power::Carried>,
 }
 
 /// A planetoid: size, whether it regrows, and where it sits in the sector (fractions of a
@@ -118,6 +120,9 @@ pub struct Cell {
     /// Most abundant first.
     pub species: Vec<SpeciesAt>,
     pub creatures: u32,
+    /// Creatures of this sector that carry a rare power (a species' carriers and awakened
+    /// individuals alike).
+    pub powered: u32,
     pub asteroids: u32,
     /// Wall segments and turrets of a civilization's fortresses (wild life has no stations:
     /// the old ecosystem bases are gone).
@@ -146,11 +151,16 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
             (p.y - center.y) / SECTOR_SIZE,
         )
     };
-    let (mut creatures, mut asteroids, mut works, mut outposts) = (0, 0, 0, 0);
+    let (mut creatures, mut powered, mut asteroids, mut works, mut outposts) = (0, 0, 0, 0, 0);
     let (mut wells, mut planetoids, mut capital) = (Vec::new(), Vec::new(), false);
     for s in &spawns {
         match s.kind {
-            BodyKind::Creature => creatures += 1,
+            BodyKind::Creature => {
+                creatures += 1;
+                if s.species.is_some_and(|sp| sp.genome.power().is_some()) {
+                    powered += 1;
+                }
+            }
             BodyKind::BlackHole => wells.push(frac(s.position)),
             BodyKind::Asteroid if s.rock == RockKind::Planetoid => {
                 let (dx, dy) = frac(s.position);
@@ -199,9 +209,11 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
                 spread: p.spread,
                 favourite: p.favourite,
                 isolation: p.patch.isolation,
+                power: p.species.genome.power(),
             })
             .collect(),
         creatures,
+        powered,
         asteroids,
         works,
         wells,
@@ -305,6 +317,7 @@ type SpeciesRow = (
     String,
     &'static str,
     usize,
+    String,
 );
 
 struct TerritoryRow {
@@ -407,6 +420,15 @@ impl Map {
                     hex(s.color),
                     spread_label(s.spread),
                     s.favourite.index(),
+                    s.power.map_or(String::new(), |c| {
+                        format!(
+                            "{} ({} {:.2}, {})",
+                            c.power.creature(),
+                            c.power.gene(),
+                            c.strength,
+                            c.power.tier().label()
+                        )
+                    }),
                 ));
             }
         }
@@ -444,8 +466,8 @@ impl Map {
     /// `[[dx, dy]...]`, planetoids `[[radius, renewable, dx, dy]...]`, territory index or -1,
     /// capital 0/1, outposts, apex index or -1, diversity cap, belt depth, biome cell index,
     /// oasis 0/1, then the wildlife's affinity read (0 none, 1 neutral, 2 friendly, 3 hostile,
-    /// 4 mixed), its hostile share, its friendly share and the territory index it is read
-    /// against (-1 for none).
+    /// 4 mixed), its hostile share, its friendly share, the territory index it is read
+    /// against (-1 for none) and the number of creatures carrying a rare power.
     pub fn row_json(&self, index: usize) -> String {
         let c = &self.cells[index];
         let mut o = String::new();
@@ -507,7 +529,7 @@ impl Map {
         };
         let _ = write!(
             o,
-            "],{territory},{},{},{apex},{:.2},{:.2},{},{},{mood},{:.2},{:.2},{mood_civ}]",
+            "],{territory},{},{},{apex},{:.2},{:.2},{},{},{mood},{:.2},{:.2},{mood_civ},{}]",
             u8::from(c.capital),
             c.outposts,
             c.capacity,
@@ -516,6 +538,7 @@ impl Map {
             u8::from(c.oasis),
             c.mood.as_ref().map_or(0.0, |m| m.1.hostile),
             c.mood.as_ref().map_or(0.0, |m| m.1.friendly),
+            c.powered,
         );
         o
     }
@@ -534,7 +557,7 @@ impl Map {
             origin.x,
             origin.y + o.rows as i32 - 1
         );
-        for (i, (_, name, hue, family, niche, color, spread, favourite)) in
+        for (i, (_, name, hue, family, niche, color, spread, favourite, power)) in
             self.species.iter().enumerate()
         {
             if i > 0 {
@@ -550,7 +573,9 @@ impl Map {
             json_str(&mut j, color);
             j.push(',');
             json_str(&mut j, spread);
-            let _ = write!(j, ",{favourite}]");
+            let _ = write!(j, ",{favourite},");
+            json_str(&mut j, power);
+            j.push(']');
         }
         j.push_str("],\"biomeKinds\":[");
         for (i, kind) in BiomeKind::ALL.iter().enumerate() {
@@ -676,6 +701,34 @@ mod tests {
         ] {
             assert!(!page.contains(banned), "external reference: {banned}");
         }
+    }
+
+    #[test]
+    fn power_carriers_show_on_the_map_only_from_ring_three() {
+        let mut seen = 0;
+        let mut species_with_power = 0;
+        for x in -14..=14 {
+            for y in -14..=14 {
+                let id = SectorId { x, y };
+                let cell = sample_cell(SEED, id);
+                if ring(id) <= 2 {
+                    assert_eq!(cell.powered, 0, "{id:?}");
+                    assert!(cell.species.iter().all(|s| s.power.is_none()));
+                }
+                seen += cell.powered;
+                species_with_power += cell.species.iter().filter(|s| s.power.is_some()).count();
+            }
+        }
+        assert!(
+            seen > 0 && species_with_power > 0,
+            "{seen} {species_with_power}"
+        );
+        let html = render(MapOptions {
+            center: SectorId { x: 9, y: 9 },
+            ..small(41, 41)
+        })
+        .unwrap();
+        assert!(html.contains("data-layer=\"powers\""));
     }
 
     #[test]
