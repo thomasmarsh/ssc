@@ -13,4 +13,5 @@ pub mod sectormap;
 pub mod simulation;
 pub mod synth;
 pub mod territory;
+pub mod well;
 pub mod world;

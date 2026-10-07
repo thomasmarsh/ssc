@@ -60,6 +60,7 @@ details{margin-top:14px}summary{cursor:pointer;color:var(--mute);font-size:12px;
 .planet{fill:var(--rock);stroke:var(--ink)}
 .renew{fill:none;stroke:var(--ok);stroke-width:2;vector-effect:non-scaling-stroke}
 .power{fill:#e0409a;stroke:var(--ink)}.pow{color:#e0409a}
+.orbit{fill:none;stroke-width:1.1;stroke-dasharray:2 3;vector-effect:non-scaling-stroke;opacity:.8}
 .well{fill:none;stroke:var(--well);stroke-width:1.6;vector-effect:non-scaling-stroke}
 .crown{fill:var(--gold);stroke:var(--ink)}
 .dtext{fill:var(--ink);font-weight:600;pointer-events:none}
@@ -244,9 +245,13 @@ function buildIcons(){
    if(p[1])el("circle",{cx:px,cy:py,r:rad+.06,class:"renew"},G.planets);
   }
   for(const w of row[WELL]){
-   const px=c+.5+w[0],py=r+.5-w[1];
-   el("circle",{cx:px,cy:py,r:.07,class:"well"},G.wells);
-   el("circle",{cx:px,cy:py,r:.025,fill:"var(--well)"},G.wells);
+   const px=c+.5+w[0],py=r+.5-w[1],m=D.wellModes[w[2]],col=m[1],mode=m[0];
+   if(mode==="static"||mode==="reverse"){el("circle",{cx:px,cy:py,r:.07,class:"well",style:"stroke:"+col},G.wells);el("circle",{cx:px,cy:py,r:.025,fill:mode==="reverse"?"#fff":col},G.wells)}
+   else if(mode==="maw"){el("circle",{cx:px,cy:py,r:.11,class:"well",style:"stroke:"+col,"stroke-width":2.6},G.wells);el("circle",{cx:px,cy:py,r:.035,fill:col},G.wells)}
+   else if(mode==="pulse"){el("circle",{cx:px,cy:py,r:.07,class:"well",style:"stroke:"+col},G.wells);el("circle",{cx:px,cy:py,r:.11,class:"well",style:"stroke:"+col,"stroke-dasharray":"2 3"},G.wells);el("circle",{cx:px,cy:py,r:.025,fill:col},G.wells)}
+   else if(mode==="drift"){el("ellipse",{cx:px,cy:py,rx:Math.max(.04,w[3]),ry:Math.max(.04,w[3]*.6),class:"orbit",stroke:col},G.wells);el("circle",{cx:px,cy:py,r:.06,class:"well",style:"stroke:"+col},G.wells);el("circle",{cx:px,cy:py,r:.022,fill:col},G.wells)}
+   else if(mode==="hop"){el("circle",{cx:px,cy:py,r:Math.max(.05,w[3]),class:"orbit",stroke:col},G.wells);el("circle",{cx:px,cy:py,r:.06,class:"well",style:"stroke:"+col},G.wells);el("path",{d:"M"+(px-.05)+" "+py+"h.1M"+px+" "+(py-.05)+"v.1",stroke:col,class:"orbit"},G.wells)}
+   else{/* binary: a pair on one orbit */el("circle",{cx:px,cy:py,r:Math.max(.04,w[3]),class:"orbit",stroke:col},G.wells);if(!w[4]){el("circle",{cx:px-w[3],cy:py,r:.06,class:"well",style:"stroke:"+col},G.wells);el("circle",{cx:px+w[3],cy:py,r:.06,class:"well",style:"stroke:"+col},G.wells)}}
   }
   if(row[POW]>0){
    const px=c+.82,py=r+.2,q=.08+Math.min(row[POW],5)*.02;
@@ -341,7 +346,7 @@ function describe(cr,full){
  if(row[BELT]>0)h+='<div class="row"><span class="k">Belt</span>'+bar(row[BELT])+' <span>'+row[BELT].toFixed(2)+(row[OAS]?' <span class="ok">oasis: a planetoid restores a little life</span>':'')+'</span></div>';
  h+='<div class="row"><span class="k">Rock</span>'+bar(row[MAT])+' <span>'+row[MAT].toFixed(2)+' <span class="sub">'+rockWord(row[MAT])+'</span></span></div>';
  const pl=row[PLA];
- h+='<div class="row"><span class="k">Bodies</span><span>'+row[CRE]+' creatures, '+row[AST]+' asteroids, '+pl.length+' planetoid'+(pl.length===1?'':'s')+(row[WELL].length?', '+row[WELL].length+' gravity well'+(row[WELL].length===1?'':'s'):'')+(row[BAS]?', '+row[BAS]+' fortress piece'+(row[BAS]===1?'':'s'):'')+'</span></div>';
+ h+='<div class="row"><span class="k">Bodies</span><span>'+row[CRE]+' creatures, '+row[AST]+' asteroids, '+pl.length+' planetoid'+(pl.length===1?'':'s')+(row[WELL].length?', '+row[WELL].length+' gravity well'+(row[WELL].length===1?'':'s')+' ('+row[WELL].filter(w=>!w[4]).map(w=>D.wellModes[w[2]][0]).join(', ')+')':'')+(row[BAS]?', '+row[BAS]+' fortress piece'+(row[BAS]===1?'':'s'):'')+'</span></div>';
  if(pl.length)h+='<div class="row"><span class="k">Planetoid</span><span>'+pl.map(p=>'radius '+p[0]+(p[1]?' <span class="ok">renewable</span>':'')).join('; ')+'</span></div>';
  if(terr){
   h+='<h3>Territory</h3><div class="row"><span class="dot" style="background:'+terr[8]+'"></span><b>'+esc(terr[0])+'</b></div>';
@@ -378,7 +383,7 @@ const LEGEND='<details open><summary>Legend</summary><div class="leg">'
 +'<svg viewBox="0 0 30 20"><path d="M0 0L30 20M0 20L30 0" stroke="var(--ink)" stroke-width="1.5" opacity=".6"/><circle cx="15" cy="10" r="4" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Belt: crossed lines (deep rock belt, life near zero); green ring: an oasis</span>'
 +'<svg viewBox="0 0 30 20"><path d="M5 17V6L10 11L15 3L20 11L25 6V17z" fill="var(--gold)" stroke="var(--ink)"/></svg><span>Apex elder (small and faint: a lesser one)</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="5" fill="var(--rock)" stroke="var(--ink)"/><circle cx="15" cy="10" r="8" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Planetoid (size by radius); green ring: renewable</span>'
-+'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6" fill="none" stroke="var(--well)" stroke-width="2"/><circle cx="15" cy="10" r="2" fill="var(--well)"/></svg><span>Gravity well</span>'
++'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6" fill="none" stroke="var(--well)" stroke-width="2"/><circle cx="15" cy="10" r="2" fill="var(--well)"/></svg><span>Gravity well: green static, orange maw (big), amber pulse (breathing ring), cyan drift (dotted orbit), violet hop (dashed reach), rose binary pair, white centre reverse</span>'
 +'<svg viewBox="0 0 30 20"><path d="M15 3L22 10L15 17L8 10z" fill="#e0409a" stroke="var(--ink)" stroke-width="1.5"/></svg><span>Powers layer: creatures carrying a rare power (a species trait or an awakened individual)</span>'
 +'<svg viewBox="0 0 30 20"><path d="M15 2L27 11h-4v7H7v-7H3z" fill="var(--accent)"/></svg><span>HOME, sector (0,0)</span>'
 +'<svg viewBox="0 0 30 20"><defs><linearGradient id="nb"><stop offset="0" stop-color="hsl(150,55%,45%)" stop-opacity=".5"/><stop offset="1" stop-color="hsl(210,55%,45%)" stop-opacity=".5"/></linearGradient></defs><rect width="30" height="20" fill="url(#nb)"/></svg><span>In the game, the nebula behind the stars uses these same colours: range hue, life, rock brown, belts, oases, confluences and civilization tints. Press U in game to reduce effects</span>'

@@ -1961,7 +1961,9 @@ fn draw_cache(gizmos: &mut Gizmos, time: f32, cache: &Cache) {
 /// How far past its center a body's drawing reaches (a planetoid's halo goes out to 1.22
 /// radii plus its breathing).
 fn body_draw_extent(body: &Body) -> f32 {
-    if body.rock == RockKind::Planetoid {
+    if body.kind == BodyKind::BlackHole {
+        crate::wellview::extent(body)
+    } else if body.rock == RockKind::Planetoid {
         body.radius * 1.25 + 6.0
     } else {
         body.radius
@@ -2247,26 +2249,7 @@ pub fn draw(
             // Fortress walls are drawn together after the loop, with their joins.
             BodyKind::Asteroid if body.rock == RockKind::Wall => {}
             BodyKind::Asteroid => draw_rock(&mut gizmos, game.time, body, color),
-            BodyKind::BlackHole => {
-                for ring in 0..4 {
-                    let radius = r + ring as f32 * 10.0;
-                    gizmos
-                        .circle_2d(
-                            p,
-                            radius,
-                            Color::srgba(0.3, 0.95, 0.55, 0.8 - ring as f32 * 0.18),
-                        )
-                        .resolution(32);
-                }
-                for i in 0..6 {
-                    let angle = game.time * 0.7 + i as f32 * std::f32::consts::TAU / 6.0;
-                    gizmos.line_2d(
-                        p + Vec2::from_angle(angle) * (r + 12.0),
-                        p + Vec2::from_angle(angle + 0.5) * (r + 35.0),
-                        color,
-                    );
-                }
-            }
+            BodyKind::BlackHole => crate::wellview::draw(&mut gizmos, game, body),
         }
         // A hungry forager shows a faint amber ring that warms as its energy runs out.
         if body.kind == BodyKind::Creature && !body.follower && body.vigor() < 1.0 {
@@ -3464,6 +3447,33 @@ fn draw_radar(gizmos: &mut Gizmos, game: &ssc::simulation::Game, center: Vec2, u
             }
         }
     }
+    // Wells that move or change wear a mode ring on the scope, and a hop shows where it will
+    // land.
+    for body in game.bodies.iter().filter(|b| b.kind == BodyKind::BlackHole) {
+        let (genome, pose, _) = crate::wellview::view(body);
+        if genome.mode == ssc::well::Mode::Static {
+            continue;
+        }
+        let tint = crate::wellview::color(&genome, &pose);
+        let offset = (body.position - origin) * scale;
+        if offset.length() < radius - 2.0 * ui_scale {
+            gizmos
+                .circle_2d(center + offset, 5.5 * ui_scale, tint.with_alpha(0.8))
+                .resolution(10);
+        }
+        if let Some(ghost) = pose.ghost {
+            let at = (ghost - origin) * scale;
+            if at.length() < radius - 2.0 * ui_scale {
+                gizmos
+                    .circle_2d(
+                        center + at,
+                        4.0 * ui_scale,
+                        tint.with_alpha(0.3 + 0.6 * pose.tell),
+                    )
+                    .resolution(10);
+            }
+        }
+    }
     // Pads: a diamond, green while private and amber once the enemy has seen it. One out of
     // range sits on the rim, pointing the way.
     for pad in game.pads() {
@@ -3572,7 +3582,10 @@ fn body_color(body: &Body) -> Color {
                 Color::srgb(r, g, b)
             }
         }
-        BodyKind::BlackHole => Color::srgb(0.3, 0.95, 0.55),
+        BodyKind::BlackHole => {
+            let (genome, pose, _) = crate::wellview::view(body);
+            crate::wellview::color(&genome, &pose)
+        }
         BodyKind::Base => Color::srgb(0.95, 0.32, 0.7),
         BodyKind::Asteroid => Color::srgb(0.43, 0.49, 0.57),
     }

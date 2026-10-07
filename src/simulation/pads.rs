@@ -454,6 +454,10 @@ impl Game {
         {
             return Some(PadHint::Unsafe);
         }
+        // A hopping well nearby is mid-hop: its landing and its collapse are no place to dock.
+        if self.well_mid_hop_near(at, crate::well::HOP_PAD_REFUSE) {
+            return Some(PadHint::Unsafe);
+        }
         if speed > LAND_SPEED {
             return Some(PadHint::TooFast);
         }

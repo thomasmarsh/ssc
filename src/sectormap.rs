@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 6;
+pub const GENERATOR_VERSION: u32 = 7;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
@@ -92,6 +92,16 @@ pub struct SpeciesAt {
     pub power: Option<crate::power::Carried>,
 }
 
+/// A gravity well of the map: where it was generated, its mode and how far it roams.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WellAt {
+    pub dx: f32,
+    pub dy: f32,
+    pub mode: crate::well::Mode,
+    pub roam: f32,
+    pub partner: bool,
+}
+
 /// A planetoid: size, whether it regrows, and where it sits in the sector (fractions of a
 /// sector from its center, y up).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,8 +137,9 @@ pub struct Cell {
     /// Wall segments and turrets of a civilization's fortresses (wild life has no stations:
     /// the old ecosystem bases are gone).
     pub works: u32,
-    /// Gravity wells, as fractions of a sector from the center (y up).
-    pub wells: Vec<(f32, f32)>,
+    /// Gravity wells, as fractions of a sector from the center (y up), with their mode and
+    /// the reach of their movement as a fraction of a sector.
+    pub wells: Vec<WellAt>,
     pub planetoids: Vec<PlanetoidAt>,
     pub territory: Option<Territory>,
     pub capital: bool,
@@ -161,7 +172,7 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
                     powered += 1;
                 }
             }
-            BodyKind::BlackHole => wells.push(frac(s.position)),
+            BodyKind::BlackHole => {}
             BodyKind::Asteroid if s.rock == RockKind::Planetoid => {
                 let (dx, dy) = frac(s.position);
                 planetoids.push(PlanetoidAt {
@@ -181,6 +192,16 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
             },
             BodyKind::Player => {}
         }
+    }
+    for w in crate::well::of_sector(seed, id, &spawns) {
+        let (dx, dy) = frac(w.anchor);
+        wells.push(WellAt {
+            dx,
+            dy,
+            mode: w.genome.mode,
+            roam: crate::well::extent(&w.genome) / SECTOR_SIZE,
+            partner: w.genome.partner,
+        });
     }
     let apex = apex::rank(seed, id).map(|r| (r, apex::name(seed, id), apex::archetype(seed, id)));
     let mood = crate::territory::nearby_territory(seed, id)
@@ -491,11 +512,22 @@ impl Map {
             );
         }
         let _ = write!(o, "],{},{},{},[", c.creatures, c.asteroids, c.works);
-        for (i, (dx, dy)) in c.wells.iter().enumerate() {
+        for (i, w) in c.wells.iter().enumerate() {
             if i > 0 {
                 o.push(',');
             }
-            let _ = write!(o, "[{dx:.3},{dy:.3}]");
+            let mode = crate::well::Mode::ALL
+                .iter()
+                .position(|m| *m == w.mode)
+                .unwrap_or(0);
+            let _ = write!(
+                o,
+                "[{:.3},{:.3},{mode},{:.3},{}]",
+                w.dx,
+                w.dy,
+                w.roam,
+                u8::from(w.partner)
+            );
         }
         o.push_str("],[");
         for (i, p) in c.planetoids.iter().enumerate() {
@@ -575,6 +607,17 @@ impl Map {
             json_str(&mut j, spread);
             let _ = write!(j, ",{favourite},");
             json_str(&mut j, power);
+            j.push(']');
+        }
+        j.push_str("],\"wellModes\":[");
+        for (i, mode) in crate::well::Mode::ALL.iter().enumerate() {
+            if i > 0 {
+                j.push(',');
+            }
+            j.push('[');
+            json_str(&mut j, mode.label());
+            j.push(',');
+            json_str(&mut j, &hex(mode.tint()));
             j.push(']');
         }
         j.push_str("],\"biomeKinds\":[");
@@ -701,6 +744,26 @@ mod tests {
         ] {
             assert!(!page.contains(banned), "external reference: {banned}");
         }
+    }
+
+    #[test]
+    fn wells_carry_their_mode_and_only_far_sectors_hold_dynamic_ones() {
+        let mut modes = std::collections::HashSet::new();
+        for x in -25..=25 {
+            for y in -25..=25 {
+                let id = SectorId { x, y };
+                let cell = sample_cell(SEED, id);
+                for w in &cell.wells {
+                    modes.insert(w.mode);
+                    if ring(id) <= 4 {
+                        assert_eq!(w.mode, crate::well::Mode::Static, "{id:?}");
+                    }
+                }
+            }
+        }
+        assert!(modes.len() >= 5, "{modes:?}");
+        let html = render(small(9, 9)).unwrap();
+        assert!(html.contains("\"wellModes\""));
     }
 
     #[test]

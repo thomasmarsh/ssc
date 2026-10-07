@@ -4,6 +4,7 @@ mod juice;
 mod nebula;
 mod presentation;
 mod settings;
+mod wellview;
 
 use bevy::{
     app::AppExit,
@@ -817,6 +818,14 @@ fn smoke_run(
     {
         session.game.teleport(Vec2::new(x, y));
         session.game.player_invulnerability = 1e9;
+    }
+    // SSC_TIME=<seconds>: start the game clock there (wells and anything else posed by time).
+    if run.frames == 0
+        && let Some(time) = std::env::var("SSC_TIME")
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+    {
+        session.game.time = time;
     }
     // SSC_OUTPOST=1: start at the early outpost's capital (standing meter, tithe seat).
     if run.frames == 0 && std::env::var_os("SSC_OUTPOST").is_some() {

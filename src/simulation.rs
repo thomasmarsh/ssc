@@ -43,6 +43,7 @@ mod titles;
 pub mod tuning;
 pub mod upgrades;
 mod weapons;
+mod wells;
 mod wildlife;
 
 pub use apexes::{ApexInfo, ApexReport};
@@ -75,6 +76,7 @@ pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 pub use titles::{TitleFacts, title, title_case};
 use upgrades::{Item, Loadout, Stats};
 pub use weapons::{Mine, Shape};
+pub use wells::{WellRun, WellView};
 
 use crate::genome::{Diet, Genome, Species};
 use crate::territory::{CivRole, Fall, Territory};
@@ -272,6 +274,8 @@ pub struct Body {
     /// Seconds a harm that does no damage (a mining beam on its host) still counts.
     provoked: f32,
     brood_timer: f32,
+    /// Gravity wells made by the generator: the genome and the pose that moves them.
+    pub well: Option<WellRun>,
 }
 
 #[derive(Clone, Debug)]
@@ -723,6 +727,7 @@ impl Game {
         self.update_apexes(dt);
         self.fire_weapons();
         self.cue_new_shots(in_flight);
+        self.update_wells(dt);
         self.apply_gravity(dt);
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if !is_fixed(body) {
@@ -872,7 +877,9 @@ impl Game {
         if let Some(t) = world::territory(self.seed, id) {
             self.register_territory(t);
         }
-        for spawn in world::generate(self.seed, id) {
+        let spawns = world::generate(self.seed, id);
+        let wells = crate::well::of_sector(self.seed, id, &spawns);
+        for spawn in spawns {
             if fallen.contains(&spawn.index) || present.contains(&spawn.index) {
                 continue;
             }
@@ -934,6 +941,13 @@ impl Game {
                 body.health *= toughness;
                 body.max_health = body.health;
                 body.mass *= density;
+            }
+            if spawn.kind == BodyKind::BlackHole
+                && let Some(well) = wells.iter().find(|w| w.index == spawn.index)
+            {
+                let run = WellRun::new(well, self.time);
+                body.position = run.pose.position;
+                body.well = Some(run);
             }
             body.velocity = spawn.velocity;
             body.genes = spawn.phenotype;
@@ -1122,29 +1136,50 @@ impl Game {
     }
 
     fn apply_gravity(&mut self, dt: f32) {
+        // (position, signed strength, reach, core radius, damage per second) of every well.
         let holes: Vec<_> = self
             .bodies
             .iter()
             .filter(|b| b.active && b.kind == BodyKind::BlackHole)
-            .map(|b| b.position)
+            .map(|b| match &b.well {
+                Some(run) => (
+                    b.position,
+                    run.pose.strength,
+                    run.pose.reach,
+                    run.pose.core,
+                    run.pose.dps,
+                ),
+                None => (
+                    b.position,
+                    1.0,
+                    crate::well::BASE_REACH,
+                    crate::well::BASE_CORE,
+                    crate::well::BASE_DPS,
+                ),
+            })
             .collect();
         let invulnerability = self.player_invulnerability;
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if is_fixed(body) {
                 continue;
             }
-            for &position in &holes {
+            for &(position, strength, reach, core, dps) in &holes {
                 let offset = position - body.position;
                 let distance_squared = offset.length_squared();
-                if distance_squared < 550.0 * 550.0 {
-                    let pull = offset * (7_000_000.0 / (distance_squared + 2500.0).powf(1.5));
+                if distance_squared < reach * reach && strength != 0.0 {
+                    let pull = offset
+                        * (crate::well::BASE_PULL * strength
+                            / (distance_squared + 2500.0).powf(1.5));
                     // Negative mass is repelled by gravity; ballast mostly shrugs it off.
                     let ballast = if body.rig.ballast { 0.2 } else { 1.0 };
                     body.velocity += pull.clamp_length_max(350.0) * dt * mass_sign(body) * ballast;
                     body.velocity = body.velocity.clamp_length_max(650.0);
-                    if !body.rig.ballast && distance_squared < (body.radius + 28.0).powi(2) {
-                        damage(body, 35.0 * dt, invulnerability);
-                    }
+                }
+                if !body.rig.ballast
+                    && core > 0.0
+                    && distance_squared < (body.radius + core).powi(2)
+                {
+                    damage(body, dps * dt, invulnerability);
                 }
             }
         }
@@ -1772,6 +1807,7 @@ impl Game {
             since_hit: 0.0,
             provoked: 0.0,
             brood_timer: 0.0,
+            well: None,
         }
     }
 
