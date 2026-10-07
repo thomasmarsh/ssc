@@ -94,6 +94,8 @@ pub struct PowerState {
     pub(super) revealed: bool,
     pub(super) reveal: Option<f32>,
     pub(super) idle: f32,
+    /// Seconds before a weaver may string another rock.
+    pub(super) web_clock: f32,
 }
 
 /// Everything the adapter needs to draw a body's power.
@@ -196,6 +198,7 @@ impl Game {
                     || Power::Song.active(&g)
                     || (Power::Mimic.active(&g) && Power::Mimic.fits(&g))
                     || Power::Cloud.active(&g)
+                    || Power::Weave.active(&g)
                     || Power::Devour.active(&g));
             if phase.is_none() && !blinks && !jammer && !fielder {
                 self.bodies[index].phased = false;
@@ -210,6 +213,7 @@ impl Game {
                 shove_age: f32::MAX,
                 bulk: 1.0,
                 song_clock: 1.5 + 0.5 * (id % 4) as f32,
+                web_clock: 1.0 + 0.4 * (id % 5) as f32,
                 ..PowerState::default()
             });
             match phase {
@@ -245,6 +249,9 @@ impl Game {
             }
             if fielder && Power::Song.active(&g) {
                 self.step_song(index, &mut state, dt, ship, &mut cues);
+            }
+            if fielder && Power::Weave.active(&g) {
+                self.step_weave(index, &mut state, dt, ship, &mut cues);
             }
             if fielder {
                 eaten.extend(self.step_fields(index, &mut state, dt, &warp_owner, &mut cues));

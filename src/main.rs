@@ -873,6 +873,7 @@ fn smoke_run(
             "lurefish" => Genome::lurefish(),
             "hullworm" => Genome::hullworm(),
             "remora" => Genome::remora(),
+            "weaver" => Genome::weaver(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
@@ -892,9 +893,32 @@ fn smoke_run(
             session.game.player_invulnerability = 0.0;
         }
         let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
-        for k in 0..3 {
+        let count = if name == "weaver" { 1 } else { 3 };
+        for k in 0..count {
             let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (near + 90.0 * k as f32);
-            session.game.place_creature(&Species::of(genome), at);
+            let id = session.game.place_creature(&Species::of(genome), at);
+            if name == "weaver" {
+                // Stage a stationary web with free stones, so bounded screenshots do not
+                // depend on the sector happening to put rocks beside the specimen.
+                for body in session.game.bodies.iter_mut().filter(|b| b.id == id) {
+                    body.pinned = true;
+                }
+                for (i, rock) in session
+                    .game
+                    .bodies
+                    .iter_mut()
+                    .filter(|b| {
+                        b.kind == ssc::simulation::BodyKind::Asteroid
+                            && !b.pinned
+                            && b.rock != ssc::world::RockKind::Planetoid
+                    })
+                    .take(3)
+                    .enumerate()
+                {
+                    rock.position = at + Vec2::from_angle(-1.2 + i as f32 * 1.2) * 300.0;
+                    rock.velocity = Vec2::ZERO;
+                }
+            }
         }
     }
     // SSC_ORGANS=1: own the four organs with two slots fitted, a bond running, and a hold to
@@ -975,6 +999,11 @@ fn smoke_run(
         for _ in 0..4000 {
             session.game.step(0.02, ssc::simulation::Input::default());
             let told = session.game.song_rings().iter().any(|r| r.radius > 200.0)
+                || session
+                    .game
+                    .tethers
+                    .iter()
+                    .any(|t| t.kind == ssc::simulation::TetherKind::Web && t.warning > 0.0)
                 || session.game.bodies.iter().any(|b| {
                     session
                         .game

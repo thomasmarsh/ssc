@@ -313,10 +313,14 @@ impl Game {
                 .iter()
                 .any(|p| p.position.distance(ship.position) < LOOT_RANGE),
             Need::Wells => near(WELL_RANGE, &|b| b.kind == BodyKind::BlackHole),
-            Need::Cords => self
-                .tethers
-                .iter()
-                .any(|t| t.kind == TetherKind::Latch && t.attached()),
+            Need::Cords => self.tethers.iter().any(|t| {
+                (t.kind == TetherKind::Latch && t.attached())
+                    || (t.kind == TetherKind::Web
+                        && self.tether_ends(t).is_some_and(|(a, b)| {
+                            tether::closest_on_segment(ship.position, a, b).distance(ship.position)
+                                < ship.radius + 100.0
+                        }))
+            }),
         }
     }
 }

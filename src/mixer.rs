@@ -140,6 +140,14 @@ fn spec(cue: &Cue) -> Spec {
             detune: 0.03,
             at: Some(at),
         },
+        Cue::Weave { at } => Spec {
+            sound: Sound::Weave,
+            gain: 0.5,
+            reach: Some(1600.0),
+            priority: Priority::Explosion,
+            detune: 0.02,
+            at: Some(at),
+        },
         Cue::PhaseSolid { at } => Spec {
             sound: Sound::PhaseSolid,
             gain: 0.45,
@@ -277,6 +285,7 @@ fn interval(sound: Sound) -> f32 {
         Sound::Split => 0.1,
         Sound::Dirge => 0.8,
         Sound::Crack => 0.2,
+        Sound::Weave => 0.3,
     }
 }
 

@@ -11,6 +11,15 @@
 use crate::genome::{Genome, Weapon};
 use crate::world::SectorParams;
 
+/// Weaver webs: short harmless lead-in, one minute solid, and spaced spokes.
+pub const WEB_TELL: f32 = 0.9;
+pub const WEB_OFFSCREEN_TELL: f32 = 1.2;
+pub const WEB_LIFE: f32 = 60.0;
+pub const WEB_GAP: f32 = 140.0;
+pub const WEB_ANGLE: f32 = 0.55;
+pub const WEB_SECTOR_CAP: usize = 2;
+pub const WEB_PULL_CAP: f32 = 80.0;
+
 /// An intensity below this is dormant. Drift never reaches it from zero (the block is skipped
 /// by `Genome::drifted`) and a mutation cannot cross it in one step.
 pub const GATE: f32 = 0.3;
@@ -434,6 +443,7 @@ impl Power {
                 | Self::Mimic
                 | Self::Latch
                 | Self::Symbiote
+                | Self::Weave
         )
     }
 
@@ -467,6 +477,7 @@ impl Power {
             Self::Mimic => [1.0, 0.75, 0.3],
             Self::Symbiote => [1.0, 0.72, 0.25],
             Self::Latch => [0.75, 0.45, 1.0],
+            Self::Weave => [0.65, 1.0, 0.85],
             _ => [0.9, 0.9, 0.9],
         }
     }
@@ -797,6 +808,17 @@ fn style(g: &mut Genome, power: Power) {
             g.speed = g.speed.min(60.0);
             g.hull = g.hull.max(120.0);
         }
+        Power::Weave => {
+            g.segments = 1;
+            g.limbs = 6;
+            g.limb_len = 2;
+            g.reel = 15.0;
+            g.speed = g.speed.min(70.0);
+            g.weapon = Weapon::Tether;
+            g.cord_strength = 2.0;
+            g.cord_hardness = 3.0;
+            g.diet = crate::genome::Diet::Rocks;
+        }
         Power::Latch => {
             // A grey worm: tiny, fed by what its diet takes from the hull it clings to.
             g.radius = g.radius.min(9.0);
@@ -840,6 +862,23 @@ fn style(g: &mut Genome, power: Power) {
 }
 
 impl Genome {
+    /// A spoked builder that strings cords to rocks rather than firing at the ship.
+    pub fn weaver() -> Self {
+        let mut g = Self {
+            weave: 0.6,
+            power_period: 5.0,
+            power_reach: 700.0,
+            radius: 20.0,
+            hull: 80.0,
+            mass: 60.0,
+            speed: 60.0,
+            cruise: 25.0,
+            trigger: crate::genome::Trigger::Harm,
+            ..Self::default()
+        };
+        style(&mut g, Power::Weave);
+        g
+    }
     /// The specimens of the bestiary, as ordinary genomes: a Veilwing (phase).
     pub fn veilwing() -> Self {
         Self {
@@ -1184,6 +1223,26 @@ mod tests {
             }
         }
         carriers as f32 / n as f32
+    }
+
+    #[test]
+    fn weavers_are_live_and_sampled_as_spoked_builders_from_ring_six() {
+        assert!(Power::Weave.built());
+        let index = Power::ALL.iter().position(|p| *p == Power::Weave).unwrap();
+        for depth in [0.0, 3.0, 5.0, 6.0] {
+            assert_eq!(weights(&far(depth))[index], 0.0);
+        }
+        let w = weights(&far(30.0));
+        assert!(w[index] > 0.0);
+        let roll = w[..index].iter().sum::<f32>() + w[index] * 0.5;
+        let mut g = Genome::default();
+        sample(&mut g, roll, &far(30.0));
+        assert_eq!(g.live_power().unwrap().power, Power::Weave);
+        assert_eq!((g.segments, g.limbs, g.limb_len), (1, 6, 2));
+        assert_eq!(g.weapon, Weapon::Tether);
+        assert_eq!(g.cord_hardness, 3.0);
+        assert!(g.power_reach >= 500.0);
+        assert_eq!(Genome::weaver().parts(), 13);
     }
 
     #[test]

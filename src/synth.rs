@@ -69,10 +69,12 @@ pub enum Sound {
     Dirge,
     /// A mimic cracking: a dry snap and a rising chirp.
     Crack,
+    /// A web being strung: a rising, plucked chord.
+    Weave,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 43] = [
+    pub const ALL: [Sound; 44] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -116,6 +118,7 @@ impl Sound {
         Sound::Split,
         Sound::Dirge,
         Sound::Crack,
+        Sound::Weave,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -480,6 +483,16 @@ impl Sound {
                         * decay(t, 0.7)
                 });
                 lowpass(&mut v, 1200.0);
+                v
+            }
+            Sound::Weave => {
+                let mut v = voice(0.7, |t, _| {
+                    let f = sweep((t / 0.6).min(1.0), 260.0, 520.0);
+                    (sine(f, t) * 0.7 + sine(f * 1.5, t) * 0.3)
+                        * (t / 0.04).min(1.0)
+                        * decay(t, 0.28)
+                });
+                lowpass(&mut v, 2400.0);
                 v
             }
             Sound::Split => {

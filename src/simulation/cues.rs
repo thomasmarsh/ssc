@@ -108,6 +108,10 @@ pub enum Cue {
     Song {
         at: Vec2,
     },
+    /// A weaver strings a harmless warning cord before it tightens.
+    Weave {
+        at: Vec2,
+    },
     /// A splitter died and is about to come apart.
     Split {
         at: Vec2,

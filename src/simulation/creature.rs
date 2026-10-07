@@ -595,6 +595,10 @@ impl Game {
             match g.weapon {
                 Weapon::None => {}
                 Weapon::Tether => {
+                    // A weaver's launchers build its web instead of latching onto the ship.
+                    if crate::power::Power::Weave.active(&g) {
+                        continue;
+                    }
                     let id = body.id;
                     if (TETHER_MIN_RANGE..g.weapon_range).contains(&distance)
                         && self.tethers.len() < tether::MAX_TETHERS

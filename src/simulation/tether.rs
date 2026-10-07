@@ -45,7 +45,7 @@ const SIPHON_RATE: f32 = 10.0;
 /// Separation a linked pair settles at, and the pull when it is exceeded.
 const LINK_REST: f32 = 300.0;
 const LINK_STIFFNESS: f32 = 1.5;
-const LINK_DAMAGE: f32 = 14.0;
+pub(super) const LINK_DAMAGE: f32 = 14.0;
 
 /// How a latched cord behaves, read from its owner's genome when it is fired.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,6 +109,8 @@ pub enum TetherKind {
     Latch,
     /// Permanent cord between two creatures.
     Link,
+    /// Temporary, warned cord from a weaver to a free rock.
+    Web,
 }
 
 #[derive(Clone, Debug)]
@@ -134,6 +136,10 @@ pub struct Tether {
     /// How fast a latched cord shortens, from the owner's genome.
     reel: f32,
     age: f32,
+    /// Seconds until a web becomes solid; zero for other cords.
+    pub warning: f32,
+    /// Seconds a web has left, including its warning; other cords do not expire.
+    pub remaining: f32,
 }
 
 impl Tether {
@@ -164,6 +170,8 @@ impl Tether {
             anchored,
             reel,
             age: 0.0,
+            warning: 0.0,
+            remaining: f32::INFINITY,
         }
     }
 
@@ -183,11 +191,25 @@ impl Tether {
             anchored: false,
             reel: 0.0,
             age: 0.0,
+            warning: 0.0,
+            remaining: f32::INFINITY,
         }
     }
 
     pub fn attached(&self) -> bool {
         self.tip.is_none()
+    }
+
+    pub(super) fn web(owner: u64, other: u64, rest: f32, warning: f32) -> Self {
+        Self {
+            kind: TetherKind::Web,
+            rest,
+            health: 3.0 * CORD_BULLET_DAMAGE,
+            max_health: 3.0 * CORD_BULLET_DAMAGE,
+            warning,
+            remaining: crate::power::WEB_LIFE + warning,
+            ..Self::link(owner, other)
+        }
     }
 }
 
@@ -246,6 +268,9 @@ impl Game {
             return false;
         };
         let player = self.bodies.iter().position(|b| b.kind == BodyKind::Player);
+        if tether.kind == TetherKind::Web {
+            return self.step_web(tether, owner, player, dt, severed);
+        }
         if tether.health <= 0.0 {
             severed.push(self.bodies[owner].position);
             if tether.kind == TetherKind::Latch {
@@ -375,6 +400,7 @@ impl Game {
                 }
                 true
             }
+            TetherKind::Web => unreachable!("webs are advanced above"),
         }
     }
 }

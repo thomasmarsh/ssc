@@ -54,6 +54,7 @@ mod titles;
 pub mod tuning;
 pub mod upgrades;
 mod weapons;
+mod weave;
 mod wells;
 mod wildlife;
 

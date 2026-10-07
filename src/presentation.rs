@@ -2609,9 +2609,34 @@ pub fn draw(
         }
     }
     for tether in &game.tethers {
+        if tether.health <= 0.0 {
+            continue;
+        }
         let Some((from, to)) = game.tether_ends(tether) else {
             continue;
         };
+        if tether.kind == TetherKind::Web {
+            let warning = tether.warning > 0.0;
+            let [r, g, b] = ssc::power::Power::Weave.tint();
+            let color = Color::srgb(r, g, b).with_alpha(if warning {
+                0.55 + 0.2 * (game.time * 12.0).sin().abs()
+            } else {
+                let fray = (tether.health / tether.max_health).clamp(0.0, 1.0);
+                (0.5 + 0.5 * fray) * (tether.remaining / 3.0).clamp(0.2, 1.0)
+            });
+            let along = to - from;
+            if warning {
+                for i in 0..16 {
+                    let u = i as f32 / 16.0;
+                    gizmos.line_2d(from + along * u, from + along * (u + 0.035), color);
+                }
+            } else {
+                gizmos.line_2d(from, to, color);
+            }
+            gizmos.circle_2d(to, 7.0, color).resolution(12);
+            gizmos.circle_2d(from, 4.0, color).resolution(8);
+            continue;
+        }
         let latched = tether.kind == TetherKind::Latch && tether.attached();
         // How near the ship is to snapping it, or how hard it pulls, whichever is more.
         let strain = if latched {

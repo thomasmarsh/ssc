@@ -165,6 +165,23 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
         eyes(gizmos, p, r, time, view.glare, tint);
     }
     match carried.power {
+        Power::Weave => {
+            // Six spinnerets make the builder readable even before it has found a rock.
+            let mut tips = Vec::with_capacity(7);
+            for k in 0..6 {
+                let angle = body.angle + k as f32 * TAU / 6.0;
+                let radial = Vec2::from_angle(angle);
+                let bend = Vec2::from_angle(angle + 0.3);
+                let knee = p + radial * (r * 1.5 + 6.0);
+                let tip = p + bend * (r * 2.0 + 12.0);
+                gizmos.line_2d(p + radial * r * 0.7, knee, tint.with_alpha(0.8));
+                gizmos.line_2d(knee, tip, tint.with_alpha(0.8));
+                gizmos.circle_2d(tip, 2.0, tint).resolution(6);
+                tips.push(knee);
+            }
+            tips.push(tips[0]);
+            gizmos.linestrip_2d(tips, tint.with_alpha(0.2));
+        }
         Power::Emp | Power::Confuse => {
             // Crackling fronds around the body.
             for k in 0..6 {
