@@ -260,7 +260,9 @@ impl Power {
         matches!(self, Self::Warp | Self::Song)
     }
 
-    /// Whether the simulation acts on this power yet (the others are carried but inert).
+    /// Whether the simulation acts on this power yet. Only built powers are sampled or
+    /// awakened (`weights`, `awaken`), so a carrier never does nothing. Mark a power built when
+    /// its behaviour lands.
     pub fn built(self) -> bool {
         matches!(self, Self::Blink | Self::Phase | Self::Bypass)
     }
@@ -488,7 +490,9 @@ pub fn weights(params: &SectorParams) -> [f32; 20] {
     for (slot, power) in out.iter_mut().zip(Power::ALL) {
         let first = power.first_ring() as f32;
         let ramp = smoothstep(first, first + RAMP_RINGS, params.depth);
-        *slot = power.rate() * ramp * bias(power, params);
+        // A power the simulation does not act on is never sampled (it would be a dud).
+        let live = if power.built() { 1.0 } else { 0.0 };
+        *slot = power.rate() * ramp * bias(power, params) * live;
     }
     out
 }
@@ -641,7 +645,10 @@ pub fn awaken(mut g: Genome, roll: f32, ring: u32) -> Genome {
     let eligible: Vec<(Power, f32)> = Power::ALL
         .into_iter()
         .filter(|p| {
-            matches!(p.tier(), Tier::Mild | Tier::Strange) && p.first_ring() <= ring && p.fits(&g)
+            p.built()
+                && matches!(p.tier(), Tier::Mild | Tier::Strange)
+                && p.first_ring() <= ring
+                && p.fits(&g)
         })
         .map(|p| (p, p.rate()))
         .collect();
@@ -737,9 +744,15 @@ mod tests {
     }
 
     #[test]
-    fn about_seven_percent_of_far_species_carry_one_power() {
+    fn built_powers_are_carried_by_their_share_of_far_species_and_only_one_each() {
+        // Only built powers are sampled: the rate is the sum of their weights (all of them
+        // together would be about 7 percent).
+        let want: f32 = weights(&far(40.0)).iter().sum();
         let rate = species_rate(&far(40.0), 40_000);
-        assert!((0.05..0.09).contains(&rate), "species rate {rate}");
+        assert!(
+            (want * 0.8..want * 1.2).contains(&rate),
+            "species rate {rate} vs {want}"
+        );
         // And each carrier holds exactly one power above its gate.
         for i in 0..20_000 {
             let g = Genome::sample(&mut Rng::new(0xBEEF_0000 + i), &far(40.0));
@@ -754,7 +767,7 @@ mod tests {
     #[test]
     fn rare_powers_are_rarer_than_mild_ones() {
         let mut counts = [0u32; 20];
-        let n = 120_000;
+        let n = 160_000;
         for i in 0..n {
             let g = Genome::sample(&mut Rng::new(0xCAFE_0000 + i), &far(40.0));
             if let Some(c) = g.power() {
@@ -763,9 +776,13 @@ mod tests {
             }
         }
         let count = |p: Power| counts[Power::ALL.iter().position(|q| *q == p).unwrap()];
-        assert!(count(Power::Blink) > count(Power::Emp));
-        assert!(count(Power::Blink) > count(Power::Lens));
-        assert!(count(Power::Rift) < count(Power::Split));
+        assert!(count(Power::Blink) > count(Power::Phase));
+        // Nothing unbuilt is ever sampled.
+        for p in Power::ALL {
+            if !p.built() {
+                assert_eq!(count(p), 0, "{p:?} is not built");
+            }
+        }
         // Blink: 1 in 125 before the sector's lean, so 0.4 to 1.6 percent either way.
         let blink = count(Power::Blink) as f32 / n as f32;
         assert!((0.004..0.016).contains(&blink), "blink {blink}");

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 7;
+pub const GENERATOR_VERSION: u32 = 8;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
@@ -168,7 +168,7 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
         match s.kind {
             BodyKind::Creature => {
                 creatures += 1;
-                if s.species.is_some_and(|sp| sp.genome.power().is_some()) {
+                if s.species.is_some_and(|sp| sp.genome.live_power().is_some()) {
                     powered += 1;
                 }
             }
@@ -230,7 +230,7 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
                 spread: p.spread,
                 favourite: p.favourite,
                 isolation: p.patch.isolation,
-                power: p.species.genome.power(),
+                power: p.species.genome.live_power(),
             })
             .collect(),
         creatures,
@@ -775,8 +775,8 @@ mod tests {
     fn power_carriers_show_on_the_map_only_from_ring_three() {
         let mut seen = 0;
         let mut species_with_power = 0;
-        for x in -14..=14 {
-            for y in -14..=14 {
+        for x in -80..=80 {
+            for y in -80..=80 {
                 let id = SectorId { x, y };
                 let cell = sample_cell(SEED, id);
                 if ring(id) <= 2 {
