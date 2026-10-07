@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 3;
+pub const GENERATOR_VERSION: u32 = 4;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
@@ -128,7 +128,7 @@ pub struct Cell {
     pub capital: bool,
     /// Outpost bases of a civilization in this sector.
     pub outposts: u32,
-    pub apex: Option<(Rank, String)>,
+    pub apex: Option<(Rank, String, apex::Archetype)>,
 }
 
 /// Samples sector `id` through the same functions the game uses.
@@ -166,7 +166,7 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
             BodyKind::Player => {}
         }
     }
-    let apex = apex::rank(seed, id).map(|r| (r, apex::name(seed, id)));
+    let apex = apex::rank(seed, id).map(|r| (r, apex::name(seed, id), apex::archetype(seed, id)));
     Cell {
         id,
         ring: ring(id),
@@ -283,7 +283,7 @@ pub struct Map {
     region_index: HashMap<u64, usize>,
     territories: Vec<TerritoryRow>,
     territory_index: HashMap<u64, usize>,
-    apexes: Vec<(String, &'static str)>,
+    apexes: Vec<(String, &'static str, &'static str)>,
     apex_index: HashMap<SectorId, usize>,
 }
 
@@ -410,7 +410,7 @@ impl Map {
                 peaceful: t.peaceful(),
             });
         }
-        if let Some((rank, name)) = &cell.apex {
+        if let Some((rank, name, archetype)) = &cell.apex {
             self.apex_index.insert(cell.id, self.apexes.len());
             self.apexes.push((
                 name.clone(),
@@ -418,6 +418,7 @@ impl Map {
                     Rank::Major => "apex",
                     Rank::Lesser => "lesser apex",
                 },
+                archetype.label(),
             ));
         }
     }
@@ -564,7 +565,7 @@ impl Map {
             let _ = write!(j, ",{}]", u8::from(t.peaceful));
         }
         j.push_str("],\"apexes\":[");
-        for (i, (name, rank)) in self.apexes.iter().enumerate() {
+        for (i, (name, rank, archetype)) in self.apexes.iter().enumerate() {
             if i > 0 {
                 j.push(',');
             }
@@ -572,6 +573,8 @@ impl Map {
             json_str(&mut j, name);
             j.push(',');
             json_str(&mut j, rank);
+            j.push(',');
+            json_str(&mut j, archetype);
             j.push(']');
         }
         j.push_str("],\"cells\":[\n");

@@ -372,10 +372,12 @@ fn hud_lines(game: &Game) -> String {
             ""
         };
         text.push_str(&format!(
-            "\n* APEX  {}{lesser}   {:.1}K   HULL [{}]{}",
+            "\n* APEX  {}{lesser}  ({})   {:.1}K   HULL [{}]{}{}",
             apex.name,
+            apex.archetype.label().to_uppercase(),
             apex.distance / 1000.0,
             bar(apex.health, 10),
+            if apex.enraged { "   ENRAGED" } else { "" },
             if apex.alert { "   HUNTING YOU" } else { "" }
         ));
     }
@@ -446,6 +448,8 @@ fn territory_line(game: &Game) -> String {
 
 /// The colour of everything apex: the world crown, the radar ring, the arrow and the HUD line.
 const APEX_GOLD: Color = Color::srgb(1.0, 0.82, 0.22);
+/// The crown of an apex that has passed its phase change.
+const APEX_ENRAGED: Color = Color::srgb(1.0, 0.36, 0.25);
 const DRY_RED: Color = Color::srgb(1.0, 0.42, 0.34);
 const OWNED: Color = Color::srgb(0.62, 0.72, 0.82);
 
@@ -1976,23 +1980,45 @@ pub fn draw(
                         .circle_2d(p, r * 1.3 + 9.0, Color::srgba(cr, cg, cb, 0.28))
                         .resolution(20);
                 }
-                if !body.follower && game.apex_of(body).is_some() {
-                    // An apex elder: two slow golden crowns and spokes, unmistakable.
+                if !body.follower
+                    && let Some(archetype) = game.apex_archetype(body)
+                {
+                    // An apex elder: two slow golden crowns and spokes, unmistakable; the
+                    // spoke count tells the archetype and the crown reddens once enraged.
+                    let crown = if game.apex_enraged(body) {
+                        APEX_ENRAGED
+                    } else {
+                        APEX_GOLD
+                    };
                     let spin = game.time * 0.4;
                     for (k, grow) in [(0.0, 1.5), (1.0, 1.9)] {
                         let ring = r * grow + 14.0 + 4.0 * (game.time * 1.6 + k).sin();
                         gizmos
-                            .circle_2d(p, ring, APEX_GOLD.with_alpha(0.5 - 0.15 * k))
+                            .circle_2d(p, ring, crown.with_alpha(0.5 - 0.15 * k))
                             .resolution(28);
                     }
-                    for k in 0..6 {
-                        let a = spin + k as f32 * std::f32::consts::TAU / 6.0;
+                    let spokes = archetype.spokes();
+                    for k in 0..spokes {
+                        let a = spin + k as f32 * std::f32::consts::TAU / spokes as f32;
                         let d = Vec2::from_angle(a);
                         gizmos.line_2d(
                             p + d * (r * 1.9 + 18.0),
                             p + d * (r * 1.9 + 34.0),
-                            APEX_GOLD.with_alpha(0.7),
+                            crown.with_alpha(0.7),
                         );
+                    }
+                    if archetype == ssc::apex::Archetype::Bulwark && !game.apex_enraged(body) {
+                        // The plated front arc, until it is shed.
+                        let heading = body.angle;
+                        for k in -6..=6 {
+                            let a = heading + k as f32 * 0.17;
+                            let d = Vec2::from_angle(a);
+                            gizmos.line_2d(
+                                p + d * (r + 3.0),
+                                p + d * (r + 11.0),
+                                Color::srgb(0.75, 0.78, 0.85),
+                            );
+                        }
                     }
                 }
                 if let Some(root) = body.root

@@ -424,6 +424,8 @@ pub struct Game {
     /// Apex elders generated in the sectors met, and which have been announced; see `apexes`.
     apexes: BTreeMap<(SectorId, u32), ApexInfo>,
     apex_seen: HashSet<(SectorId, u32)>,
+    apex_state: HashMap<u64, apexes::ApexState>,
+    apex_rng: Rng,
     seed: u64,
     rng: Rng,
     /// Loot has its own stream, so drops never disturb the gameplay one.
@@ -523,6 +525,8 @@ impl Game {
             civ_struck: HashMap::new(),
             apexes: BTreeMap::new(),
             apex_seen: HashSet::new(),
+            apex_state: HashMap::new(),
+            apex_rng: Rng::new(seed ^ crate::apex::APEX_SALT),
             civ_clock: 0.0,
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
             sanctuary: true,
@@ -688,6 +692,7 @@ impl Game {
         self.update_eggs(dt);
         self.update_tethers(dt);
         self.update_chains(dt);
+        self.update_apexes(dt);
         self.fire_weapons();
         self.cue_new_shots(in_flight);
         self.apply_gravity(dt);
@@ -907,7 +912,7 @@ impl Game {
             body.pinned = spawn.pinned;
             body.origin = Some((id, spawn.index));
             if let Some(rank) = spawn.apex {
-                self.register_apex(id, spawn.index, rank);
+                self.register_apex(id, spawn.index, rank, &mut body);
             }
             self.apply_mined(&mut body);
             body.angle = self.rng.f32() * TAU;
@@ -1349,6 +1354,17 @@ impl Game {
                 }
             }
             if let Some((index, fraction)) = hit {
+                // A bulwark's plated front turns most of the ship's fire away.
+                let guarded = if bullet.friendly {
+                    apexes::guard(
+                        &self.apexes,
+                        &self.apex_state,
+                        &self.bodies[index],
+                        bullet.velocity,
+                    )
+                } else {
+                    1.0
+                };
                 let body = &mut self.bodies[index];
                 if dashing && !bullet.friendly && body.kind == BodyKind::Player {
                     grazes.push(bullet.position);
@@ -1361,7 +1377,12 @@ impl Game {
                         body,
                         armored(
                             body,
-                            bullet.damage * if bullet.friendly { boost } else { 1.0 },
+                            bullet.damage
+                                * if bullet.friendly {
+                                    boost * guarded
+                                } else {
+                                    1.0
+                                },
                             bullet.friendly,
                         ),
                         self.player_invulnerability,

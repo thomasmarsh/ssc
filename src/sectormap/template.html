@@ -340,7 +340,7 @@ function describe(cr,full){
   if(row[OUT])h+='<div class="row"><span class="k">Outposts</span><span>'+row[OUT]+' here</span></div>';
   if(terr[9]===1)h+='<div class="row ok"><b>The early outpost: peaceful, fights only when hurt</b></div>';
  }
- if(row[APX]>=0){const a=D.apexes[row[APX]];h+='<h3>Apex</h3><div class="row gold"><b>&#9818; '+esc(a[0])+'</b> <span class="sub">'+esc(a[1])+'</span></div>'}
+ if(row[APX]>=0){const a=D.apexes[row[APX]];h+='<h3>Apex</h3><div class="row gold"><b>&#9818; '+esc(a[0])+'</b> <span class="sub">'+esc(a[2])+', '+esc(a[1])+'</span></div>'}
  return h;
 }
 function showTip(e,cr){

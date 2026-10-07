@@ -5,7 +5,7 @@
 use super::tuning as t;
 use super::upgrades::{self, Item, Rarity, Slot, Source};
 use super::*;
-use crate::apex::Rank;
+use crate::apex::{self, Archetype, Rank};
 
 /// What the simulation knows of a generated apex.
 #[derive(Clone, Debug, PartialEq)]
@@ -13,6 +13,90 @@ pub struct ApexInfo {
     /// Display name, uppercase.
     pub name: String,
     pub rank: Rank,
+    pub archetype: Archetype,
+}
+
+/// What an apex is doing right now beyond ordinary steering.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Move {
+    #[default]
+    Idle,
+    /// A juggernaut standing its ground before it charges: seconds left and the aim.
+    Windup(f32, Vec2),
+    /// A juggernaut at full tilt: seconds left and the heading.
+    Charge(f32, Vec2),
+    /// A maelstrom dragging the ship in: seconds left.
+    Pull(f32),
+}
+
+/// The live state of one apex body, kept apart from `Body` (only apexes pay for it).
+#[derive(Clone, Debug, Default)]
+pub struct ApexState {
+    /// Past its phase change: enraged, plates shed.
+    pub enraged: bool,
+    /// Seconds until the next signature move.
+    clock: f32,
+    mv: Move,
+    /// Living members of a queen's retinue.
+    pub escorts: Vec<u64>,
+}
+
+// ---- tuning: phases and signature moves ------------------------------------------------
+
+/// How a phase change sharpens the elder: speed and fire rate multipliers, contact damage.
+const ENRAGE_SPEED: f32 = 1.25;
+const ENRAGE_FIRE: f32 = 0.65;
+const ENRAGE_STING: f32 = 1.2;
+/// Juggernaut: seconds between charges (calm, enraged), the telegraph, the charge, its
+/// speed, and the range a charge starts from.
+const CHARGE_EVERY: (f32, f32) = (6.5, 3.8);
+const CHARGE_WINDUP: f32 = 0.9;
+const CHARGE_TIME: f32 = 1.1;
+const CHARGE_SPEED: f32 = 800.0;
+const CHARGE_RANGE: (f32, f32) = (350.0, 1500.0);
+/// Queen: seconds between escorts (calm, enraged) and the most alive at once.
+const ESCORT_EVERY: (f32, f32) = (5.5, 3.0);
+const ESCORT_CAP: (usize, usize) = (4, 7);
+/// Phantom: seconds between blinks (calm, enraged), the ring around the ship it lands in,
+/// and the nearest it will blink from.
+const BLINK_EVERY: (f32, f32) = (3.4, 1.9);
+const BLINK_RING: (f32, f32) = (340.0, 520.0);
+const BLINK_FROM: f32 = 220.0;
+/// Maelstrom: seconds between pulls (calm, enraged), a pull's length, its acceleration on the
+/// ship and the range it reaches.
+const PULL_EVERY: (f32, f32) = (8.0, 5.0);
+const PULL_TIME: f32 = 1.3;
+const PULL_ACCEL: f32 = 850.0;
+const PULL_RANGE: f32 = 1600.0;
+/// Bulwark: half-angle of the armoured front (as a cosine) and the share of damage that gets
+/// through it.
+const GUARD_COS: f32 = 0.26;
+const GUARD_LEAK: f32 = 0.12;
+
+fn pick<T: Copy>(pair: (T, T), enraged: bool) -> T {
+    if enraged { pair.1 } else { pair.0 }
+}
+
+/// The share of a friendly shot's damage that reaches `body` when it arrives with `velocity`:
+/// a bulwark's plated front turns most of it away until the plates are shed.
+pub(super) fn guard(
+    apexes: &BTreeMap<(SectorId, u32), ApexInfo>,
+    states: &HashMap<u64, ApexState>,
+    body: &Body,
+    velocity: Vec2,
+) -> f32 {
+    let Some(info) = body.origin.and_then(|key| apexes.get(&key)) else {
+        return 1.0;
+    };
+    if info.archetype != Archetype::Bulwark || states.get(&body.id).is_some_and(|s| s.enraged) {
+        return 1.0;
+    }
+    let from_shot = -velocity.normalize_or_zero();
+    if Vec2::from_angle(body.angle).dot(from_shot) > GUARD_COS {
+        GUARD_LEAK
+    } else {
+        1.0
+    }
 }
 
 /// The HUD's account of the nearest apex.
@@ -25,13 +109,39 @@ pub struct ApexReport {
     /// Hull remaining, 0 to 1.
     pub health: f32,
     pub alert: bool,
+    pub archetype: Archetype,
+    pub enraged: bool,
 }
 
 impl Game {
-    /// Remembers an apex when its sector loads.
-    pub(super) fn register_apex(&mut self, id: SectorId, index: u32, rank: Rank) {
-        let name = crate::apex::name(self.seed, id).to_uppercase();
-        self.apexes.insert((id, index), ApexInfo { name, rank });
+    /// Remembers an apex when its sector loads and gives its body the hull and shield its
+    /// archetype and ring ask for (genes are bounded; these are not).
+    pub(super) fn register_apex(&mut self, id: SectorId, index: u32, rank: Rank, body: &mut Body) {
+        let name = apex::name(self.seed, id).to_uppercase();
+        let archetype = apex::archetype(self.seed, id);
+        let ring = crate::range::ring(id);
+        body.max_health = apex::hull(archetype, rank, ring);
+        body.health = body.max_health;
+        body.max_shield = apex::shield(rank, ring);
+        body.shield = body.max_shield;
+        self.apexes.insert(
+            (id, index),
+            ApexInfo {
+                name,
+                rank,
+                archetype,
+            },
+        );
+    }
+
+    /// The archetype of an apex body, if it is one.
+    pub fn apex_archetype(&self, body: &Body) -> Option<Archetype> {
+        self.apex_of(body).map(|info| info.archetype)
+    }
+
+    /// Whether an apex body has gone through its phase change.
+    pub fn apex_enraged(&self, body: &Body) -> bool {
+        self.apex_state.get(&body.id).is_some_and(|s| s.enraged)
     }
 
     /// The apex a body is, if it is one.
@@ -40,6 +150,225 @@ impl Game {
             return None;
         }
         self.apexes.get(&body.origin?)
+    }
+
+    /// The apexes' signature moves and phase change, run each step after steering and before
+    /// bodies move, so a charge or a blink overrides what steering decided.
+    pub(super) fn update_apexes(&mut self, dt: f32) {
+        if self.apexes.is_empty() {
+            self.apex_state.clear();
+            return;
+        }
+        let Some(ship) = self.player().map(|p| (p.position, p.velocity)) else {
+            return;
+        };
+        let live: Vec<(u64, Archetype)> = self
+            .bodies
+            .iter()
+            .filter(|b| b.active && !b.consumed && !b.follower)
+            .filter_map(|b| self.apex_of(b).map(|info| (b.id, info.archetype)))
+            .collect();
+        self.apex_state
+            .retain(|id, _| live.iter().any(|(live, _)| live == id));
+        for (id, archetype) in live {
+            let Some(index) = self.bodies.iter().position(|b| b.id == id) else {
+                continue;
+            };
+            let mut state = self.apex_state.remove(&id).unwrap_or_else(|| ApexState {
+                // The first signature move waits a little, so a stirring apex is not instant.
+                clock: 2.0 + (id % 5) as f32,
+                ..ApexState::default()
+            });
+            let body = &self.bodies[index];
+            let (at, alert) = (body.position, body.alert);
+            let to_ship = ship.0 - at;
+            let distance = to_ship.length();
+            if !state.enraged && body.health < body.max_health * apex::ENRAGE_AT {
+                state.enraged = true;
+                self.enrage(index);
+            }
+            let enraged = state.enraged;
+            state.clock -= dt;
+            match archetype {
+                Archetype::Juggernaut => {
+                    self.juggernaut(index, &mut state, dt, to_ship, alert, enraged);
+                }
+                Archetype::Queen => self.queen(index, &mut state, alert, enraged),
+                Archetype::Phantom => self.phantom(index, &mut state, ship.0, alert, enraged),
+                Archetype::Maelstrom => {
+                    self.maelstrom(index, &mut state, dt, distance, alert, enraged);
+                }
+                // The rest is in the genes: cords, the learner's brain, the spiral, and the
+                // bulwark's plates (see `guard`).
+                Archetype::Lasher | Archetype::Bulwark | Archetype::Hunter | Archetype::Warden => {}
+            }
+            self.apex_state.insert(id, state);
+        }
+    }
+
+    /// The phase change: faster, quicker on the trigger and stinging harder (a bulwark also
+    /// sheds its plates: see `guard`). Announced once.
+    fn enrage(&mut self, index: usize) {
+        let at = self.bodies[index].position;
+        let radius = self.bodies[index].radius;
+        let name = self
+            .apex_of(&self.bodies[index])
+            .map(|info| info.name.clone())
+            .unwrap_or_default();
+        let g = &mut self.bodies[index].genome;
+        g.speed *= ENRAGE_SPEED;
+        g.cruise *= ENRAGE_SPEED;
+        g.fire_period *= ENRAGE_FIRE;
+        g.contact_damage *= ENRAGE_STING;
+        self.effect(at, radius * 3.0, 0.8, EffectKind::Explosion);
+        self.notify(format!("APEX: {name} enrages"), Rarity::Epic);
+    }
+
+    fn juggernaut(
+        &mut self,
+        index: usize,
+        state: &mut ApexState,
+        dt: f32,
+        to_ship: Vec2,
+        alert: bool,
+        enraged: bool,
+    ) {
+        let distance = to_ship.length();
+        state.mv = match state.mv {
+            Move::Idle
+                if alert
+                    && state.clock <= 0.0
+                    && (CHARGE_RANGE.0..CHARGE_RANGE.1).contains(&distance) =>
+            {
+                let at = self.bodies[index].position;
+                let radius = self.bodies[index].radius;
+                self.effect(at, radius * 2.6, CHARGE_WINDUP, EffectKind::Respawn);
+                Move::Windup(CHARGE_WINDUP, to_ship.normalize_or_zero())
+            }
+            Move::Windup(left, _) if left > dt => {
+                // Planted and squaring up on the ship.
+                let body = &mut self.bodies[index];
+                body.velocity *= 0.8;
+                let aim = to_ship.normalize_or_zero();
+                body.angle = aim.y.atan2(aim.x);
+                Move::Windup(left - dt, aim)
+            }
+            Move::Windup(_, aim) => Move::Charge(CHARGE_TIME, aim),
+            Move::Charge(left, aim) if left > dt => {
+                let body = &mut self.bodies[index];
+                body.velocity = aim * CHARGE_SPEED;
+                body.angle = aim.y.atan2(aim.x);
+                Move::Charge(left - dt, aim)
+            }
+            Move::Charge(..) => {
+                self.bodies[index].velocity *= 0.3;
+                state.clock = pick(CHARGE_EVERY, enraged);
+                Move::Idle
+            }
+            other => other,
+        };
+    }
+
+    fn queen(&mut self, index: usize, state: &mut ApexState, alert: bool, enraged: bool) {
+        if !alert || state.clock > 0.0 {
+            return;
+        }
+        state.clock = pick(ESCORT_EVERY, enraged);
+        state
+            .escorts
+            .retain(|id| self.bodies.iter().any(|b| b.id == *id && b.health > 0.0));
+        if state.escorts.len() >= pick(ESCORT_CAP, enraged) {
+            return;
+        }
+        let queen = self.bodies[index].clone();
+        // The usual caps: the world budget and the sector's creature budget.
+        let sector = SectorId::containing(queen.position);
+        let here = self
+            .bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Creature && SectorId::containing(b.position) == sector)
+            .count();
+        if self.bodies.len() + self.food.len() + self.eggs.len() + 2 >= MAX_BODIES
+            || here + 1 >= world::SECTOR_BODY_BUDGET as usize
+        {
+            return;
+        }
+        let species = Species {
+            lineage: queen.species ^ 0xE5C0_0000 | 1,
+            generation: 0,
+            genome: apex::escort(&queen.genome).individual(&mut self.variation),
+        };
+        let direction = self.apex_rng.direction();
+        let spot = queen.position + direction * (queen.radius + 40.0);
+        let mut body = self.make_creature(&species, spot);
+        body.velocity = queen.velocity + direction * 120.0;
+        body.genes = queen.genes;
+        body.provisioned = true;
+        body.alert = true;
+        let id = body.id;
+        self.add_body(body);
+        self.effect(spot, 24.0, 0.4, EffectKind::Respawn);
+        state.escorts.push(id);
+    }
+
+    fn phantom(
+        &mut self,
+        index: usize,
+        state: &mut ApexState,
+        ship: Vec2,
+        alert: bool,
+        enraged: bool,
+    ) {
+        let from = self.bodies[index].position;
+        if !alert || state.clock > 0.0 || from.distance(ship) < BLINK_FROM {
+            return;
+        }
+        state.clock = pick(BLINK_EVERY, enraged);
+        let ring = self.apex_rng.range(BLINK_RING.0, BLINK_RING.1);
+        let to = ship + self.apex_rng.direction() * ring;
+        let radius = self.bodies[index].radius;
+        self.effect(from, radius * 2.2, 0.35, EffectKind::Respawn);
+        self.effect(to, radius * 2.2, 0.35, EffectKind::Respawn);
+        let body = &mut self.bodies[index];
+        body.position = to;
+        body.velocity *= 0.3;
+        // It loosens a burst the moment it lands.
+        body.fire_cooldown = 0.2;
+    }
+
+    fn maelstrom(
+        &mut self,
+        index: usize,
+        state: &mut ApexState,
+        dt: f32,
+        distance: f32,
+        alert: bool,
+        enraged: bool,
+    ) {
+        state.mv = match state.mv {
+            Move::Idle if alert && state.clock <= 0.0 && distance < PULL_RANGE => {
+                let at = self.bodies[index].position;
+                let radius = self.bodies[index].radius;
+                self.effect(at, PULL_RANGE * 0.5, PULL_TIME, EffectKind::Pair);
+                self.effect(at, radius * 3.0, 0.6, EffectKind::Respawn);
+                Move::Pull(PULL_TIME)
+            }
+            Move::Pull(left) if left > dt => {
+                let at = self.bodies[index].position;
+                if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
+                    let toward = (at - ship.position).normalize_or_zero();
+                    if ship.position.distance(at) < PULL_RANGE * 1.2 {
+                        ship.velocity += toward * PULL_ACCEL * dt;
+                    }
+                }
+                Move::Pull(left - dt)
+            }
+            Move::Pull(_) => {
+                state.clock = pick(PULL_EVERY, enraged);
+                Move::Idle
+            }
+            other => other,
+        };
     }
 
     /// Posts the banner the first time an apex comes into range.
@@ -81,6 +410,8 @@ impl Game {
                 position: b.position,
                 health: (b.health / b.max_health).clamp(0.0, 1.0),
                 alert: b.alert,
+                archetype: info.archetype,
+                enraged: self.apex_enraged(b),
             })
             .filter(|r| r.distance <= t::APEX_HUD_RANGE)
             .min_by(|a, b| a.distance.total_cmp(&b.distance))
@@ -151,7 +482,7 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::tests::DT;
+    use crate::simulation::tests::{DT, set_player};
     use crate::world::Spawn;
 
     const SEED: u64 = 0x535343;
@@ -431,6 +762,396 @@ mod tests {
             .filter(|b| game.apex_of(b).is_some())
             .count();
         assert!(apexes <= 1, "one apex, found {apexes}");
+        for q in &game.active {
+            let creatures = game
+                .bodies
+                .iter()
+                .filter(|b| b.kind == BodyKind::Creature && SectorId::containing(b.position) == *q)
+                .count();
+            assert!(creatures <= 2 * world::SECTOR_BODY_BUDGET as usize);
+        }
+    }
+
+    // ---- archetypes --------------------------------------------------------------------
+
+    /// The nearest sector (by ring) holding an apex of `archetype`, and its seed.
+    fn find_kind(archetype: Archetype) -> (u64, SectorId) {
+        let mut best: Option<(u32, u64, SectorId)> = None;
+        for seed in [SEED, 42, 7, 99, 1] {
+            for x in -45..=45 {
+                for y in -45..=45 {
+                    let id = SectorId { x, y };
+                    if crate::apex::rank(seed, id) == Some(Rank::Major)
+                        && crate::apex::archetype(seed, id) == archetype
+                        && world::generate(seed, id)
+                            .last()
+                            .is_some_and(|s| s.apex.is_some())
+                    {
+                        let ring = crate::range::ring(id);
+                        if best.is_none_or(|(r, ..)| ring < r) {
+                            best = Some((ring, seed, id));
+                        }
+                    }
+                }
+            }
+        }
+        let (_, seed, id) = best.unwrap_or_else(|| panic!("no {archetype:?} apex"));
+        (seed, id)
+    }
+
+    /// A game with the ship `gap` units south of the apex of `archetype`, held there.
+    fn arena(archetype: Archetype, gap: f32) -> (Game, Vec2, u64) {
+        let (seed, id) = find_kind(archetype);
+        let at = apex_spawn(seed, id).position;
+        let mut game = Game::new(seed);
+        game.player_invulnerability = 1e9;
+        let spot = at + Vec2::new(0.0, gap);
+        game.teleport(spot);
+        game.step(DT, Input::default());
+        let apex = the_apex(&game).id;
+        (game, spot, apex)
+    }
+
+    fn apex_body(game: &Game, id: u64) -> &Body {
+        game.bodies.iter().find(|b| b.id == id).expect("the apex")
+    }
+
+    #[test]
+    fn archetypes_are_deterministic_and_all_of_them_turn_up() {
+        let mut seen = std::collections::BTreeMap::new();
+        for seed in [SEED, 42, 7] {
+            for x in -45..=45 {
+                for y in -45..=45 {
+                    let id = SectorId { x, y };
+                    if crate::apex::rank(seed, id).is_none() {
+                        continue;
+                    }
+                    let a = crate::apex::archetype(seed, id);
+                    assert_eq!(a, crate::apex::archetype(seed, id));
+                    *seen.entry(a).or_insert(0_u32) += 1;
+                    // The name carries the archetype's epithet.
+                    let name = crate::apex::name(seed, id);
+                    assert_eq!(name, crate::apex::name(seed, id));
+                    assert!(
+                        a.epithets().iter().any(|e| name.ends_with(e)),
+                        "{name} for {a:?}"
+                    );
+                }
+            }
+        }
+        assert!(seen.len() >= 5, "only {seen:?}");
+        assert_eq!(seen.len(), Archetype::ALL.len(), "{seen:?}");
+        let total: u32 = seen.values().sum();
+        assert!(
+            seen.values().all(|n| *n * 25 > total),
+            "an archetype is nearly absent: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn country_shapes_which_elders_grow_old() {
+        use crate::biome::{BiomeKind, biome};
+        let (mut queens_on_plains, mut plains) = (0, 0);
+        let (mut queens_elsewhere, mut elsewhere) = (0, 0);
+        for seed in [SEED, 42, 7, 99] {
+            for x in -70..=70 {
+                for y in -70..=70 {
+                    let id = SectorId { x, y };
+                    if crate::apex::rank(seed, id).is_none() {
+                        continue;
+                    }
+                    let queen = crate::apex::archetype(seed, id) == Archetype::Queen;
+                    if biome(seed, id).kind == BiomeKind::Plains {
+                        plains += 1;
+                        queens_on_plains += i32::from(queen);
+                    } else {
+                        elsewhere += 1;
+                        queens_elsewhere += i32::from(queen);
+                    }
+                }
+            }
+        }
+        assert!(plains > 30 && elsewhere > 200);
+        assert!(
+            queens_on_plains as f32 / plains as f32
+                > 1.5 * queens_elsewhere as f32 / elsewhere as f32,
+            "plains: {queens_on_plains}/{plains}, elsewhere {queens_elsewhere}/{elsewhere}"
+        );
+    }
+
+    #[test]
+    fn archetypes_are_expressed_through_genes_and_look_different() {
+        let base = crate::genome::Species::bogey().genome;
+        let make = |a: Archetype| crate::apex::elder(base, &mut Rng::new(5), Rank::Major, a);
+        let g = |a: Archetype| make(a);
+        // Cords: a long, strong, hard one.
+        let lasher = g(Archetype::Lasher);
+        assert_eq!(lasher.weapon, crate::genome::Weapon::Tether);
+        assert!(lasher.cord_strength >= 5.0 && lasher.cord_slack >= 1500.0);
+        assert!(lasher.cord_hardness >= 6.0 && lasher.cord_drag >= 0.5);
+        // A learning pack leader.
+        let hunter = g(Archetype::Hunter);
+        assert!(hunter.learner >= 0.9 && hunter.alarm >= 700.0);
+        assert_eq!(hunter.social, crate::genome::Social::Pack);
+        // Negative mass and a hard fling.
+        let storm = g(Archetype::Maelstrom);
+        assert!(storm.mass < 0.0 && storm.fling_strength() >= 2.0);
+        // Weapons differ: patterns, not just numbers.
+        let weapons: std::collections::BTreeSet<String> = Archetype::ALL
+            .iter()
+            .map(|a| format!("{:?}", g(*a).weapon))
+            .collect();
+        assert!(weapons.len() >= 5, "{weapons:?}");
+        // Silhouette and tint differ: no two archetypes share both.
+        for a in Archetype::ALL {
+            for b in Archetype::ALL {
+                if a == b {
+                    continue;
+                }
+                let (x, y) = (g(a), g(b));
+                let tint = (x.hue - y.hue).abs() + (x.pale - y.pale).abs();
+                let shape = (x.radius - y.radius).abs() / 36.0
+                    + f32::from(x.sides.abs_diff(y.sides)) / 5.0
+                    + (x.aspect - y.aspect).abs();
+                assert!(tint > 0.08 || shape > 0.25, "{a:?} and {b:?} look alike");
+            }
+        }
+        // The juggernaut is the biggest and the phantom the smallest.
+        let radius = |a| g(a).radius;
+        assert!(
+            Archetype::ALL
+                .iter()
+                .all(|a| radius(Archetype::Juggernaut) >= radius(*a))
+        );
+        assert!(
+            Archetype::ALL
+                .iter()
+                .all(|a| radius(Archetype::Phantom) <= radius(*a))
+        );
+        // Every elder stays a single body.
+        assert!(Archetype::ALL.iter().all(|a| g(*a).parts() == 1));
+    }
+
+    #[test]
+    fn apex_hull_and_shield_grow_with_the_ring_and_are_formidable() {
+        use crate::apex::{hull, shield};
+        for a in Archetype::ALL {
+            let near = hull(a, Rank::Major, 5);
+            let far = hull(a, Rank::Major, 25);
+            assert!(near >= 2000.0, "{a:?} has only {near} hull at ring 5");
+            assert!(far > 1.3 * near, "{a:?}: {near} -> {far}");
+            assert!(far <= near * crate::apex::GROWTH_CAP);
+            assert!(hull(a, Rank::Lesser, 5) < 0.6 * near);
+        }
+        assert!(shield(Rank::Major, 25) > shield(Rank::Major, 5));
+        assert!(
+            hull(Archetype::Juggernaut, Rank::Major, 5) > hull(Archetype::Phantom, Rank::Major, 5)
+        );
+        // In play the body carries them, and the depth threat multiplies what they absorb:
+        // the old elder (hull at most 400 before threat) died in seconds.
+        let (game, _, id) = arena(Archetype::Bulwark, 900.0);
+        let body = apex_body(&game, id);
+        let ring = crate::range::ring(SectorId::containing(body.position));
+        assert_eq!(body.max_health, hull(Archetype::Bulwark, Rank::Major, ring));
+        assert_eq!(body.max_shield, shield(Rank::Major, ring));
+        let effective = (body.max_health + body.max_shield) * body.genes.threat;
+        assert!(effective > 8000.0, "effective hull only {effective}");
+    }
+
+    #[test]
+    fn a_juggernaut_winds_up_and_then_charges() {
+        let (mut game, spot, id) = arena(Archetype::Juggernaut, 900.0);
+        let (mut wound, mut fastest) = (false, 0.0_f32);
+        for _ in 0..(40.0 / 0.05) as usize {
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+            if let Some(state) = game.apex_state.get(&id) {
+                wound |= matches!(state.mv, Move::Windup(..));
+            }
+            fastest = fastest.max(apex_body(&game, id).velocity.length());
+        }
+        assert!(wound, "no telegraph");
+        assert!(fastest >= CHARGE_SPEED * 0.9, "fastest {fastest}");
+    }
+
+    #[test]
+    fn a_queen_raises_a_capped_retinue() {
+        let (mut game, spot, id) = arena(Archetype::Queen, 900.0);
+        let mut most = 0;
+        for _ in 0..(120.0 / 0.05) as usize {
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+            let state = game.apex_state.get(&id).expect("a queen has a state");
+            most = most.max(state.escorts.len());
+            let alive = state
+                .escorts
+                .iter()
+                .filter(|e| game.bodies.iter().any(|b| b.id == **e))
+                .count();
+            assert!(alive <= ESCORT_CAP.1, "{alive} escorts");
+            assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
+        }
+        assert!(most >= 2, "the queen raised only {most}");
+        assert!(most <= ESCORT_CAP.1);
+        // They are the queen's own colours and fight.
+        let queen = apex_body(&game, id).genome;
+        let state = &game.apex_state[&id];
+        let escort = game
+            .bodies
+            .iter()
+            .find(|b| state.escorts.contains(&b.id))
+            .expect("an escort lives");
+        assert!((escort.genome.hue - queen.hue).abs() < 0.08);
+        assert!(escort.genome.weapon != crate::genome::Weapon::None);
+        assert!(escort.provisioned && escort.genome.radius < 20.0);
+    }
+
+    #[test]
+    fn a_phantom_blinks_beside_the_ship() {
+        let (mut game, spot, id) = arena(Archetype::Phantom, 1100.0);
+        let mut blinks = 0;
+        let mut last = apex_body(&game, id).position;
+        for _ in 0..(40.0 / 0.05) as usize {
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+            let now = apex_body(&game, id).position;
+            if now.distance(last) > 250.0 {
+                blinks += 1;
+                let gap = now.distance(spot);
+                assert!(
+                    (BLINK_RING.0 - 40.0..BLINK_RING.1 + 40.0).contains(&gap),
+                    "landed {gap} from the ship"
+                );
+            }
+            last = now;
+        }
+        assert!(blinks >= 3, "{blinks} blinks");
+    }
+
+    #[test]
+    fn a_maelstrom_drags_the_ship_toward_it() {
+        let (mut game, _, id) = arena(Archetype::Maelstrom, 1200.0);
+        let mut pulled = false;
+        let (mut inward, mut closest) = (0.0_f32, f32::MAX);
+        for _ in 0..(40.0 / 0.05) as usize {
+            game.step(0.05, Input::default());
+            let apex = apex_body(&game, id).position;
+            let ship = game.player().unwrap();
+            let toward = (apex - ship.position).normalize_or_zero();
+            if game
+                .apex_state
+                .get(&id)
+                .is_some_and(|s| matches!(s.mv, Move::Pull(_)))
+            {
+                pulled = true;
+                inward = inward.max(ship.velocity.dot(toward));
+            }
+            closest = closest.min(ship.position.distance(apex));
+        }
+        assert!(pulled, "no pull");
+        assert!(inward > 500.0, "dragged in at only {inward}");
+        assert!(closest < 900.0, "never came closer than {closest}");
+    }
+
+    #[test]
+    fn a_bulwark_turns_shots_on_its_front_until_it_sheds_its_plates() {
+        let (mut game, _, id) = arena(Archetype::Bulwark, 900.0);
+        let body = apex_body(&game, id).clone();
+        let facing = Vec2::from_angle(body.angle);
+        let shot_at_front = -facing * 600.0;
+        let shot_at_back = facing * 600.0;
+        let front = guard(&game.apexes, &game.apex_state, &body, shot_at_front);
+        let back = guard(&game.apexes, &game.apex_state, &body, shot_at_back);
+        assert!(front < 0.2 && back == 1.0, "front {front}, back {back}");
+        // Past its phase change the plates are gone.
+        let hull = apex_body(&game, id).max_health;
+        game.bodies.iter_mut().find(|b| b.id == id).unwrap().health = hull * 0.2;
+        game.step(DT, Input::default());
+        assert!(game.apex_state[&id].enraged);
+        let body = apex_body(&game, id).clone();
+        let shot = -Vec2::from_angle(body.angle) * 600.0;
+        assert_eq!(guard(&game.apexes, &game.apex_state, &body, shot), 1.0);
+        // Nobody else is armoured.
+        let plain = game
+            .bodies
+            .iter()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap();
+        assert_eq!(guard(&game.apexes, &game.apex_state, plain, shot), 1.0);
+    }
+
+    #[test]
+    fn a_bulwark_in_play_takes_far_less_from_the_front() {
+        let (mut game, _, id) = arena(Archetype::Bulwark, 900.0);
+        let body = apex_body(&game, id).clone();
+        let facing = Vec2::from_angle(body.angle);
+        let hit = |game: &mut Game, from: Vec2| {
+            let before = {
+                let b = apex_body(game, id);
+                b.health + b.shield
+            };
+            let shot = Bullet::friendly(
+                apex_body(game, id).position + from * (body.radius + 120.0),
+                -from * 900.0,
+                1.0,
+            );
+            game.bullets.push(shot);
+            for _ in 0..8 {
+                game.move_bullets(0.02);
+            }
+            let b = apex_body(game, id);
+            before - (b.health + b.shield)
+        };
+        // Freeze the apex's facing for the test.
+        let front = hit(&mut game, facing);
+        game.bodies.iter_mut().find(|b| b.id == id).unwrap().angle = body.angle;
+        let back = hit(&mut game, -facing);
+        assert!(
+            front > 0.0 && back > 4.0 * front,
+            "front {front}, back {back}"
+        );
+    }
+
+    #[test]
+    fn every_apex_enrages_once_below_a_third_of_its_hull() {
+        for archetype in Archetype::ALL {
+            let (mut game, spot, id) = arena(archetype, 900.0);
+            let before = apex_body(&game, id).genome;
+            game.notices.clear();
+            let hull = apex_body(&game, id).max_health;
+            game.bodies.iter_mut().find(|b| b.id == id).unwrap().health = hull * 0.3;
+            for _ in 0..5 {
+                set_player(&mut game, spot, Vec2::ZERO);
+                game.step(DT, Input::default());
+            }
+            assert!(game.apex_state[&id].enraged, "{archetype:?}");
+            let after = apex_body(&game, id).genome;
+            assert!(after.speed > before.speed, "{archetype:?}");
+            assert!(after.fire_period < before.fire_period, "{archetype:?}");
+            let banners = game
+                .notices
+                .iter()
+                .filter(|n| n.text.contains("enrages"))
+                .count();
+            assert_eq!(banners, 1, "{archetype:?} announces its phase change once");
+            assert!(game.apex_enraged(apex_body(&game, id)));
+        }
+    }
+
+    #[test]
+    fn a_long_fight_beside_a_queen_keeps_every_cap() {
+        let (mut game, spot, _) = arena(Archetype::Queen, 900.0);
+        for _ in 0..(300.0 / 0.05) as usize {
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+            assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
+        }
+        let apexes = game
+            .bodies
+            .iter()
+            .filter(|b| game.apex_of(b).is_some())
+            .count();
+        assert!(apexes <= 1);
         for q in &game.active {
             let creatures = game
                 .bodies
