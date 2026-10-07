@@ -477,10 +477,7 @@ impl Game {
             let species = species.individual(&mut self.variation);
             let mut body = self.make_creature(&species, at);
             body.energy = body.max_energy;
-            body.genes = civ_phenotype(
-                &world::phenotype_of(&world::latent(self.seed, sector)),
-                t.strength,
-            );
+            body.genes = civ_phenotype(&world::phenotype_at(self.seed, sector), t.strength);
             body.alert = true;
             body.home = Some(t.capital.center());
             body.velocity = (mark - at).normalize_or_zero() * species.genome.cruise;

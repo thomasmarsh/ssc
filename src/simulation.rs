@@ -39,6 +39,7 @@ mod parasite;
 mod parry;
 mod ping;
 mod powers;
+mod realms;
 mod regions;
 mod regrow;
 mod root;
@@ -82,6 +83,7 @@ pub use pads::{
 };
 pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RANGE, RING_SPEED};
 pub use powers::{BlinkTell, JamKind, JamTell, PowerView};
+pub use realms::RealmState;
 pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
 pub use song::SongRing;
@@ -524,6 +526,8 @@ pub struct Game {
     sanctuary: bool,
     /// The region the ship is in, announced with hysteresis (see `regions`).
     region: regions::RegionState,
+    /// The realm the ship is in, announced with hysteresis (see `realms`).
+    realms: realms::RealmState,
     /// The score chain; see `feel`.
     streak: feel::Streak,
     /// Hit stops, direction marks and the events the screen reacts to; see `feel`.
@@ -607,6 +611,7 @@ impl Game {
             civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
             sanctuary: true,
             region: regions::RegionState::default(),
+            realms: realms::RealmState::default(),
             streak: feel::Streak::default(),
             feel: feel::FeelState::default(),
             lure: lure::LureState::default(),
@@ -730,6 +735,7 @@ impl Game {
         let start = self.player().map(|p| p.position);
         self.update_civilizations(dt);
         self.update_region(dt);
+        self.update_realm(dt);
         self.update_loadout(dt, &input);
         self.update_organs(dt);
         let recharge = self.stats.recharge;
@@ -1159,6 +1165,7 @@ impl Game {
             self.pay_volley();
         }
         let stats = self.stats;
+        let reach = self.realm_effects().weapon_range;
         let Some(player) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
             return;
         };
@@ -1192,6 +1199,8 @@ impl Game {
         }
         if input.fire && player.fire_cooldown <= 0.0 && self.bullets.len() < MAX_BULLETS {
             let (position, velocity, radius) = (player.position, player.velocity, player.radius);
+            // A realm of dust shortens how far a shot flies (see `realm::Effects`).
+            let shot_life = stats.shot_life * reach;
             // A needler trades rate of fire for a dense burst.
             player.fire_cooldown = stats.fire_period * if stats.needles > 0 { 1.5 } else { 1.0 };
             for (offset, share, shape) in volley(&stats, &mut self.rng) {
@@ -1204,7 +1213,7 @@ impl Game {
                 let mut shot = Bullet::friendly(
                     position + aim * (radius + 5.0),
                     velocity + aim * speed,
-                    stats.shot_life,
+                    shot_life,
                 );
                 shot.shape = shape;
                 if needle {
@@ -1243,6 +1252,8 @@ impl Game {
             })
             .collect();
         let invulnerability = self.player_invulnerability;
+        // A heavy realm pulls harder (see `realm::Effects`).
+        let gravity = self.realm_effects().gravity;
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if is_fixed(body) {
                 continue;
@@ -1252,7 +1263,7 @@ impl Game {
                 let distance_squared = offset.length_squared();
                 if distance_squared < reach * reach && strength != 0.0 {
                     let pull = offset
-                        * (crate::well::BASE_PULL * strength
+                        * (crate::well::BASE_PULL * strength * gravity
                             / (distance_squared + 2500.0).powf(1.5));
                     // Negative mass is repelled by gravity; ballast mostly shrugs it off.
                     let ballast = if body.rig.ballast { 0.2 } else { 1.0 };
@@ -2144,17 +2155,29 @@ fn damage_bypassing(body: &mut Body, amount: f32, player_invulnerability: f32, b
     {
         return 0.0;
     }
-    // Armor softens what the ship takes; deep-space fauna is simply harder to kill.
+    // Armor softens what the ship takes; deep-space fauna is simply harder to kill, and a
+    // realm's plates turn away the light hits first (see `realm::Foe`).
+    let foe = body.genes.foe;
     let amount = match body.kind {
         BodyKind::Player => amount * body.rig.guard,
-        BodyKind::Creature => amount / body.genes.threat.max(1.0),
+        BodyKind::Creature => {
+            let through = (amount - foe.plating).max(amount * tuning::PLATING_FLOOR);
+            through / body.genes.threat.max(1.0)
+        }
         // Stations are meant to be taken down, so depth toughens them more gently.
         BodyKind::Base => amount / body.genes.threat.max(1.0).sqrt(),
         _ => amount,
     };
-    let absorbed = body.shield.min(amount * (1.0 - bypass.clamp(0.0, 1.0)));
-    body.shield -= absorbed;
-    body.health -= amount - absorbed;
+    // A realm's shields and hulls are bigger pools: the shield soaks up to its size times the
+    // multiplier of raw damage, and the hull takes what is left divided by its multiplier.
+    let (shield_mult, hull_mult) = if body.kind == BodyKind::Creature {
+        (foe.shield.max(0.05), foe.hull.max(0.05))
+    } else {
+        (1.0, 1.0)
+    };
+    let absorbed = (body.shield * shield_mult).min(amount * (1.0 - bypass.clamp(0.0, 1.0)));
+    body.shield -= absorbed / shield_mult;
+    body.health -= (amount - absorbed) / hull_mult;
     body.since_hit = 0.0;
     amount
 }

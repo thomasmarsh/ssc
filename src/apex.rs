@@ -316,18 +316,21 @@ pub fn rank(seed: u64, id: SectorId) -> Option<Rank> {
         return None;
     };
     let mut rng = Rng::new(hash2(seed ^ APEX_SALT, id.x, id.y));
-    rng.chance(chance).then_some(rank)
+    rng.chance(chance * crate::realm::effects(seed, id).apex)
+        .then_some(rank)
 }
 
 /// The kind of fight the sector's apex would be, from the sector hash weighted by its biome.
 /// Pure (and defined for any sector, apex or not).
 pub fn archetype(seed: u64, id: SectorId) -> Archetype {
     let country = biome(seed, id).kind;
-    let total: f32 = Archetype::ALL.iter().map(|a| a.weight(country)).sum();
+    let realm = crate::realm::weighting(seed, id);
+    let weight = |a: Archetype| a.weight(country) * realm.archetype_weight(a);
+    let total: f32 = Archetype::ALL.iter().map(|a| weight(*a)).sum();
     let h = hash2(seed ^ APEX_SALT ^ 0x7A, id.x, id.y);
     let mut roll = (h >> 40) as f32 / 16_777_216.0 * total;
     for a in Archetype::ALL {
-        roll -= a.weight(country);
+        roll -= weight(a);
         if roll < 0.0 {
             return a;
         }

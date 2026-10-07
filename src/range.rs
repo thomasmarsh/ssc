@@ -772,11 +772,23 @@ fn weights(seed: u64, id: SectorId, oasis: bool) -> Vec<(Distribution, f32)> {
                     kill
                 };
             let here = biome(seed, id);
+            // The realm tilts who thrives: hunters, swarmers and jam carriers by its weights,
+            // and the kinds of country it favours. Nothing in the starter realm.
+            let realm = crate::realm::weighting(seed, id);
+            let tilted = realm.intensity > 0.0;
             let all: Vec<(Distribution, f32)> = candidates(seed, id)
                 .into_iter()
                 .filter(|c| r >= c.family.min_ring())
                 .filter_map(|c| {
-                    let a = c.abundance_in(seed, id, &here) * barren;
+                    let mut a = c.abundance_in(seed, id, &here);
+                    if tilted {
+                        a = (a
+                            * realm.species_weight(&c.founder(seed))
+                            * realm.biome_weight(here.kind))
+                        .min(1.0);
+                    }
+                    // Rock belts mask life whatever the realm favours.
+                    let a = a * barren;
                     (a > 0.0).then_some((c, a))
                 })
                 .filter(|(c, _)| r >= c.floor(seed))

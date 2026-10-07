@@ -1074,6 +1074,88 @@ pub fn draw_organs(g: &mut Gizmos, hud: &HudModel, layout: &ClusterLayout, s: &S
     }
 }
 
+/// The realm tag's stress icon, top left under the threat pips: a diamond in the realm's tint
+/// around the glyph of the first axis it tests (a calm ring where it tests nothing), and a dot
+/// for each further axis, hollow for the mild one.
+pub fn draw_realm(g: &mut Gizmos, hud: &HudModel, s: &Screen) {
+    use ssc::realm::Axis;
+    let Some(tag) = &hud.realm else {
+        return;
+    };
+    let c = Vec2::new(36.0, 66.0);
+    let [r, gr, b] = tag.tint;
+    let tint = Color::srgb(r, gr, b).with_alpha(tag.alpha.max(0.45));
+    let p = |dx: f32, dy: f32| s.v(c + Vec2::new(dx, dy));
+    g.linestrip_2d(
+        [
+            p(0.0, -10.0),
+            p(10.0, 0.0),
+            p(0.0, 10.0),
+            p(-10.0, 0.0),
+            p(0.0, -10.0),
+        ],
+        tint,
+    );
+    if tag.gentle {
+        circle(g, s, c, 3.5, tint);
+        return;
+    }
+    match tag.axes.first().copied().unwrap_or(Axis::Damage) {
+        Axis::Damage => {
+            g.line_2d(p(-4.0, -4.0), p(4.0, 4.0), tint);
+            g.line_2d(p(-4.0, 4.0), p(4.0, -4.0), tint);
+        }
+        Axis::Range => {
+            g.line_2d(p(-5.0, 0.0), p(5.0, 0.0), tint);
+            g.line_2d(p(5.0, 0.0), p(2.0, -3.0), tint);
+            g.line_2d(p(5.0, 0.0), p(2.0, 3.0), tint);
+        }
+        Axis::Defense => {
+            g.linestrip_2d(
+                [
+                    p(-3.5, -4.0),
+                    p(3.5, -4.0),
+                    p(3.5, 1.0),
+                    p(0.0, 5.0),
+                    p(-3.5, 1.0),
+                    p(-3.5, -4.0),
+                ],
+                tint,
+            );
+        }
+        Axis::Mobility => {
+            g.linestrip_2d([p(-4.0, -3.5), p(0.0, 0.0), p(-4.0, 3.5)], tint);
+            g.linestrip_2d([p(0.0, -3.5), p(4.0, 0.0), p(0.0, 3.5)], tint);
+        }
+        Axis::Mining => {
+            g.linestrip_2d(
+                [p(-4.0, 3.5), p(0.0, -4.0), p(4.0, 3.5), p(-4.0, 3.5)],
+                tint,
+            );
+        }
+        Axis::Sensors => {
+            circle(g, s, c, 4.0, tint);
+            disc(g, s, c, 1.2, tint);
+        }
+        Axis::Symbiosis => {
+            circle(g, s, c + Vec2::new(-2.0, 0.0), 2.8, tint);
+            circle(g, s, c + Vec2::new(2.0, 0.0), 2.8, tint);
+        }
+        Axis::Utility => {
+            outline_box(g, s, c.x - 3.5, c.y - 3.5, 7.0, 7.0, tint);
+            disc(g, s, c, 1.0, tint);
+        }
+    }
+    for (k, _) in tag.axes.iter().enumerate().skip(1) {
+        let at = c + Vec2::new(-4.0 + (k - 1) as f32 * 8.0, 18.0);
+        if k < tag.primary {
+            disc(g, s, at, 2.0, tint);
+        } else {
+            circle(g, s, at, 2.0, tint);
+        }
+    }
+}
+
 pub const CARGO_HALF_HEIGHT: f32 = CARGO_H / 2.0;
 
 /// The whole HUD apart from the ship's own rings.
@@ -1092,6 +1174,7 @@ pub fn draw_hud(g: &mut Gizmos, game: &Game, hud: &HudModel, s: &Screen, time: f
     }
     draw_cargo(g, &hud.cargo, layout.cargo, s, time);
     draw_organs(g, hud, &layout, s, time);
+    draw_realm(g, hud, s);
 }
 
 // ---- texts ------------------------------------------------------------------------------
@@ -1101,6 +1184,7 @@ pub fn draw_hud(g: &mut Gizmos, game: &Game, hud: &HudModel, s: &Screen, time: f
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tag {
     Region,
+    Realm,
     Sector,
     Score,
     Mult,
@@ -1123,8 +1207,9 @@ pub enum Tag {
 }
 
 impl Tag {
-    const ALL: [Tag; 25] = [
+    const ALL: [Tag; 26] = [
         Tag::Region,
+        Tag::Realm,
         Tag::Sector,
         Tag::Score,
         Tag::Mult,
@@ -1154,6 +1239,7 @@ impl Tag {
     fn size(self) -> f32 {
         match self {
             Tag::Region => 19.0,
+            Tag::Realm => 11.0,
             Tag::Score => 26.0,
             Tag::Weapon => 17.0,
             Tag::Prompt => 14.0,
@@ -1201,6 +1287,16 @@ fn describe(
             Vec2::new(cx, 18.0),
             Align::Center,
         ),
+        Tag::Realm => {
+            let realm = hud.realm.as_ref()?;
+            let [r, g, b] = realm.tint;
+            (
+                format!("{}\n{}", realm.name, realm.title),
+                Color::srgb(r, g, b).with_alpha(0.55 + 0.4 * realm.alpha),
+                Vec2::new(54.0, 61.0),
+                Align::Left,
+            )
+        }
         Tag::Sector => (
             format!("SECTOR {}, {}", hud.sector.0, hud.sector.1),
             dim.with_alpha(0.75 * hud.region_alpha),
@@ -1419,6 +1515,7 @@ fn describe(
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Align {
+    Left,
     Center,
     Right,
 }
@@ -1463,10 +1560,12 @@ pub fn update_texts(
             460.0
         };
         let left = match align {
+            Align::Left => at.x,
             Align::Center => at.x - width / 2.0,
             Align::Right => at.x - width,
         };
         let justify = match align {
+            Align::Left => Justify::Left,
             Align::Center => Justify::Center,
             Align::Right => Justify::Right,
         };

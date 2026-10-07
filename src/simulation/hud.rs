@@ -322,6 +322,23 @@ pub struct HudModel {
     pub organs: Vec<OrganIcon>,
     /// Worms on the hull, and how fat the fattest is (0 to 1).
     pub worms: (usize, f32),
+    /// The realm the ship is announced to be in (none before the first tick).
+    pub realm: Option<RealmTag>,
+}
+
+/// The realm tag of the HUD: the name, the kind, its colour and the axes it tests.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RealmTag {
+    pub name: String,
+    pub title: &'static str,
+    pub tint: [f32; 3],
+    /// Primary axes first, then the mild one (see `mild`).
+    pub axes: Vec<crate::realm::Axis>,
+    /// How many of `axes` are primary (the rest, at most one, is mild).
+    pub primary: usize,
+    /// No stress here: the starter, a rest realm, or the edge of a realm.
+    pub gentle: bool,
+    pub alpha: f32,
 }
 
 impl Game {
@@ -483,6 +500,7 @@ impl Game {
             lure: self.next_lure(),
             jam,
             organs: self.organ_icons(),
+            realm: self.realm_tag(),
             worms: (
                 self.latches().len(),
                 self.latches()

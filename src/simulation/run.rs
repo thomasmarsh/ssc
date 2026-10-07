@@ -85,6 +85,9 @@ pub struct RunStats {
     pub sectors: HashSet<SectorId>,
     /// Regions entered (by key), after the hysteresis that keeps a border from flickering.
     pub regions: HashSet<u64>,
+    /// Realms entered (by key) and their names in order, after the same hysteresis.
+    pub realms: HashSet<u64>,
+    pub realm_names: Vec<String>,
     /// Farthest sector depth reached and the deepest threat multiplier faced.
     pub deepest: f32,
     pub threat: f32,
@@ -364,9 +367,10 @@ impl Game {
                 self.score, r.deaths
             ),
             format!(
-                "SECTORS EXPLORED {}   REGIONS {}   DEEPEST {:.0}   THREAT FACED x{:.1}   FLOWN {:.1}K",
+                "SECTORS EXPLORED {}   REGIONS {}   REALMS {}   DEEPEST {:.0}   THREAT FACED x{:.1}   FLOWN {:.1}K",
                 r.sectors.len(),
                 r.regions.len(),
+                r.realms.len(),
                 r.deepest,
                 r.threat.max(1.0),
                 r.distance / 1000.0
@@ -396,6 +400,9 @@ impl Game {
                 r.weapons, r.parts, r.pads
             ),
         ];
+        if r.realm_names.len() > 1 {
+            lines.push(format!("REALMS VISITED: {}", r.realm_names.join(", ")));
+        }
         if !r.apex_slain.is_empty() {
             lines.push(format!("APEX SLAIN: {}", r.apex_slain.join(", ")));
         }

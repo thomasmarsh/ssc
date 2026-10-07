@@ -306,7 +306,7 @@ impl Game {
             return false;
         };
         let skills = self.loadout.skills;
-        let range = skills.ping_range(PING_RANGE);
+        let range = skills.ping_range(PING_RANGE) * self.realm_effects().sensor;
         let speed = skills.ping_speed(RING_SPEED);
         let owns = |kind: EchoKind| kind.unlocked_by().is_none_or(|s| skills.level(s) > 0);
         if !free {

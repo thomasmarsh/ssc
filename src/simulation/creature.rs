@@ -172,7 +172,10 @@ impl Game {
             // A tired forager is slower; a fed one (or one that needs no food) is unchanged.
             let vigor = body.vigor();
             let pace_spread = if schooling { 0.1 } else { 0.3 };
-            let cruise = g.cruise * (1.0 - pace_spread / 2.0 + pace_spread * temperament) * vigor;
+            let cruise = g.cruise
+                * (1.0 - pace_spread / 2.0 + pace_spread * temperament)
+                * vigor
+                * body.genes.foe.speed;
             let lead = g.lead * phenotype.sensor_acuity;
             let flock = g.flocking * phenotype.flocking;
             let perception = if g.social == Social::Solitary {
@@ -181,7 +184,8 @@ impl Game {
                 PERCEPTION * flock
             };
             // Aggression moves pace only a little; it mostly shows in rage and fire rate.
-            let speed = g.speed * (1.0 + (phenotype.aggression - 1.0) * 0.4) * vigor;
+            let speed =
+                g.speed * (1.0 + (phenotype.aggression - 1.0) * 0.4) * vigor * phenotype.foe.speed;
 
             let mut separation = Vec2::ZERO;
             let mut heading = Vec2::ZERO;

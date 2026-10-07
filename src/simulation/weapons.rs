@@ -323,6 +323,7 @@ impl Game {
     /// their own clocks while their traits are fitted.
     pub(super) fn update_arms(&mut self, dt: f32, firing: bool) {
         let stats = self.stats;
+        let reach = self.realm_effects().weapon_range;
         for clock in &mut self.arm_clock {
             *clock = (*clock - dt).max(0.0);
         }
@@ -354,7 +355,7 @@ impl Game {
                 let offset = (k as f32 - (count - 1) as f32 / 2.0) * 0.5;
                 let aim = Vec2::from_angle(angle + offset);
                 let mut missile =
-                    Bullet::friendly(position + aim * 22.0, velocity + aim * 380.0, 2.8);
+                    Bullet::friendly(position + aim * 22.0, velocity + aim * 380.0, 2.8 * reach);
                 missile.damage = stats.damage * 1.6;
                 missile.radius = 5.0;
                 missile.shape = Shape::Missile;
@@ -395,7 +396,7 @@ impl Game {
                     break;
                 }
                 let aim = Vec2::from_angle(phase + k as f32 * TAU / ring as f32);
-                let mut orb = Bullet::friendly(position + aim * 20.0, aim * 520.0, 0.9);
+                let mut orb = Bullet::friendly(position + aim * 20.0, aim * 520.0, 0.9 * reach);
                 orb.damage = stats.damage * 0.5;
                 orb.shape = Shape::Orb;
                 self.bullets.push(orb);

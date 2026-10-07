@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 14;
+pub const GENERATOR_VERSION: u32 = 15;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
@@ -127,6 +127,8 @@ pub struct Cell {
     pub biome: BiomeKind,
     pub oasis: bool,
     pub region: Region,
+    /// The realm (the very large layer) and how fully its effects apply here.
+    pub realm: crate::realm::Realm,
     /// Most abundant first.
     pub species: Vec<SpeciesAt>,
     pub creatures: u32,
@@ -217,6 +219,7 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
         biome: eco.biome.kind,
         oasis: eco.oasis,
         region: region(seed, id),
+        realm: crate::realm::realm(seed, id),
         species: eco
             .presence
             .iter()
@@ -322,6 +325,9 @@ pub struct Map {
     species_index: HashMap<u64, usize>,
     regions: Vec<(String, u32)>,
     region_index: HashMap<u64, usize>,
+    /// Realms by first appearance: name, kind, tint.
+    realms: Vec<(String, u8, String)>,
+    realm_index: HashMap<u64, usize>,
     territories: Vec<TerritoryRow>,
     territory_index: HashMap<u64, usize>,
     apexes: Vec<(String, &'static str, &'static str)>,
@@ -397,6 +403,8 @@ impl Map {
             biome_index: HashMap::new(),
             regions: Vec::new(),
             region_index: HashMap::new(),
+            realms: Vec::new(),
+            realm_index: HashMap::new(),
             territories: Vec::new(),
             territory_index: HashMap::new(),
             apexes: Vec::new(),
@@ -468,6 +476,14 @@ impl Map {
             self.regions
                 .push((cell.region.name.clone(), kind_index(cell.region.kind)));
         }
+        if !self.realm_index.contains_key(&cell.realm.key) {
+            self.realm_index.insert(cell.realm.key, self.realms.len());
+            self.realms.push((
+                cell.realm.name.clone(),
+                cell.realm.kind.0,
+                hex(cell.realm.tint()),
+            ));
+        }
         if let Some(t) = &cell.territory {
             self.intern_territory(t);
         }
@@ -493,7 +509,8 @@ impl Map {
     /// capital 0/1, outposts, apex index or -1, diversity cap, belt depth, biome cell index,
     /// oasis 0/1, then the wildlife's affinity read (0 none, 1 neutral, 2 friendly, 3 hostile,
     /// 4 mixed), its hostile share, its friendly share, the territory index it is read
-    /// against (-1 for none) and the number of creatures carrying a rare power.
+    /// against (-1 for none), the number of creatures carrying a rare power, the realm index and
+    /// how fully the realm's effects apply here (0 to 1).
     pub fn row_json(&self, index: usize) -> String {
         let c = &self.cells[index];
         let mut o = String::new();
@@ -566,7 +583,7 @@ impl Map {
         };
         let _ = write!(
             o,
-            "],{territory},{},{},{apex},{:.2},{:.2},{},{},{mood},{:.2},{:.2},{mood_civ},{}]",
+            "],{territory},{},{},{apex},{:.2},{:.2},{},{},{mood},{:.2},{:.2},{mood_civ},{},{},{:.2}]",
             u8::from(c.capital),
             c.outposts,
             c.capacity,
@@ -576,6 +593,8 @@ impl Map {
             c.mood.as_ref().map_or(0.0, |m| m.1.hostile),
             c.mood.as_ref().map_or(0.0, |m| m.1.friendly),
             c.powered,
+            self.realm_index[&c.realm.key],
+            c.realm.intensity,
         );
         o
     }
@@ -651,6 +670,45 @@ impl Map {
             j.push('[');
             json_str(&mut j, name);
             let _ = write!(j, ",{kind}]");
+        }
+        j.push_str("],\"realmKinds\":[");
+        for (i, kind) in crate::realm::RealmKind::all().enumerate() {
+            if i > 0 {
+                j.push(',');
+            }
+            let spec = kind.spec();
+            let probe = crate::realm::Realm {
+                key: 77,
+                kind,
+                name: String::new(),
+                intensity: 1.0,
+                effects: spec.effects,
+            };
+            j.push('[');
+            json_str(&mut j, spec.title);
+            j.push(',');
+            json_str(&mut j, spec.blurb);
+            j.push(',');
+            json_str(&mut j, &probe.stress_line());
+            j.push(',');
+            let lines: Vec<String> = probe
+                .changes()
+                .iter()
+                .map(|(label, pct)| format!("{label} {pct:+}%"))
+                .collect();
+            json_str(&mut j, &lines.join("; "));
+            j.push(']');
+        }
+        j.push_str("],\"realms\":[");
+        for (i, (name, kind, tint)) in self.realms.iter().enumerate() {
+            if i > 0 {
+                j.push(',');
+            }
+            j.push('[');
+            json_str(&mut j, name);
+            let _ = write!(j, ",{kind},");
+            json_str(&mut j, tint);
+            j.push(']');
         }
         j.push_str("],\"territories\":[");
         for (i, t) in self.territories.iter().enumerate() {
@@ -893,6 +951,7 @@ mod tests {
             "id=\"sf\"",
             "data-layer=\"diversity\"",
             "data-layer=\"biomes\"",
+            "data-layer=\"realms\"",
             "id=\"sum\"",
         ] {
             assert!(html.contains(hook), "{hook}");
@@ -902,6 +961,38 @@ mod tests {
         let fields: Vec<&str> = row.trim_end_matches(']').rsplitn(5, ',').collect();
         assert_eq!(fields.len(), 5, "{row}");
         assert!(map.biomes.len() >= 2 && map.biomes.iter().all(|k| *k < 8));
+    }
+
+    /// The realm layer: every row ends with its realm's index and strength, the tables name the
+    /// realm and the kinds, and HOME is the gentle starter.
+    #[test]
+    fn rows_carry_their_realm() {
+        let map = Map::build(small(15, 15)).unwrap();
+        let data = map.data_json();
+        for key in [
+            "\"realmKinds\"",
+            "\"realms\"",
+            "\"THE VEIL\"",
+            "\"IRON TIDE\"",
+        ] {
+            assert!(data.contains(key), "{key}");
+        }
+        for (i, cell) in map.cells.iter().enumerate() {
+            let row = map.row_json(i);
+            let tail = format!(
+                ",{},{:.2}]",
+                map.realm_index[&cell.realm.key], cell.realm.intensity
+            );
+            assert!(row.ends_with(&tail), "{row}");
+            assert_eq!(cell.realm, crate::realm::realm(DEFAULT_SEED, cell.id));
+        }
+        let home = map.cells.iter().find(|c| c.id == SectorId::ORIGIN).unwrap();
+        assert_eq!(home.realm.kind, crate::realm::RealmKind::CRADLE);
+        assert!(
+            map.realms
+                .iter()
+                .any(|(name, kind, _)| name.ends_with("Cradle") && *kind == 0)
+        );
     }
 
     #[test]

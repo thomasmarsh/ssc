@@ -450,7 +450,7 @@ impl Game {
         let material = rock.material(seed);
         let kind = rock.rock;
         let power = self.loadout.skills.beam_power();
-        let gain = self.loadout.skills.yield_mult();
+        let gain = self.loadout.skills.yield_mult() * self.realm_effects().mining;
         let units = if kind == RockKind::Crystal {
             let cycles = |t: f32| ((t + 1e-4) / CYCLE).floor().min(3.0);
             (cycles(self.mine_clock) - cycles(before)) * CYCLE_YIELD * power

@@ -201,7 +201,7 @@ impl Game {
         if scale <= 0.0 {
             return false;
         }
-        let seconds = (seconds * scale).clamp(0.1, power::JAM_MAX);
+        let seconds = (seconds * scale * self.realm_effects().jam_time).clamp(0.1, power::JAM_MAX);
         let mut chosen: Vec<System> = Vec::new();
         for &s in systems {
             if s == System::Hud {
@@ -239,7 +239,7 @@ impl Game {
         if scale <= 0.0 {
             return false;
         }
-        let seconds = (seconds * scale).clamp(0.1, power::JAM_MAX);
+        let seconds = (seconds * scale * self.realm_effects().jam_time).clamp(0.1, power::JAM_MAX);
         let j = &mut self.jam;
         j.confuse = seconds;
         j.confuse_total = seconds;

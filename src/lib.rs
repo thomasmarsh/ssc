@@ -8,6 +8,7 @@ pub mod genome;
 pub mod mixer;
 pub mod power;
 pub mod range;
+pub mod realm;
 pub mod region;
 pub mod sectormap;
 pub mod simulation;

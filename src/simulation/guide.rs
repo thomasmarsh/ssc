@@ -125,7 +125,12 @@ impl Game {
                 );
             }
         }
-        minerals.retain(|b| b.distance <= MINERAL_RANGE);
+        // A realm that dims the sensors shortens how far the arrows see (and drops far threats).
+        let sense = self.realm_effects().sensor;
+        minerals.retain(|b| b.distance <= MINERAL_RANGE * sense.clamp(0.05, 1.0));
+        if sense < 1.0 {
+            threats.retain(|b| b.distance <= super::tuning::THREAT_SENSE_RANGE * sense);
+        }
         let mut out = pick_nearest(threats, MAX_THREAT_ARROWS);
         out.extend(pick_nearest(minerals, MAX_MINERAL_ARROWS));
         out

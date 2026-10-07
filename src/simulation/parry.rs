@@ -41,7 +41,7 @@ impl Game {
         {
             return false;
         }
-        if self.jammed(JamSystem::Parry) {
+        if self.jammed(JamSystem::Parry) || self.ability_fizzles(1) {
             self.cue(Cue::Refused);
             return false;
         }

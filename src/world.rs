@@ -2,6 +2,7 @@
 //! function of (world seed, sector id), so they can be regenerated at will.
 
 use crate::genome::{GenePool, Habit, INDIVIDUAL_SALT, Niche, Species, Weapon};
+use crate::realm::Foe;
 use crate::simulation::BodyKind;
 pub use crate::territory::{CivRole, CivShape, CivTag, Fall, Standing, Territory, territory};
 use bevy::prelude::Vec2;
@@ -114,12 +115,16 @@ pub struct Phenotype {
     /// How hard the place makes things: creatures here take proportionally less damage
     /// and hit harder. One at HOME, growing with depth.
     pub threat: f32,
+    /// What the realm does to its enemies (hull, shield, pace, damage, armour): neutral in the
+    /// starter realm. See `realm`.
+    pub foe: Foe,
 }
 
 impl Phenotype {
-    /// Damage multiplier for what a creature fires or rams with.
+    /// Damage multiplier for what a creature fires or rams with: depth sharpens it, and so
+    /// does the realm.
     pub fn sharpness(&self) -> f32 {
-        1.0 + 0.6 * (self.threat - 1.0).max(0.0)
+        (1.0 + 0.6 * (self.threat - 1.0).max(0.0)) * self.foe.damage
     }
 }
 
@@ -131,6 +136,23 @@ pub fn phenotype_of(params: &SectorParams) -> Phenotype {
         aggression: 0.5 + params.aggression,
         mass_affinity: (params.distortion - 0.5) * 2.0,
         threat: threat(params.depth),
+        foe: Foe::NEUTRAL,
+    }
+}
+
+/// The phenotype of the fauna of sector `id`: its parameters' and its realm's.
+pub fn phenotype_at(seed: u64, id: SectorId) -> Phenotype {
+    realm_phenotype(seed, id, phenotype_of(&latent(seed, id)))
+}
+
+/// `base` with the realm of sector `id` laid over it: its enemy modifiers, and the threat it
+/// raises or lowers.
+fn realm_phenotype(seed: u64, id: SectorId, base: Phenotype) -> Phenotype {
+    let e = crate::realm::effects(seed, id);
+    Phenotype {
+        threat: 1.0 + (base.threat - 1.0) * e.threat,
+        foe: e.foe,
+        ..base
     }
 }
 
@@ -150,6 +172,7 @@ impl Default for Phenotype {
             aggression: 1.0,
             mass_affinity: 0.0,
             threat: 1.0,
+            foe: Foe::NEUTRAL,
         }
     }
 }
@@ -525,13 +548,19 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
     let range = |low: f32, high: f32, p: f32| (count(low * 2.0 * p), count(high * 2.0 * p));
     let mut out = Vec::new();
 
-    let genes = Phenotype {
-        flocking: 0.5 + swarm,
-        sensor_acuity: 0.5 + tech,
-        aggression: 0.5 + aggression,
-        mass_affinity: (distortion - 0.5) * 2.0,
-        threat: threat(depth),
-    };
+    let genes = realm_phenotype(
+        seed,
+        id,
+        Phenotype {
+            flocking: 0.5 + swarm,
+            sensor_acuity: 0.5 + tech,
+            aggression: 0.5 + aggression,
+            mass_affinity: (distortion - 0.5) * 2.0,
+            threat: threat(depth),
+            foe: Foe::NEUTRAL,
+        },
+    );
+    let realm = crate::realm::effects(seed, id);
 
     // The sector's planetoid is decided first, so everything else keeps clear of it.
     let world = planetoid(seed, id, params);
@@ -562,8 +591,8 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
     }
     // The opening rings (HOME and its two rings of neighbours) hold rocks and plankton but no
     // gravity wells: nothing there is a hazard beyond the creatures the ramp allows.
-    let wells = if ring > 2 && rng.chance((1.2 * distortion).min(1.0)) {
-        rng.int(1, count(4.0 * distortion).max(1))
+    let wells = if ring > 2 && rng.chance((1.2 * distortion * realm.wells).min(1.0)) {
+        rng.int(1, count(4.0 * distortion * realm.wells).max(1))
     } else {
         0
     };
@@ -600,7 +629,7 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
     // The population: each species whose range covers the sector, in proportion to how
     // present it is here. A thin edge of a range holds a few creatures, its heart a crowd,
     // and a place with little life holds fewer of everything.
-    let lush = POP_BASE + POP_LIFE * swarm;
+    let lush = (POP_BASE + POP_LIFE * swarm) * realm.life;
     for entry in &pool.entries {
         let plan = cluster_plan(entry.species.genome.niche());
         let expected = plan.clusters * entry.weight * lush;
@@ -633,7 +662,7 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
     let populated = !pool.entries.is_empty();
 
     // Nests: ring-shaped rock shelters with a few grazing creatures of a nesting species.
-    let nest_chance = (wildness * (0.3 + 0.7 * above(swarm) + 0.3 * danger)).min(0.85);
+    let nest_chance = (wildness * (0.3 + 0.7 * above(swarm) + 0.3 * danger) * realm.life).min(0.85);
     for _ in 0..(wild.chance(nest_chance) as u32 + wild.chance(nest_chance * 0.4) as u32) {
         let heart = place(&mut wild);
         let gap = wild.int(0, NEST_STONES - 1);
@@ -691,7 +720,9 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
 
     // Exotic fauna: any species of the pool, wherever tech, distortion or danger run high.
     // A chain body plan with a wave gene slithers when it turns up here or in any slot above.
-    let exotic = wildness * (0.9 * above(tech) + 0.9 * above(distortion) + 0.35 * danger).min(0.85);
+    let exotic = wildness
+        * (0.9 * above(tech) + 0.9 * above(distortion) + 0.35 * danger).min(0.85)
+        * realm.life;
     for _ in 0..(wild.chance(exotic) as u32 + wild.chance(exotic * 0.3) as u32) {
         let anchor = place(&mut wild);
         if !populated {
@@ -709,7 +740,7 @@ pub fn compose_with(seed: u64, id: SectorId, params: &SectorParams, pool: &GeneP
 
     // Inhabited rocks: shells that hatch their tenants when approached or hurt.
     let mut den = Rng::new(hash2(seed ^ HUSK_SALT, id.x, id.y));
-    let husk_chance = (wildness * (0.25 + 0.5 * danger + 0.4 * above(swarm))).min(0.9);
+    let husk_chance = (wildness * (0.25 + 0.5 * danger + 0.4 * above(swarm)) * realm.life).min(0.9);
     for _ in 0..(den.chance(husk_chance) as u32 + den.chance(husk_chance * 0.35) as u32) {
         let heart = place(&mut den);
         if !populated {

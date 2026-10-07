@@ -77,6 +77,8 @@ select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(-
 .sprow{cursor:pointer}.sprow:hover{background:var(--bg)}
 .belt{fill:none;stroke:var(--ink);stroke-width:.05;opacity:.5}
 .oasis{fill:none;stroke:var(--ok);stroke-width:1.6;vector-effect:non-scaling-stroke}
+.realmedge{fill:none;stroke:var(--ink);stroke-width:3;vector-effect:non-scaling-stroke;opacity:.55;stroke-linecap:square}
+.rname{font-weight:700;letter-spacing:.08em;paint-order:stroke;stroke:var(--stage);stroke-width:.18;pointer-events:none}
 .bedge{fill:none;stroke:var(--accent);stroke-width:1.6;vector-effect:non-scaling-stroke;opacity:.7}
 svg.lo .lod{display:none}
 svg.lo2 .lod2{display:none}
@@ -103,6 +105,7 @@ svg.lo2 .lod2{display:none}
  <label><input type="checkbox" data-layer="life" checked>life</label>
  <label><input type="checkbox" data-layer="rock" checked>rock</label>
  <label><input type="checkbox" data-layer="regions" checked>regions</label>
+ <label><input type="checkbox" data-layer="realms" checked><span class="sw" style="background:linear-gradient(90deg,#c85,#58c,#b8c)"></span>realms</label>
  <label><input type="checkbox" data-layer="rings" checked>rings</label>
  <label><input type="checkbox" data-layer="civs" checked>civilizations</label>
  <label><input type="checkbox" data-layer="planets" checked>planetoids</label>
@@ -129,7 +132,7 @@ const D=/*DATA*/;
 const NS="http://www.w3.org/2000/svg";
 const $=s=>document.querySelector(s);
 const cols=D.cols,rows=D.rows,cells=D.cells;
-const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14,CAPY=15,BELT=16,BIO=17,OAS=18,MOOD=19,MHOS=20,MFRI=21,MCIV=22,POW=23;
+const RING=0,LIFE=1,MAT=2,KIND=3,REG=4,SP=5,CRE=6,AST=7,BAS=8,WELL=9,PLA=10,TER=11,CAP=12,OUT=13,APX=14,CAPY=15,BELT=16,BIO=17,OAS=18,MOOD=19,MHOS=20,MFRI=21,MCIV=22,POW=23,REALM=24,RINT=25;
 const KINDS=["Home","Wild","Confluence","Belt","Reach","Oasis","Civilization"];
 const FORMS=["the peaceful start, no creatures","a country of wildlife, named for its biome or a strong specialist","many species converge (rare, biodiverse)","a rock-rich band with little life","a sparse gap with little life","a planetoid with life around it in the middle of nowhere","a civilization's territory"];
 const hc=-D.x0,hr=D.y1; /* HOME's cell */
@@ -147,14 +150,14 @@ const pat=el("pattern",{id:"hatch",width:".22",height:".22",patternUnits:"userSp
 el("line",{x1:"0",y1:"0",x2:"0",y2:".22",class:"hatch"},pat);
 const world=el("g",{},svg);
 const G={};
-["fill","bio","aff","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","powers","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
+["fill","realm","bio","aff","div","rock","hatch","belt","tfill","regions","realmedge","rname","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","powers","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
 G.hatch.setAttribute("class","lod2");G.belt.setAttribute("class","lod");
 ["wells","planets","civs","apex","powers","home"].forEach(n=>G[n].setAttribute("class","lod"));
 G.grid.setAttribute("class","lod2");G.regions.setAttribute("class","lod2");
 
-const layers={ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,powers:false,grid:false,diversity:false,biomes:false,belts:true,affinity:false};
+const layers={realms:true,ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,powers:false,grid:false,diversity:false,biomes:false,belts:true,affinity:false};
 let filter=-1; /* species index shown alone, or -1 */
-const showMap={affinity:["aff"],diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],powers:["powers"],grid:["grid"]};
+const showMap={realms:["realm","realmedge","rname"],affinity:["aff"],diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],powers:["powers"],grid:["grid"]};
 function applyLayers(){for(const l in showMap)for(const g of showMap[l])G[g].style.display=layers[l]?"":"none"}
 
 const dark=()=>matchMedia("(prefers-color-scheme: dark)").matches;
@@ -170,8 +173,8 @@ function filterWeight(row){for(const s of row[SP])if(s[0]===filter)return s[1];r
 const BIOHUE=[200,130,95,0,285,45,25,170];
 
 function build(){
- for(const n of ["fill","bio","aff","div","rock","hatch","belt","tfill","regions","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","powers","home"])G[n].textContent="";
- const divs=[[],[],[],[],[],[],[]],bio=new Map(),bedge=[],belts=[],aff=[[],[],[]];
+ for(const n of ["fill","realm","bio","aff","div","rock","hatch","belt","tfill","regions","realmedge","rname","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","powers","home"])G[n].textContent="";
+ const realmFill=new Map(),realmEdge=[],realmSum=new Map(),divs=[[],[],[],[],[],[],[]],bio=new Map(),bedge=[],belts=[],aff=[[],[],[]];
  /* range hue by life level */
  const fills=new Map(),rocks=[[],[],[],[]],hatch=[],conf=[],tf=new Map(),tedge=new Map(),redge=[];
  const rect=(c,r)=>"M"+c+" "+r+"h1v1h-1z";
@@ -190,11 +193,13 @@ function build(){
   if(row[BELT]>=.5)belts.push("M"+c+" "+r+"l1 1M"+(c+1)+" "+r+"l-1 1");
   if(row[OAS])belts.push("M"+(c+.5)+" "+(r+.2)+"m-.12 0a.12 .12 0 1 0 .24 0a.12 .12 0 1 0 -.24 0");
   if(row[KIND]===2)conf.push("M"+(c+.07)+" "+(r+.07)+"h.86v.86h-.86z");
+  {const ri=row[REALM];let a3=realmFill.get(ri);if(!a3){a3=[];realmFill.set(ri,a3)}a3.push(rect(c,r));
+   let sm=realmSum.get(ri);if(!sm){sm=[0,0,0];realmSum.set(ri,sm)}sm[0]+=c+.5;sm[1]+=r+.5;sm[2]++}
   const t=row[TER];
   if(t>=0){let a2=tf.get(t);if(!a2){a2=[];tf.set(t,a2)}a2.push(rect(c,r))}
   const rt=cellAt(c+1,r),bt=cellAt(c,r+1);
-  if(rt){if(rt[BIO]!==row[BIO])bedge.push("M"+(c+1)+" "+r+"v1");if(rt[REG]!==row[REG])redge.push("M"+(c+1)+" "+r+"v1");edge(tedge,t,rt[TER],"M"+(c+1)+" "+r+"v1")}
-  if(bt){if(bt[BIO]!==row[BIO])bedge.push("M"+c+" "+(r+1)+"h1");if(bt[REG]!==row[REG])redge.push("M"+c+" "+(r+1)+"h1");edge(tedge,t,bt[TER],"M"+c+" "+(r+1)+"h1")}
+  if(rt){if(rt[REALM]!==row[REALM])realmEdge.push("M"+(c+1)+" "+r+"v1");if(rt[BIO]!==row[BIO])bedge.push("M"+(c+1)+" "+r+"v1");if(rt[REG]!==row[REG])redge.push("M"+(c+1)+" "+r+"v1");edge(tedge,t,rt[TER],"M"+(c+1)+" "+r+"v1")}
+  if(bt){if(bt[REALM]!==row[REALM])realmEdge.push("M"+c+" "+(r+1)+"h1");if(bt[BIO]!==row[BIO])bedge.push("M"+c+" "+(r+1)+"h1");if(bt[REG]!==row[REG])redge.push("M"+c+" "+(r+1)+"h1");edge(tedge,t,bt[TER],"M"+c+" "+(r+1)+"h1")}
  }
  function edge(map,a,b,seg){if(a===b)return;for(const t of[a,b]){if(t<0)continue;let x=map.get(t);if(!x){x=[];map.set(t,x)}x.push(seg)}}
  for(const[key,list]of fills){const[h,lb]=key.split("|").map(Number);el("path",{d:list.join(""),fill:fillColor(h,(lb+.5)/6)},G.fill)}
@@ -208,6 +213,11 @@ function build(){
  rocks.forEach((l,i)=>{if(l.length)el("path",{d:l.join(""),class:"rock","fill-opacity":ops[i]},G.rock)});
  if(hatch.length)el("path",{d:hatch.join(""),fill:"url(#hatch)",opacity:".7"},G.hatch);
  if(redge.length)el("path",{d:redge.join(""),class:"redge"},G.regions);
+ for(const[ri,l]of realmFill)el("path",{d:l.join(""),fill:D.realms[ri][2],"fill-opacity":dark()?".42":".45"},G.realm);
+ if(realmEdge.length)el("path",{d:realmEdge.join(""),class:"realmedge"},G.realmedge);
+ realmLabels.length=0;
+ for(const[ri,sm]of realmSum){if(sm[2]<24)continue;const rl=D.realms[ri],t=el("text",{"text-anchor":"middle",class:"rname",fill:rl[2]},G.rname);t.textContent=rl[0].toUpperCase();t.dataset.x=sm[0]/sm[2];t.dataset.y=sm[1]/sm[2];realmLabels.push(t)}
+ apply();
  if(conf.length)el("path",{d:conf.join(""),class:"conf"},G.conf);
  for(const[t,l]of tf)el("path",{d:l.join(""),fill:D.territories[t][8],"fill-opacity":".22"},G.tfill);
  for(const[t,l]of tedge)el("path",{d:l.join(""),class:"tedge",stroke:D.territories[t][8]},G.tedge);
@@ -218,7 +228,7 @@ function build(){
  G.conf.style.display="";
  applyLayers();
 }
-const ringLabels=[];
+const ringLabels=[],realmLabels=[];
 function buildRings(){
  ringLabels.length=0;
  const axis=(p,n)=>p<0?-p:p>=n?p-n+1:0,far=(p,n)=>Math.max(Math.abs(p),Math.abs(p-(n-1)));
@@ -292,6 +302,7 @@ function apply(){
  world.setAttribute("transform","translate("+v.x+" "+v.y+") scale("+v.k+")");
  svg.classList.toggle("lo",v.k<6);svg.classList.toggle("lo2",v.k<9);
  const step=niceStep(Math.ceil(46/v.k)),fs=11/v.k;
+ {const rfs=Math.min(3.4,13/v.k);for(const t of realmLabels){t.setAttribute("font-size",rfs);t.setAttribute("x",t.dataset.x);t.setAttribute("y",t.dataset.y)}}
  for(const t of ringLabels){const k=+t.dataset.k;t.style.display=(k%step===0)?"":"none";t.setAttribute("font-size",fs);t.setAttribute("x",+t.dataset.x+2/v.k);t.setAttribute("y",+t.dataset.y+fs)}
  clearTimeout(detailTimer);detailTimer=setTimeout(detail,80);
  placeMarks();
@@ -329,6 +340,7 @@ function describe(cr,full){
  const reg=D.regions[row[REG]],terr=row[TER]>=0?D.territories[row[TER]]:null;
  let h='<h2>'+esc(reg[0])+'</h2><div class="sub">sector ('+x+', '+y+') &middot; centre ('+(x*D.size)+', '+(y*D.size)+') &middot; ring '+row[RING]+'</div>';
  h+='<div class="row"><span class="k">Form</span><span><b>'+KINDS[row[KIND]]+'</b>'+(full?' - '+FORMS[row[KIND]]:'')+'</span></div>';
+ {const rl=D.realms[row[REALM]],rk=D.realmKinds[rl[1]],pc=Math.round(row[RINT]*100);h+='<div class="row"><span class="k">Realm</span><span><span class="dot" style="background:'+rl[2]+'"></span> <b>'+esc(rl[0])+'</b> <span class="sub">'+esc(rk[0])+(rk[2].indexOf("NO STRESS")<0?', '+pc+'% strength':'')+'</span></span></div>';if(full||pc>=50)h+='<div class="row sub">'+esc((rk[2].split('   ')[1]||''))+(full?' - '+esc(rk[1])+(rk[3]?' ('+esc(rk[3])+')':''):'')+'</div>'}
  if(row[KIND]===0)h+='<div class="row ok"><b>HOME - peaceful, no creatures, a planetoid to land on</b></div>';
  else{const bk=D.biomeKinds[D.biomes[row[BIO]]];h+='<div class="row"><span class="k">Biome</span><span>'+esc(bk[0])+' <span class="sub">cell #'+row[BIO]+'</span></span></div>'}
  const sp=row[SP];
@@ -378,6 +390,7 @@ const LEGEND='<details open><summary>Legend</summary><div class="leg">'
 +'<svg viewBox="0 0 30 20"><rect x="2" y="2" width="26" height="16" fill="none" stroke="var(--ring)" stroke-dasharray="4 3"/></svg><span>Dashed square: Moore ring from HOME, numbered</span>'
 +'<svg viewBox="0 0 30 20"><path d="M15 3L26 10L15 17L4 10z" fill="#c33" fill-opacity=".8" stroke="var(--ink)"/></svg><span>Civilization capital (pips: fort tier), outlined in its tint; triangles are outposts</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="7" fill="var(--panel)" stroke="var(--ok)" stroke-width="2.5"/><circle cx="15" cy="10" r="2.5" fill="var(--ok)"/></svg><span>The early outpost, peaceful</span>'
++'<svg viewBox="0 0 30 20"><rect width="15" height="20" fill="#c85" fill-opacity=".4"/><rect x="15" width="15" height="20" fill="#58c" fill-opacity=".4"/><path d="M15 0V20" stroke="var(--ink)" stroke-width="3" opacity=".55"/></svg><span>Realm layer: a very large tint per realm (40 to 120 sectors across), a heavy line at its border and its name; hover for the kind and what it stresses</span>'
 +'<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#d33" fill-opacity=".5"/></svg><span>Diversity layer: redder is more species in the sector (0 darkens)</span>'
 +'<svg viewBox="0 0 30 20"><rect width="15" height="20" fill="hsl(200,60%,55%)" fill-opacity=".5"/><rect x="15" width="15" height="20" fill="hsl(25,60%,55%)" fill-opacity=".5"/><path d="M15 0V20" stroke="var(--accent)" stroke-width="2"/></svg><span>Biome layer: tint by kind of country, blue line at cell borders</span>'
 +'<svg viewBox="0 0 30 20"><path d="M0 0L30 20M0 20L30 0" stroke="var(--ink)" stroke-width="1.5" opacity=".6"/><circle cx="15" cy="10" r="4" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Belt: crossed lines (deep rock belt, life near zero); green ring: an oasis</span>'

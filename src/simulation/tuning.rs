@@ -6,6 +6,23 @@
 
 use super::Material;
 
+// ---- realms (see `realm` and `realms`) ----------------------------------------------------------
+
+/// Seconds the ship must hold a new realm before it is announced, and the least gap between two
+/// realm banners (the same hysteresis as regions, a little longer since realms are huge).
+pub const REALM_HOLD: f32 = 4.0;
+pub const REALM_COOLDOWN: f32 = 30.0;
+/// A hit never loses more than this share of its damage to a realm's flat plating: a light gun
+/// is turned away mostly, never entirely.
+pub const PLATING_FLOOR: f32 = 0.25;
+/// Past this many sectors of reach, hostile arrows beyond the sensor's range are dropped when a
+/// realm cuts the sensors (the base reach of the threat arrows).
+pub const THREAT_SENSE_RANGE: f32 = 14_000.0;
+/// Stream salt of the roll that decides whether an ability fizzles (see `realm::Effects`).
+pub const FIZZLE_SALT: u64 = 0xF122_1E00_0000_0071;
+/// A fizzled dash or parry costs nothing but locks the ability for this long.
+pub const FIZZLE_LOCK: f32 = 0.6;
+
 // ---- rocks ---------------------------------------------------------------------------------
 
 /// How much tougher free rocks are against the ship's own weapons (its shots, blasts and

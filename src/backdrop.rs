@@ -27,6 +27,9 @@ pub const ROCK: [f32; 3] = [0.76, 0.65, 0.54];
 /// The starfield's base tint (the nearest layer) when nothing colours it.
 pub const STAR_BASE: [f32; 3] = [0.5, 0.64, 0.78];
 
+/// How much of a realm's colour the nebula takes on, at full strength.
+pub const REALM_TINT: f32 = 0.45;
+
 /// No cloud layer is ever more opaque than this: ships, rocks and shots stay legible.
 pub const MAX_LAYER_ALPHA: f32 = 0.075;
 /// Dark layers may be a little more opaque: they cut rather than glow.
@@ -314,6 +317,10 @@ fn look(seed: u64, id: SectorId) -> Look {
     // Rock shades the cloud toward the map's brown; a belt is nearly all dust.
     let rock = ((eco.matter - 0.4) / 0.6).clamp(0.0, 1.0) * 0.5;
     tint = mix3(tint, ROCK, (rock + 0.4 * eco.belt).min(0.8));
+    // The realm colours the whole continent: its tint over every place in it, as strongly as
+    // its effects apply (nothing in the starter realm).
+    let realm = crate::realm::weighting(seed, id);
+    tint = mix3(tint, realm.tint(), REALM_TINT * realm.intensity);
     let mut look = Look {
         tint,
         secondary,

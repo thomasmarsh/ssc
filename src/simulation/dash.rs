@@ -81,7 +81,7 @@ impl Game {
         {
             return false;
         }
-        if self.jammed(JamSystem::Dash) {
+        if self.jammed(JamSystem::Dash) || self.ability_fizzles(0) {
             self.cue(Cue::Refused);
             return false;
         }

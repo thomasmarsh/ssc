@@ -1145,7 +1145,7 @@ fn situation_text(session: &Session) -> String {
         .map_or((0.0, 0.0), |ship| (ship.health, ship.shield));
     let (power, threat) = (game.power(), game.threat());
     let mut text = format!(
-        "DETAILS   (hold TAB, F3 latches)\n\nSECTOR ({}, {})   {}\n{} HOSTILES NEARBY   SCORE {:06}\nHULL {:.0}   SHIELD {:.0}   LIVES {}\nVIEW {}   STYLE {}\n\nSHIP POWER x{:.1}   THREAT x{:.1}\n{}\n\nDANGER {:3.0}%   AGGRESSION {:3.0}%\nDENSITY {:3.0}%   DISTORTION {:3.0}%\nTECH {:3.0}%   SWARM {:3.0}%",
+        "DETAILS   (hold TAB, F3 latches)\n\nSECTOR ({}, {})   {}\n{} HOSTILES NEARBY   SCORE {:06}\nHULL {:.0}   SHIELD {:.0}   LIVES {}\nVIEW {}   STYLE {}\n\n{}\n\nSHIP POWER x{:.1}   THREAT x{:.1}\n{}\n\nDANGER {:3.0}%   AGGRESSION {:3.0}%\nDENSITY {:3.0}%   DISTORTION {:3.0}%\nTECH {:3.0}%   SWARM {:3.0}%",
         sector.x,
         sector.y,
         game.region()
@@ -1157,6 +1157,7 @@ fn situation_text(session: &Session) -> String {
         game.lives,
         session.camera_view.label(),
         session.style.label(),
+        game.realm_lines().join("\n"),
         power,
         threat,
         standing(power, threat),
@@ -1267,11 +1268,12 @@ fn summary_lines(session: &Session) -> Vec<(String, Color, f32)> {
         out.push((report.title.to_uppercase(), AMBER, 16.0));
         out.push((
             format!(
-                "SCORE {}   DESTROYED {}   SECTORS EXPLORED {}   REGIONS {}   MINED {:.0}",
+                "SCORE {}   DESTROYED {}   SECTORS EXPLORED {}   REGIONS {}   REALMS {}   MINED {:.0}",
                 game.score,
                 r.kills,
                 r.sectors.len(),
                 r.regions.len(),
+                r.realms.len(),
                 r.total_mined()
             ),
             light,
@@ -1418,6 +1420,12 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
         detail.push((
             format!("REGION  {}\n", game.region_of(cursor.sector).name),
             light,
+        ));
+        let realm = game.realm_of(cursor.sector);
+        let [r, g, b] = realm.tint();
+        detail.push((
+            format!("REALM   {}   {}\n", realm.name, realm.title()),
+            Color::srgb(r, g, b),
         ));
     }
     // How the wildlife of a charted sector in or beside a claim regards that civilization.
