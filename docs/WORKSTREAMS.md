@@ -1,0 +1,105 @@
+# Workstreams
+
+The big areas of work after the current slice list in `docs/FLOW.md` and `docs/BESTIARY.md`. Written 2026-10-08 from Thomas's brief. Each workstream has a goal, what exists today, design notes, slices in a sensible order, dependencies and open questions. Status goes at the end of each as slices land (tag unbuilt items `TODO:`). `SEED.md` holds the ordered queue; this file holds the thinking.
+
+Shared principles (from `CLAUDE.md` and the brief):
+- Fluid and natural first. Rich detail is welcome only where it can be ignored without friction: a player who never reads a tooltip should still get a good game.
+- Opt-in depth. Every new system has a no-grind path (kill an apex, loot a civilization, trade) next to the crafted path.
+- Expressions of genomes and seeds, not enum branches. New generators use salted streams; any generation change bumps the generator version and keeps the HOME golden unless changed on purpose.
+- Rendering never owns rules. Simulation stays headless and deterministic.
+- Performance: only sectors near the player simulate; every new population gets a hard cap and a test of that cap.
+
+## Foundation: stochastic L-system infrastructure (feeds 1, 6, 7)
+
+Goal: one small, deterministic, tested module that grows branching and segmented structure from a seed, used for plants (1), creature bodies including apex elders (6) and hosted or brood bodies (7).
+- Today: creature bodies are jointed chains driven by a flat gene list (`src/genome.rs`, `genome!` macro: real, int, categorical and trait genes). There is no grammar and no branching. Rooted life exists (`src/simulation/root.rs`) and plankton, but plants are not structured.
+- Design: a stochastic parametric L-system with weighted rules whose weights and parameters are genes (so mutation and crossover act on the grammar), a turtle interpreter that outputs a tree of segments (length, angle, radius, kind), and a cap on symbols and segments. Output is plain data; the simulation turns it into joints or growth stages and the presentation draws it with gizmos. Growth is staged: a plant holds a seed, a derivation depth and a growth time, and renders the partial derivation, so growth is smooth and cheap.
+- Slices: (a) module plus property tests (determinism, caps, mutation closeness), no gameplay; (b) a debug view (`SSC_SPECIMEN`-style hook and the dev panel) to look at samples; (c) wire into plants (workstream 1) first because it carries the least risk.
+- Open: how much of the existing chain body generator is replaced versus left alone. Default is to leave the wild classics alone and use the L-system for new bodies only.
+
+## 1. Farming
+
+Goal: plant, tend and harvest crops with the mining beam, as a fluid loop that adds a new renewable resource.
+- Today: mining beam and tough rocks (`src/simulation/mining.rs`), regrowing planetoids (`regrow.rs`), plankton and rooted life, cargo materials in `Cargo`.
+- Design: a new material (working name BIOMASS; its use is decided by machines in workstream 2: food, fuel, reagents, organ upkeep). Seeds are a pickup dropped by harvested wild plants and some creatures. Planting: fly slowly over a planetoid or a rock with soil, one key (use the interact button, contextual) drops a seed that anchors and grows by the L-system staged growth. Harvest with the beam: the plant yields by growth stage, ripe plants pay more and regrow from a stump; over-harvest kills the plant. Detail that can be ignored: crop varieties by seed genome (yield, growth time, hardiness, color) so keen players can breed, casual players just plant and reap. Pests and grazers are free ecology: wildlife eats unguarded crops, which gives farming a reason to defend.
+- Slices: (1) crop plant entity with staged growth, harvest by beam, new material and HUD bar; (2) seeds, planting by interact, soil on planetoids; (3) crop genome and breeding via crossover of adjacent plants; (4) grazers and pests; (5) civilizations that farm and trade biomass.
+- Depends on: L-system foundation (a)-(c). Controls budget (workstream 10): planting reuses interact, no new key.
+- Open: do crops grow in open space or only on planetoids and hulls (default: planetoids and station hulls only).
+
+## 2. Machines and trade
+
+Goal: raw resources may need processing before use, via gadgets the player can build, opt-in and low-grind (Graveyard Keeper but lighter). Alternatives always exist: loot civilizations, kill apex bosses, or trade.
+- Today: the bench sells upgrades from raw cargo; pads can be built; civilizations tithe; no machines, no merchants.
+- Design: machines are small buildable pads or modules at a planetoid pad (a refinery, a still, a loom, a seed press). Each takes inputs from cargo and produces a processed good over time while the player is elsewhere, collected on return. Processed goods feed better upgrades and some abilities, but every bench item keeps a raw-only price somewhere so crafting is a discount or a shortcut, never a wall (decide per item in a pricing pass). Wandering traders are new creature-like entities (genome-expressed ship bodies, peaceful, flee when attacked) that roam between civilizations on routes, trade resources and processed goods at fluctuating prices set by what local sectors lack, and sometimes sell rare parts or seeds. A civilization's regard affects prices.
+- Slices: (1) one machine type end to end (refine raw into a processed good, collect at pad) plus a pricing pass; (2) trader entity with route between two civilizations, buy and sell UI reusing the bench frame; (3) price model from sector supply; (4) more machines; (5) trader encounters as events (escort, ambush, rare stock).
+- Depends on: farming for biomass sinks (can start without), civilizations and diplomacy (exist), controls (10).
+
+## 3. Megastructures
+
+Goal: metropolis-scale structures spanning several sectors. Local civilizations are villages; a megastructure is a city. Some are living (a great civilization), some are ruins of an ancient forgotten one. About one per realm.
+- Today: realms (40 to 120 sectors across, `src/realm.rs`), civilizations with fortress tiers (`src/fortress.rs`), territory blobs (`src/territory.rs`), planetoids, sector grid with simulation near the player only.
+- Design: a megastructure is placed per realm by a salted stream on the realm's anchor sector, with a footprint spanning N by M sectors. Its parts are fixed solids and landmark bodies generated per sector from the shared plan (pure function of seed and sector, so loading any one sector yields its part). Living: a high-tier civilization with districts, trade hub for traders and a teleporter hub (4). Ruins: dead, dangerous and lucrative: derelict defenses that still fire, sealed vaults (relic style, `DISCOVERY.md`), ancient machines that unlock an otherwise unavailable tech, and a lore thread. It must read as one place from the star map and sonar from far away (a big glyph, a landmark echo).
+- Slices: (1) cross-sector placement framework with a test that the parts line up across sector boundaries and across load order; (2) one ruin type with defenses, loot and star-map glyph; (3) one living type with trade; (4) variants by realm and L-system or grammar-driven layouts.
+- Depends on: feelings (9) so urban versus ruin has a look, fast travel (4) for a landmark destination, machines and trade (2) for the living type.
+- Open: size cap per sector load budget; whether ruins ever respawn defenders.
+
+## 4. Fast travel
+
+Goal: reach new realms without long flights.
+- Observation (Thomas): flying along a sector boundary, the ship passed almost unimpeded for a long way with very few collisions. `TODO:` investigate whether generation under-populates sector edges (placement margins) and fix, since it makes boundary corridors an unintended highway.
+- Design: three layers. Hyperlanes: charted lanes between points of interest that the ship enters at a lane mouth, travels fast with the world streaming past as visual streaks, and drops out of at the end or on demand (the ship exits at normal speed and sees things as it flies by; hostile interdiction can pull it out early). Pad teleporters: a built pad can be upgraded to support teleport at high cost, both ends must be built; upgrades make a pad hard to spot (stealth) and pads can be installed at friendly civilizations. Civilization teleport service: non-hostile civilizations will teleport the ship to a destination for a high fee, scaled by distance and regard. Prefer hyperlanes to teleport where it makes the world feel connected, keep teleport for pad-to-pad and paid service.
+- Today: Rift transit and beacons and star map jumps exist (`src/simulation/chart.rs`, `rift.rs`: personal rifts and seam needle are unbuilt). The jump to a beacon is the closest present mechanic.
+- Slices: (1) edge-density investigation and fix; (2) hyperlane travel state in the simulation (stream sectors along the lane, cap speed by what must load, drop-out) with a deterministic test; (3) hyperlane rendering (streaks, parallax, passing landmarks); (4) pad teleport upgrade, both ends, stealth, friendly-civilization pads; (5) paid civilization teleport; (6) lanes to megastructures and realm borders.
+- Depends on: sector streaming budgets (travel speed must not outrun loading). Controls (10): one contextual key for enter lane or confirm teleport.
+
+## 5. Weavers and asteroid-rich habitats
+
+Goal: weavers (and slingers) get enough material to work with and treat their rocks with care.
+- Today: Weaver webs and Slinger orbits (`weave.rs`, `sling.rs` style modules; see `BESTIARY.md` sections 17 to 19). Asteroids are generally sparse; rock belts mask life.
+- Design: (a) a held (orbiting or cord-bound) rock is safe from breakage by contact with the owner's body or a compatriot's body (a handled-with-care flag with a short grace after release for the thrower's own species), while other damage still breaks it; (b) asteroid-rich areas (see 9, desert flavor): belts and fields with real density, and their affinities as the weaver and slinger niche in `src/range.rs` and `src/biome.rs` so they live there by abundance rules not by enum. Ore-rich fields also help mining and the Slinger's ore-rock complaint.
+- Slices: (1) the care rule and tests (small, independent); (2) asteroid-rich field generator with its own salt and a population test; (3) range and biome retuning so weavers and slingers concentrate there.
+- Depends on: feelings (9) for the field generator.
+
+## 6. Apex body types
+
+Goal: apex elders have varied bodies, produced by the same procgen mechanisms as other creatures.
+- Today: apex archetypes (`src/apex.rs`, `src/simulation/apexes.rs`) are mostly one authored shape with varied powers.
+- Design: give apex genomes a body-plan expression using the L-system infrastructure plus the existing chain bodies, scaled up: segmented serpents, branching coral-like colossi, multi-limbed or ring bodies, with hurtbox and weak-point implications, and fairness rules from `BESTIARY.md`. A body type should read from silhouette.
+- Slices: (1) body-plan gene set for apexes feeding the existing chain; (2) L-system bodies for two new archetypes; (3) hit and weak-point rules per body; (4) rebalance.
+- Depends on: L-system foundation.
+
+## 7. Creatures inside creatures
+
+Goal: megafauna with symbiotic or parasitic residents, and large broods.
+- Today: parasites and attached hostiles (`parasite.rs`), Hullworm and Remora symbiosis on the ship, passengers on rift transit, eggs and nests.
+- Design: a host genome gets hosted-slot genes (count, kind, relationship: symbiote, parasite, brood). Residents spawn attached, ride the host, and are released on death or damage thresholds (a death releases a brood). Relationship affects behavior: symbiotes defend or clean the host, parasites drain it, broods swarm. Use the same attach mechanics as Hullworm so the code is shared. Display: residents visible on the body.
+- Slices: (1) host slots and attached residents on one megafauna; (2) release rules and brood swarm; (3) symbiote and parasite behaviors; (4) ecology (species pairings by niche).
+- Depends on: swarm budgets (8).
+
+## 8. Swarms and rallied forces
+
+Goal: bigger flocks in general, and hostile civilizations that rally forces so high alert is a real danger beyond the local screen.
+- Today: small sparse groups, bogey schooling, civilization alert levels and territory (`src/simulation/diplomacy.rs`, `civ.rs`).
+- Design: alert is a civilization-level value that, when high, dispatches rally forces that pursue the ship across sectors with escalating waves, are visible on sonar and the map as incoming marks, and ratchet down when the ship leaves territory or pays. Flocks: bigger schools and herds by genome (instanced cheaply: a flock is one logical entity with member state in a flat array, lighter collision, level-of-detail by distance).
+- Slices: (1) flock data structure and one big herd with a budget test; (2) rally dispatch with caps (global and per civilization) and tests; (3) sonar and map markers; (4) de-escalation rules; (5) tune against the playtest.
+- Depends on: performance caps. Open: global cap and what happens on very low-end machines.
+
+## 9. Feelings: urban, wild, desert
+
+Goal: three distinct moods: urban (civilizations and megastructures), wild (low-tech grazing, predators, mostly unaware of the ship), desert (empty expanses and asteroid belts). They are flavors, not biomes: a lens laid over biomes and realms.
+- Design: a per-sector feeling value derived from existing fields (civilization territory and its tier give urban, creature abundance gives wild, low life with high or zero rock density gives desert), used by generation (density, rock fields, ruins) and presentation (palette, sound bed, pacing: wild is quiet and peaceful, desert is vast and sparse with rare big finds, urban is busy). Lean into each: wild sectors favor unaware herds, desert sectors have long travel and a payoff, urban sectors have traffic.
+- Slices: (1) a pure `feeling(seed, sector)` view-model with tests (no generation change); (2) presentation hooks (palette and ambient sound per feeling); (3) generation tilts, behind a generator version bump; (4) desert rock-field generator (shared with 5).
+- Depends on: nothing; unblocks 3, 5, 8.
+
+## 10. Gamepad consolidation
+
+Goal: simple controls on the pad with no overlaps and nothing that needs the keyboard.
+- Today: see the controls table in `README.md`. The pad already has most actions mapped, with overlaps (Select doubles as interact, face buttons mean different things per screen) and `TODO:` some actions with no pad route (check settings, restart, specific bench actions, dev panel is guide only).
+- Plan: (1) audit: list every action, its keyboard key and pad binding in one table, flag keyboard-only actions and double bindings; (2) a control budget: design a final map before any new feature adds controls, keep one contextual interact button for plant, enter lane, trade and bench; (3) implement the remap with a single input module test that every action has a pad route and no two actions in the same context share a button; (4) on-screen glyphs follow the active device.
+- Slices: audit and map doc first (docs only), then implementation. Do it before workstreams 1, 2 and 4 add inputs.
+
+## Cross-cutting
+
+- Developer tooling (`docs/DEVTOOLS.md`): Phase A done. B (tunables registry), C (overlay) and D (separate app) queued. Each new workstream should register its numbers in the registry once B exists.
+- Playtest after each major workstream: all balance is first-guess.
+- Suggested order: 10 audit, 9.1, 5.1, 4.1, foundation L-system, 1, 6, 4.2-3, 8, 7, 2, 3, 4.4-6. Reorder with playtest notes.
