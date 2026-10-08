@@ -11,6 +11,7 @@
 //! The link is only an id: a host that is destroyed, eaten or unloaded is found missing the
 //! next tick and everything on it is released, so nothing dangles.
 
+use super::attach::{self, Frame};
 use super::*;
 use crate::genome::Habit;
 
@@ -25,8 +26,6 @@ pub const STAND: f32 = 0.9;
 /// looks for one.
 const REACH: f32 = 45.0;
 pub const SEEK_RANGE: f32 = 700.0;
-/// Clear arc kept between neighbors on a host, in world units.
-const SPACING: f32 = 4.0;
 /// Fraction of a host's rim that rooters may fill.
 const RIM_FILL: f32 = 0.9;
 /// Energy per second a host yields to everyone on it: its plankton rate times this and a
@@ -58,18 +57,12 @@ pub fn can_host(rock: &Body) -> bool {
 
 /// Where a creature of `radius` anchored at `angle` (host frame) sits on `host`.
 pub fn place(host: &Body, angle: f32, radius: f32) -> Vec2 {
-    host.position + Vec2::from_angle(host.angle + angle) * (host.radius + radius * STAND)
+    Frame::of(host).seat(angle, radius, STAND)
 }
 
 /// How many creatures of `radius` fit around a host's rim.
 pub fn capacity(host_radius: f32, radius: f32) -> usize {
-    ((TAU * host_radius * RIM_FILL / (2.0 * radius + SPACING)) as usize).max(1)
-}
-
-/// Shortest arc between two angles.
-fn apart(a: f32, b: f32) -> f32 {
-    let d = (a - b).rem_euclid(TAU);
-    d.min(TAU - d)
+    attach::capacity(host_radius, radius, RIM_FILL)
 }
 
 impl Body {
@@ -117,6 +110,16 @@ struct Host {
     yield_rate: f32,
 }
 
+impl Host {
+    fn frame(&self) -> Frame {
+        Frame {
+            position: self.position,
+            angle: self.angle,
+            radius: self.radius,
+        }
+    }
+}
+
 impl Game {
     fn hosts(&self) -> HashMap<u64, Host> {
         self.bodies
@@ -154,8 +157,7 @@ impl Game {
                 continue;
             };
             let outward = host.angle + root.angle;
-            body.position =
-                host.position + Vec2::from_angle(outward) * (host.radius + body.radius * STAND);
+            body.position = host.frame().seat(root.angle, body.radius, STAND);
             body.velocity = host.velocity;
             // A landed ship faces outward and turns with its world unless its pilot steers.
             let own = body.alert || (body.kind == BodyKind::Player && steering);
@@ -167,9 +169,7 @@ impl Game {
             let Some(id) = egg.host else { continue };
             match hosts.get(&id) {
                 Some(host) => {
-                    egg.position = host.position
-                        + Vec2::from_angle(host.angle + egg.anchor)
-                            * (host.radius + egg.radius * STAND);
+                    egg.position = host.frame().seat(egg.anchor, egg.radius, STAND);
                     egg.velocity = host.velocity;
                 }
                 // The host is gone: the egg drifts free.
@@ -263,8 +263,7 @@ impl Game {
             let host = hosts[&id];
             let wanted = (at - host.position).to_angle() - host.angle;
             if let Some(angle) = self.free_anchor(id, host.radius, wanted, radius, None) {
-                let place = host.position
-                    + Vec2::from_angle(host.angle + angle) * (host.radius + radius * STAND);
+                let place = host.frame().seat(angle, radius, STAND);
                 let body = &mut self.bodies[index];
                 body.root = Some(Root { host: id, angle });
                 body.position = place;
@@ -302,14 +301,7 @@ impl Game {
                     .map(|e| (e.anchor, e.radius)),
             )
             .collect();
-        (0..=10).find_map(|k| {
-            let step = (k as f32 / 2.0).ceil() * 0.25 * if k % 2 == 0 { 1.0 } else { -1.0 };
-            let angle = wanted + step;
-            taken
-                .iter()
-                .all(|&(a, r)| apart(angle, a) * host_radius > r + size + SPACING)
-                .then_some(angle)
-        })
+        attach::free_angle(&taken, host_radius, wanted, size)
     }
 
     /// Lets go of the host: the creature is pushed gently off and may not cling again for a

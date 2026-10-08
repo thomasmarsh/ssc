@@ -229,7 +229,12 @@ impl Game {
         for (id, angle) in seats {
             if let Some(worm) = self.bodies.iter_mut().find(|b| b.id == id) {
                 let dir = Vec2::from_angle(heading + angle);
-                worm.position = at + dir * (radius + worm.radius * 0.6);
+                let hull = attach::Frame {
+                    position: at,
+                    angle: heading,
+                    radius,
+                };
+                worm.position = hull.seat(angle, worm.radius, 0.6);
                 worm.velocity = velocity;
                 worm.angle = dir.to_angle();
                 // A fastened worm neither shoots nor bites.

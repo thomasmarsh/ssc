@@ -9,6 +9,7 @@ mod adapt;
 mod apexes;
 mod arms;
 pub mod arsenal;
+mod attach;
 mod bench;
 mod bench_feedback;
 mod brain;
