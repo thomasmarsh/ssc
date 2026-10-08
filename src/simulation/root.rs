@@ -21,6 +21,11 @@ pub const DAZE: f32 = 2.5;
 pub const REATTACH_DELAY: f32 = 5.0;
 /// How long a brood released by the loss of its host stays on the hunt, whatever it saw.
 pub const SWARM_RAGE: f32 = 30.0;
+/// Health per second one symbiote restores to its host, and one parasite takes from it.
+const TEND: f32 = 2.0;
+const DRAIN: f32 = 1.5;
+/// Parasites never drain a host below this fraction of its health.
+const DRAIN_FLOOR: f32 = 0.4;
 /// Fraction of its radius at which a rooted body's center stands off the surface (so it
 /// sits nearly on it, a little sunk in).
 pub const STAND: f32 = 0.9;
@@ -243,6 +248,7 @@ impl Game {
             self.release(index, dazed);
         }
         self.shed_brood();
+        self.tend_hosts(dt);
         // Free creatures that want a rock take hold of one they touch.
         let seekers: Vec<usize> = self
             .bodies
@@ -355,6 +361,50 @@ impl Game {
         }
         for index in shed {
             self.release(index, true);
+        }
+    }
+
+    /// What riders do to a living host: each symbiote cleans it (heals `TEND` per second, up
+    /// to full), each parasite drains `DRAIN` per second and feeds on it, but never below
+    /// `DRAIN_FLOOR` of its health, so parasites alone cannot kill an elder.
+    fn tend_hosts(&mut self, dt: f32) {
+        let mut change: HashMap<u64, f32> = HashMap::new();
+        let mut fed: Vec<usize> = Vec::new();
+        for (index, body) in self.bodies.iter().enumerate() {
+            let Some(root) = body.root else { continue };
+            if !body.active || body.health <= 0.0 {
+                continue;
+            }
+            if crate::hosted::is_symbiote(&body.genome) {
+                *change.entry(root.host).or_default() += TEND * dt;
+            } else if crate::hosted::is_parasite(&body.genome) {
+                *change.entry(root.host).or_default() -= DRAIN * dt;
+                fed.push(index);
+            }
+        }
+        if change.is_empty() {
+            return;
+        }
+        let mut drained: HashSet<u64> = HashSet::new();
+        for host in self.bodies.iter_mut().filter(|b| carries_residents(b)) {
+            let Some(&delta) = change.get(&host.id) else {
+                continue;
+            };
+            let floor = host.max_health * DRAIN_FLOOR;
+            if delta > 0.0 {
+                host.health = (host.health + delta).min(host.max_health);
+            } else if host.health > floor {
+                host.health = (host.health + delta).max(floor);
+                drained.insert(host.id);
+            }
+        }
+        for index in fed {
+            if self.bodies[index]
+                .root
+                .is_some_and(|r| drained.contains(&r.host))
+            {
+                self.bodies[index].feed(DRAIN * dt);
+            }
         }
     }
 
@@ -1323,6 +1373,49 @@ mod tests {
         game.step(DT, Input::default());
         assert_eq!(attached(&game), 2, "no further loss without more damage");
         assert!(body(&game, pal).root.is_some(), "the symbiote stays");
+    }
+
+    #[test]
+    fn symbiotes_heal_their_host_and_parasites_drain_it_but_never_to_death() {
+        use crate::hosted::{Hosted, Relation, resident};
+        let host_with = |game: &mut Game, relation: Relation| {
+            let species = Species::of(Genome {
+                radius: 60.0,
+                hull: 300.0,
+                mass: 100.0,
+                hosted: Some(Hosted { count: 2, relation }),
+                ..Genome::default()
+            });
+            let host = game.make_creature(&species, FAR);
+            let id = host.id;
+            game.bodies.push(host);
+            let rider = Species::of(resident(&species.genome, relation));
+            rooted_on(game, &rider, id, 1.0);
+            id
+        };
+        let mut game = empty_game();
+        quiet(&mut game);
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        let friend_host = host_with(&mut game, Relation::Symbiote);
+        let leech_host = host_with(&mut game, Relation::Parasite);
+        let max = body(&game, friend_host).max_health;
+        for id in [friend_host, leech_host] {
+            game.bodies.iter_mut().find(|b| b.id == id).unwrap().health = max * 0.7;
+        }
+        for _ in 0..120 {
+            game.step(DT, Input::default());
+        }
+        assert!(body(&game, friend_host).health > max * 0.7 + 1.0, "cleaned");
+        assert!(body(&game, leech_host).health < max * 0.7 - 1.0, "drained");
+        for _ in 0..(60 * 120) {
+            game.step(DT, Input::default());
+        }
+        let left = body(&game, leech_host).health;
+        assert!(left >= max * DRAIN_FLOOR - 0.01 && left > 0.0, "{left}");
+        assert!(
+            body(&game, friend_host).health <= max,
+            "healing stops at full"
+        );
     }
 
     #[test]

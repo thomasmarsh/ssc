@@ -144,6 +144,29 @@ pub fn is_brood(genome: &Genome) -> bool {
         && genome.diet == Diet::None
 }
 
+/// The unarmed resident shape shared by symbiotes and parasites (see `resident`).
+fn is_rider(genome: &Genome) -> bool {
+    genome.hosted.is_none()
+        && genome.anatomy.is_none()
+        && genome.weapon != Weapon::Projectile
+        && genome.parts() == 1
+        && genome.radius == RESIDENT_RADIUS
+        && genome.mass == 4.0
+        && genome.hull == 40.0
+        && genome.social == Social::Pack
+        && genome.diet == Diet::None
+}
+
+/// A symbiote resident: harmless, and it tends its host (`root::tend_hosts`).
+pub fn is_symbiote(genome: &Genome) -> bool {
+    is_rider(genome) && genome.contact_damage == 0.0
+}
+
+/// A parasite resident: it stings, and it drains its host (`root::tend_hosts`).
+pub fn is_parasite(genome: &Genome) -> bool {
+    is_rider(genome) && genome.contact_damage > 0.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,10 +184,10 @@ mod tests {
         }
         assert_eq!(resident(&host, Relation::Symbiote).contact_damage, 0.0);
         for relation in Relation::ALL {
-            assert_eq!(
-                is_brood(&resident(&host, relation)),
-                relation == Relation::Brood
-            );
+            let g = resident(&host, relation);
+            assert_eq!(is_brood(&g), relation == Relation::Brood);
+            assert_eq!(is_symbiote(&g), relation == Relation::Symbiote);
+            assert_eq!(is_parasite(&g), relation == Relation::Parasite);
         }
     }
 
