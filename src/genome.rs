@@ -14,6 +14,7 @@
 
 use crate::anatomy::{ANATOMY_SALT, AnimalGenome, AnimalSpecimen};
 use crate::bodyplan;
+use crate::builder::Builder;
 use crate::hosted::Hosted;
 use crate::power::{self, POWER_GENES};
 use crate::world::{Rng, SectorParams, hash2};
@@ -265,6 +266,9 @@ genome! {
         // Optional host slots (see `hosted`): residents that ride this creature. `None`
         // for every creature but the apex elders that carry some.
         hosted: Option<Hosted> = None;
+        // Optional build behavior (see `builder`): what it gathers and the structure it
+        // raises. `None` for every creature that exists in the wild today.
+        builder: Option<Builder> = None;
     }
 }
 
@@ -466,6 +470,7 @@ impl Genome {
             spec.genome = spec.genome.limited();
         }
         self.hosted = self.hosted.map(Hosted::limited);
+        self.builder = self.builder.map(Builder::limited);
         self
     }
 
@@ -776,6 +781,8 @@ impl Genome {
         child.anatomy = body.anatomy;
         // Host slots travel whole with the body (a descendant is as big a host as its body).
         child.hosted = body.hosted;
+        // So does a build habit, whole from the body-plan parent.
+        child.builder = body.builder;
         if let (Some(mine), Some(other)) = (a.anatomy, b.anatomy) {
             let mut own = Rng::new(rng.next_u64() ^ ANATOMY_SALT);
             if let Some(spec) = &mut child.anatomy {
@@ -1245,6 +1252,8 @@ impl Genome {
             limbs: 0,
             // A young one is a single bead whatever its adult plan.
             anatomy: None,
+            // Only adults build.
+            builder: None,
             // A young one that clings to a rock fights for its place.
             weapon: if self.defended_young() {
                 self.weapon

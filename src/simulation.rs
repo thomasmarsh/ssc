@@ -13,6 +13,7 @@ pub mod attach;
 mod bench;
 mod bench_feedback;
 mod brain;
+mod build;
 mod chain;
 mod chart;
 mod civ;
@@ -468,6 +469,8 @@ pub struct Game {
     veil: f32,
     /// Worms on the hull, grooming and the shy remora; see `parasite`.
     parasites: parasite::ParasiteState,
+    /// Structures being raised by builder creatures; see `build`.
+    builds: build::BuildState,
     parry_rng: Rng,
     /// The sonar ring, its echoes and their cache; see `ping`.
     ping: ping::PingState,
@@ -615,6 +618,7 @@ impl Game {
             relics_taken: HashSet::new(),
             veil: 0.0,
             parasites: parasite::ParasiteState::default(),
+            builds: build::BuildState::default(),
             parry_rng: Rng::new(seed ^ parry::PARRY_SALT),
             ping: ping::PingState::default(),
             chart: chart::ChartState::default(),
@@ -793,6 +797,7 @@ impl Game {
         self.update_realm(dt);
         self.update_loadout(dt, &input);
         self.update_organs(dt);
+        self.update_builders(dt);
         let recharge = self.stats.recharge;
         let beaming = self.beam.is_some();
         for body in self.bodies.iter_mut().filter(|b| b.active) {

@@ -27,6 +27,19 @@ Residents ride an elder: on its body's socket marks first (cyan in the bestiary 
 
 Not built yet, so do not judge: species pairings by range, symbiotes actively defending (they only heal).
 
+## Builder creatures (workstream 11, slice 1)
+
+Only the authored builder exists (dev spawn row or `SSC_SPECIMEN=builder`; no wild builders yet). Spawn three with `SSC_DEV=1`, backquote, spawn row, Enter, then watch one.
+
+| Question | What to check | Knob |
+|---|---|---|
+| Pace | Does a block arrive every few seconds, so a structure rises while you watch without ever feeling instant? | `Builder::patience` (1 to 12 s), `Builder::work` |
+| Shape | Does the finished structure read as a deliberate fan or branch of stones rather than a random clump? | the grammar template and `scale`, `StructurePlan::from_plan` |
+| Size | Is a structure the right size beside the ship (24 blocks, about 50 units per plan unit)? | `Builder::scale`, `blocks` |
+| Obstruction | If you park in a site or a rock drifts onto it, does building wait and resume rather than stall for good? | `build::REACH`, site occupancy |
+
+Not built yet, so do not judge: the builder walking to its site or gathering stones, nests as a wild species, repair or raiding, structures surviving a reload.
+
 ## Questions to answer after the first session
 
 1. Which of the above felt wrong first? One line each is enough.
