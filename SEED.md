@@ -41,16 +41,16 @@ Decide per slice, and say which in one line.
 Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices. Reorder with playtest notes.
 
 0. Playtest (the user), now and at each checkpoint. Nothing has been played by a human; all balance is a guess.
-1. Phase 1, groundwork: [S] gamepad audit (docs; includes contextual interact rule and reserved bindings); [S] feeling view-model 9.1; [S] weaver and slinger rock care 5.1; [S] edge-density measuring test 4.1 (measure only; also confirm which tests read the HOME golden); [M] L-system a to c; investigate the clippy-plus-test hang.
-2. Phase 2: [M] gamepad implementation with the input test; decide persistence; [S] sector-load budget measure.
+1. Phase 1, groundwork. FIRST: [M] L-system and structure-grammar foundation (user priority; everything procgen from the single master seed). Then: [S] gamepad audit (docs; includes contextual interact rule and reserved bindings); [S] feeling view-model 9.1; [S] weaver and slinger rock care 5.1; [S] edge-density measuring test 4.1 (measure only; also confirm which tests read the HOME golden); investigate the clippy-plus-test hang.
+2. Phase 2: [M] gamepad implementation with the input test; [S] sector-load budget measure; [L] persistence (workstream 12: state inventory, `SaveState` with a round-trip test, disk format, continue UI). Persistence precedes farming.
 3. Phase 3, generation batch under one `GENERATOR_VERSION` bump with one golden re-baseline: edge fix, feeling presentation and tilts, desert and asteroid fields, weaver retuning. Playtest checkpoint.
 4. Phase 4: [L] farming slices 1 and 2 with a trivial bench sink. Playtest checkpoint.
 5. Phase 5: [M] cross-sector placement framework, then [L] hyperlanes (no interdiction first).
 6. Phase 6: [L] flock budget then rally forces; apex bodies; nested creatures (attach extraction first).
-7. Phase 7: [L] machines, pricing and traders; teleports; megastructures (ruin first).
+7. Phase 7: [L] machines, pricing and traders; builder creatures (workstream 11); teleports; megastructures (ruin first).
 8. Alongside: [M slices] DEVTOOLS B then C (register new constants at birth; never blocks features). Hygiene and the `TODO:` lists in `docs/` as files are touched.
 
-Open decisions for the user: sector size 6000 vs 1200 (decide from the first playtest, before the generation batch); one deliberate HOME golden re-baseline in phase 3; persistence to disk (recommended: not yet, keep built state in one serializable struct); crops only on planetoids and hulls; one contextual interact button.
+Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to disk wanted (multiplayer eventually, out of scope); crops only on planetoids (stations only inside a greenroom); one contextual interact for now, full-button pad design long term. Open: sector density tuning after the first playtest.
 
 ## Recently done
 

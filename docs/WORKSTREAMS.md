@@ -24,7 +24,7 @@ Goal: plant, tend and harvest crops with the mining beam, as a fluid loop that a
 - Design: a new material (working name BIOMASS; its use is decided by machines in workstream 2: food, fuel, reagents, organ upkeep). Seeds are a pickup dropped by harvested wild plants and some creatures. Planting: fly slowly over a planetoid or a rock with soil, one key (use the interact button, contextual) drops a seed that anchors and grows by the L-system staged growth. Harvest with the beam: the plant yields by growth stage, ripe plants pay more and regrow from a stump; over-harvest kills the plant. Detail that can be ignored: crop varieties by seed genome (yield, growth time, hardiness, color) so keen players can breed, casual players just plant and reap. Pests and grazers are free ecology: wildlife eats unguarded crops, which gives farming a reason to defend.
 - Slices: (1) crop plant entity with staged growth, harvest by beam, new material and HUD bar; (2) seeds, planting by interact, soil on planetoids; (3) crop genome and breeding via crossover of adjacent plants; (4) grazers and pests; (5) civilizations that farm and trade biomass.
 - Depends on: L-system foundation (a)-(c). Controls budget (workstream 10): planting reuses interact, no new key.
-- Open: do crops grow in open space or only on planetoids and hulls (default: planetoids and station hulls only).
+- Decided (Thomas): crops grow only on planetoids. Stations can grow them only inside an enclosed greenroom-style module, never on bare hulls in open space.
 
 ## 2. Machines and trade
 
@@ -98,6 +98,20 @@ Goal: simple controls on the pad with no overlaps and nothing that needs the key
 - Plan: (1) audit: list every action, its keyboard key and pad binding in one table, flag keyboard-only actions and double bindings; (2) a control budget: design a final map before any new feature adds controls, keep one contextual interact button for plant, enter lane, trade and bench; (3) implement the remap with a single input module test that every action has a pad route and no two actions in the same context share a button; (4) on-screen glyphs follow the active device.
 - Slices: audit and map doc first (docs only), then implementation. Do it before workstreams 1, 2 and 4 add inputs.
 
+## 11. Builder creatures
+
+Goal: creatures that perform simple construction, expanding what weavers already do (gathering asteroids and stringing webs). Added 2026-10-08; design not started.
+- Direction: builders are genome expressions like everything else (a build-behavior gene set: what material they gather, what structure grammar they follow, how patient, how territorial). They gather rocks, ice or biomass and assemble nests, walls, bridges, hive structures, lures or trap fields using the same grammar infrastructure as plants and megastructures (the L-system or structure grammar produces the plan, the builder realizes it over time). Structures are persistent world state (see 12), can be mined, raided or repaired, and give the ecology new niches and the player new things to read and exploit.
+- Ties to: weaver and slinger rock care (5), asteroid-rich habitats (5, 9), the L-system foundation, megastructures (living ones may be built by creatures), and machines (builders could be allies or competitors).
+- Slices (provisional): (1) a structure-plan type shared with the L-system output and a builder behavior that places one kind of block; (2) a nest builder species placed by niche; (3) civilizations' own construction; (4) player interaction (mine, trade for, tame or sabotage).
+
+## 12. Persistence and save to disk
+
+Goal: save and load the run and the player-shaped world. Decided (Thomas): wanted, and multiplayer is wanted eventually but is far out of scope. Design now so it stays possible later.
+- Principles: generation stays a pure function of the master seed and sector, so only deltas from generation are saved (dead creatures, taken loot, planted crops, built pads and machines, creature-built structures, chart, pins, beacons, regard, doctrine, run stats, player ship and loadout). One serializable `SaveState` struct holds everything player-created or divergent; version it and migrate. Simulation stays deterministic and headless with explicit state, which is also the base multiplayer would need (authoritative sim, snapshot plus input stream). No rendering state in saves.
+- Slices: (1) inventory every piece of mutable state and classify it (derived, delta, ephemeral) in a doc; (2) `SaveState` with serialize and a round-trip test that a saved and reloaded game steps identically; (3) disk format, location and autosave, versioned; (4) UI: continue, new run, delete; (5) migration tests.
+- Must come before farming, machines and builders, which all create persistent state. Open: whether legacy and wrecks (cross-run within a session today) become part of the same file.
+
 ## Cross-cutting
 
 - Developer tooling (`docs/DEVTOOLS.md`): Phase A done. B (tunables registry), C (overlay) and D (separate app) queued. Each new workstream should register its numbers in the registry once B exists.
@@ -117,6 +131,8 @@ Hidden dependencies to respect:
 - Register new constants in the tunables registry at birth (DEVTOOLS B); migrate the old scattered ones module by module in the background. The registry never blocks a feature slice.
 - Keep player-created persistent state (pads, crops, machines) in one serializable struct so a later save is a serializer, not a refactor.
 - One contextual interact button serves plant, lane, trade and bench (priority by proximity); decided in the gamepad audit.
+
+Decisions (Thomas, 2026-10-08): HOME golden may be changed once on purpose; sector size is 6000 (1200 was a typo); save to disk is wanted (multiplayer eventually, out of scope now); crops only on planetoids (stations only inside a greenroom); one contextual interact is a safe starting assumption but the long-term pad design will use all buttons for flow. The L-system foundation is prioritized first. Persistence (12) moves before farming; builder creatures (11) come after the structure grammar exists.
 
 Phases (tags: S in-session small, M one subagent, L several sequential subagent slices):
 0. Human playtest (user), in parallel with phase 1. Feeds every reorder below.
