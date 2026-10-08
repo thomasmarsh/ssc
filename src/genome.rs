@@ -1485,6 +1485,8 @@ mod tests {
     use super::*;
     use crate::world::SectorId;
 
+    const GOLDEN_NO_GRAMMAR: u64 = 0xc128e765da6c6cdf;
+
     #[test]
     fn home_species_are_named_and_colored_from_their_genes() {
         let names: Vec<String> = GenePool::home()
@@ -1618,6 +1620,47 @@ mod tests {
             assert!(child.weapon == a.weapon || child.weapon == b.weapon);
             assert!(child.diet == a.diet || child.diet == b.diet);
         }
+    }
+
+    /// A fingerprint of every gene (as bits) of a genome.
+    fn fingerprint(g: &Genome, h: &mut u64) {
+        let mut copy = *g;
+        for gene in copy.genes() {
+            let bits = match gene {
+                Gene::Real { v, .. } => u64::from(v.to_bits()),
+                Gene::Int { v, .. } => u64::from(*v),
+                Gene::Cat { v } => u64::from(v.get()),
+            };
+            *h = hash2(*h, (bits & 0xFFFF_FFFF) as i32, (bits >> 32) as i32);
+        }
+    }
+
+    /// Pins sampling, individuals, crossover and mutation (genes and the stream position
+    /// after each) over many seeds, so a genome without a grammar can never drift.
+    #[test]
+    fn genomes_without_a_grammar_keep_their_draws() {
+        let mut h = 0x5EED_u64;
+        for seed in 0..300u64 {
+            let mut rng = Rng::new(seed * 7919 + 13);
+            let sp = SectorParams {
+                depth: (seed % 9) as f32,
+                danger: rng.f32(),
+                aggression: rng.f32(),
+                density: rng.f32(),
+                distortion: rng.f32(),
+                tech: rng.f32(),
+                swarm: rng.f32(),
+            };
+            let a = Genome::sample(&mut rng, &sp);
+            let b = Genome::sample(&mut rng, &sp).individual(&mut rng);
+            let c = Genome::crossover(a, b, &mut rng);
+            let m = c.mutate(&mut rng);
+            for g in [&a, &b, &c, &m] {
+                fingerprint(g, &mut h);
+            }
+            h = hash2(h, (rng.next_u64() & 0x7FFF_FFFF) as i32, 1);
+        }
+        assert_eq!(h, GOLDEN_NO_GRAMMAR, "{h:#x}");
     }
 
     #[test]
