@@ -221,7 +221,7 @@ const SHAPES: [Shape; 12] = [
     Shape {
         weight: 6,
         segments: (2, 4, 1, 5),
-        limbs: (2, 2, 2, 4),
+        limbs: (4, 6, 2, 8),
         limb_len: (2, 3, 1, 3),
         max_depth: 2,
         depths: [45, 42, 13, 0],
@@ -828,6 +828,8 @@ struct Builder<'a> {
     radii: Vec<f32>,
     /// Sign of the next limb's phase.
     phase: f32,
+    /// Waist splits the trunk actually went through.
+    splits: u32,
 }
 
 impl Builder<'_> {
@@ -927,6 +929,12 @@ impl Builder<'_> {
             g.archetype,
             Archetype::Chain | Archetype::Plumeworm | Archetype::Ribbed
         ) {
+            // Chains keep a thick body as they subdivide; the others pinch to a thin waist.
+            let waist = if g.archetype == Archetype::Chain {
+                0.9
+            } else {
+                0.7
+            };
             for _ in 0..self.depth.min(2) {
                 if radii.len() * 2 - 1 > SAMPLE_BODIES {
                     break;
@@ -935,10 +943,11 @@ impl Builder<'_> {
                 for (i, r) in radii.iter().enumerate() {
                     split.push(*r);
                     if let Some(next) = radii.get(i + 1) {
-                        split.push(r.min(*next) * 0.7);
+                        split.push(r.min(*next) * waist);
                     }
                 }
                 radii = split;
+                self.splits += 1;
             }
         }
         radii
@@ -1018,6 +1027,7 @@ fn build(g: &AnimalGenome, seed: u64, depth: u8) -> Plan {
         ends: Vec::new(),
         radii: Vec::new(),
         phase: -1.0,
+        splits: 0,
     };
     let trunk = b.trunk();
     let mut limbs: Vec<Vec<u32>> = Vec::new();
@@ -1026,31 +1036,53 @@ fn build(g: &AnimalGenome, seed: u64, depth: u8) -> Plan {
     let len = usize::from(g.limb_len) + extra;
     let (head, spine) = (trunk[0], trunk.len());
     match g.archetype {
-        Archetype::Crab | Archetype::Ray => {
+        Archetype::Ray => {
+            // Wings: a fan of limbs per side from the broad shoulder bead, swept back, the
+            // leading edge longest, so the body reads as a flat disc and not a chain.
+            let shoulder = trunk[1.min(spine - 1)];
+            let pairs = n.div_ceil(2);
+            for i in 0..n {
+                let side: i8 = if i % 2 == 0 { 1 } else { -1 };
+                let rank = i / 2;
+                let sweep = if pairs > 1 {
+                    rank as f32 / (pairs - 1) as f32
+                } else {
+                    0.5
+                };
+                let out = rot(
+                    Vec2::new(-f32::from(side), 0.0),
+                    f32::from(side) * -(sweep * 0.9 - 0.25),
+                );
+                let len = b.sized(len, i, n).saturating_sub(rank / 2).max(1);
+                let scale = 1.0 - 0.15 * sweep;
+                limbs.push(b.limb(shoulder, out, side, len, scale, 0.12, g.curl * 0.3));
+            }
+        }
+        Archetype::Crab => {
             // The legacy layout: legs spread along the trunk, alternating sides, leaning back.
-            let (scale, step) = if g.archetype == Archetype::Ray {
-                (0.8, 0.15)
-            } else {
-                (0.55, 0.1)
-            };
             for i in 0..n {
                 let attach = (((i as f32 + 0.5) / n as f32 * spine as f32) as usize).min(spine - 1);
                 let side: i8 = if i % 2 == 0 { 1 } else { -1 };
                 let out = Vec2::new(-f32::from(side), 0.0) + Vec2::new(0.0, g.lean);
                 let len = b.sized(len, i, n);
-                limbs.push(b.limb(trunk[attach], out, side, len, scale, step, g.curl));
+                limbs.push(b.limb(trunk[attach], out, side, len, 0.55, 0.1, g.curl));
             }
         }
         Archetype::Squid => {
+            // A tight, converging bundle of arms with the middle pair of a full ring drawn out
+            // into thin feeding tentacles; the mantle and fins trail behind.
             for i in 0..n {
                 let u = (i as f32 + 0.5) / n as f32 * 2.0 - 1.0;
-                // A crown of tentacles fanned across the front of the head.
-                let dir = rot(-Vec2::Y, u * (0.5 + 0.6 * g.lean).min(1.4));
-                // The middle pair of a full ring are the long feeding tentacles.
-                let long = usize::from(n >= 6 && u.abs() < 1.0 / n as f32 * 1.5);
-                let side = b.next_side();
+                let dir = rot(-Vec2::Y, u * (0.4 + 0.3 * g.lean).min(0.8));
+                let long = n >= 6 && u.abs() < 1.0 / n as f32 * 1.5;
+                let side: i8 = if u < 0.0 { -1 } else { 1 };
                 let len = b.sized(len, i, n);
-                limbs.push(b.limb(head, dir, side, len + long, 0.38, 0.06, g.curl));
+                let converge = -g.curl.abs() * 0.8;
+                if long {
+                    limbs.push(b.limb(head, dir, side, len + 3, 0.2, 0.0, converge));
+                } else {
+                    limbs.push(b.limb(head, dir, side, len + 1, 0.4, 0.07, converge));
+                }
             }
         }
         Archetype::Octopus | Archetype::Star => {
@@ -1125,14 +1157,20 @@ impl Builder<'_> {
         if levels == 0 {
             return;
         }
+        // The first two levels are long limbs of two beads, the outer twigs single beads.
+        let beads = if levels + 2 > self.depth { 2 } else { 1 };
         for side in [1i8, -1] {
             let turn =
                 f32::from(side) * self.g.lean * (1.0 + self.g.asymmetry * 0.5 * f32::from(side));
             let out = rot(dir, turn);
-            let r = radius * 0.78 * (1.0 + self.jitter());
-            let child = self.bead(Some(at), out, r, side, 1);
-            let rr = self.radius(child);
-            self.branch(child, out, rr, levels - 1);
+            let mut host = at;
+            let mut rr = radius;
+            for _ in 0..beads {
+                let r = rr * 0.82 * (1.0 + self.jitter());
+                host = self.bead(Some(host), out, r, side, 1);
+                rr = self.radius(host);
+            }
+            self.branch(host, out, rr, levels - 1);
         }
     }
 
@@ -1266,7 +1304,9 @@ impl Builder<'_> {
                 }
             }
             Archetype::Chain => {
-                for &host in trunk.iter().skip(1).step_by(2) {
+                // Fins on every other original bead (the beads between are waist splits).
+                let unit = 1usize << self.splits;
+                for &host in trunk.iter().skip(unit).step_by(2 * unit) {
                     let r = self.radius(host);
                     for sign in [-1.0f32, 1.0] {
                         let angle = (0.6f32).atan2(sign);
