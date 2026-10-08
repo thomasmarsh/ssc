@@ -4330,6 +4330,10 @@ fn draw_roots(gizmos: &mut Gizmos, time: f32, body: &Body, host: &Body, color: C
     let faint = color.with_alpha(0.55);
     // A collar hugging the rim.
     gizmos.line_2d(base - side * r * 0.95, base + side * r * 0.95, faint);
+    // A resident riding a creature has a collar only: there is no rock to root into.
+    if host.kind == BodyKind::Creature {
+        return;
+    }
     // Roots reaching down into the rock.
     for k in 0..5 {
         let t = k as f32 / 4.0 - 0.5;

@@ -55,6 +55,15 @@ pub fn can_host(rock: &Body) -> bool {
         }
 }
 
+/// A living creature whose genome has host slots: its residents ride it like rooters ride a
+/// rock, and are let go the next tick it is found missing (dead, eaten or unloaded).
+pub fn carries_residents(body: &Body) -> bool {
+    body.kind == BodyKind::Creature
+        && body.health > 0.0
+        && !body.consumed
+        && body.genome.hosted.is_some()
+}
+
 /// Where a creature of `radius` anchored at `angle` (host frame) sits on `host`.
 pub fn place(host: &Body, angle: f32, radius: f32) -> Vec2 {
     Frame::of(host).seat(angle, radius, STAND)
@@ -108,6 +117,9 @@ struct Host {
     radius: f32,
     /// Energy per second the host yields to everyone clinging to it.
     yield_rate: f32,
+    /// A creature with host slots rather than a rock: only its own residents ride it, no
+    /// free creature ever takes hold of it.
+    carrier: bool,
 }
 
 impl Host {
@@ -124,11 +136,12 @@ impl Game {
     fn hosts(&self) -> HashMap<u64, Host> {
         self.bodies
             .iter()
-            .filter(|b| can_host(b))
+            .filter(|b| can_host(b) || carries_residents(b))
             .map(|b| {
                 (
                     b.id,
                     Host {
+                        carrier: b.kind == BodyKind::Creature,
                         position: b.position,
                         velocity: b.velocity,
                         angle: b.angle,
@@ -252,6 +265,7 @@ impl Game {
         let (at, radius) = (self.bodies[index].position, self.bodies[index].radius);
         let mut near: Vec<(f32, u64)> = hosts
             .iter()
+            .filter(|(_, h)| !h.carrier)
             .map(|(&id, h)| (at.distance(h.position) - h.radius - radius * STAND, id))
             .filter(|&(gap, id)| {
                 gap < REACH
@@ -361,6 +375,7 @@ impl Game {
         let hosts = self.hosts();
         let mut near: Vec<(f32, u64)> = hosts
             .iter()
+            .filter(|(_, h)| !h.carrier)
             .map(|(&id, h)| (at.distance(h.position) - h.radius, id))
             .filter(|&(gap, id)| gap < reach || Some(id) == prefer)
             .collect();
@@ -883,6 +898,10 @@ mod tests {
                     assert_eq!(s.index as usize, i);
                     let Some(r) = s.rooted else { continue };
                     let host = &a[r.host as usize];
+                    if host.apex.is_some() {
+                        // An elder's resident: covered by the host-slot tests below.
+                        continue;
+                    }
                     assert!(r.host < s.index && host.kind == BodyKind::Asteroid);
                     assert!(
                         !matches!(host.rock, RockKind::Crystal | RockKind::Husk),
@@ -1010,5 +1029,173 @@ mod tests {
             }
         }
         assert!(seen, "met some rooted life");
+    }
+
+    /// A hosted apex with its residents: the sector, the host's spawn index.
+    fn hosted_sector() -> (SectorId, usize) {
+        (-14..=14)
+            .flat_map(|x| (-14..=14).map(move |y| SectorId { x, y }))
+            .find_map(|id| {
+                let a = world::generate(42, id);
+                let p = a.iter().position(|s| {
+                    s.apex.is_some() && s.species.is_some_and(|sp| sp.genome.hosted.is_some())
+                })?;
+                a.iter()
+                    .any(|s| s.rooted.is_some_and(|r| r.host as usize == p))
+                    .then_some((id, p))
+            })
+            .expect("a hosted elder exists nearby")
+    }
+
+    #[test]
+    fn hosted_elders_are_deterministic_capped_and_inside_the_budget() {
+        let mut hosts = 0;
+        for seed in [1_u64, 42, 7] {
+            for x in -14..=14 {
+                for y in -14..=14 {
+                    let id = SectorId { x, y };
+                    let a = world::generate(seed, id);
+                    assert_eq!(a, world::generate(seed, id), "deterministic");
+                    for (p, host) in a.iter().enumerate() {
+                        let Some(hosted) = host.species.and_then(|sp| sp.genome.hosted) else {
+                            continue;
+                        };
+                        hosts += 1;
+                        let kids: Vec<_> = a
+                            .iter()
+                            .filter(|s| s.rooted.is_some_and(|r| r.host as usize == p))
+                            .collect();
+                        assert!(
+                            kids.len() <= usize::from(crate::hosted::MAX_RESIDENTS),
+                            "cap"
+                        );
+                        assert!(kids.len() <= usize::from(hosted.count));
+                        for k in &kids {
+                            assert!(k.index as usize > p, "residents follow their host");
+                            assert_eq!(k.species.unwrap().genome.parts(), 1);
+                            assert!(k.species.unwrap().genome.hosted.is_none());
+                            assert_eq!(k.species.unwrap().genome.learner, 0.0);
+                        }
+                        assert!(world::bodies_used(&a) <= world::SECTOR_BODY_BUDGET.max(1));
+                    }
+                }
+            }
+        }
+        assert!(hosts > 5, "some elders carry residents: {hosts}");
+        // HOME never does.
+        assert!(
+            world::generate(42, SectorId::ORIGIN)
+                .iter()
+                .all(|s| s.species.is_none_or(|sp| sp.genome.hosted.is_none()))
+        );
+    }
+
+    #[test]
+    fn residents_load_attached_to_their_elder_and_are_released_when_it_dies_or_unloads() {
+        let (id, p) = hosted_sector();
+        let spawns = world::generate(42, id);
+        let mut game = Game::new(42);
+        game.teleport(spawns[p].position + Vec2::new(0.0, 900.0));
+        for _ in 0..30 {
+            game.step(DT, Input::default());
+        }
+        let host = game
+            .bodies
+            .iter()
+            .find(|b| b.origin == Some((id, p as u32)))
+            .expect("elder loaded")
+            .id;
+        let riders = |game: &Game| -> Vec<u64> {
+            game.bodies
+                .iter()
+                .filter(|b| b.root.is_some_and(|r| r.host == host))
+                .map(|b| b.id)
+                .collect()
+        };
+        let ids = riders(&game);
+        assert!(!ids.is_empty(), "residents ride the elder");
+        assert!(game.bodies.len() < MAX_BODIES);
+        // Free creatures never take hold of an elder: nothing but residents is on it.
+        for &r in &ids {
+            let (c, h) = (body(&game, r), body(&game, host));
+            let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
+            assert!(gap.abs() < 1.0, "seated on the rim: {gap}");
+        }
+        // Death: the next tick nothing dangles.
+        let mut dead = Game::new(42);
+        dead.teleport(spawns[p].position + Vec2::new(0.0, 900.0));
+        for _ in 0..30 {
+            dead.step(DT, Input::default());
+        }
+        assert_eq!(riders(&dead), ids, "loading is deterministic");
+        dead.bodies
+            .iter_mut()
+            .find(|b| b.id == host)
+            .unwrap()
+            .health = 0.0;
+        dead.bodies.retain(|b| b.id != host);
+        dead.step(DT, Input::default());
+        for &r in &ids {
+            if let Some(c) = dead.bodies.iter().find(|b| b.id == r) {
+                assert!(c.root.is_none(), "released");
+            }
+        }
+        // Unload: walk far away; no root ever points at a missing body.
+        for k in 1..=8 {
+            game.teleport(Vec2::new(6000.0 * 3.0 * k as f32, 0.0) + spawns[p].position);
+            for _ in 0..60 {
+                game.step(DT, Input::default());
+            }
+            for b in &game.bodies {
+                if let Some(r) = b.root {
+                    assert!(game.body(r.host).is_some(), "no dangling host");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn residents_ride_a_moving_carrier_and_free_creatures_never_take_hold_of_it() {
+        let mut game = empty_game();
+        quiet(&mut game);
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        let host_species = Species::of(Genome {
+            radius: 40.0,
+            hull: 300.0,
+            mass: 100.0,
+            hosted: Some(crate::hosted::Hosted {
+                count: 2,
+                relation: crate::hosted::Relation::Brood,
+            }),
+            ..Genome::default()
+        });
+        let mut host = game.make_creature(&host_species, FAR);
+        host.velocity = Vec2::new(30.0, 0.0);
+        let host_id = host.id;
+        game.bodies.push(host);
+        let kind = Species::of(crate::hosted::resident(
+            &host_species.genome,
+            crate::hosted::Relation::Brood,
+        ));
+        let a = rooted_on(&mut game, &kind, host_id, 0.5);
+        // A free rooting-capable creature touching the elder does not cling to it.
+        let mut drifter = game.make_creature(&rooter(0.9), FAR + Vec2::new(60.0, 0.0));
+        drifter.velocity = Vec2::ZERO;
+        let drifter = {
+            let id = drifter.id;
+            game.bodies.push(drifter);
+            id
+        };
+        for _ in 0..120 {
+            game.step(DT, Input::default());
+        }
+        let (h, c) = (body(&game, host_id), body(&game, a));
+        let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
+        assert!(gap.abs() < 0.5, "rides the surface: {gap}");
+        assert!(c.root.is_some_and(|r| r.host == host_id));
+        assert!(
+            body(&game, drifter).root.is_none_or(|r| r.host != host_id),
+            "an elder is not a rock"
+        );
     }
 }

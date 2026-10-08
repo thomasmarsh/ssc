@@ -14,6 +14,7 @@
 
 use crate::anatomy::{ANATOMY_SALT, AnimalGenome, AnimalSpecimen};
 use crate::bodyplan;
+use crate::hosted::Hosted;
 use crate::power::{self, POWER_GENES};
 use crate::world::{Rng, SectorParams, hash2};
 
@@ -261,6 +262,9 @@ genome! {
         // An optional animal body plan (see `anatomy` and `bodyplan`): the archetype genome
         // and its plan seed. `None` for every creature that exists in the wild today.
         anatomy: Option<AnimalSpecimen> = None;
+        // Optional host slots (see `hosted`): residents that ride this creature. `None`
+        // for every creature but the apex elders that carry some.
+        hosted: Option<Hosted> = None;
     }
 }
 
@@ -461,6 +465,7 @@ impl Genome {
         if let Some(spec) = &mut self.anatomy {
             spec.genome = spec.genome.limited();
         }
+        self.hosted = self.hosted.map(Hosted::limited);
         self
     }
 
@@ -769,6 +774,8 @@ impl Genome {
         // from the body-plan parent, and recombines with the other parent's only when both
         // have one.
         child.anatomy = body.anatomy;
+        // Host slots travel whole with the body (a descendant is as big a host as its body).
+        child.hosted = body.hosted;
         if let (Some(mine), Some(other)) = (a.anatomy, b.anatomy) {
             let mut own = Rng::new(rng.next_u64() ^ ANATOMY_SALT);
             if let Some(spec) = &mut child.anatomy {

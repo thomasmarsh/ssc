@@ -18,9 +18,12 @@ use crate::biome::{BiomeKind, biome};
 use crate::genome::{
     Diet, Fear, Fecundity, GenePool, Genome, Nest, Social, Species, Trigger, Weapon,
 };
+use crate::hosted::{HOSTED_SALT, Hosted, resident};
 use crate::power::Power;
 use crate::region::{harsh_name, soft_name};
-use crate::world::{Phenotype, Rng, SECTOR_BODY_BUDGET, SECTOR_SIZE, SectorId, Spawn, hash2};
+use crate::world::{
+    Phenotype, Rng, Rooting, SECTOR_BODY_BUDGET, SECTOR_SIZE, SectorId, Spawn, hash2,
+};
 use bevy::prelude::Vec2;
 
 /// Separates the apex stream from every other one.
@@ -595,15 +598,79 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
     }
     let extent = SECTOR_SIZE / 2.0 - 600.0;
     let at = id.center() + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));
+    // Host slots (workstream 7): some elders carry residents on their head. Its own hash, so
+    // no existing draw moves; the residents are appended after the elder, so no index does.
+    let hosting = hosting(seed, id, rank);
+    genome.hosted = hosting;
     let species = Species {
         lineage: hash2(seed ^ APEX_SALT ^ 0x11, id.x, id.y) | 1,
         generation: 0,
         genome,
     };
+    let host_index = out.len() as u32;
     out.push(Spawn {
         phenotype: *genes,
-        index: out.len() as u32,
+        index: host_index,
         apex: Some(rank),
         ..Spawn::creature(species, at)
     });
+    if let Some(hosted) = hosting {
+        seed_residents(seed, id, &genome, hosted, host_index, at, genes, out);
+    }
+}
+
+/// The share of elders that carry residents, by rank.
+pub const HOSTED_SHARE: (f32, f32) = (0.25, 0.5);
+
+/// The elder's host slots, if it has any: a pure function of the seed and sector.
+fn hosting(seed: u64, id: SectorId, rank: Rank) -> Option<Hosted> {
+    let h = hash2(seed ^ HOSTED_SALT ^ 0x68, id.x, id.y);
+    let share = if rank == Rank::Major {
+        HOSTED_SHARE.1
+    } else {
+        HOSTED_SHARE.0
+    };
+    ((h & 0xFFFF) as f32 / 65_536.0 < share).then(|| Hosted::from_hash(h >> 16))
+}
+
+/// Appends the residents of the elder `host` (spawn `host_index`, at `at`): as many as fit
+/// its head and the sector's body budget, each attached from the start.
+#[allow(clippy::too_many_arguments)]
+fn seed_residents(
+    seed: u64,
+    id: SectorId,
+    host: &Genome,
+    hosted: Hosted,
+    host_index: u32,
+    at: Vec2,
+    genes: &Phenotype,
+    out: &mut Vec<Spawn>,
+) {
+    let key = hash2(seed ^ HOSTED_SALT, id.x, id.y);
+    let n = hosted.fitting(host.radius);
+    let kind = resident(host, hosted.relation);
+    for k in 0..n {
+        if SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + kind.parts() {
+            break;
+        }
+        let angle = Hosted::anchor(key, k, n);
+        let species = Species {
+            lineage: hash2(seed ^ HOSTED_SALT ^ 0x11, id.x, id.y) | 1,
+            generation: 0,
+            genome: kind,
+        };
+        out.push(Spawn {
+            phenotype: *genes,
+            rooted: Some(Rooting {
+                host: host_index,
+                angle,
+                growth: 1.0,
+            }),
+            index: out.len() as u32,
+            ..Spawn::creature(
+                species,
+                at + Vec2::from_angle(angle) * (host.radius + kind.radius),
+            )
+        });
+    }
 }

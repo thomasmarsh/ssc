@@ -9,6 +9,7 @@ pub mod config;
 pub mod fortress;
 pub mod genome;
 pub mod grammar;
+pub mod hosted;
 pub mod mixer;
 pub mod power;
 pub mod range;

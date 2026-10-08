@@ -229,9 +229,15 @@ mod tests {
                             .iter()
                             .all(|s| s.civ.is_some_and(|c| c.territory == t.id))
                     );
+                    // The apex and its residents (appended after it) come after the forts.
+                    let after_forts = |o: &world::Spawn| {
+                        o.apex.is_some()
+                            || o.rooted
+                                .is_some_and(|r| spawns[r.host as usize].apex.is_some())
+                    };
                     assert!(forts.iter().all(|s| {
                         s.index as usize
-                            >= spawns.iter().filter(|o| o.apex.is_none()).count() - forts.len()
+                            >= spawns.iter().filter(|o| !after_forts(o)).count() - forts.len()
                     }));
                     assert!(
                         forts
