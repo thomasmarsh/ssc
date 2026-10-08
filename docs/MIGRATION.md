@@ -39,7 +39,7 @@ Headless scenario tests (170+ of them) cover sector math, pure generation, loadi
 
 ## Next steps
 
-- The HUD, input and feel pass is built (see [UNIVERSE.md](UNIVERSE.md#hud-input-and-feel-built)); next in [FLOW.md](FLOW.md) are the bench merge and the skill merge (the Tow Rig became rock shoving, see `simulation/shove.rs`).
+- The HUD, input and feel pass is built (see [UNIVERSE.md](UNIVERSE.md#hud-input-and-feel-built)); next in [FLOW.md](FLOW.md) are the later skill/economy redesign; the three-tab bench is built ([BENCH.md](BENCH.md)) (the Tow Rig became rock shoving, see `simulation/shove.rs`).
 - Persist more than kills: positions, damage and bred creatures.
 - Rebase world coordinates near the player; `f32` positions lose precision many sectors from the origin.
 - Rooted life (`src/simulation/root.rs`, habit genes in `src/genome.rs`, residents in `world::root_residents`) is built; see `docs/UNIVERSE.md`. Territories and civilization can build on `Body::root` and `Root::host`.
@@ -53,3 +53,5 @@ This is a reimplementation, not a behavior-preserving port. It does not carry ov
 The desktop app currently has procedural visuals and no audio. Build and run instructions are in the [README](../README.md).
 
 Sonar curiosity lives in `simulation/discovery.rs`, resolving bounded live handles through `ping.rs` after tick cleanup. `chart.rs` remembers generated anchors and relic sites, while the desktop adapter draws distinct glyphs and bounded labels. [DISCOVERY.md](DISCOVERY.md) is the lifecycle and presentation contract.
+
+The consolidated bench navigation and read-only rows live in `simulation/bench.rs`. Typed action identities dispatch the original transactions in `pads.rs` and `organs.rs`; `presentation.rs` bounds the list while retaining selected details and costs. [BENCH.md](BENCH.md) records the contract.

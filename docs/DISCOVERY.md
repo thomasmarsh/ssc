@@ -1,6 +1,6 @@
 # Bounded sonar curiosity
 
-This is the built contract for the discovery slice after Seamer `09ad7e8`, Runekeeper `7125751`, and Slinger `73def65`. FLOW's wonder layer reuses X, the free sector-entry ping, the SONAR tab, and the current map. There is no new action, ability, organ, beacon link, or generation rule.
+This is the built contract for the discovery slice after Seamer `09ad7e8`, Runekeeper `7125751`, and Slinger `73def65`. FLOW's wonder layer reuses X, the free sector-entry ping, the SKILLS tab's SONAR group, and the current map. There is no new action, ability, organ, beacon link, or generation rule.
 
 ## Eligibility and truth
 

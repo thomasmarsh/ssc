@@ -257,7 +257,15 @@ impl Game {
         if self.bench_open() {
             out.push(hint("UP DOWN", "row"));
             out.push(hint("LEFT RIGHT", "tab"));
-            out.push(hint("ENTER", "buy"));
+            out.push(hint("ENTER", "action"));
+            if self.bench_panel().is_some_and(|panel| {
+                panel
+                    .rows
+                    .iter()
+                    .any(|row| row.selected && matches!(row.action, super::BenchAction::Stash(_)))
+            }) {
+                out.push(hint("Q", "stash take"));
+            }
             out.push(hint("E", "close bench"));
             return out;
         }

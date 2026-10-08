@@ -1385,6 +1385,12 @@ impl Part {
         }
     }
 
+    /// Guaranteed positive-stat multiplier for the next rarity, before its random affix.
+    pub fn next_rarity_scale(&self) -> Option<f32> {
+        self.next_rarity()
+            .map(|next| next.strength() / self.rarity.strength())
+    }
+
     /// Raises the part one rarity step: gains of the new rarity scale every beneficial stat
     /// (penalties stay as they are), a Rare part gains a trait level, and one more affix is
     /// rolled. Nothing gets worse. False at the cap.

@@ -23,7 +23,6 @@
 //!   enemy suffers one seeded raid roll when its sector reloads.
 
 use super::arsenal::Profile;
-use super::organs::Organ;
 use super::skills::{Skill, SkillTab};
 use super::tuning as t;
 use super::upgrades::Rarity;
@@ -101,64 +100,6 @@ pub struct Pad {
     /// new one, never counted against `MAX_PADS` and never a respawn point.
     pub home: bool,
     reloads: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BenchTab {
-    Repair,
-    Reforge,
-    Upgrade,
-    Arms,
-    Stash,
-    Rig,
-    Sonar,
-}
-
-impl BenchTab {
-    pub const ALL: [BenchTab; 7] = [
-        Self::Repair,
-        Self::Reforge,
-        Self::Upgrade,
-        Self::Arms,
-        Self::Stash,
-        Self::Rig,
-        Self::Sonar,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Repair => "REPAIR",
-            Self::Reforge => "REFORGE",
-            Self::Upgrade => "UPGRADE",
-            Self::Arms => "ARMS",
-            Self::Stash => "STASH",
-            Self::Rig => "RIG",
-            Self::Sonar => "SONAR",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Bench {
-    pub tab: BenchTab,
-    pub cursor: usize,
-}
-
-/// One line of the bench panel.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BenchRow {
-    pub text: String,
-    pub selected: bool,
-    /// Whether pressing confirm on it would do something.
-    pub ok: bool,
-}
-
-/// The bench as the HUD draws it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BenchPanel {
-    pub tab: BenchTab,
-    pub rows: Vec<BenchRow>,
-    pub footer: String,
 }
 
 /// What pressing the land key would do right now, for the prompt.
@@ -1266,79 +1207,8 @@ impl Game {
 
     // ---- the bench -----------------------------------------------------------------------
 
-    /// Opens or closes the bench (landed only); the interact key does it.
-    pub fn bench_toggle(&mut self) {
-        if self.pad.landed.is_none() {
-            return;
-        }
-        self.pad.bench = match self.pad.bench {
-            Some(_) => None,
-            None => Some(Bench {
-                tab: BenchTab::Repair,
-                cursor: 0,
-            }),
-        };
-    }
-
-    pub fn bench_open(&self) -> bool {
-        self.pad.bench.is_some() && self.pad.landed.is_some()
-    }
-
-    /// Picks a tab (0 to 6).
-    pub fn bench_tab(&mut self, n: usize) {
-        if let (Some(bench), Some(&tab)) = (self.pad.bench.as_mut(), BenchTab::ALL.get(n)) {
-            bench.tab = tab;
-            bench.cursor = 0;
-        }
-    }
-
-    /// Steps to the next (or previous) tab, for a pad without number keys.
-    pub fn bench_tab_step(&mut self, step: i32) {
-        if let Some(bench) = self.pad.bench {
-            let at = BenchTab::ALL
-                .iter()
-                .position(|&t| t == bench.tab)
-                .unwrap_or(0) as i32;
-            let next = (at + step.signum()).rem_euclid(BenchTab::ALL.len() as i32);
-            self.bench_tab(next as usize);
-        }
-    }
-
-    fn bench_targets(&self, tab: BenchTab) -> usize {
-        match tab {
-            BenchTab::Repair => 1,
-            BenchTab::Reforge | BenchTab::Upgrade => self.loadout.parts.len(),
-            BenchTab::Arms => self.bench_profiles().len(),
-            BenchTab::Stash => Material::ALL.len(),
-            BenchTab::Rig => Skill::of_tab(SkillTab::Rig).len() + Organ::ALL.len(),
-            BenchTab::Sonar => Skill::of_tab(SkillTab::Sonar).len(),
-        }
-    }
-
-    /// Owned profiles the bench can level (the stock gun has no levels).
-    fn bench_profiles(&self) -> Vec<Profile> {
-        self.loadout
-            .arsenal
-            .owned()
-            .into_iter()
-            .filter(|&p| p != Profile::Stock)
-            .collect()
-    }
-
-    /// Moves the cursor within the tab's list, wrapping.
-    pub fn bench_move(&mut self, step: i32) {
-        let Some(bench) = self.pad.bench else { return };
-        let n = self.bench_targets(bench.tab);
-        if n == 0 {
-            return;
-        }
-        let next = (bench.cursor as i32 + step.signum()).rem_euclid(n as i32) as usize;
-        if let Some(bench) = self.pad.bench.as_mut() {
-            bench.cursor = next;
-        }
-    }
-
-    fn bench_failed(&mut self, text: String) {
+    /// Refuses a transaction with the existing dry cue and notice.
+    pub(super) fn bench_failed(&mut self, text: String) {
         self.cue(Cue::Dry);
         self.notify(text, Rarity::Common);
     }
@@ -1348,7 +1218,7 @@ impl Game {
         self.bench_done("TEST".into(), Rarity::Rare);
     }
 
-    fn bench_done(&mut self, text: String, rarity: Rarity) {
+    pub(super) fn bench_done(&mut self, text: String, rarity: Rarity) {
         self.cue(Cue::Pickup { rarity });
         self.feel_event(super::feel::FeelEvent::Purchase {
             rarity: rarity as u8,
@@ -1356,48 +1226,8 @@ impl Game {
         self.notify(text, rarity);
     }
 
-    /// Does the tab's main thing to the selected target: repair, reforge, upgrade, level up,
-    /// or deposit into the stash.
-    pub fn bench_confirm(&mut self) {
-        if !self.bench_open() {
-            return;
-        }
-        let Some(bench) = self.pad.bench else { return };
-        let n = self.bench_targets(bench.tab);
-        let cursor = bench.cursor.min(n.saturating_sub(1));
-        match bench.tab {
-            BenchTab::Repair => self.bench_repair(),
-            BenchTab::Reforge => self.bench_reforge(cursor),
-            BenchTab::Upgrade => self.bench_upgrade(cursor),
-            BenchTab::Arms => self.bench_level(cursor),
-            BenchTab::Stash => self.bench_stash(cursor, true),
-            BenchTab::Rig => {
-                let skills = Skill::of_tab(SkillTab::Rig).len();
-                match cursor.checked_sub(skills).and_then(|k| Organ::ALL.get(k)) {
-                    Some(&organ) => match self.bench_organ(organ) {
-                        Ok(text) => self.bench_done(text, Rarity::Epic),
-                        Err(text) => self.bench_failed(text),
-                    },
-                    None => self.bench_skill(SkillTab::Rig, cursor),
-                }
-            }
-            BenchTab::Sonar => self.bench_skill(SkillTab::Sonar, cursor),
-        }
-    }
-
-    /// The tab's second action: withdraw, on the stash tab.
-    pub fn bench_alt(&mut self) {
-        if !self.bench_open() {
-            return;
-        }
-        let Some(bench) = self.pad.bench else { return };
-        if bench.tab == BenchTab::Stash {
-            self.bench_stash(bench.cursor, false);
-        }
-    }
-
     /// Repairs hull and shield at once, as far as the hold pays for it.
-    fn bench_repair(&mut self) {
+    pub(super) fn bench_repair(&mut self) {
         let Some(ship) = self.player() else { return };
         let hull_missing = (ship.max_health - ship.health).max(0.0);
         let shield_missing = (ship.max_shield - ship.shield).max(0.0);
@@ -1424,7 +1254,7 @@ impl Game {
         );
     }
 
-    fn bench_reforge(&mut self, index: usize) {
+    pub(super) fn bench_reforge(&mut self, index: usize) {
         let Some(part) = self.loadout.parts.get(index) else {
             self.bench_failed("NO PART FITTED".into());
             return;
@@ -1445,7 +1275,7 @@ impl Game {
         }
     }
 
-    fn bench_upgrade(&mut self, index: usize) {
+    pub(super) fn bench_upgrade(&mut self, index: usize) {
         let Some(part) = self.loadout.parts.get(index) else {
             self.bench_failed("NO PART FITTED".into());
             return;
@@ -1471,7 +1301,16 @@ impl Game {
         );
     }
 
-    fn bench_level(&mut self, index: usize) {
+    pub(super) fn bench_profiles(&self) -> Vec<Profile> {
+        self.loadout
+            .arsenal
+            .owned()
+            .into_iter()
+            .filter(|&p| p != Profile::Stock)
+            .collect()
+    }
+
+    pub(super) fn bench_level(&mut self, index: usize) {
         let Some(&profile) = self.bench_profiles().get(index) else {
             self.bench_failed("NO WEAPON TO RAISE".into());
             return;
@@ -1524,7 +1363,7 @@ impl Game {
     }
 
     /// Buys the next level of a rig upgrade. Levels only go up.
-    fn bench_skill(&mut self, tab: SkillTab, index: usize) {
+    pub(super) fn bench_skill(&mut self, tab: SkillTab, index: usize) {
         let Some(&skill) = Skill::of_tab(tab).get(index) else {
             return;
         };
@@ -1550,7 +1389,7 @@ impl Game {
         }
     }
 
-    fn bench_stash(&mut self, index: usize, deposit: bool) {
+    pub(super) fn bench_stash(&mut self, index: usize, deposit: bool) {
         let Some(&kind) = Material::ALL.get(index) else {
             return;
         };
@@ -1582,229 +1421,11 @@ impl Game {
             );
         }
     }
-
-    /// The bench as the HUD draws it.
-    pub fn bench_panel(&self) -> Option<BenchPanel> {
-        let bench = self.pad.bench.filter(|_| self.bench_open())?;
-        let can = |price: &[(Material, f32)]| self.cargo.can_afford(price);
-        let mut rows: Vec<BenchRow> = Vec::new();
-        #[allow(clippy::needless_late_init)]
-        let footer: String;
-        match bench.tab {
-            BenchTab::Repair => {
-                let ship = self.player()?;
-                let hull = (ship.max_health - ship.health).max(0.0);
-                let shield = (ship.max_shield - ship.shield).max(0.0);
-                let text = format!(
-                    "HULL {hull:.0} to fill ({:.0}M)   SHIELD {shield:.0} to fill ({:.0}V)",
-                    hull * REPAIR_METAL,
-                    shield * REPAIR_VOLATILES
-                );
-                rows.push(BenchRow {
-                    text,
-                    selected: true,
-                    ok: (hull > 0.5 && self.cargo.metal > 0.0)
-                        || (shield > 0.5 && self.cargo.volatiles > 0.0),
-                });
-                footer = "ENTER repairs what the hold can pay for".into();
-            }
-            BenchTab::Reforge | BenchTab::Upgrade => {
-                let reforge = bench.tab == BenchTab::Reforge;
-                for (i, part) in self.loadout.parts.iter().enumerate() {
-                    let (price, ok, extra) = if reforge {
-                        let price = reforge_price(part.rarity);
-                        let ok = can(&price);
-                        (Some(price), ok, String::new())
-                    } else {
-                        match part.next_rarity() {
-                            Some(next) => {
-                                let price = upgrade_price(part.rarity);
-                                let ok = can(&price);
-                                (
-                                    Some(price),
-                                    ok,
-                                    format!(" > {}", next.label().to_uppercase()),
-                                )
-                            }
-                            None => (None, false, " MAX".into()),
-                        }
-                    };
-                    let cost = price.as_deref().map(price_text).unwrap_or_default();
-                    rows.push(BenchRow {
-                        text: format!(
-                            "{}  {}{extra}  {}  {cost}",
-                            part.name.to_uppercase(),
-                            part.rarity.label().to_uppercase(),
-                            part.summary()
-                        ),
-                        selected: i == bench.cursor,
-                        ok,
-                    });
-                }
-                if rows.is_empty() {
-                    rows.push(BenchRow {
-                        text: "NO PARTS FITTED".into(),
-                        selected: false,
-                        ok: false,
-                    });
-                }
-                footer = if reforge {
-                    "ENTER rerolls the affixes (best of three, never worse)".into()
-                } else {
-                    "ENTER raises one rarity step".into()
-                };
-            }
-            BenchTab::Arms => {
-                for (i, profile) in self.bench_profiles().into_iter().enumerate() {
-                    let level = self.loadout.arsenal.level(profile);
-                    let (text, ok) = match level_price(profile, level) {
-                        Some(price) if level < profile.max_level() => (
-                            format!(
-                                "{}  LEVEL {level} > {}  {}",
-                                profile.label(),
-                                level + 1,
-                                price_text(&price)
-                            ),
-                            can(&price),
-                        ),
-                        _ => (format!("{}  LEVEL {level}  MAX", profile.label()), false),
-                    };
-                    rows.push(BenchRow {
-                        text,
-                        selected: i == bench.cursor,
-                        ok,
-                    });
-                }
-                if rows.is_empty() {
-                    rows.push(BenchRow {
-                        text: "NO WEAPON PROFILE OWNED YET".into(),
-                        selected: false,
-                        ok: false,
-                    });
-                }
-                footer = "ENTER raises the weapon one level".into();
-            }
-            BenchTab::Rig | BenchTab::Sonar => {
-                let tab = if bench.tab == BenchTab::Rig {
-                    SkillTab::Rig
-                } else {
-                    SkillTab::Sonar
-                };
-                for (i, skill) in Skill::of_tab(tab).into_iter().enumerate() {
-                    let level = self.loadout.skills.level(skill);
-                    let gate = self.skill_gate(skill);
-                    let (text, ok) = match skill.price(level) {
-                        Some(price) if gate.is_some() => (
-                            format!(
-                                "{}  LOCKED  needs {}  {}",
-                                skill.label(),
-                                gate.unwrap_or_default(),
-                                price_text(&price)
-                            ),
-                            false,
-                        ),
-                        Some(price) if level == 0 && skill.starts_locked() => (
-                            format!(
-                                "{}  UNLOCK  {}  {}",
-                                skill.label(),
-                                skill.summary(),
-                                price_text(&price)
-                            ),
-                            can(&price),
-                        ),
-                        Some(price) => (
-                            format!(
-                                "{}  LEVEL {level}/{} > {}  {}  {}",
-                                skill.label(),
-                                skill.max_level(),
-                                level + 1,
-                                skill.summary(),
-                                price_text(&price)
-                            ),
-                            can(&price),
-                        ),
-                        None => (format!("{}  LEVEL {level}  MAX", skill.label()), false),
-                    };
-                    rows.push(BenchRow {
-                        text,
-                        selected: i == bench.cursor,
-                        ok,
-                    });
-                }
-                if tab == SkillTab::Rig {
-                    let skills = Skill::of_tab(SkillTab::Rig).len();
-                    let slots = self.loadout.skills.organ_slots();
-                    let organs = &self.loadout.organs;
-                    for (k, organ) in Organ::ALL.into_iter().enumerate() {
-                        let text = match organs.strain(organ) {
-                            None => {
-                                format!("{} ORGAN  not owned  {}", organ.label(), organ.summary())
-                            }
-                            Some(strain) => {
-                                let state = if organs.is_fitted(organ) {
-                                    if organs.dormant {
-                                        "FITTED, ASLEEP"
-                                    } else {
-                                        "FITTED"
-                                    }
-                                } else if organs.loan().is_some_and(|(o, _)| o == organ) {
-                                    "BONDED, LOAN"
-                                } else if slots == 0 {
-                                    "OWNED, NEEDS SYMBIOSIS"
-                                } else if organs.grafted(organ) {
-                                    "OWNED  swap free"
-                                } else {
-                                    "OWNED  graft 8C 20V a level"
-                                };
-                                format!(
-                                    "{} ORGAN  level {}/{}  x{:.1}  {state}",
-                                    organ.label(),
-                                    strain.level,
-                                    t::ORGAN_LEVELS,
-                                    strain.magnitude
-                                )
-                            }
-                        };
-                        rows.push(BenchRow {
-                            text,
-                            selected: skills + k == bench.cursor,
-                            ok: organs.owns(organ) && slots > 0,
-                        });
-                    }
-                }
-                footer = if tab == SkillTab::Sonar {
-                    "ENTER buys the next level; X pings; upgrades are kept for the run".into()
-                } else {
-                    "ENTER buys the next level; upgrades are kept for the run".into()
-                };
-            }
-            BenchTab::Stash => {
-                let stash = self.landed_pad().map(|p| p.stash).unwrap_or_default();
-                for (i, kind) in Material::ALL.into_iter().enumerate() {
-                    rows.push(BenchRow {
-                        text: format!(
-                            "{}  HOLD {:.0}  STASH {:.0}/{STASH_CAP:.0}",
-                            kind.label(),
-                            self.cargo.amount(kind),
-                            stash.amount(kind)
-                        ),
-                        selected: i == bench.cursor,
-                        ok: true,
-                    });
-                }
-                footer = format!("ENTER stores {STASH_STEP:.0}   Q takes {STASH_STEP:.0}");
-            }
-        }
-        Some(BenchPanel {
-            tab: bench.tab,
-            rows,
-            footer,
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::organs::Organ;
     use super::*;
     use crate::genome::{Genome, Species};
     use crate::simulation::arsenal::Profile;
@@ -2411,7 +2032,17 @@ mod tests {
 
     fn bench(game: &mut Game, tab: usize) {
         game.bench_toggle();
-        game.bench_tab(tab);
+        let action = match tab {
+            0 => BenchAction::Repair,
+            1 => BenchAction::Reforge(0),
+            2 => BenchAction::Upgrade(0),
+            3 => BenchAction::Weapon(Profile::Spread),
+            4 => BenchAction::Stash(Material::Metal),
+            5 => BenchAction::Skill(Skill::BeamPower),
+            6 => BenchAction::Skill(Skill::PingReach),
+            _ => unreachable!(),
+        };
+        game.bench_select(action);
     }
 
     #[test]
@@ -2517,8 +2148,8 @@ mod tests {
             stock(&mut game, 400.0, 0.0, 100.0);
             bench(&mut game, 1);
             game.pad.bench = Some(Bench {
-                tab: BenchTab::Reforge,
-                cursor: 0,
+                tab: BenchTab::Parts,
+                cursor: 1,
             });
             let part = game.loadout.parts[0].clone();
             game.bench_confirm();
@@ -2600,9 +2231,9 @@ mod tests {
         game.pad.cover_broken = COVER_BREAK;
         bench(&mut game, 6);
         let panel = game.bench_panel().unwrap();
-        assert_eq!(panel.tab, BenchTab::Sonar);
-        assert_eq!(panel.rows.len(), Skill::of_tab(SkillTab::Sonar).len());
-        assert!(panel.rows.iter().any(|r| r.text.contains("UNLOCK")));
+        assert_eq!(panel.tab, BenchTab::Skills);
+        assert_eq!(panel.rows.len(), Skill::ALL.len() + Organ::ALL.len());
+        assert!(panel.rows.iter().any(|r| r.state == "UNLOCK"));
         for skill in Skill::of_tab(SkillTab::Sonar) {
             assert_eq!(game.loadout.skills.level(skill), 0, "nothing starts owned");
         }
@@ -2661,10 +2292,10 @@ mod tests {
         game.pad.cover_broken = COVER_BREAK;
         bench(&mut game, 5);
         let panel = game.bench_panel().unwrap();
-        assert_eq!(panel.tab, BenchTab::Rig);
+        assert_eq!(panel.tab, BenchTab::Skills);
         assert_eq!(
             panel.rows.len(),
-            Skill::of_tab(SkillTab::Rig).len() + Organ::ALL.len(),
+            Skill::ALL.len() + Organ::ALL.len(),
             "the skills and then the organ rows"
         );
         // Short of the price: nothing bought, nothing spent.
@@ -3296,8 +2927,8 @@ mod tests {
         bench(&mut game, 4);
         for i in 0..12 {
             game.pad.bench = Some(Bench {
-                tab: BenchTab::Stash,
-                cursor: i % 3,
+                tab: BenchTab::Parts,
+                cursor: 1 + game.loadout.parts.len() * 2 + i % 3,
             });
             if i % 4 == 3 {
                 game.bench_alt();

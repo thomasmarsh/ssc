@@ -76,8 +76,8 @@ const CHART_SPANS: usize = 1 + (CHART_COLS * CHART_ROWS) as usize + CHART_DETAIL
 pub(crate) const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
 const FEED_LINES: usize = 5;
-/// Bench panel rows: the tab strip, up to nine rows and the footer hint.
-const BENCH_LINES: usize = 17;
+/// Bounded text spans for tabs, action rows, selected details, costs, and controls.
+const BENCH_LINES: usize = 64;
 /// Panel rows: five slots, a header and up to eleven profiles, a header and up to nine
 /// boosts, a header and three materials. Rows with nothing to say are empty (no height).
 /// Where the ship panel's lines divide into its two columns: gear and arsenal, then the rig.
@@ -112,7 +112,7 @@ BEACON  H               STAR MAP  G
 SEE     hold TAB for details + radar     F3 latches them
 GAME    P pause    ESC settings and quit    F11 fullscreen    ENTER new run
 
-BENCH   UP DOWN row    LEFT RIGHT tab (or 1-7)    ENTER do it    Q take    E close
+BENCH   UP DOWN row    LEFT RIGHT tab (or 1-3)    ENTER action    Q stash take    E close
 
 GAMEPAD  sticks fly and aim    R2 mine    L1 / R1 weapon    D-pad right parry
          L3 dash    R3 ping    B or Select interact    Y beacon
@@ -704,7 +704,7 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
             None => (String::new(), MUTED),
         });
     }
-    lines.push(("\nRIG   bench tabs 6, 7\n".into(), CYAN));
+    lines.push(("\nSKILLS   bench tab 3\n".into(), CYAN));
     for skill in Skill::of_tab(SkillTab::Rig) {
         let level = game.loadout.skills.level(skill);
         if skill.is_ability() {
@@ -961,38 +961,173 @@ fn pad_banner(game: &Game) -> (String, Color) {
 }
 
 /// The bench panel's lines: tab strip, rows, hint. Empty when the bench is closed.
-fn bench_lines(game: &Game) -> Vec<(String, Color)> {
+fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
     let Some(panel) = game.bench_panel() else {
         return Vec::new();
     };
-    let mut lines = Vec::new();
-    let tabs: Vec<String> = ssc::simulation::BenchTab::ALL
-        .into_iter()
-        .enumerate()
-        .map(|(n, tab)| {
-            if tab == panel.tab {
-                format!("[{} {}]", n + 1, tab.label())
-            } else {
-                format!("{} {}", n + 1, tab.label())
-            }
-        })
-        .collect();
-    lines.push((format!("{}\n", tabs.join("  ")), PAD_GREEN));
-    // A long tab scrolls to keep the selected row on screen.
-    let visible = BENCH_LINES - 2;
+    let columns = ((width - 34.0) / 8.6).floor().max(32.0) as usize;
+    let mut lines = vec![(
+        format!(
+            "{}\n",
+            ssc::simulation::BenchTab::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(n, tab)| {
+                    if tab == panel.tab {
+                        format!("[{} {}]", n + 1, tab.label())
+                    } else {
+                        format!("{} {}", n + 1, tab.label())
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("  ")
+        ),
+        PAD_GREEN,
+    )];
     let selected = panel.rows.iter().position(|r| r.selected).unwrap_or(0);
-    let first = (selected + 1).saturating_sub(visible);
-    for row in panel.rows.iter().skip(first).take(visible) {
-        let marker = if row.selected { ">" } else { " " };
-        let color = match (row.selected, row.ok) {
+    let row = &panel.rows[selected];
+    let details = wrap_bench(&row.detail, columns);
+    let notice = game.notices.last().map(|notice| {
+        let wrapped = wrap_bench(&notice.text, columns);
+        let mut lines: Vec<String> = wrapped.iter().take(2).cloned().collect();
+        if wrapped.len() > 2
+            && let Some(last) = lines.last_mut()
+        {
+            *last = clip_bench(&format!("{last}..."), columns);
+        }
+        (
+            lines,
+            rarity_color(notice.rarity).with_alpha(notice.remaining.min(1.0)),
+        )
+    });
+    // Reserve the selected action, description, costs, hold, and controls before the list.
+    let reserved = 8 + details.len() + notice.as_ref().map_or(0, |(lines, _)| lines.len());
+    let visible = ((height - 24.0) / 18.0).floor() as usize;
+    let available = visible.saturating_sub(reserved);
+    let mut count = available.clamp(1, 12);
+    while count > 1 {
+        let start = selected
+            .saturating_sub(count / 2)
+            .min(panel.rows.len().saturating_sub(count));
+        let headings = panel
+            .rows
+            .iter()
+            .skip(start)
+            .take(count)
+            .enumerate()
+            .filter(|(i, entry)| *i == 0 || panel.rows[start + i - 1].group != entry.group)
+            .count();
+        if count + headings <= available {
+            break;
+        }
+        count -= 1;
+    }
+    let first = selected
+        .saturating_sub(count / 2)
+        .min(panel.rows.len().saturating_sub(count));
+    lines.push((
+        format!(
+            "rows {}-{} / {}\n",
+            first + 1,
+            (first + count).min(panel.rows.len()),
+            panel.rows.len()
+        ),
+        MUTED,
+    ));
+    let mut group = "";
+    for entry in panel.rows.iter().skip(first).take(count) {
+        if group != entry.group {
+            lines.push((format!("{}\n", entry.group), PAD_GREEN));
+            group = entry.group;
+        }
+        let tint = match (entry.selected, entry.ok) {
             (true, true) => CYAN,
             (true, false) => DRY_RED,
             (false, true) => OWNED,
-            (false, false) => MUTED,
+            _ => MUTED,
         };
-        lines.push((format!("{marker} {}\n", row.text), color));
+        let text = format!(
+            "{} {}  [{}]",
+            if entry.selected { ">" } else { " " },
+            entry.text,
+            entry.state
+        );
+        lines.push((format!("{}\n", clip_bench(&text, columns)), tint));
     }
-    lines.push((format!("{}   E closes\n", panel.footer), MUTED));
+    lines.push((format!("\n{}\n", clip_bench(&row.text, columns)), CYAN));
+    lines.push((
+        format!("{}  |  {}\n", row.group, row.state),
+        if row.ok { PAD_GREEN } else { DRY_RED },
+    ));
+    for detail in details {
+        lines.push((format!("{detail}\n"), OWNED));
+    }
+    lines.push(("Cost: ".into(), MUTED));
+    if row.costs.is_empty() {
+        lines.push(("none\n".into(), MUTED));
+    } else {
+        for kind in Material::ALL {
+            let amount: f32 = row
+                .costs
+                .iter()
+                .filter(|(material, _)| *material == kind)
+                .map(|(_, cost)| cost)
+                .sum();
+            if amount <= 0.0 {
+                continue;
+            }
+            lines.push((
+                format!("{amount:.1} {}  ", kind.label()),
+                material_color(kind),
+            ));
+        }
+        lines.push(("\n".into(), MUTED));
+    }
+    lines.push(("Hold: ".into(), MUTED));
+    for kind in Material::ALL {
+        lines.push((
+            format!("{:.0} {}  ", game.cargo.amount(kind), kind.label()),
+            material_color(kind),
+        ));
+    }
+    lines.push(("\n".into(), MUTED));
+    if let Some((notices, tint)) = notice {
+        for notice in notices {
+            lines.push((format!("{notice}\n"), tint));
+        }
+    }
+    lines.push((format!("{}\n", panel.footer), MUTED));
+    lines
+}
+
+fn clip_bench(text: &str, columns: usize) -> String {
+    if text.chars().count() <= columns {
+        text.into()
+    } else {
+        format!(
+            "{}...",
+            text.chars()
+                .take(columns.saturating_sub(3))
+                .collect::<String>()
+        )
+    }
+}
+
+fn wrap_bench(text: &str, columns: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.chars().count() + word.chars().count() + 1 > columns {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
     lines
 }
 
@@ -1021,7 +1156,7 @@ pub(crate) fn arsenal_banner(game: &Game) -> (String, Color) {
 /// Scrolls the open details or help panel with the mouse wheel.
 pub fn scroll_panels(
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
-    session: Res<Session>,
+    mut session: ResMut<Session>,
     mut panels: Query<&mut ScrollPosition, With<Scrollable>>,
 ) {
     let mut delta = 0.0;
@@ -1030,6 +1165,10 @@ pub fn scroll_panels(
             bevy::input::mouse::MouseScrollUnit::Line => event.y * 28.0,
             bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
         };
+    }
+    if delta != 0.0 && session.game.bench_open() {
+        session.game.bench_move(-delta.signum() as i32);
+        return;
     }
     if delta == 0.0 || !(session.details_open() || session.help) {
         return;
@@ -1065,7 +1204,14 @@ pub fn update_hud(
         pad_text.0.0 = text;
     }
     pad_text.1.0 = tint;
-    let panel = bench_lines(game);
+    let viewport = camera
+        .logical_viewport_size()
+        .unwrap_or(Vec2::new(1280.0, 800.0))
+        / ui_scale.0;
+    let bench_width = (viewport.x - 32.0).min(680.0);
+    let bench_height = viewport.y - DETAILS_TOP - DETAILS_BOTTOM;
+    bench_node.width = px(bench_width);
+    let panel = bench_lines(game, bench_width, bench_height);
     let bench_display = if panel.is_empty() {
         Display::None
     } else {
@@ -1127,7 +1273,11 @@ pub fn update_hud(
     let count = if details || session.help {
         0
     } else {
-        game.notices.len()
+        if game.bench_open() {
+            0
+        } else {
+            game.notices.len()
+        }
     };
     for (mut span, mut color, line) in &mut feed {
         // Newest at the bottom; older lines sit above and fade as they expire.
@@ -4490,5 +4640,75 @@ fn draw_sigil(
                 gizmos.line_2d(p + pair[0], p + pair[1], bright);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod bench_layout_tests {
+    use super::*;
+    use ssc::simulation::{
+        BenchAction,
+        organs::{Organ, Strain},
+        skills::Skill,
+    };
+    fn game() -> Game {
+        let mut game = Game::new(5460803);
+        crate::smoke_pads(&mut game, "bench");
+        game
+    }
+    #[test]
+    fn selected_action_costs_and_controls_survive_all_list_boundaries_at_supported_sizes() {
+        let mut game = game();
+        for (width, height) in [(680.0, 582.0), (680.0, 382.0)] {
+            for tab in 0..3 {
+                game.bench_tab(tab);
+                let count = game.bench_panel().unwrap().rows.len();
+                for _ in 0..count {
+                    let panel = game.bench_panel().unwrap();
+                    let row = panel.rows.iter().find(|r| r.selected).unwrap();
+                    let spans = bench_lines(&game, width, height);
+                    assert!(spans.len() < BENCH_LINES);
+                    let text: String = spans.into_iter().map(|(text, _)| text).collect();
+                    assert!(text.contains(&row.text));
+                    assert!(text.contains(&row.state));
+                    assert!(text.contains("Cost:"));
+                    assert!(text.contains("Enter/A act"));
+                    assert_eq!(text.lines().filter(|line| line.starts_with('>')).count(), 1);
+                    assert!(
+                        text.lines().count() as f32 * 18.0 + 24.0 <= height,
+                        "{} lines in {height}: {text}",
+                        text.lines().count()
+                    );
+                    game.bench_move(1);
+                }
+            }
+        }
+    }
+    #[test]
+    fn long_organ_description_is_bounded_and_material_costs_keep_their_colours() {
+        let mut game = game();
+        game.loadout.skills.raise(Skill::Symbiosis);
+        game.loadout.organs.acquire(Strain {
+            organ: Organ::Skipjack,
+            level: 3,
+            magnitude: 1.6,
+        });
+        game.bench_select(BenchAction::Organ(Organ::Skipjack));
+        let spans = bench_lines(&game, 680.0, 382.0);
+        assert!(
+            spans
+                .iter()
+                .any(|(text, tint)| text.contains("24.0 CRYSTAL")
+                    && *tint == material_color(Material::Crystal))
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|(text, tint)| text.contains("60.0 VOLATILES")
+                    && *tint == material_color(Material::Volatiles))
+        );
+        let text: String = spans.into_iter().map(|(text, _)| text).collect();
+        assert!(text.contains("needs DASH"));
+        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 382.0);
     }
 }

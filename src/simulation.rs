@@ -9,6 +9,7 @@ mod adapt;
 mod apexes;
 mod arms;
 pub mod arsenal;
+mod bench;
 mod brain;
 mod chain;
 mod chart;
@@ -64,6 +65,7 @@ mod wildlife;
 
 pub use adapt::Resist;
 pub use apexes::{ApexInfo, ApexReport};
+pub use bench::{Bench, BenchAction, BenchPanel, BenchRow, BenchTab};
 pub use brain::Brain;
 pub use chain::{Chain, Part};
 pub use chart::{
@@ -86,8 +88,8 @@ pub use loot::{Notice, Pickup};
 pub use mimic::Disguise;
 pub use mining::{Beam, Cargo, Lode, Material, renewable};
 pub use pads::{
-    Bench, BenchPanel, BenchRow, BenchTab, HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP,
-    Pad, PadHint, PadKey, PadState, STASH_CAP, price_text,
+    HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP, Pad, PadHint, PadKey, PadState, STASH_CAP,
+    price_text,
 };
 pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RANGE, RING_SPEED};
 pub use powers::{BlinkTell, JamKind, JamTell, PowerView};

@@ -318,7 +318,7 @@ Written after the pass; the sections above stay as the review. Everything here i
 - Docking assist (a press within 400 units eases the ship in): landing still needs speed under 80 within 80 units, and the prompt says "DOCK SLOW DOWN" when it will refuse.
 - The guided first ten minutes beyond the free ping and the lure, and "BEST BUY" at the bench.
 - The purchase show proper (the part plugging into the ship graphic, the one-line change "DASH 240 to 270"); today a ring and the notice. Pickups flying to the ship along a curve, the low-hull heartbeat cue, the respawn-grace shell and an auto-zooming camera.
-- Everything in P1 and P2: three-tab bench, ten skills, resource roles, trophy gating, lode fatigue, the Tow Rig, a single star-map pin, specimen log, controller-first map.
+- The remaining P1 and P2 items: ten skills, changed resource roles, trophy gating, lode fatigue, the Tow Rig, a single star-map pin, specimen log, controller-first map.
 
 **Judgement calls worth a look when playing**
 
@@ -443,3 +443,8 @@ Seamer is built, generator version 19. BESTIARY section 17 records shared-gene m
 ## Status: bounded curiosity discovery
 
 [DISCOVERY.md](DISCOVERY.md) is authoritative for the wonder layer: base ping reveals existing live Seamer pairs and dynamic wells; the existing LODE ECHO tier adds sealed organ relics. Eight curiosity handles at most, nine-second echoes, live availability checks, paired mouth identity, fallback lures, generated-anchor well charting, and one-time relic pointers preserve the starter loop and nearest-civilization guarantee. The section 5 proposal that the map shows all lures is reconciled: temporary rifts and carried/released wells never become persistent destinations. Mimic deception, dim absorption, lens honesty, abilities, and beacon integration remain outside this slice.
+
+
+## Status: three-tab bench
+
+[BENCH.md](BENCH.md) is authoritative for the built PARTS, WEAPONS, and SKILLS surface, selected action/cost/detail layout, groups, controls, bounds, and tests. Section 3 item 11 is partly built: repair stays explicit and partial, the manual stash stays at the bottom of PARTS, and all 19 existing skills remain. The actual arsenal only buys levels of owned profiles; unowned rows explain the existing part/charge route. Adjacent reforge/rarity rows keep current navigation without adding an action mode. Skill merging, automatic stash overflow, changed economy/material roles, trophy gates, docking assist, and the fuller purchase show remain later work. Generator version remains 19; generated content and RNG draw counts are unchanged.

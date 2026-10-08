@@ -1483,7 +1483,7 @@ fn describe(
                 .map(|h| format!("{} {}", h.key, h.action))
                 .collect();
             items.extend(["F1 HELP", "TAB DETAILS", "ESC SETTINGS"].map(String::from));
-            let room = (s.size.x - 24.0) / 6.8;
+            let room = (s.size.x - 24.0) / 7.4;
             let mut text = String::new();
             for item in items {
                 let next = if text.is_empty() {

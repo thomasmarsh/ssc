@@ -403,7 +403,7 @@ fn controls(
         return;
     }
     // The bench, while landed with it open: arrows pick a row (left and right a tab), enter or
-    // space does the thing, Q takes from the stash, 1-7 jump to a tab, E closes. Nothing flies.
+    // space does the thing, Q takes from the stash, 1-3 jump to a tab, E closes. Nothing flies.
     if !session.paused && session.game.bench_open() {
         bench_controls(&keys, &pad, &mut session);
         session.input = Input::default();
@@ -441,7 +441,7 @@ fn controls(
         {
             session.game.interact();
         }
-        // Beacon (locked until bought at the bench's RIG tab): H, or Y on a pad.
+        // Beacon (locked until bought at the bench's SKILLS tab): H, or Y on a pad.
         if keys.just_pressed(KeyCode::KeyH) || pad(GamepadButton::North) {
             let _ = session.game.deploy_beacon();
         }
@@ -609,7 +609,7 @@ fn bench_controls(
     if keys.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft) {
         game.bench_tab_step(-1);
     }
-    for (n, key) in DIGITS.into_iter().take(7).enumerate() {
+    for (n, key) in DIGITS.into_iter().take(3).enumerate() {
         if keys.just_pressed(key) {
             game.bench_tab(n);
         }
@@ -619,8 +619,7 @@ fn bench_controls(
         || pad(GamepadButton::South)
     {
         game.bench_confirm();
-    }
-    if keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::West) {
+    } else if keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::West) {
         game.bench_alt();
     }
     if keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::East) || pad(GamepadButton::Select) {
@@ -1103,7 +1102,7 @@ fn smoke_run(
         run.hold = true;
     }
     // SSC_ORGANS=1: own the four organs with two slots fitted, a bond running, and a hold to
-    // pay the upkeep, to check the HUD icons, the details and the RIG tab.
+    // pay the upkeep, to check the HUD icons, the details and the SKILLS tab.
     if run.frames == 0 && std::env::var_os("SSC_ORGANS").is_some() {
         use ssc::genome::Genome;
         use ssc::simulation::organs::{Organ, Strain};
@@ -1132,6 +1131,24 @@ fn smoke_run(
         };
         let _ = game.bench_organ(Organ::Veil);
         let _ = game.bench_organ(Organ::Faraday);
+    }
+    if run.frames == 0
+        && let Ok(mode) = std::env::var("SSC_BENCH_VIEW")
+    {
+        let game = &mut session.game;
+        let at = game
+            .pads()
+            .find(|pad| pad.home)
+            .map(|pad| game.pad_position(pad))
+            .expect("HOME pad for bench gallery");
+        game.teleport(at);
+        game.pad_action();
+        game.bench_toggle();
+        if let Some(ship) = game.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
+            ship.health = ship.max_health * 0.6;
+        }
+        smoke_bench(game, &mode);
+        run.hold = true;
     }
     // SSC_JAM=emp|confuse|glitch|hud: just before the screenshot, jam the ship (with the dash
     // and parry owned, so their rings show).
@@ -1333,7 +1350,7 @@ fn smoke_run(
         arm_for_smoke(&mut session.game, grade);
     }
     // SSC_PAD=kit|deploy|land|bench: stage the pad states beside the nearest planetoid (a kit
-    // in hand, a pad down, landed, or landed with the bench open on tab SSC_BENCH=0..5).
+    // in hand, a pad down, landed, or landed with the bench open on tab SSC_BENCH=0..2).
     if run.frames == 4
         && let Ok(mode) = std::env::var("SSC_PAD")
     {
@@ -1583,5 +1600,191 @@ fn smoke_pads(game: &mut Game, mode: &str) {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(0);
         game.bench_tab(tab);
+    }
+}
+
+/// Existing progress staged only by the bounded smoke runner.
+fn smoke_bench(game: &mut Game, mode: &str) {
+    use ssc::genome::Genome;
+    use ssc::simulation::{
+        BenchAction,
+        arsenal::Profile,
+        organs::{Organ, Strain},
+        skills::Skill,
+        upgrades::{Rarity, Slot},
+    };
+    game.cargo = Cargo {
+        metal: 80.0,
+        volatiles: 55.0,
+        crystal: 25.0,
+        ..default()
+    };
+    match mode {
+        "parts" | "upgrade" => {
+            let source = upgrades::Source::plain(2.0, game.params());
+            let mut rng = Rng::new(90);
+            game.loadout.parts.clear();
+            for (slot, rarity) in [
+                (Slot::Plating, Rarity::Rare),
+                (Slot::Engine, Rarity::Common),
+            ] {
+                let part = (0..500)
+                    .map(|_| upgrades::roll_part(&mut rng, &source))
+                    .find(|part| part.slot == slot && part.rarity == rarity)
+                    .expect("bounded fitted-part specimen");
+                game.loadout.parts.push(part);
+            }
+            game.bench_select(if mode == "parts" {
+                BenchAction::Upgrade(0)
+            } else {
+                BenchAction::Upgrade(1)
+            });
+        }
+        "weapons" => {
+            game.loadout.arsenal.acquire(Profile::Spread, 1);
+            game.loadout
+                .arsenal
+                .acquire(Profile::Needles, Profile::Needles.max_level());
+            game.bench_select(BenchAction::Weapon(Profile::Spread));
+        }
+        "skills" => game.bench_select(BenchAction::Skill(Skill::EchoLodes)),
+        "gate" => game.bench_select(BenchAction::Skill(Skill::Parry)),
+        "organs" => {
+            game.loadout.skills.raise(Skill::Symbiosis);
+            for (organ, donor) in [
+                (Organ::Remora, Genome::remora()),
+                (Organ::Faraday, Genome::stormcap()),
+                (Organ::Veil, Genome::veilwing()),
+                (Organ::Skipjack, Genome::skipjack()),
+            ] {
+                game.loadout
+                    .organs
+                    .acquire(Strain::from_donor(organ, &donor));
+            }
+            game.bench_organ(Organ::Remora).unwrap();
+            game.bench_select(BenchAction::Organ(Organ::Skipjack));
+        }
+        "stash" => game.bench_select(BenchAction::Stash(Material::Crystal)),
+        _ => panic!("unknown bench gallery"),
+    }
+}
+
+#[cfg(test)]
+mod bench_input_tests {
+    use super::*;
+    use ssc::simulation::{BenchAction, skills::Skill};
+    fn session() -> Session {
+        let mut session = Session::default();
+        smoke_pads(&mut session.game, "bench");
+        session.game.cargo = Cargo {
+            metal: 1000.0,
+            volatiles: 1000.0,
+            crystal: 1000.0,
+            ..default()
+        };
+        session
+            .game
+            .bench_select(BenchAction::Skill(Skill::BeamPower));
+        session
+    }
+    #[test]
+    fn simultaneous_keyboard_and_controller_confirms_buy_once_and_holding_does_not_repeat() {
+        let mut session = session();
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Enter);
+        keys.press(KeyCode::Space);
+        bench_controls(
+            &keys,
+            &|button| button == GamepadButton::South || button == GamepadButton::West,
+            &mut session,
+        );
+        assert_eq!(session.game.loadout.skills.level(Skill::BeamPower), 1);
+        keys.clear();
+        for _ in 0..10 {
+            bench_controls(&keys, &|_| false, &mut session);
+        }
+        assert_eq!(session.game.loadout.skills.level(Skill::BeamPower), 1);
+        keys.release(KeyCode::Enter);
+        keys.clear();
+        keys.press(KeyCode::Enter);
+        bench_controls(&keys, &|_| false, &mut session);
+        assert_eq!(session.game.loadout.skills.level(Skill::BeamPower), 2);
+    }
+    #[test]
+    fn keyboard_and_controller_reach_all_tabs_and_groups_with_existing_bindings() {
+        let mut session = session();
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Digit1);
+        bench_controls(&keys, &|_| false, &mut session);
+        assert_eq!(
+            session.game.bench_panel().unwrap().tab,
+            ssc::simulation::BenchTab::Parts
+        );
+        keys.clear();
+        for expected in [
+            ssc::simulation::BenchTab::Weapons,
+            ssc::simulation::BenchTab::Skills,
+            ssc::simulation::BenchTab::Parts,
+        ] {
+            bench_controls(&keys, &|b| b == GamepadButton::DPadRight, &mut session);
+            assert_eq!(session.game.bench_panel().unwrap().tab, expected);
+        }
+        keys.press(KeyCode::Digit3);
+        bench_controls(&keys, &|_| false, &mut session);
+        keys.clear();
+        let mut groups = vec![];
+        for _ in 0..23 {
+            let panel = session.game.bench_panel().unwrap();
+            let row = panel.rows.iter().find(|r| r.selected).unwrap();
+            if groups.last() != Some(&row.group) {
+                groups.push(row.group);
+            }
+            bench_controls(&keys, &|b| b == GamepadButton::RightTrigger, &mut session);
+        }
+        assert_eq!(groups, ["MINING", "FLIGHT / UTILITY", "SONAR", "ORGANS"]);
+        assert_eq!(
+            session
+                .game
+                .bench_panel()
+                .unwrap()
+                .rows
+                .iter()
+                .position(|r| r.selected)
+                .unwrap(),
+            0
+        );
+        bench_controls(&keys, &|b| b == GamepadButton::LeftTrigger, &mut session);
+        assert_eq!(
+            session
+                .game
+                .bench_panel()
+                .unwrap()
+                .rows
+                .iter()
+                .position(|r| r.selected)
+                .unwrap(),
+            22
+        );
+    }
+    #[test]
+    fn confirm_and_stash_take_together_do_one_transfer() {
+        let mut session = session();
+        session
+            .game
+            .bench_select(BenchAction::Stash(Material::Metal));
+        session.game.cargo.metal = 100.0;
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Enter);
+        keys.press(KeyCode::KeyQ);
+        bench_controls(&keys, &|_| false, &mut session);
+        assert_eq!(session.game.cargo.metal, 75.0);
+        keys.clear();
+        bench_controls(&keys, &|_| false, &mut session);
+        assert_eq!(session.game.cargo.metal, 75.0);
+        keys.release(KeyCode::KeyQ);
+        keys.clear();
+        keys.press(KeyCode::KeyQ);
+        bench_controls(&keys, &|_| false, &mut session);
+        assert_eq!(session.game.cargo.metal, 100.0);
     }
 }
