@@ -68,16 +68,18 @@ Not built yet, so do not judge: gathering rocks as a visible step, repair or rai
 
 ## Oozer (bestiary design 22, first half)
 
-A slow translucent green blob with a soft wobbling skin and a nucleus, ring 4 and out (about 1 in 260 species). Try `SSC_SPECIMEN=oozer` past the start rings or the dev spawn `oozer`. It crawls after the ship, eats rocks on the way (and grows), and swallows the ship when it gets within lobe reach after a 0.8 s stretch.
+A slow translucent green blob with a soft wobbling skin and a nucleus, ring 4 and out (about 1 in 260 species). Try `SSC_SPECIMEN=oozer` past the start rings or the dev spawn `oozer`. It crawls after the ship, eats rocks on the way and digests them into a fed reserve that slowly grows it (several times its made size when well fed, shrinking back over minutes when hungry), reaches a long pseudopod toward the ship or a rock like a white blood cell, swallows the ship when the tip touches it, and squeezes through narrow gaps between solid rocks (the hit circle shrinks, the body flattens). To see the extremes: `SSC_OOZER_ISOLATE=1 SSC_OOZER_FED=1` (full) and `SSC_OOZER_GATE=60` (a gap) with `SSC_SPECIMEN=oozer` (see HOOKS.md).
 
 | Question | What to check | Knob |
 |---|---|---|
 | Softness | Does the skin read as jelly (lags when it turns, dents near the ship) or as a slightly lumpy circle? | `ooze::REST`, `NEIGHBOUR`, `DAMP`, `INERTIA`, `AMBIENT`, `DENT` |
-| Telegraph | Is the lobe stretch (0.8 s) readable and fair, can a ship always step away? | `ENGULF_TELL`, `ENGULF_LOBE` |
+| Reach | Does the long pseudopod read as a white blood cell feeling toward you, is it a fair telegraph (extends at 300 u/s, turns at 1.5 rad/s, so circling it works), and is a 240 (700 when huge) unit reach too long to dodge? | `ENGULF_REACH`, `ENGULF_REACH_SPEED`, `ENGULF_TURN` |
+| Size | Does it grow and shrink at a believable pace (40 s to triple, 95 s back), does a fat one loom without being unfair (hull, mass and reach scale with it), is it ever too big for a sector or a screen? | `ENGULF_BULK_BASE`, `ENGULF_BULK_GENE`, `ENGULF_GROW_RATE`, `ENGULF_SHRINK_RATE`, `ENGULF_HUNGER`, `ENGULF_FEED_*` |
+| Squeeze | Does it flow through a gap smaller than itself and look like it (flattened, area kept), without ever clipping into stone? Does it feel cheap that a gap does not stop it? | `ENGULF_SQUEEZE`, `ENGULF_SQUEEZE_IN`, `ENGULF_SQUEEZE_OUT`, `ooze::squeeze_for` |
 | Escape | Does thrusting out feel always possible but costly, not a fight against the pull? Does the capped pull feel like being carried? | `ENGULF_PULL` |
 | Digestion | Is 3 hull or shield a second worth fearing, and do your shots from inside feel like a way out? | `ENGULF_DPS`, `ENGULF_DPS_GAIN` |
 | After | Is 3 s of immunity after an escape enough to leave, not enough to farm it? | `ENGULF_FREE` |
-| Contents | Do swallowed rocks read inside and brown away? Does its growth feel earned? | `ENGULF_GROW`, `ENGULF_BULK`, `ENGULF_DIGEST` |
+| Contents | Do swallowed rocks read inside and brown away? Does its growth feel earned? | `ENGULF_DIGEST`, `ENGULF_SHIP_FEED` |
 | Readability | With the ship inside, the shield rings clutter the blob. Is it clear where the skin is? | `powerview::draw_ooze` |
 
 Not built yet, so do not judge: swallowing small creatures, the nucleus as a soft spot, spitting when hit hard.
