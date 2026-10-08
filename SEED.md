@@ -45,7 +45,7 @@ Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
 Current focus (user decision): complete the creature set so mechanics can be tuned together. Farming, population scaling and economy come after, in the order of WORKSTREAMS phases. The gamepad audit, feeling view-model (a poor name, rename when built), weaver rock care and edge-density measurement are anytime items, not next.
 
 0. Playtest (the user), at any time. Nothing has been played by a human; all balance is a guess. The checklist is `docs/PLAYTEST.md`: add a section per feature when it lands.
-1. [L] NEXT: bestiary fill (weak points per node kind on elder bodies if the playtest asks for them): nested creatures and broods (7: slice 4b remains - residents on Socket nodes), builder creatures (11), swarms and flock budgets (8), the Foamback and Oozer (designs 21 and 22 in `docs/BESTIARY.md`), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
+1. [L] NEXT: bestiary fill (weak points per node kind on elder bodies if the playtest asks for them): nested creatures and broods (7: only species pairing by range remains), builder creatures (11), swarms and flock budgets (8), the Foamback and Oozer (designs 21 and 22 in `docs/BESTIARY.md`), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
 2. Then farming (with persistence first, workstream 12), population scaling and rally forces, economy and megastructures, hyperlanes.
 3. Alongside: DEVTOOLS B then C (register new constants at birth); hygiene and `TODO:` lists as files are touched.
 
@@ -53,6 +53,7 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
+- Nested creatures slice 4b (generator version 23): residents seat on an elder body's `Socket` marks (`Root::socket`, `Game::socket_pose`), extras stay on the head.
 - Nested creatures slice 4a (generator version 22): the resident relation is chosen by the host country's biome character (`hosted::niche_weights`).
 - Nested creatures slice 3: symbiote residents heal the host, parasites drain it and feed (`root::tend_hosts`, floored at 40 percent health).
 - Nested creatures slice 2c: a hurt elder sheds brood at health thresholds (`root::shed_brood`), swarming. Slice 2 complete.
@@ -60,10 +61,3 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 - Nested creatures slice 2a: a brood whose host is lost swarms (provoked 30 s) instead of scattering dazed; `hosted::is_brood`, `root::SWARM_RAGE`.
 - Nested creatures slice 1 (generator version 21): shared attach mechanic in `src/simulation/attach.rs`, optional `hosted` genome section, apex elders carry 2 to 4 capped residents (symbiote, parasite, brood) that ride the head and are released when the host is lost. See `docs/WORKSTREAMS.md` section 7.
 - Apex elders with animal bodies (generator version 20): species-lineage silhouettes via `apex::body`, radius and hull x1.6, head-only fight with untouchable armour parts, whole body falls with the head, elder gallery labels fixed. Weak points per node kind remain `TODO:`.
-- Archetype polish: ray is a winged disc, tree has two-bead limbs, squid a converging arm bundle with thin feeding tentacles, chains keep a thicker body and fins only on original beads.
-- Animal body plans (rework of the grammar bodies, which read as trees): `src/anatomy.rs` (12 archetypes incl. ribbed spine, depth 0 to 3, typed nodes, variety genes), optional `anatomy` genome section, every legacy species a proven depth-0 plan, `SSC_BESTIARY` gallery, 11 specimens. See `docs/PROCGEN.md`.
-- L-system foundation slices a and b: `src/grammar.rs` (Plan, 8 templates, `GrammarGenome`, caps, growth, 25 tests), `SSC_GRAMMAR` gallery; design in `docs/PROCGEN.md`. Slice c (plants) is farming's first step.
-- Developer toggles (`SSC_DEV=1`, backquote panel, `DevState`), phase A of `docs/DEVTOOLS.md`.
-- Master seed extracted to `src/config.rs`.
-- Low-hull heartbeat cue, pickups arcing into the ship, grace drawn as a shell instead of blinking.
-- Bench purchase feedback, three-tab bench, bounded curiosity discovery, Seamer rifts, Runekeeper sigils, Slinger orbits (details in `docs/`).

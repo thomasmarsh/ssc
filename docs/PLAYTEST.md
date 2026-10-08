@@ -6,7 +6,7 @@ How to get there: elders are rare and deep (past ring 3). Fly out with `SSC_DEV=
 
 ## Nested creatures (workstream 7)
 
-Residents ride an elder's head. Is it readable and is it fun?
+Residents ride an elder: on its body's socket marks first (cyan in the bestiary gallery), then the head. Is it readable and is it fun?
 
 | Check | Look for | Knob |
 |---|---|---|
@@ -19,11 +19,12 @@ Residents ride an elder's head. Is it readable and is it fun?
 | Parasite drain | Parasites drain the elder 1.5 hp/s each (never below 40 percent of its health) and feed. Is the elder visibly weaker, and is that noticeable or invisible? | `root::DRAIN`, `root::DRAIN_FLOOR` |
 | Symbiote and parasite release | On host loss they scatter dazed. Is a stinging parasite loose in the sector acceptable? | `root::DAZE`, `root::KICK`, parasite `contact_damage` 9 |
 | Kill reward | Do riders pay enough bounty to be worth shooting before the elder falls? Can you shoot them off the head at all while it fights you? | `bounty` per relation in `resident` |
+| Socket seating | Do riders sit on the elder's body (ribs, arms, tail) and swing with it as it turns, not floating or on the wrong bead? Does a body with no sockets still wear them all on the head? Do riders stay readable when the elder lunges? | `bodyplan` socket marks (`sockets` gene), `apex::seed_residents`, `Root::socket` |
 | Elder fight | Do riders make the head-only fight easier or harder (they block shots, add fire)? | brood weapon stats, rider placement `Hosted::anchor` |
 | Reload | Leave and return after killing an elder: no riders reappear (tested). After leaving it alive: riders are back and seated | none, report if wrong |
 | Frame cost | Sector with a hosted elder plus a busy biome: any hitch? | `world::SECTOR_BODY_BUDGET` |
 
-Not built yet, so do not judge: species pairings by niche, residents beyond the head, symbiotes actively defending (they only heal).
+Not built yet, so do not judge: species pairings by range, symbiotes actively defending (they only heal).
 
 ## Questions to answer after the first session
 

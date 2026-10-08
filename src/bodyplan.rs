@@ -122,6 +122,16 @@ pub struct BodyPlan {
 }
 
 impl BodyPlan {
+    /// The indices (into `decor`, in order) of the socket marks, which can seat residents.
+    pub fn socket_slots(&self) -> Vec<u8> {
+        self.decor
+            .iter()
+            .enumerate()
+            .filter(|(_, d)| d.kind == PartKind::Socket)
+            .map(|(i, _)| i as u8)
+            .collect()
+    }
+
     /// The unit vector of a node's frame: from its parent to it, or the tail direction.
     pub fn frame(&self, host: usize) -> Vec2 {
         match self.nodes[host].parent {

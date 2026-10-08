@@ -295,33 +295,56 @@ impl Game {
     pub fn chain_decorations(&self) -> Vec<PlacedDecoration> {
         let mut placed = Vec::new();
         for chain in self.chains.values() {
-            for decor in &chain.decor {
-                let Some(host) = self.body(decor.host) else {
-                    continue;
-                };
-                let toward = chain
-                    .parts
+            placed.extend(
+                chain
+                    .decor
                     .iter()
-                    .find(|p| p.id == decor.host)
-                    .and_then(|p| p.parent)
-                    .and_then(|id| self.body(id))
-                    .map_or(-Vec2::from_angle(host.angle), |p| {
-                        host.position - p.position
-                    })
-                    .try_normalize()
-                    .unwrap_or(Vec2::Y);
-                let frame = toward.to_angle();
-                placed.push(PlacedDecoration {
-                    kind: decor.kind,
-                    host: decor.host,
-                    position: host.position + toward * decor.along + toward.perp() * decor.across,
-                    angle: frame + decor.angle,
-                    length: decor.length,
-                    radius: decor.radius,
-                });
-            }
+                    .filter_map(|d| self.place_decor(chain, d)),
+            );
         }
         placed
+    }
+
+    /// One decoration placed from its host bead's current pose, `None` once the bead is gone.
+    fn place_decor(&self, chain: &Chain, decor: &Decoration) -> Option<PlacedDecoration> {
+        let host = self.body(decor.host)?;
+        let toward = chain
+            .parts
+            .iter()
+            .find(|p| p.id == decor.host)
+            .and_then(|p| p.parent)
+            .and_then(|id| self.body(id))
+            .map_or(-Vec2::from_angle(host.angle), |p| {
+                host.position - p.position
+            })
+            .try_normalize()
+            .unwrap_or(Vec2::Y);
+        Some(PlacedDecoration {
+            kind: decor.kind,
+            host: decor.host,
+            position: host.position + toward * decor.along + toward.perp() * decor.across,
+            angle: toward.to_angle() + decor.angle,
+            length: decor.length,
+            radius: decor.radius,
+        })
+    }
+
+    /// Where the socket mark `slot` (an index into the body's marks, see
+    /// `bodyplan::BodyPlan::socket_slots`) of the animal body headed by `head` sits now:
+    /// position, outward angle and the velocity of the bead carrying it. `None` when the
+    /// body, the mark or its bead is gone.
+    pub(super) fn socket_pose(&self, head: u64, slot: u8) -> Option<(Vec2, f32, Vec2)> {
+        let chain = self.chains.get(&self.body(head)?.chain?)?;
+        let decor = chain
+            .decor
+            .get(usize::from(slot))
+            .filter(|d| d.kind == PartKind::Socket)?;
+        let placed = self.place_decor(chain, decor)?;
+        Some((
+            placed.position,
+            placed.angle,
+            self.body(decor.host)?.velocity,
+        ))
     }
 
     fn part_body(

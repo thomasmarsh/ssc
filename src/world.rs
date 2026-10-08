@@ -422,6 +422,8 @@ pub struct Rooting {
     pub host: u32,
     pub angle: f32,
     pub growth: f32,
+    /// A resident seated on a socket mark of its host's body (see `Root::socket`).
+    pub socket: Option<u8>,
 }
 
 impl Spawn {
@@ -973,6 +975,7 @@ fn root_residents(
                     host: host as u32,
                     angle,
                     growth,
+                    socket: None,
                 }),
                 index: out.len() as u32,
                 ..Spawn::creature(species, at + Vec2::from_angle(angle) * radius)

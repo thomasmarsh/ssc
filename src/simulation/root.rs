@@ -49,6 +49,10 @@ pub(super) const FIRE_ARC: f32 = -0.1;
 pub struct Root {
     pub host: u64,
     pub angle: f32,
+    /// A resident seated on one of the host body's socket marks (an index into its marks,
+    /// see `chain::Game::socket_pose`); `angle` is then where it sits on the head should the
+    /// socket be lost.
+    pub socket: Option<u8>,
 }
 
 /// A rock a creature may cling to: free or planetoid, not a crystal, a husk or a nest stone.
@@ -171,14 +175,26 @@ impl Game {
         }
         let hosts = self.hosts();
         let steering = self.pad.aiming();
+        // Residents seated on a socket of their host's body follow that bead's pose; one
+        // whose socket (or bead) is gone sits on the head at its fallback angle.
+        let poses: HashMap<(u64, u8), (Vec2, f32, Vec2)> = self
+            .bodies
+            .iter()
+            .filter_map(|b| b.root.and_then(|r| Some((r.host, r.socket?))))
+            .filter_map(|key| Some((key, self.socket_pose(key.0, key.1)?)))
+            .collect();
         for body in self.bodies.iter_mut().filter(|b| b.root.is_some()) {
             let Some(root) = body.root else { continue };
             let Some(host) = hosts.get(&root.host) else {
                 continue;
             };
-            let outward = host.angle + root.angle;
-            body.position = host.frame().seat(root.angle, body.radius, STAND);
-            body.velocity = host.velocity;
+            let seated = root.socket.and_then(|s| poses.get(&(root.host, s)));
+            let outward = seated.map_or(host.angle + root.angle, |p| p.1);
+            body.position = seated.map_or_else(
+                || host.frame().seat(root.angle, body.radius, STAND),
+                |p| p.0,
+            );
+            body.velocity = seated.map_or(host.velocity, |p| p.2);
             // A landed ship faces outward and turns with its world unless its pilot steers.
             let own = body.alert || (body.kind == BodyKind::Player && steering);
             if !own {
@@ -288,7 +304,11 @@ impl Game {
             if let Some(angle) = self.free_anchor(id, host.radius, wanted, radius, None) {
                 let place = host.frame().seat(angle, radius, STAND);
                 let body = &mut self.bodies[index];
-                body.root = Some(Root { host: id, angle });
+                body.root = Some(Root {
+                    host: id,
+                    angle,
+                    socket: None,
+                });
                 body.position = place;
                 body.velocity = host.velocity;
                 body.chain = None;
@@ -491,7 +511,11 @@ impl Game {
     /// Clings `body` (not yet added to the world) to `host` at `angle`.
     pub(super) fn root_body(&self, body: &mut Body, host: u64, angle: f32) {
         let Some(rock) = self.body(host) else { return };
-        body.root = Some(Root { host, angle });
+        body.root = Some(Root {
+            host,
+            angle,
+            socket: None,
+        });
         body.position = place(rock, angle, body.radius);
         body.velocity = rock.velocity;
         body.angle = rock.angle + angle;
@@ -1210,6 +1234,9 @@ mod tests {
         assert!(game.bodies.len() < MAX_BODIES);
         // Free creatures never take hold of an elder: nothing but residents is on it.
         for &r in &ids {
+            if body(&game, r).root.is_some_and(|r| r.socket.is_some()) {
+                continue; // seated on a socket mark, covered by the socket tests
+            }
             let (c, h) = (body(&game, r), body(&game, host));
             let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
             assert!(gap.abs() < 1.0, "seated on the rim: {gap}");
@@ -1285,7 +1312,10 @@ mod tests {
         let (h, c) = (body(&game, host_id), body(&game, a));
         let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
         assert!(gap.abs() < 0.5, "rides the surface: {gap}");
-        assert!(c.root.is_some_and(|r| r.host == host_id));
+        assert!(
+            c.root
+                .is_some_and(|r| r.host == host_id && r.socket.is_none())
+        );
         assert!(
             body(&game, drifter).root.is_none_or(|r| r.host != host_id),
             "an elder is not a rock"
@@ -1459,5 +1489,164 @@ mod tests {
             game.step(DT, Input::default());
         }
         assert_eq!(here(&game), 0, "the slain elder's residents stay gone");
+    }
+
+    /// An animal host with at least `want` socket marks, and its slots.
+    fn socketed_host(want: usize) -> (Genome, Vec<u8>) {
+        crate::bodyplan::SPECIMENS
+            .iter()
+            .filter_map(|name| crate::bodyplan::specimen_by_name(name))
+            .find_map(|g| {
+                let slots = crate::bodyplan::express(&g.anatomy?, g.radius)?.socket_slots();
+                (slots.len() >= want).then_some((g, slots))
+            })
+            .expect("a body with sockets")
+    }
+
+    /// An animal host carrying a resident per socket (up to four) plus `extra`: the
+    /// first ones on its sockets in slot order, the extras on its head. Returns the host head and the resident ids.
+    fn socket_scene(game: &mut Game, extra: usize) -> (u64, Vec<u64>, Vec<u8>) {
+        let (mut genome, slots) = socketed_host(1);
+        let count = slots.len().min(4) + extra;
+        genome.hosted = Some(crate::hosted::Hosted {
+            count: count as u8,
+            relation: crate::hosted::Relation::Symbiote,
+        });
+        let host_species = Species::of(genome);
+        let mut head = game.make_creature(&host_species, FAR);
+        head.wander = 0.0;
+        let head_id = game.spawn_chain(head);
+        let kind = Species::of(crate::hosted::resident(
+            &genome,
+            crate::hosted::Relation::Symbiote,
+        ));
+        let mut ids = Vec::new();
+        for k in 0..count {
+            let id = rooted_on(game, &kind, head_id, 0.5 + k as f32);
+            if let Some(&slot) = slots.get(k) {
+                game.bodies
+                    .iter_mut()
+                    .find(|b| b.id == id)
+                    .unwrap()
+                    .root
+                    .as_mut()
+                    .unwrap()
+                    .socket = Some(slot);
+            }
+            ids.push(id);
+        }
+        (head_id, ids, slots)
+    }
+
+    #[test]
+    fn residents_sit_on_their_hosts_sockets_and_follow_its_pose() {
+        let mut game = empty_game();
+        quiet(&mut game);
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        let (head, ids, slots) = socket_scene(&mut game, 1);
+        let seated = ids.len().min(slots.len());
+        assert!(ids.len() > seated, "an overflow resident exists");
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == head)
+            .unwrap()
+            .velocity = Vec2::new(40.0, 10.0);
+        for _ in 0..90 {
+            game.step(DT, Input::default());
+            for (k, &id) in ids.iter().enumerate() {
+                let c = body(&game, id);
+                let root = c.root.expect("still riding");
+                assert_eq!(root.socket.is_some(), k < seated);
+                if let Some(slot) = root.socket {
+                    let (at, _, _) = game.socket_pose(head, slot).expect("socket alive");
+                    // Placed before the chain's last constraint pass, so a hair off at most.
+                    assert!(c.position.distance(at) < 6.0, "{}", c.position.distance(at));
+                }
+            }
+        }
+        let first = body(&game, ids[0]);
+        assert!(first.position.distance(body(&game, head).position) > 1.0);
+        // Residents beyond the socket count stay on the head's rim.
+        for &id in ids.iter().skip(slots.len()) {
+            let (c, h) = (body(&game, id), body(&game, head));
+            let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
+            assert!(gap.abs() < 0.5, "overflow rides the head: {gap}");
+        }
+        // Distinct sockets are distinct places.
+        if seated >= 2 {
+            assert!(
+                body(&game, ids[0])
+                    .position
+                    .distance(body(&game, ids[1]).position)
+                    > 1.0
+            );
+        }
+    }
+
+    #[test]
+    fn socket_residents_are_released_when_the_host_is_lost_and_fall_back_when_a_bead_is() {
+        let mut game = empty_game();
+        quiet(&mut game);
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        let (head, ids, _) = socket_scene(&mut game, 1);
+        for _ in 0..10 {
+            game.step(DT, Input::default());
+        }
+        assert!(ids.iter().all(|&id| body(&game, id).root.is_some()));
+        // A socket that cannot be found keeps its rider on the head instead.
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == ids[0])
+            .unwrap()
+            .root
+            .as_mut()
+            .unwrap()
+            .socket = Some(250);
+        game.step(DT, Input::default());
+        let (c, h) = (body(&game, ids[0]), body(&game, head));
+        let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
+        assert!(gap.abs() < 0.5, "fell back to the head: {gap}");
+        // Losing the host lets every rider go.
+        game.bodies.retain(|b| b.id != head);
+        game.step(DT, Input::default());
+        for &id in &ids {
+            if let Some(c) = game.bodies.iter().find(|b| b.id == id) {
+                assert!(c.root.is_none(), "released");
+            }
+        }
+    }
+
+    #[test]
+    fn generated_elders_seat_their_first_residents_on_distinct_sockets() {
+        let mut seated = 0;
+        for x in -14..=14 {
+            for y in -14..=14 {
+                let a = world::generate(42, SectorId { x, y });
+                for (p, host) in a.iter().enumerate() {
+                    let Some(genome) = host.species.map(|s| s.genome) else {
+                        continue;
+                    };
+                    let kids: Vec<_> = a
+                        .iter()
+                        .filter_map(|s| s.rooted.filter(|r| r.host as usize == p))
+                        .collect();
+                    let slots = genome
+                        .anatomy
+                        .and_then(|spec| crate::bodyplan::express(&spec, genome.radius))
+                        .map(|plan| plan.socket_slots())
+                        .unwrap_or_default();
+                    let on: Vec<u8> = kids.iter().filter_map(|r| r.socket).collect();
+                    assert!(on.len() <= slots.len());
+                    assert!(on.iter().all(|s| slots.contains(s)));
+                    assert!(on.windows(2).all(|w| w[0] < w[1]), "distinct, in order");
+                    assert!(kids.iter().take(on.len()).all(|r| r.socket.is_some()));
+                    if slots.is_empty() {
+                        assert!(on.is_empty(), "no sockets, the head as before");
+                    }
+                    seated += on.len();
+                }
+            }
+        }
+        assert!(seated > 0, "some residents sit on sockets");
     }
 }

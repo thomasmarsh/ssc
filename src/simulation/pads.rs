@@ -774,6 +774,7 @@ impl Game {
             ship.root = Some(Root {
                 host: host_id,
                 angle: anchor,
+                socket: None,
             });
             ship.position = spot;
             ship.velocity = velocity;
@@ -1811,7 +1812,11 @@ mod tests {
         let host = game.pad_host(key).unwrap().id;
         let tenant = spawn(&mut game, &species, at + Vec2::new(100.0, 0.0));
         let c = game.bodies.iter_mut().find(|b| b.id == tenant).unwrap();
-        c.root = Some(Root { host, angle: 0.0 });
+        c.root = Some(Root {
+            host,
+            angle: 0.0,
+            socket: None,
+        });
         c.position = at + Vec2::new(100.0, 0.0);
         set_player(
             &mut game,
@@ -1913,6 +1918,7 @@ mod tests {
         c.root = Some(Root {
             host: id,
             angle: 1.5,
+            socket: None,
         });
         run(&mut game, 0.5);
         assert!(!game.is_hidden());

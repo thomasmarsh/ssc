@@ -760,6 +760,7 @@ mod tests {
                 p.root = Some(Root {
                     host: id,
                     angle: 0.0,
+                    socket: None,
                 });
             }
             g.tethers.push(Tether::link(owner, id));
@@ -799,6 +800,7 @@ mod tests {
                     b.root = Some(Root {
                         host: owner,
                         angle: 0.0,
+                        socket: None,
                     })
                 }
                 2 => b.phased = true,

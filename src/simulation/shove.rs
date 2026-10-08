@@ -300,6 +300,7 @@ mod tests {
             c.root = Some(crate::simulation::Root {
                 host: 1,
                 angle: 0.0,
+                socket: None,
             });
             c
         }));

@@ -648,8 +648,16 @@ fn seed_residents(
     out: &mut Vec<Spawn>,
 ) {
     let key = hash2(seed ^ HOSTED_SALT, id.x, id.y);
-    let n = hosted.fitting(host.radius);
     let kind = resident(host, hosted.relation);
+    // The first residents take the body's sockets, the rest ride the head as before.
+    let sockets = host
+        .anatomy
+        .and_then(|spec| crate::bodyplan::express(&spec, host.radius))
+        .map(|plan| plan.socket_slots())
+        .unwrap_or_default();
+    let total = hosted.limited().count;
+    let seated = total.min(sockets.len().min(255) as u8);
+    let n = seated + (total - seated).min(hosted.fitting(host.radius));
     for k in 0..n {
         if SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + kind.parts() {
             break;
@@ -666,6 +674,7 @@ fn seed_residents(
                 host: host_index,
                 angle,
                 growth: 1.0,
+                socket: sockets.get(usize::from(k)).copied().filter(|_| k < seated),
             }),
             index: out.len() as u32,
             ..Spawn::creature(

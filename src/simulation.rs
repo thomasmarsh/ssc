@@ -1172,6 +1172,13 @@ impl Game {
                 (spawn.rooted, spawn.rooted.and_then(|r| made.get(&r.host)))
             {
                 self.root_body(&mut body, host, rooting.angle);
+                if let (Some(slot), Some(root)) = (rooting.socket, body.root.as_mut()) {
+                    root.socket = Some(slot);
+                    if let Some((at, facing, _)) = self.socket_pose(host, slot) {
+                        body.position = at;
+                        body.angle = facing;
+                    }
+                }
             }
             if let Some(tag) = spawn.civ {
                 if matches!(tag.role, CivRole::Wall | CivRole::Turret) {
