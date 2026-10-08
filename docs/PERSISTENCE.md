@@ -1,6 +1,6 @@
 # Persistence: state inventory and save format
 
-Workstream 12 (see [WORKSTREAMS.md](WORKSTREAMS.md)). Code: `src/simulation/save.rs` (state, format, versioning, load), `src/savefile.rs` (directory, atomic write, backup) and `src/autosave.rs` (the Bevy hook, opt-in).
+Workstream 12 (see [WORKSTREAMS.md](WORKSTREAMS.md)). Code: `src/simulation/save.rs` (state, format, versioning, load), `src/savefile.rs` (directory, atomic write, backup) and `src/autosave.rs` (the Bevy hook, on by default) and `src/titlemenu.rs` (continue / new / delete).
 
 ## Principle
 
@@ -47,8 +47,13 @@ Tested in `simulation/save.rs`: the text round trip is a fixed point (apart from
 
 ## Open
 
-- Slice 4 (UI): continue, new run and delete menu; until then saving is opt-in with `SSC_SAVE=1` (see [HOOKS.md](HOOKS.md)). A run that ends is not saved over; the last autosave remains.
+## The menu and the death rule (slice 4)
+
+- Saving is on by default; `SSC_NO_SAVE=1` turns it off, and a scripted run (`SSC_SMOKE_FRAMES`) never touches the player's save unless it sets `SSC_SAVE=1` (with `SSC_SAVE_DIR` for a scratch slot). See [HOOKS.md](HOOKS.md).
+- At launch, when a readable save exists, the title menu shows (game waits, nothing is saved while it is up): CONTINUE (the save is already loaded behind it), NEW RUN and DELETE SAVE, the last two needing a second Enter. New run deletes the run file and starts a fresh `Game`; delete removes it and leaves only NEW RUN. With no save the game starts directly.
+- Every lost ship is saved at once (`autosave::settle`). A lost life stays lost. When the last ship goes, the slot is written with `Game::next_run()`, the successor of the dead run: the bequest is made exactly there, once, and the file never holds the dead state, so reloading cannot undo death. Pressing Enter on the game over screen builds the same successor; quitting there leaves it in the slot and the next launch continues from it.
+- Decision (Thomas): wrecks and legacy stay in the run file for now, no separate cross-run file. Revisit when 'new game' is defined: today NEW RUN erases wrecks and legacy along with the run. If new game should keep them, they must move to their own file then.
 - Builder structures and slain residents: not saved yet. They need their own delta (structure plan, placed blocks by builder spawn key), added with a `#[serde(default)]` field and no version bump.
 - Crops, machines: they will add their own delta structs to `SaveState` when built.
-- Whether legacy and wrecks should live in a separate cross-run file (today they ride in the run file).
+- Legacy and wrecks ride in the run file (decided, see above); a separate file depends on what 'new game' erases.
 - Migration tests need a stored fixture per old version once version 2 exists.

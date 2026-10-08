@@ -80,7 +80,8 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 
 ## Saving (opt-in)
 
-- `SSC_SAVE=1`: load the saved run at start (if there is one), autosave every 30 seconds while alive, and save once more on exit (a smoke run too). Off by default so a normal run never reads or writes a save. A finished run is not saved over. Format and rules: [PERSISTENCE.md](PERSISTENCE.md).
+- Saving is on by default: the saved run loads at start (behind the title menu), autosaves every 30 seconds while alive, on every lost ship and on exit. `SSC_NO_SAVE=1` turns it off. A run with `SSC_SMOKE_FRAMES` neither reads nor writes the player's save unless `SSC_SAVE=1` is set (then it continues straight into the save, no menu).
+- `SSC_MENU=save|armed|new`: show the title menu (with a save, with the erase armed, or with none) for screenshots. `SSC_DIE=1`: lose every ship at frame 6. Check no-undo: `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s SSC_SMOKE_FRAMES=30 cargo run --bin ssc`, then again with `SSC_DIE=1`: the slot holds a fresh run with the legacy and a wreck, `generation: 1`. Format and rules: [PERSISTENCE.md](PERSISTENCE.md).
 - `SSC_SAVE_DIR=<dir>`: where the slot lives (default the per-user data folder, macOS `~/Library/Application Support/ssc`). Use a scratch directory for checks. Check a reload: `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s SSC_TELEPORT=12000,0 SSC_SMOKE_FRAMES=60 cargo run --bin ssc` (writes on exit), then the same command without `SSC_TELEPORT` and with `SSC_SCREENSHOT=/tmp/s.png` starts where the first ended; stderr says `save: loaded`.
 
 ## Developer panel (not smoke-gated)

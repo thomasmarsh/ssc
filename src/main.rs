@@ -11,6 +11,7 @@ mod powerview;
 mod presentation;
 mod settings;
 mod shipview;
+mod titlemenu;
 mod wellview;
 
 use bevy::{
@@ -190,6 +191,10 @@ pub struct Session {
     pub best: Option<u64>,
     pub new_best: bool,
     recorded: bool,
+    /// Ship losses already saved, so each loss is written once.
+    settled_deaths: u32,
+    /// The title menu, up at launch when a save exists (the game waits).
+    pub menu: Option<titlemenu::TitleMenu>,
 }
 
 impl Session {
@@ -201,8 +206,24 @@ impl Session {
 
 impl Default for Session {
     fn default() -> Self {
+        let saved = autosave::load();
+        // A scripted run continues straight into its save (SSC_MENU shows the menu).
+        let scripted = std::env::var_os("SSC_SMOKE_FRAMES").is_some();
+        let menu = saved.as_ref().filter(|_| !scripted).map(|game| {
+            let minutes = (game.time / 60.0) as u32;
+            titlemenu::TitleMenu::new(
+                true,
+                format!(
+                    "saved run: score {}, {} ships, {minutes} min",
+                    game.score, game.lives
+                ),
+            )
+        });
+        let game = saved.unwrap_or_else(|| Game::new(ssc::config::MASTER_SEED));
         Self {
-            game: autosave::load().unwrap_or_else(|| Game::new(ssc::config::MASTER_SEED)),
+            settled_deaths: game.run.deaths,
+            game,
+            menu,
             input: Input::default(),
             paused: false,
             slow: false,
@@ -277,6 +298,7 @@ fn main() {
                 presentation::setup,
                 hud::setup,
                 settings::setup,
+                titlemenu::setup,
                 devpanel::setup,
                 nebula::setup,
                 bestiaryview::setup,
@@ -305,6 +327,7 @@ fn main() {
                 presentation::scroll_panels,
                 hud::update_texts.run_if(not(bestiaryview::gallery_active)),
                 settings::update,
+                titlemenu::update,
                 devpanel::update,
                 presentation::update_summary,
                 presentation::update_chart,
@@ -321,12 +344,19 @@ fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>, smoke: Res<Smo
         || session.chart.is_some()
         || session.settings.is_some()
         || session.dev_panel.is_some()
+        || session.menu.is_some()
     {
         return;
     }
     let input = session.input;
     let dt = time.delta_secs() * if session.slow { 0.35 } else { 1.0 };
     session.game.step_scaled(dt, input);
+    // Every lost ship is saved at once (and a lost run is replaced by its successor), so
+    // reloading cannot undo it.
+    if session.game.run.deaths != session.settled_deaths {
+        session.settled_deaths = session.game.run.deaths;
+        autosave::settle(&session.game);
+    }
     if session.game.game_over && !session.recorded {
         session.recorded = true;
         let score = session.game.score;
@@ -380,6 +410,11 @@ fn controls(
             session.input = Input::default();
             return;
         }
+    }
+    if session.menu.is_some() {
+        title_controls(&keys, &pad, &mut session);
+        session.input = Input::default();
+        return;
     }
     if session.help && (escape || keys.just_pressed(KeyCode::F1)) {
         session.help = false;
@@ -570,10 +605,53 @@ fn controls(
 /// Starts a fresh run (a lost one applies its legacy; restarting mid-run earns none).
 fn restart(session: &mut Session) {
     session.game.reset();
+    session.settled_deaths = 0;
     session.recorded = false;
     session.new_best = false;
     session.paused = false;
     session.slow = false;
+}
+
+/// The title menu's keys: up and down choose, enter (south on a pad) confirms. The saved run is
+/// already loaded behind the menu, so continue only closes it; the other rows touch the file.
+fn title_controls(
+    keys: &ButtonInput<KeyCode>,
+    pad: &impl Fn(GamepadButton) -> bool,
+    session: &mut Session,
+) {
+    let Some(mut menu) = session.menu.take() else {
+        return;
+    };
+    if keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown) {
+        menu.step(1);
+    }
+    if keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
+        menu.step(-1);
+    }
+    let confirm = keys.just_pressed(KeyCode::Enter)
+        || keys.just_pressed(KeyCode::Space)
+        || pad(GamepadButton::South);
+    let outcome = if confirm {
+        menu.confirm()
+    } else {
+        titlemenu::Outcome::Stay
+    };
+    session.menu = match outcome {
+        titlemenu::Outcome::Stay => Some(menu),
+        titlemenu::Outcome::Continue => None,
+        titlemenu::Outcome::NewRun => {
+            autosave::erase();
+            session.game = Game::new(ssc::config::MASTER_SEED);
+            session.settled_deaths = 0;
+            None
+        }
+        titlemenu::Outcome::DeleteSave => {
+            autosave::erase();
+            session.game = Game::new(ssc::config::MASTER_SEED);
+            session.settled_deaths = 0;
+            Some(menu)
+        }
+    };
 }
 
 /// The settings screen's keys: up and down choose a row, left, right and enter change it, Esc
@@ -904,6 +982,33 @@ fn smoke_run(
         session.radar |= std::env::var_os("SSC_RADAR").is_some();
         if std::env::var_os("SSC_SETTINGS").is_some() {
             session.settings = Some(2);
+        }
+    }
+    // SSC_MENU=save|armed|new: show the title menu with a save, with its erase armed, or none.
+    if run.frames == 0
+        && let Ok(mode) = std::env::var("SSC_MENU")
+    {
+        let mut menu = titlemenu::TitleMenu::new(
+            mode != "new",
+            "saved run: score 4500, 3 ships, 12 min".into(),
+        );
+        if mode == "armed" {
+            menu.step(1);
+            menu.confirm();
+        }
+        session.menu = Some(menu);
+    }
+    // SSC_DIE=1: lose every ship at frame 6 (checks the save after a lost run).
+    if run.frames == 6 && std::env::var_os("SSC_DIE").is_some() {
+        session.game.lives = 1;
+        if let Some(ship) = session
+            .game
+            .bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+        {
+            ship.health = 0.0;
+            ship.shield = 0.0;
         }
     }
     // SSC_DEV=1 SSC_DEV_PANEL=<row>: open the developer panel on that row; SSC_DEV_ON=1 first

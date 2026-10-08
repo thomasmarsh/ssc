@@ -494,4 +494,25 @@ mod tests {
         let (loaded, _) = Game::from_save(state, generator);
         assert!(loaded.player().unwrap().health >= 1.0);
     }
+
+    /// The title menu's death rule: the slot is written with the successor of a lost run, so a
+    /// reload carries the bequest and cannot bring the pre-death state back.
+    #[test]
+    fn a_lost_run_saves_as_its_successor_with_the_bequest() {
+        let mut game = Game::new(7);
+        game.cargo.metal = 400.0;
+        game.run.mined = [400.0, 0.0, 0.0];
+        game.lives = 0;
+        game.game_over = true;
+        game.seal_bequest(Vec2::new(5000.0, 0.0), None);
+        let text = game.next_run().save_state().to_text();
+        let (state, generator) = SaveState::from_text(&text).unwrap();
+        let (loaded, _) = Game::from_save(state, generator);
+        assert!(!loaded.game_over);
+        assert!(loaded.lives > 0);
+        assert!(loaded.cargo.metal > 0.0 && loaded.cargo.metal < 400.0);
+        assert!(loaded.pending_bequest().is_none());
+        // Making the successor again from the dead run gives the same save: made once, idempotent.
+        assert_eq!(text, game.next_run().save_state().to_text());
+    }
 }
