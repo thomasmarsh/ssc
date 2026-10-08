@@ -1249,10 +1249,12 @@ pub enum Tag {
     PromptKey,
     Key(usize),
     Cargo(usize),
+    /// The developer tag, while any dev toggle is on.
+    Dev,
 }
 
 impl Tag {
-    const ALL: [Tag; 34] = [
+    const ALL: [Tag; 35] = [
         Tag::Discovery(0),
         Tag::Discovery(1),
         Tag::Discovery(2),
@@ -1287,6 +1289,7 @@ impl Tag {
         Tag::Cargo(0),
         Tag::Cargo(1),
         Tag::Cargo(2),
+        Tag::Dev,
     ];
 
     fn size(self) -> f32 {
@@ -1300,7 +1303,13 @@ impl Tag {
             Tag::Lure => 12.0,
             Tag::Floater(_) => 15.0,
             Tag::PromptKey => 15.0,
-            Tag::Sector | Tag::Mult | Tag::Hints | Tag::Standing | Tag::Nearest | Tag::Apex => 12.0,
+            Tag::Sector
+            | Tag::Dev
+            | Tag::Mult
+            | Tag::Hints
+            | Tag::Standing
+            | Tag::Nearest
+            | Tag::Apex => 12.0,
             Tag::Vitals | Tag::Key(_) => 11.0,
             Tag::Cargo(_) => 10.0,
         }
@@ -1405,6 +1414,17 @@ fn describe(
             Vec2::new(cx, 40.0),
             Align::Center,
         ),
+        Tag::Dev => {
+            if !game.dev.active() {
+                return None;
+            }
+            (
+                "DEV".to_string(),
+                crate::presentation::AMBER,
+                Vec2::new(right, 104.0),
+                Align::Right,
+            )
+        }
         Tag::Score => (
             format!("{:06}", hud.score),
             Color::srgb(0.9, 0.96, 1.0),

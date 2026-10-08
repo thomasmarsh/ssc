@@ -1,4 +1,5 @@
 mod audio;
+mod devpanel;
 mod glitchview;
 mod hud;
 mod juice;
@@ -173,6 +174,8 @@ pub struct Session {
     /// The settings screen (Esc), with the selected row, and the options it holds that the
     /// game itself keeps: auto repair and the boosts.
     pub settings: Option<usize>,
+    /// The developer panel (SSC_DEV=1) and its selected row; the game waits while it is open.
+    pub dev_panel: Option<usize>,
     /// Screen shake, floating scores and rings; see `juice`.
     pub juice: juice::Juice,
     pub auto_repair: bool,
@@ -209,6 +212,7 @@ impl Default for Session {
             style: RenderStyle::default(),
             reduce_effects: std::env::var_os("SSC_REDUCE_EFFECTS").is_some(),
             settings: None,
+            dev_panel: None,
             juice: juice::Juice::default(),
             auto_repair: true,
             boosts: true,
@@ -268,6 +272,7 @@ fn main() {
                 presentation::setup,
                 hud::setup,
                 settings::setup,
+                devpanel::setup,
                 nebula::setup,
                 audio::setup,
             ),
@@ -289,6 +294,7 @@ fn main() {
                 presentation::scroll_panels,
                 hud::update_texts,
                 settings::update,
+                devpanel::update,
                 presentation::update_summary,
                 presentation::update_chart,
                 smoke_run,
@@ -299,12 +305,17 @@ fn main() {
 }
 
 fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>, smoke: Res<SmokeRun>) {
-    if smoke.hold || session.paused || session.chart.is_some() || session.settings.is_some() {
+    if smoke.hold
+        || session.paused
+        || session.chart.is_some()
+        || session.settings.is_some()
+        || session.dev_panel.is_some()
+    {
         return;
     }
     let input = session.input;
     let dt = time.delta_secs() * if session.slow { 0.35 } else { 1.0 };
-    session.game.step(dt, input);
+    session.game.step_scaled(dt, input);
     if session.game.game_over && !session.recorded {
         session.recorded = true;
         let score = session.game.score;
@@ -345,6 +356,20 @@ fn controls(
     // first if that is what is showing.
     let escape = keys.just_pressed(KeyCode::Escape);
     let start = pad(GamepadButton::Start);
+    // The developer panel (SSC_DEV=1 only): backquote or the guide button toggles it, and while
+    // it is open it takes every key.
+    if ssc::simulation::dev::enabled() {
+        let toggle = keys.just_pressed(KeyCode::Backquote) || pad(GamepadButton::Mode);
+        if session.dev_panel.is_some() {
+            dev_controls(&keys, &pad, &mut session, toggle || escape || start);
+            session.input = Input::default();
+            return;
+        } else if toggle && session.settings.is_none() {
+            session.dev_panel = Some(0);
+            session.input = Input::default();
+            return;
+        }
+    }
     if session.help && (escape || keys.just_pressed(KeyCode::F1)) {
         session.help = false;
     } else if session.settings.is_some() {
@@ -582,6 +607,41 @@ fn settings_controls(
         _ => {}
     }
     outcome
+}
+
+/// The developer panel's keys: up and down choose a row, left and right change it, enter does it,
+/// backquote, Esc or Start close.
+fn dev_controls(
+    keys: &ButtonInput<KeyCode>,
+    pad: &impl Fn(GamepadButton) -> bool,
+    session: &mut Session,
+    close: bool,
+) {
+    use ssc::simulation::dev::DevRow;
+    let Some(mut row) = session.dev_panel else {
+        return;
+    };
+    if close || pad(GamepadButton::East) {
+        session.dev_panel = None;
+        return;
+    }
+    if keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown) {
+        row = devpanel::step_index(row, 1);
+    }
+    if keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
+        row = devpanel::step_index(row, -1);
+    }
+    session.dev_panel = Some(row);
+    let dir = i32::from(keys.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight))
+        - i32::from(keys.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft));
+    let confirm = keys.just_pressed(KeyCode::Enter)
+        || keys.just_pressed(KeyCode::Space)
+        || pad(GamepadButton::South);
+    if dir != 0 {
+        session.game.dev_change(DevRow::ALL[row], dir);
+    } else if confirm {
+        session.game.dev_change(DevRow::ALL[row], 0);
+    }
 }
 
 /// The bench's keys; see `controls`.
@@ -835,6 +895,23 @@ fn smoke_run(
             session.settings = Some(2);
         }
     }
+    // SSC_DEV=1 SSC_DEV_PANEL=<row>: open the developer panel on that row; SSC_DEV_ON=1 first
+    // turns on the six switches and doubles the time scale (to check the panel and the DEV tag).
+    if run.frames == 0
+        && ssc::simulation::dev::enabled()
+        && let Some(row) = std::env::var("SSC_DEV_PANEL")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+    {
+        use ssc::simulation::dev::DevRow;
+        if std::env::var_os("SSC_DEV_ON").is_some() {
+            for row in DevRow::ALL.into_iter().take(6) {
+                session.game.dev_change(row, 0);
+            }
+            session.game.dev_change(DevRow::TimeScale, 1);
+        }
+        session.dev_panel = Some(row.min(DevRow::ALL.len() - 1));
+    }
     // Smoke runs can start somewhere interesting: SSC_TELEPORT="x,y" (invulnerable).
     if run.frames == 0
         && let Some((x, y)) = std::env::var("SSC_TELEPORT")
@@ -858,31 +935,8 @@ fn smoke_run(
     if run.frames == 0
         && let Ok(name) = std::env::var("SSC_SPECIMEN")
     {
-        use ssc::genome::{Genome, Species};
-        let genome = match name.as_str() {
-            "skipjack" => Genome::skipjack(),
-            "veilwing" => Genome::veilwing(),
-            "hullpick" => Genome::hullpick(),
-            "stormcap" => Genome::stormcap(),
-            "argus" => Genome::argus(),
-            "gloomfeeder" => Genome::gloomfeeder(),
-            "dizzard" => Genome::dizzard(),
-            "pushwhale" => Genome::pushwhale(),
-            "tarbloom" => Genome::tarbloom(),
-            "lenswyrm" => Genome::lenswyrm(),
-            "tidegorger" => Genome::tidegorger(),
-            "splitter" => Genome::splitter(),
-            "murmur" => Genome::murmur(),
-            "dirgewhale" => Genome::dirgewhale(),
-            "lurefish" => Genome::lurefish(),
-            "hullworm" => Genome::hullworm(),
-            "remora" => Genome::remora(),
-            "weaver" => Genome::weaver(),
-            "slinger" => Genome::slinger(),
-            "runekeeper" => Genome::runekeeper(),
-            "seamer" => Genome::seamer(),
-            _ => Genome::default(),
-        };
+        use ssc::genome::Species;
+        let genome = ssc::simulation::dev::specimen_genome(&name);
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
             200.0
         } else if name == "hullworm" {
