@@ -21,7 +21,9 @@ use super::*;
 use crate::territory::Standing;
 
 /// How a civilization stands toward the ship, worst to best.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum Tier {
     Hostile,
     Wary,
@@ -69,7 +71,7 @@ impl Tier {
 }
 
 /// What one civilization thinks of the ship.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Regard {
     pub value: f32,
     pub tier: Tier,

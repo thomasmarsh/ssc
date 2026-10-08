@@ -89,7 +89,7 @@ pub const SHARES: [(Mode, f32); 6] = [
     (Mode::Binary, 0.08),
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     Static,
     Maw,

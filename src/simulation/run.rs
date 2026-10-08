@@ -32,7 +32,7 @@
 
 use super::*;
 use crate::simulation::upgrades::Rarity;
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 /// Sectors the flood fill may stray from where it started (Chebyshev). Matches the lineage
 /// lattice cell, so a range spans about one founder's territory.
@@ -45,7 +45,7 @@ pub const RECAP_SECONDS: f32 = 7.0;
 const SECTOR_CACHE_CAP: usize = 4096;
 
 /// One species-range wiped out.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Extirpation {
     /// Display name as the HUD shows it (uppercase).
     pub name: String,
@@ -58,7 +58,7 @@ pub struct Extirpation {
 }
 
 /// Counters for the current run. Everything resets with the game.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RunStats {
     /// Enemies destroyed (creatures and eggs excluded; see `eggs`), by any hand but hunger.
     pub kills: u32,
@@ -82,11 +82,11 @@ pub struct RunStats {
     pub eggs: u32,
     /// Creatures eaten by predators or starved, anywhere near the ship.
     pub lost_to_nature: u32,
-    pub sectors: HashSet<SectorId>,
+    pub sectors: BTreeSet<SectorId>,
     /// Regions entered (by key), after the hysteresis that keeps a border from flickering.
-    pub regions: HashSet<u64>,
+    pub regions: BTreeSet<u64>,
     /// Realms entered (by key) and their names in order, after the same hysteresis.
-    pub realms: HashSet<u64>,
+    pub realms: BTreeSet<u64>,
     pub realm_names: Vec<String>,
     /// Farthest sector depth reached and the deepest threat multiplier faced.
     pub deepest: f32,

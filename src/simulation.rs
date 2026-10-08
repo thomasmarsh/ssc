@@ -55,6 +55,7 @@ mod rift;
 mod root;
 pub mod run;
 mod rune;
+pub mod save;
 mod shove;
 pub mod skills;
 mod sling;
@@ -597,8 +598,9 @@ pub struct Game {
 }
 
 impl Game {
-    pub fn new(seed: u64) -> Self {
-        let mut game = Self {
+    /// A game with nothing loaded: no sectors, no ship, no pad. `new` and `from_save` build on it.
+    fn blank(seed: u64) -> Self {
+        Self {
             bodies: Vec::new(),
             bullets: Vec::with_capacity(MAX_BULLETS),
             effects: Vec::with_capacity(MAX_EFFECTS),
@@ -700,7 +702,11 @@ impl Game {
             fallen: HashMap::new(),
             loaded: HashSet::new(),
             active: Vec::new(),
-        };
+        }
+    }
+
+    pub fn new(seed: u64) -> Self {
+        let mut game = Self::blank(seed);
         game.stream_sectors();
         game.spawn_player(Vec2::ZERO);
         game.seed_home_pad();

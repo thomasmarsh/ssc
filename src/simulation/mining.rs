@@ -25,7 +25,7 @@ const NOTE_EVERY: f32 = 3.0;
 /// Spent ore is remembered to this grain, rounded up so reloading never refreshes a rock.
 const GRAIN: f32 = 0.25;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Material {
     Metal,
     Volatiles,
@@ -62,7 +62,7 @@ impl Material {
 }
 
 /// What the ship carries.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Cargo {
     pub metal: f32,
     pub volatiles: f32,
@@ -70,6 +70,7 @@ pub struct Cargo {
     /// Hold space added to every material by cargo upgrades.
     pub extra: f32,
     /// Developer toggle: every price is waived (see `dev`). Never set in a normal run.
+    #[serde(skip)]
     pub dev_free: bool,
 }
 

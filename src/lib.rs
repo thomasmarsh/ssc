@@ -16,6 +16,7 @@ pub mod power;
 pub mod range;
 pub mod realm;
 pub mod region;
+pub mod savefile;
 pub mod sectormap;
 pub mod simulation;
 pub mod structure;

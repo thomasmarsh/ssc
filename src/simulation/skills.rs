@@ -262,7 +262,7 @@ impl Skill {
 }
 
 /// Levels owned. Zero means not bought.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Skills {
     levels: [u8; Skill::ALL.len()],
 }

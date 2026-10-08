@@ -11,7 +11,7 @@ use super::Material;
 use super::upgrades::{Effect, Rarity, Slot, Trait};
 
 /// A way of shooting. Exactly one is active at a time; the stock gun is always owned.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Profile {
     /// The plain pellet gun: free, and what every other profile falls back to.
     Stock,
@@ -295,7 +295,7 @@ pub enum Gain {
 
 /// When an owned boost burns its fuel. A boost only runs (and only drains) while its
 /// condition holds, so it costs nothing while you are not using it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Need {
     Firing,
     Thrusting,
@@ -323,7 +323,7 @@ impl Need {
 }
 
 /// An owned boost: the old timed surges, now paid per second of use from the cargo hold.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Boost {
     pub name: String,
     pub slot: Slot,
@@ -354,7 +354,7 @@ pub enum BoostGain {
 }
 
 /// Everything the ship can shoot with and boost with.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Arsenal {
     levels: [u8; Profile::ALL.len()],
     pub active: Profile,

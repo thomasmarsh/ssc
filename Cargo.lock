@@ -4292,6 +4292,9 @@ name = "ssc"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "glam",
+ "ron",
+ "serde",
 ]
 
 [[package]]

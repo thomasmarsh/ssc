@@ -43,7 +43,9 @@ const CAP_PAD: usize = 2;
 /// A nest's stones lie within this of its heart; dwellers are counted inside it.
 const NEST_REACH: f32 = 180.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum EchoKind {
     Planetoid,
     /// An outpost of a civilization.

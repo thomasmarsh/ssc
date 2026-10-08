@@ -443,7 +443,7 @@ pub enum Standing {
 }
 
 /// The two things whose destruction hurts a civilization.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Fall {
     pub capital: bool,
     pub elder: bool,

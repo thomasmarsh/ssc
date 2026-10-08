@@ -23,7 +23,7 @@ use crate::genome::Genome;
 use crate::power::Power;
 
 /// The kinds of organ.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Organ {
     Remora,
     Faraday,
@@ -87,7 +87,7 @@ impl Organ {
 }
 
 /// An owned strain: a kind, a level and a magnitude from the donor's genes.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Strain {
     pub organ: Organ,
     pub level: u8,
@@ -132,7 +132,7 @@ pub enum Found {
 }
 
 /// The organs a run owns, which are fitted, and the bond running without a slot.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Organs {
     owned: [Option<Strain>; 4],
     /// Fitted kinds, oldest first, at most the slots open.

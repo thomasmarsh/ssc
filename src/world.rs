@@ -11,7 +11,9 @@ use std::f32::consts::TAU;
 /// Side length of one sector in world units. Sector (0, 0) is centered on the origin.
 pub const SECTOR_SIZE: f32 = 6000.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct SectorId {
     pub x: i32,
     pub y: i32,
@@ -51,7 +53,7 @@ impl SectorId {
 }
 
 /// Small deterministic generator (splitmix64) used for both generation and gameplay.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Rng(u64);
 
 impl Rng {

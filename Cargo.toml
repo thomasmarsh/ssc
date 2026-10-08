@@ -16,6 +16,10 @@ required-features = ["desktop"]
 
 [dependencies]
 bevy = { version = "=0.19.1", default-features = false, features = ["std"] }
+# Saves: serde derive, RON text, and glam's serde impls so Vec2 serializes (all already in the lock).
+serde = { version = "1", features = ["derive"] }
+ron = "0.12"
+glam = { version = "0.32", features = ["serde"] }
 
 [features]
 default = ["desktop"]

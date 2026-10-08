@@ -23,7 +23,7 @@ use crate::world::hash2;
 const LOOT_SALT: u64 = 0x100D_0000_0000_0B1D;
 
 /// A lost ship's remains.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Wreck {
     pub id: u32,
     pub position: Vec2,
@@ -34,7 +34,7 @@ pub struct Wreck {
 }
 
 /// What a run leaves behind and what the current run was given.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Legacy {
     /// Materials carried into this run, and the weapon.
     pub carried: Cargo,

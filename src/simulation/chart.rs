@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 type MarkKey = (EchoKind, i32, i32);
 
 /// One thing the chart knows about.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Mark {
     pub well_mode: Option<crate::well::Mode>,
     pub kind: EchoKind,
@@ -37,14 +37,16 @@ pub struct Mark {
     pub territory: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 struct Known {
     visited: bool,
     marks: BTreeMap<MarkKey, Mark>,
 }
 
 /// Preset notes the player can pin to a sector.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum PinLabel {
     Danger,
     Lode,
@@ -230,7 +232,7 @@ impl ChartEntry {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Beacon {
     pub id: u32,
     pub position: Vec2,
@@ -285,15 +287,19 @@ pub struct Travel {
     pub quote: TravelQuote,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChartState {
     known: BTreeMap<SectorId, Known>,
     pins: BTreeMap<SectorId, PinLabel>,
     beacons: Vec<Beacon>,
     next_beacon: u32,
+    #[serde(skip)]
     last_visit: Option<SectorId>,
+    #[serde(skip)]
     travel: Option<Travel>,
+    #[serde(skip)]
     cooldown: f32,
+    #[serde(skip)]
     exposed: f32,
 }
 

@@ -84,7 +84,7 @@ const PAD_SALT: u64 = 0x9AD0_5EED_0000_0021;
 const NOTE_GAP: f32 = 2.5;
 
 /// What a pad stands for: where it is on its planetoid, how hurt it is, what it keeps.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Pad {
     pub key: PadKey,
     /// Angle on the planetoid in its own frame, so it turns with it.
@@ -121,30 +121,40 @@ pub enum PadHint {
 }
 
 /// Everything the pads and the bench remember.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PadState {
     pub pads: BTreeMap<PadKey, Pad>,
     /// Crafted kits waiting to be deployed.
     pub kits: u32,
+    #[serde(skip)]
     pub landed: Option<PadKey>,
     /// Field repair is running.
+    #[serde(skip)]
     pub repairing: bool,
     /// The running repair began by itself (the ship sat quiet and hurt), so it stays quiet and
     /// stops the moment the ship moves or fires; and whether the ship may start one at all.
+    #[serde(skip)]
     auto_run: bool,
     auto_repair: bool,
     /// Pay `INSURANCE` metal on death to keep the best part (when a pad exists).
     pub insured: bool,
+    #[serde(skip)]
     pub bench: Option<Bench>,
     /// Seconds landed and unseen (zero while cover is broken).
+    #[serde(skip)]
     hidden_for: f32,
+    #[serde(skip)]
     cover_broken: f32,
     next_order: u64,
     /// Pads seen by learners (wild) and by each civilization (by territory).
+    #[serde(skip)]
     known_wild: HashSet<PadKey>,
+    #[serde(skip)]
     known_civ: HashMap<u64, HashSet<PadKey>>,
     /// The ship is steering or firing, so a landed ship keeps its own heading.
+    #[serde(skip)]
     aiming: bool,
+    #[serde(skip)]
     note: f32,
 }
 

@@ -19,7 +19,7 @@ use crate::world::{Rng, SectorParams};
 
 /// Scalable ship statistics. An effect's amount is a fraction of the base value
 /// (+0.25 is 25 percent more).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Stat {
     Thrust,
     TopSpeed,
@@ -121,7 +121,7 @@ impl Stat {
 }
 
 /// Abilities with levels. Levels from every part and surge add up, up to a cap.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Trait {
     /// Extra pairs of shots fanned around the nose.
     Spread,
@@ -229,7 +229,7 @@ impl Trait {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Effect {
     Stat(Stat, f32),
     Trait(Trait, u8),
@@ -254,7 +254,7 @@ impl Effect {
 
 /// Where a permanent part is bolted on. Each slot holds a few parts; a better part
 /// displaces the weakest one when its slot is full.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Slot {
     Cannon,
     Engine,
@@ -294,7 +294,9 @@ impl Slot {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum Rarity {
     Common,
     Uncommon,
@@ -669,7 +671,7 @@ const SURGES: &[Blueprint] = &[
 ];
 
 /// A permanent part, bolted to one slot of the ship.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Part {
     pub name: String,
     pub slot: Slot,
@@ -802,7 +804,7 @@ pub enum Charged {
 }
 
 /// Everything attached to the ship.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Loadout {
     pub parts: Vec<Part>,
     pub arsenal: Arsenal,
