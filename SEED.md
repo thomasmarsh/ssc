@@ -102,7 +102,7 @@ Keys: arrows to fly, `Space`/mouse to fire, `M` mine (hold), `[` `]` or 1-9 weap
 3. **FLOW.md P1/P2**:
    - The three-tab bench, purchase receipts, and existing unlock guidance are built; merge the 19 skills and redesign material roles only as a later slice. Automatic stash overflow is also deferred.
    - Progression: trophy gates on the top skill levels, lode fatigue, a ring-entry reward (the doc found no hard farming exploit, but a slow safe path pays as well as risk).
-   - Docking assist, "BEST BUY" hints, the proposed part-plugging animation, pickups curving to the ship, a low-hull heartbeat, a respawn shell, cutting star map notes.
+   - Docking assist, "BEST BUY" hints, the proposed part-plugging animation, pickups curving to the ship, a respawn shell, cutting star map notes.
 4. **Sniping/balance leftovers**: accuracy spread at range (falloff only so far), a heat or cargo cost on the stock gun, realm effects on civilizations, realm tilts on well modes beyond count and pull, a realm that stresses mining or symbiosis as a primary axis, a distinct HUD message for Dead Reach fizzles.
 5. **Ideas the user approved earlier but not yet built**: boons at pads (Hades-style per-run choice of one of three random modifiers; judged a bigger system, do after progression is clearer); "wildlife reacts to extirpation" (predators migrate when prey is gone) was offered and NOT picked by the user.
 6. **Polish and hygiene**: tune the nebula by eye in a live window; fix overlaps at small sizes; investigate the possible test hang; consider caching `ecology()`; consider persistence to disk if the user wants it; keep CLAUDE.md and docs in sync.
@@ -111,7 +111,11 @@ Keys: arrows to fly, `Space`/mouse to fire, `M` mine (hold), `[` `]` or 1-9 weap
 
 The user prefers work delivered by fresh subagents (general-purpose), one at a time, each with a long, concrete brief that includes: the reading list, the rules above (no em dash, no co-author, tests/clippy/fmt clean, commit per slice, long-run population tests unchanged), the exact design the user stated (quote it), slices with tests, and a final report format (commits, tuning numbers, tests changed and why, test counts, caveats). Before launching, check `git status` is clean and `df -h .` has space. After each agent, verify `git log` and, when cheap, run the test suite yourself, then give the user a short summary in plain language (what was built, what was checked and not, caveats, what is next). Two agents were cut off by usage-limit errors; the fix was to resume the same agent with SendMessage and tell it to continue from the working tree. The action classifier occasionally failed transiently; retrying later worked.
 
-## Latest slice: bench purchase feedback and existing unlock guidance
+## Latest slice: low-hull heartbeat
+
+See the last note in `docs/FLOW.md`. One new cue and synth sound (52 sounds now); generator version unchanged. Needs a human ear for volume and tempo.
+
+## Previous slice: bench purchase feedback and existing unlock guidance
 
 [docs/BENCH.md](docs/BENCH.md) is authoritative. Selected confirmations capture a read-only snapshot, dispatch the original transaction once, then report actual before/after values and payment. Repair includes PARTIAL hull/shield outcomes; part actions show fitted identity, rarity/rating, up to two changed stat/trait totals, and a further-change count; paid unchanged reforges say NO BETTER ROLL - KEPT. Weapons show owned levels and ammo costs; skills show the relevant getter value. Grafts identify replaced kept organs and slot counts; removal/free refitting retain ownership and payment. Refusals replace success results while preserving their original reasons, costs, prerequisites, and selection.
 

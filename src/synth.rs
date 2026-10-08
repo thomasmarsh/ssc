@@ -78,10 +78,12 @@ pub enum Sound {
     RuneFire,
     SlingTell,
     SlingThrow,
+    /// A low-hull heartbeat: a soft double thump (lub-dub).
+    Heartbeat,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 51] = [
+    pub const ALL: [Sound; 52] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -133,6 +135,7 @@ impl Sound {
         Sound::RuneFire,
         Sound::SlingTell,
         Sound::SlingThrow,
+        Sound::Heartbeat,
     ];
 
     /// Mono samples in -1..1 at `SAMPLE_RATE`.
@@ -551,6 +554,20 @@ impl Sound {
                     (sine(f, t) + sine(f * 0.5, t) * 0.6) * decay(t, 0.1)
                 });
                 lowpass(&mut v, 700.0);
+                v
+            }
+            Sound::Heartbeat => {
+                let mut v = voice(0.42, |t, _| {
+                    let lub = sine(sweep((t / 0.12).min(1.0), 70.0, 45.0), t) * decay(t, 0.05);
+                    let u = t - 0.2;
+                    let dub = if u > 0.0 {
+                        sine(sweep((u / 0.12).min(1.0), 60.0, 40.0), u) * decay(u, 0.045) * 0.7
+                    } else {
+                        0.0
+                    };
+                    lub + dub
+                });
+                lowpass(&mut v, 300.0);
                 v
             }
             Sound::Refused => {

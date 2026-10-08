@@ -326,6 +326,8 @@ pub struct FeelState {
     pub hurts: Vec<HurtMark>,
     /// Whether parry and dash have been used yet (a fresh one wears a NEW tag).
     pub used: [bool; 2],
+    /// Seconds until the low-hull heartbeat next sounds.
+    pub heartbeat: f32,
 }
 
 impl Default for FeelState {
@@ -336,6 +338,7 @@ impl Default for FeelState {
             stop_since: 10.0,
             hurts: Vec::new(),
             used: [false; 2],
+            heartbeat: 0.0,
         }
     }
 }

@@ -160,6 +160,8 @@ pub enum Cue {
     Pith {
         at: Vec2,
     },
+    /// The hull is low: one lub-dub of the ship's heartbeat, quicker the lower it gets.
+    Heartbeat,
 }
 
 impl Game {
@@ -194,6 +196,26 @@ impl Game {
             .count() as u32;
         for cue in born {
             self.cue(cue);
+        }
+    }
+
+    /// The low-hull heartbeat: below `hud::LOW` of the hull a beat sounds every 1.2 s, tightening
+    /// to 0.55 s as the hull empties. Silent otherwise, and the timer restarts at once on
+    /// recovery so the first beat after a new wound is immediate.
+    pub(super) fn cue_heartbeat(&mut self, dt: f32) {
+        let fraction = self
+            .player()
+            .filter(|p| p.health > 0.0)
+            .map(|p| p.health / p.max_health.max(1.0));
+        let Some(fraction) = fraction.filter(|f| *f < super::hud::LOW) else {
+            self.feel.heartbeat = 0.0;
+            return;
+        };
+        self.feel.heartbeat -= dt;
+        if self.feel.heartbeat <= 0.0 {
+            let need = 1.0 - fraction / super::hud::LOW;
+            self.feel.heartbeat = 1.2 - 0.65 * need;
+            self.cue(Cue::Heartbeat);
         }
     }
 
@@ -271,6 +293,39 @@ mod tests {
             game.cue(Cue::Impact { at: Vec2::ZERO });
         }
         assert_eq!(game.cues.len(), MAX_CUES);
+    }
+
+    #[test]
+    fn heartbeat_sounds_only_on_a_low_hull_and_quickens() {
+        let beats = |game: &mut Game, secs: f32| {
+            game.cues.clear();
+            for _ in 0..(secs / DT) as usize {
+                game.cue_heartbeat(DT);
+            }
+            game.drain_cues()
+                .iter()
+                .filter(|c| matches!(c, Cue::Heartbeat))
+                .count()
+        };
+        let set_hull = |game: &mut Game, f: f32| {
+            let ship = game
+                .bodies
+                .iter_mut()
+                .find(|b| b.kind == BodyKind::Player)
+                .unwrap();
+            ship.health = ship.max_health * f;
+        };
+        let mut game = empty_game();
+        assert_eq!(beats(&mut game, 5.0), 0);
+        set_hull(&mut game, 0.29);
+        let mild = beats(&mut game, 6.0);
+        assert!((4..=6).contains(&mild), "{mild}");
+        set_hull(&mut game, 0.03);
+        assert!(beats(&mut game, 6.0) > mild);
+        set_hull(&mut game, 0.0);
+        assert_eq!(beats(&mut game, 5.0), 0);
+        set_hull(&mut game, 1.0);
+        assert_eq!(beats(&mut game, 5.0), 0);
     }
 
     #[test]

@@ -929,6 +929,7 @@ impl Game {
         self.cleanup_rifts();
         self.update_ping(dt);
         self.cue_player_damage(ship_before, sources);
+        self.cue_heartbeat(dt);
     }
 
     /// Loads sectors the player can reach, unloads distant ones, and flags which

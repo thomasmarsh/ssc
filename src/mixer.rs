@@ -215,6 +215,7 @@ fn spec(cue: &Cue) -> Spec {
             at: Some(at),
         },
         Cue::Refused => ship(Sound::Refused, 0.5, 0.0),
+        Cue::Heartbeat => ship(Sound::Heartbeat, 0.6, 0.0),
         Cue::Inhale { at } => Spec {
             sound: Sound::Inhale,
             gain: 0.7,
@@ -315,6 +316,7 @@ fn interval(sound: Sound) -> f32 {
         Sound::JamHit => 0.3,
         Sound::GlareFlash => 0.3,
         Sound::Refused => 0.25,
+        Sound::Heartbeat => 0.4,
         Sound::Inhale => 1.0,
         Sound::Shove => 0.4,
         Sound::Gulp => 0.15,
