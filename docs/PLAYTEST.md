@@ -38,7 +38,19 @@ Only the authored builder exists (dev spawn row or `SSC_SPECIMEN=builder`; no wi
 | Size | Is a structure the right size beside the ship (24 blocks, about 50 units per plan unit)? | `Builder::scale`, `blocks` |
 | Obstruction | If you park in a site or a rock drifts onto it, does building wait and resume rather than stall for good? | `build::REACH`, site occupancy |
 
-Not built yet, so do not judge: the builder walking to its site or gathering stones, nests as a wild species, repair or raiding, structures surviving a reload.
+Not built yet, so do not judge: the builder gathering stones as a visible step, repair or raiding, structures surviving a reload.
+
+## Nest builders (workstream 11, slice 2)
+
+Wild builder species from ring 4 (about 7 percent of sectors from ring 5 hold one). Fly into a far sector with `SSC_DEV=1` teleport and look for calm grazers sitting beside small stone, ice or ore structures.
+
+| Question | What to check | Knob |
+|---|---|---|
+| Frequency | Do you meet a nest in a reasonable share of far sectors, or never, or constantly? | `builder::SPECIES_SHARE` (0.18 of species), `SPECIES_RING` |
+| Readability | Does a nest read as a deliberate structure, and the builder as harmless? Can you tell builder from grazer? | `Genome::nest_builder` (unarmed, `Trigger::Harm`) |
+| Leash | Does the builder stay near its nest, or loiter oddly at the edge? | `build::LEASH` (130), `home_pull` |
+| Slot use | Do finished or blocked nests stop and the world keep making new ones, or does it feel static? | `build::MAX_WORKS` (6), `STALL` (90 s) |
+| Obstruction | Do nests rise through rocks or around you sensibly? | `site_occupied` |
 
 ## Questions to answer after the first session
 

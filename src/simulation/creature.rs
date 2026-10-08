@@ -156,6 +156,7 @@ impl Game {
         };
         let civs = self.civ_snapshot();
         let pulls = self.fauna_pulls();
+        let homes = self.builder_homes();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if body.kind != BodyKind::Creature {
                 continue;
@@ -513,6 +514,10 @@ impl Game {
                     cruise * 1.2
                 };
                 desired += toward.normalize_or_zero() * pull;
+            }
+            // A builder in the middle of a structure stays within reach of it.
+            if let (false, Some(home)) = (body.alert, homes.get(&body.id)) {
+                desired += super::build::home_pull(body.position, *home, cruise);
             }
             let chasing = !body.alert && prey.is_some();
             if let (true, Some((_, toward))) = (chasing, prey) {

@@ -5,9 +5,10 @@
 //! that has this section, and its structure is the grammar's `Plan` realized over time (see
 //! `structure` and `simulation/build.rs`).
 //!
-//! Slice one: the section, the blueprint and a hand-authored specimen. No wild creature has
-//! the section yet, so generation (and the HOME golden) is untouched; a nest builder species
-//! placed by niche is slice two.
+//! Slice one: the section, the blueprint and a hand-authored specimen. Slice two: some wild
+//! species are nest builders (`Genome::nest_builder`), chosen in `range::Distribution::founder`
+//! by their own salted hash, so they live in niches like every species and the start rings
+//! (which hold only classics) are untouched.
 
 use crate::grammar::{self, Domain, GrammarGenome, Template};
 use crate::structure::{MAX_SITES, StructurePlan};
@@ -132,7 +133,41 @@ impl Builder {
     }
 }
 
+/// The share of power-free sampled species that are nest builders.
+pub const SPECIES_SHARE: f32 = 0.18;
+/// The nearest ring a nest builder species may live at.
+pub const SPECIES_RING: u32 = 4;
+/// Separates the nest builder choice from every other stream.
+pub const SPECIES_SALT: u64 = 0x4E57_B01D_0000_0043;
+
 impl crate::genome::Genome {
+    /// This genome as a nest builder species: the build section from `h`, and the calm, grazing
+    /// way of life that goes with it (unarmed, no flinging, free-roaming, mild when cornered).
+    /// The look, size and sensing stay the species' own. A species with a power is left alone
+    /// (`None`), as its power and its building would pull in different directions.
+    pub fn nest_builder(self, h: u64) -> Option<Self> {
+        if self.power_ring() > 0 {
+            return None;
+        }
+        let mut g = Self {
+            builder: Some(Builder::from_hash(h)),
+            weapon: crate::genome::Weapon::None,
+            diet: crate::genome::Diet::Graze,
+            trigger: crate::genome::Trigger::Harm,
+            fling: 0.0,
+            mass: self.mass.abs().max(6.0),
+            root: 0.0,
+            rage: self.rage.min(0.2),
+            contact_damage: self.contact_damage.min(6.0),
+            speed: self.speed.min(140.0),
+            cruise: self.cruise.clamp(25.0, 70.0),
+            learner: 0.0,
+            ..self
+        };
+        g.hardpoint_every = 0;
+        Some(g.limited())
+    }
+
     /// The authored builder: a slow, patient stone-layer that raises a coral-fan wall. Unarmed,
     /// harmless, grazing; its structure is the whole of its behavior.
     pub fn builder() -> Self {
@@ -169,6 +204,28 @@ mod tests {
             plan.validate().unwrap();
             assert!(!plan.is_empty() && plan.len() <= usize::from(b.blocks));
         }
+    }
+
+    #[test]
+    fn a_nest_builder_species_is_calm_and_keeps_its_look() {
+        let params = crate::world::latent_base(1, crate::world::SectorId { x: 5, y: 4 });
+        let wild = (0..50u64)
+            .map(|i| crate::genome::Genome::sample(&mut Rng::new(i), &params))
+            .find(|g| g.power_ring() == 0)
+            .expect("most samples have no power");
+        let g = wild.nest_builder(7).expect("no power");
+        assert!(g.builder.is_some());
+        assert_eq!(g.weapon, crate::genome::Weapon::None);
+        assert!(g.mass > 0.0 && g.fling == 0.0 && g.learner == 0.0);
+        assert_eq!(
+            (g.hue, g.radius, g.sides),
+            (wild.hue, wild.radius, wild.sides)
+        );
+        assert_eq!(g, g.limited());
+        assert_eq!(wild.nest_builder(7), wild.nest_builder(7));
+        let mut powered = wild;
+        powered.weave = 1.0;
+        assert!(powered.nest_builder(7).is_none());
     }
 
     #[test]

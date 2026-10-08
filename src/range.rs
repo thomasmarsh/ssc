@@ -298,6 +298,9 @@ pub fn wild_min_ring(genome: &Genome) -> u32 {
     {
         ring = ring.max(5);
     }
+    if genome.builder.is_some() {
+        ring = ring.max(crate::builder::SPECIES_RING);
+    }
     ring.max(genome.power_ring())
 }
 
@@ -667,7 +670,19 @@ impl Distribution {
                 params.swarm = pull(params.swarm, c.swarm);
                 params.tech = pull(params.tech, c.tech);
                 params.distortion = pull(params.distortion, c.distortion);
-                Genome::sample(&mut rng, &params)
+                let sampled = Genome::sample(&mut rng, &params);
+                // A share of species are nest builders, chosen by their own hash so no
+                // draw of the sampling stream moves (see `builder`).
+                let h = hash2(
+                    seed ^ NICHE_SALT ^ crate::builder::SPECIES_SALT,
+                    self.key as i32,
+                    (self.key >> 32) as i32,
+                );
+                if ((h >> 40) as f32 / 16_777_216.0) < crate::builder::SPECIES_SHARE {
+                    sampled.nest_builder(h).unwrap_or(sampled)
+                } else {
+                    sampled
+                }
             })
         })
     }
@@ -1673,5 +1688,60 @@ mod tests {
                 "{family:?} holds {share} of far sectors"
             );
         }
+    }
+
+    /// Nest builders are a modest share of the sampled catalog, live only from their ring on,
+    /// are calm and unlearning, and turn up in real sectors.
+    #[test]
+    fn nest_builders_are_a_calm_share_of_the_catalog_and_live_in_niches() {
+        let (mut species, mut builders) = (0, 0);
+        for seed in SEEDS {
+            for tier in 0..12 {
+                for slot in 0..SLOTS_PER_TIER {
+                    let d = Distribution::wild(seed, tier, slot);
+                    species += 1;
+                    let g = d.founder(seed);
+                    if g.builder.is_none() {
+                        continue;
+                    }
+                    builders += 1;
+                    assert!(d.floor(seed) >= crate::builder::SPECIES_RING);
+                    assert_eq!(g.weapon, Weapon::None);
+                    assert_eq!(g.learner, 0.0);
+                    assert_eq!(g.power_ring(), 0);
+                    assert_eq!(g.builder, g.builder.map(|b| b.limited()));
+                }
+            }
+        }
+        let share = builders as f32 / species as f32;
+        assert!((0.08..0.3).contains(&share), "{builders} of {species}");
+        // Nothing near HOME builds, and out in the catalog builders are found in sectors.
+        for seed in SEEDS {
+            for id in sectors(3) {
+                assert!(
+                    ecology(seed, id)
+                        .presence
+                        .iter()
+                        .all(|p| p.species.genome.builder.is_none())
+                );
+            }
+        }
+        let mut sectors_with = 0;
+        let mut total = 0;
+        for id in sectors(30).filter(|id| ring(*id) >= 5) {
+            total += 1;
+            if ecology(SEED, id)
+                .presence
+                .iter()
+                .any(|p| p.species.genome.builder.is_some())
+            {
+                sectors_with += 1;
+            }
+        }
+        let share = sectors_with as f32 / total as f32;
+        assert!(
+            (0.05..0.6).contains(&share),
+            "{share} of sectors have builders"
+        );
     }
 }
