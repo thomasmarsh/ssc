@@ -13,6 +13,7 @@
 //! Nothing here learns, and nothing is an enum branch of an enemy kind: the relationship is
 //! a gene value read by one function.
 
+use crate::biome::BiomeKind;
 use crate::genome::{Diet, Fecundity, Genome, Social, Trigger, Weapon};
 use crate::world::hash2;
 use std::f32::consts::TAU;
@@ -47,6 +48,18 @@ pub struct Hosted {
     pub relation: Relation,
 }
 
+/// How likely each relation (in `Relation::ALL` order) is in a country, from its character:
+/// calm lands breed friends, savage and strange lands breed parasites, schooling lands breed
+/// broods. Every weight stays positive so any pairing can appear anywhere.
+pub fn niche_weights(country: BiomeKind) -> [f32; 3] {
+    let c = country.character();
+    [
+        0.2 + (1.0 - c.aggression),
+        0.2 + 0.6 * c.aggression + 0.6 * c.distortion,
+        0.2 + c.swarm + 0.3 * c.aggression,
+    ]
+}
+
 impl Hosted {
     /// The same section forced into range.
     pub fn limited(self) -> Self {
@@ -56,11 +69,23 @@ impl Hosted {
         }
     }
 
-    /// A host's slots from a hash: two to four residents, relationship picked evenly.
-    pub fn from_hash(h: u64) -> Self {
+    /// A host's slots from a hash: two to four residents, the relationship picked by niche
+    /// (see `niche_weights`) from the country the host lives in.
+    pub fn from_hash(h: u64, country: BiomeKind) -> Self {
+        let w = niche_weights(country);
+        let total: f32 = w.iter().sum();
+        let mut pick = ((h >> 24) & 0xFFFF) as f32 / 65_536.0 * total;
+        let mut relation = Relation::Brood;
+        for (r, w) in Relation::ALL.iter().zip(w) {
+            if pick < w {
+                relation = *r;
+                break;
+            }
+            pick -= w;
+        }
         Self {
             count: 2 + ((h >> 8) % 3) as u8,
-            relation: Relation::ALL[((h >> 24) % 3) as usize],
+            relation,
         }
         .limited()
     }
@@ -201,8 +226,34 @@ mod tests {
         assert!(wild.fitting(500.0) <= MAX_RESIDENTS);
         assert_eq!(wild.fitting(5.0), 1);
         for h in 0..200u64 {
-            let hosted = Hosted::from_hash(hash2(h, 3, 4));
+            let hosted = Hosted::from_hash(hash2(h, 3, 4), BiomeKind::Open);
             assert!((2..=4).contains(&hosted.count));
+        }
+    }
+
+    #[test]
+    fn countries_favour_their_own_pairings() {
+        let share = |country, relation| {
+            let n = (0..2000u64)
+                .filter(|h| Hosted::from_hash(hash2(*h, 5, 6), country).relation == relation)
+                .count();
+            n as f32 / 2000.0
+        };
+        assert!(
+            share(BiomeKind::Plains, Relation::Symbiote)
+                > share(BiomeKind::Predator, Relation::Symbiote)
+        );
+        assert!(
+            share(BiomeKind::Strange, Relation::Parasite)
+                > share(BiomeKind::Plains, Relation::Parasite)
+        );
+        assert!(
+            share(BiomeKind::Plains, Relation::Brood) > share(BiomeKind::Hardy, Relation::Brood)
+        );
+        for k in BiomeKind::ALL {
+            for r in Relation::ALL {
+                assert!(share(k, r) > 0.03, "{k:?} {r:?} must stay possible");
+            }
         }
     }
 }

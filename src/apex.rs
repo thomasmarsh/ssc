@@ -630,7 +630,8 @@ fn hosting(seed: u64, id: SectorId, rank: Rank) -> Option<Hosted> {
     } else {
         HOSTED_SHARE.0
     };
-    ((h & 0xFFFF) as f32 / 65_536.0 < share).then(|| Hosted::from_hash(h >> 16))
+    ((h & 0xFFFF) as f32 / 65_536.0 < share)
+        .then(|| Hosted::from_hash(h >> 16, biome(seed, id).kind))
 }
 
 /// Appends the residents of the elder `host` (spawn `host_index`, at `at`): as many as fit
