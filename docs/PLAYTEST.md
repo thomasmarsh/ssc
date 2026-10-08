@@ -82,6 +82,17 @@ A slow translucent green blob with a soft wobbling skin and a nucleus, ring 4 an
 
 Not built yet, so do not judge: swallowing small creatures, the nucleus as a soft spot, spitting when hit hard.
 
+## Segmented bodies share one health (easy places)
+
+In sectors out to about ring 3 a many-part creature (a serpent, a limbed crab-thing) has one health pool, about 2.4 heads for ten parts, and sheds drifting, fading pieces from the tail as you hurt it; one kill, one bounty (times the pool's size), one drop. By ring 9 it is the old sum of parts again. Fight serpents at ring 1, 3, 6 and 9.
+
+| Question | What to check | Knob |
+|---|---|---|
+| Time to kill | Does a long serpent die in about the time of a single circle near home and take noticeably longer by ring 6? | `POOL_FLOOR`, `POOL_FULL_THREAT`, `POOL_NONE_THREAT` |
+| Reading it | Do pieces breaking off tell you it is working, or does shooting the head feel like nothing? Do the pieces look harmless as they drift and fade? | `POOL_DRIFT`, `POOL_FLING`, the fade in `presentation` |
+| Reward | Does one bounty and one drop for a long serpent feel thin, now that parts no longer pay one each? | bounty scale (the pool size in heads), `drop_loot` |
+| Handover | Is the change from pooled to separate lives gradual as you go outward, or is there a ring where chains suddenly feel tougher? | threat smoothstep |
+
 ## Questions to answer after the first session
 
 1. Which of the above felt wrong first? One line each is enough.

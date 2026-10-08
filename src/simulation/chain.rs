@@ -555,6 +555,8 @@ mod tests {
         let species = Species::of(genome);
         let mut head = game.make_creature(&species, at);
         head.wander = 0.0;
+        // Deep enough that every part is a life of its own (see `breakup` for easy places).
+        head.genes.threat = 9.0;
         game.spawn_chain(head);
         *game.chains.keys().last().unwrap()
     }

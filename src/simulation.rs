@@ -13,6 +13,7 @@ pub mod attach;
 mod bench;
 mod bench_feedback;
 mod brain;
+mod breakup;
 mod build;
 mod chain;
 mod chart;
@@ -73,6 +74,7 @@ pub use apexes::{ApexInfo, ApexReport};
 pub use bench::{Bench, BenchAction, BenchPanel, BenchRow, BenchTab};
 pub use bench_feedback::BenchFeedback;
 pub use brain::Brain;
+pub use breakup::Pool;
 pub use chain::{Chain, Part};
 pub use chart::{
     Beacon, BeaconError, ChartEntry, CivReading, PinLabel, Threat, Travel, TravelError, TravelQuote,
@@ -321,6 +323,8 @@ pub struct Body {
     pub sling_thrown: f32,
     /// Environmental impulse credit lasts through secondary impacts.
     pub rune_pushed: f32,
+    /// Seconds a piece broken off a body (see `breakup`) still drifts before it vanishes.
+    pub adrift: f32,
     pub rift_grace: f32,
     /// Neutral redirected rocks and secondary impacts remain environmental.
     pub rift_redirected: f32,
@@ -437,6 +441,8 @@ pub struct Game {
     pub cues: Vec<Cue>,
     pub tethers: Vec<Tether>,
     pub chains: BTreeMap<u32, Chain>,
+    /// Whole-creature health of jointed bodies in easy places (see `breakup`).
+    pools: BTreeMap<u32, Pool>,
     /// Drops waiting to be collected.
     pub pickups: Vec<Pickup>,
     pub mines: Vec<Mine>,
@@ -599,6 +605,7 @@ impl Game {
             cues: Vec::new(),
             tethers: Vec::new(),
             chains: BTreeMap::new(),
+            pools: BTreeMap::new(),
             pickups: Vec::new(),
             mines: Vec::new(),
             rune_fields: Vec::new(),
@@ -954,6 +961,7 @@ impl Game {
         self.chart_ship_damaged(taken);
         self.update_diplomacy(dt);
         self.update_apex();
+        self.update_breakups(dt);
         self.remove_destroyed();
         self.prune_slings();
         self.cleanup_rifts();
@@ -1440,7 +1448,8 @@ impl Game {
                     continue;
                 }
                 // A phased body is a rumour: nothing touches it and it touches nothing.
-                if a.phased || b.phased {
+                // Pieces broken off a body drift through everything (see `breakup`).
+                if a.phased || b.phased || a.adrift > 0.0 || b.adrift > 0.0 {
                     continue;
                 }
                 // A swarm is a cloud of motes, not a solid: bodies pass through it (and it
@@ -1710,6 +1719,7 @@ impl Game {
                     let target = if bullet.friendly {
                         body.kind != BodyKind::Player
                             && !body.phased
+                            && body.adrift <= 0.0
                             && !apexes::is_part(&self.apexes, body)
                     } else {
                         matches!(
@@ -2305,6 +2315,7 @@ impl Game {
             sling_free: 0.0,
             sling_thrown: 0.0,
             rune_pushed: 0.0,
+            adrift: 0.0,
             rift_grace: 0.0,
             rift_redirected: 0.0,
             hostile_rock_kill: false,

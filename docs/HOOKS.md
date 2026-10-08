@@ -57,6 +57,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 - `SSC_SPECIMEN_TELL=1`: advance (up to 4000 steps) until the specimen's warning is showing, then capture.
 - `SSC_SPECIMEN_THROW=1`: Slinger only, advance to a release and a short visible flight.
 - `SSC_SPECIMEN_NEAR=<units>`: distance of the first specimen from the ship (default 420, the Oozer 170). The Oozer is staged with two free stones on its way to the ship and the ship vulnerable, so it swallows within a couple of seconds (`SSC_STEPS=2`); `SSC_SPECIMEN_NEAR=300 SSC_STEPS=1` shows the blob free.
+- `SSC_SPECIMEN_HURT=<0..1>`: hurt every jointed head by that share of its hull just before the screenshot, so a pooled body shows it shedding drifting pieces (`SSC_SPECIMEN=serpent SSC_SPECIMEN_NEAR=250 SSC_SPECIMEN_HURT=0.5 SSC_STEPS=0.3`, `SSC_TELEPORT=36000,0`).
 - `SSC_RUNE=arming|activation`: four stationary Runekeepers with the four payloads; capture at 0.6 s of arming, or about 0.23 s after activation. Typically with `SSC_TELEPORT=36000,0`.
 - `SSC_RIFT=warning|active|transit`: one isolated Seamer pair with bullets over the connection; `transit` has the ship mid-crossing. Typically `SSC_TELEPORT=60000,0 SSC_CAMERA=wide`; `SSC_CAMERA=far` shows both transit ends.
 - `SSC_DISCOVERY=warning|active|well|relic|crowded`: stage existing entities near a generated relic sector, send a real ping, advance 0.6 s (warning) or 1.5 s (others), hold. Typically `SSC_CAMERA=wide`. See [DISCOVERY.md](DISCOVERY.md).

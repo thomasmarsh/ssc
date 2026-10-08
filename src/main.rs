@@ -1277,6 +1277,22 @@ fn smoke_run(
         }
         session.game.player_invulnerability = 1e9;
     }
+    // SSC_SPECIMEN_HURT=<0..1>: hurt every jointed head by that share of its hull, so a pooled
+    // body shows it shedding pieces (see `breakup`); use with SSC_SPECIMEN=serpent.
+    if run.frames + 3 == limit
+        && let Some(share) = std::env::var("SSC_SPECIMEN_HURT")
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+    {
+        for body in session
+            .game
+            .bodies
+            .iter_mut()
+            .filter(|b| b.chain.is_some() && !b.follower)
+        {
+            body.health -= body.max_health * share;
+        }
+    }
     // SSC_STEPS=<seconds>: just before the screenshot, run the game that many seconds ahead (a
     // remora needs a few calm seconds before its grooming ring shows).
     if run.frames + 3 == limit

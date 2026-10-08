@@ -2588,6 +2588,15 @@ pub fn draw(
                     Game::dim_from(&dim, p) / (1.0 - ssc::power::DIM_FLOOR)
                 };
                 let shown = crate::powerview::outline(game, body, color);
+                // A piece broken off a body fades as it drifts away.
+                let shown = if body.adrift > 0.0 {
+                    shown.with_alpha(
+                        0.15 + 0.6
+                            * (body.adrift / ssc::simulation::tuning::POOL_DRIFT).clamp(0.0, 1.0),
+                    )
+                } else {
+                    shown
+                };
                 let shown = if faint > 0.0 && !body.phased {
                     shown.with_alpha(1.0 - 0.45 * faint)
                 } else {

@@ -635,3 +635,16 @@ pub const OUTPOST_ROLLS: u32 = 1;
 pub const OUTPOST_BONUS_TIER: u8 = 2;
 /// An elder (a civilization's boss) pays one more part at fortress tier `ELDER_BONUS_TIER`.
 pub const ELDER_BONUS_TIER: u8 = 2;
+
+/// Whole-creature health for jointed bodies (see `simulation/breakup.rs`): a chain born where
+/// the place's threat is at most `POOL_FULL_THREAT` (about ring 3) has one health pool, and
+/// from `POOL_NONE_THREAT` (about ring 9) each part is its own life as before; in between the
+/// pool shrinks to the plain sum of parts. At full pool each part beyond the head counts only
+/// `POOL_FLOOR` of its hull toward the pool, so a ten-part body takes about 2.4 heads of
+/// damage, not ten. Pieces shed as it weakens drift for `POOL_DRIFT` s at up to `POOL_FLING`
+/// speed, then vanish; the kill pays the head's bounty times the pool's size in heads.
+pub const POOL_FULL_THREAT: f32 = 1.9;
+pub const POOL_NONE_THREAT: f32 = 3.7;
+pub const POOL_FLOOR: f32 = 0.15;
+pub const POOL_DRIFT: f32 = 2.5;
+pub const POOL_FLING: f32 = 70.0;
