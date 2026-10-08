@@ -154,6 +154,10 @@ impl Game {
         self.bench_actions(bench.tab).get(bench.cursor).copied()
     }
     pub fn bench_confirm(&mut self) {
+        let Some(action) = self.bench_selected() else {
+            return;
+        };
+        let before = super::bench_feedback::Snapshot::capture(self);
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
             Some(BenchAction::Reforge(i)) => self.bench_reforge(i),
@@ -187,6 +191,7 @@ impl Game {
             ),
             None => {}
         }
+        before.finish(self, action);
     }
     pub fn bench_alt(&mut self) {
         if let Some(BenchAction::Stash(m)) = self.bench_selected() {
@@ -353,6 +358,9 @@ impl Game {
                     row.state = "MAX LEVEL".into();
                 }
                 if row.group == "SONAR" {
+                    if !row.detail.ends_with('.') {
+                        row.detail.push('.');
+                    }
                     row.detail += " Base ping also finds live rifts and dynamic wells.";
                 }
             }

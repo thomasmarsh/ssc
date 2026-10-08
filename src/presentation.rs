@@ -986,23 +986,43 @@ fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
     )];
     let selected = panel.rows.iter().position(|r| r.selected).unwrap_or(0);
     let row = &panel.rows[selected];
-    let details = wrap_bench(&row.detail, columns);
-    let notice = game.notices.last().map(|notice| {
-        let wrapped = wrap_bench(&notice.text, columns);
-        let mut lines: Vec<String> = wrapped.iter().take(2).cloned().collect();
-        if wrapped.len() > 2
-            && let Some(last) = lines.last_mut()
-        {
-            *last = clip_bench(&format!("{last}..."), columns);
+    let mut details = wrap_bench(&row.detail, columns);
+    let mut response = Vec::new();
+    if let Some(receipt) = &game.bench_feedback {
+        let tint = if receipt.success {
+            rarity_color(receipt.rarity)
+        } else {
+            DRY_RED
+        };
+        for line in receipt.text.lines() {
+            response.extend(
+                wrap_bench(line, columns)
+                    .into_iter()
+                    .map(|line| (line, tint)),
+            );
         }
-        (
-            lines,
-            rarity_color(notice.rarity).with_alpha(notice.remaining.min(1.0)),
-        )
-    });
-    // Reserve the selected action, description, costs, hold, and controls before the list.
-    let reserved = 8 + details.len() + notice.as_ref().map_or(0, |(lines, _)| lines.len());
+    }
+    if let Some(guidance) = &game.unlock_guidance {
+        response.extend(
+            wrap_bench(&guidance.text, columns)
+                .into_iter()
+                .map(|line| (line, CYAN)),
+        );
+    }
+    // Keep a row and heading available even when a long part description meets a receipt.
     let visible = ((height - 24.0) / 18.0).floor() as usize;
+    let detail_budget = visible.saturating_sub(8 + response.len() + 2).max(2);
+    let shortened = details.len() > detail_budget;
+    if shortened {
+        let tail = details.split_off(details.len() - 2);
+        details.truncate(detail_budget.saturating_sub(3));
+        if detail_budget > 2 {
+            details.push("...".into());
+        }
+        details.extend(tail);
+    }
+    // Reserve the selected action, description, costs, hold, and controls before the list.
+    let reserved = 8 + details.len() + response.len();
     let available = visible.saturating_sub(reserved);
     let mut count = available.clamp(1, 12);
     while count > 1 {
@@ -1056,7 +1076,16 @@ fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
     }
     lines.push((format!("\n{}\n", clip_bench(&row.text, columns)), CYAN));
     lines.push((
-        format!("{}  |  {}\n", row.group, row.state),
+        format!(
+            "{}  |  {}{}\n",
+            row.group,
+            row.state,
+            if shortened {
+                " (details shortened)"
+            } else {
+                ""
+            }
+        ),
         if row.ok { PAD_GREEN } else { DRY_RED },
     ));
     for detail in details {
@@ -1091,10 +1120,8 @@ fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
         ));
     }
     lines.push(("\n".into(), MUTED));
-    if let Some((notices, tint)) = notice {
-        for notice in notices {
-            lines.push((format!("{notice}\n"), tint));
-        }
+    for (response, tint) in response {
+        lines.push((format!("{response}\n"), tint));
     }
     lines.push((format!("{}\n", panel.footer), MUTED));
     lines
@@ -4647,9 +4674,10 @@ fn draw_sigil(
 mod bench_layout_tests {
     use super::*;
     use ssc::simulation::{
-        BenchAction,
+        BenchAction, Cargo,
         organs::{Organ, Strain},
         skills::Skill,
+        upgrades,
     };
     fn game() -> Game {
         let mut game = Game::new(5460803);
@@ -4684,6 +4712,86 @@ mod bench_layout_tests {
             }
         }
     }
+    #[test]
+    fn purchase_receipts_guidance_and_refusals_fit_the_small_panel() {
+        for mode in [
+            "upgrade",
+            "reforge-good",
+            "reforge-kept",
+            "weapons",
+            "skills",
+            "gate",
+            "organs",
+            "unlock",
+            "repeated",
+        ] {
+            let mut game = game();
+            crate::smoke_bench(&mut game, mode);
+            if mode != "gate" {
+                game.cargo = Cargo {
+                    metal: 200.0,
+                    crystal: 200.0,
+                    volatiles: 200.0,
+                    ..Default::default()
+                };
+            }
+            game.bench_confirm();
+            let receipt = game.bench_feedback.as_ref().unwrap().text.clone();
+            for height in [382.0, 582.0] {
+                let text = bench_lines(&game, 680.0, height)
+                    .into_iter()
+                    .map(|(s, _)| s)
+                    .collect::<String>();
+                assert!(
+                    text.lines().count() as f32 * 18.0 + 24.0 <= height,
+                    "{mode}: {text}"
+                );
+                assert!(
+                    text.contains(receipt.lines().next().unwrap()),
+                    "{mode}: {text}"
+                );
+                assert!(text.contains("Enter/A act"));
+                assert!(text.contains("Cost:"));
+                for line in text.lines() {
+                    assert!(line.chars().count() <= 75, "{mode}: {line}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dense_fitted_part_details_yield_room_to_the_complete_receipt_and_guidance() {
+        let mut game = game();
+        crate::smoke_bench(&mut game, "unlock");
+        game.loadout.parts[0].effects = upgrades::Stat::ALL
+            .into_iter()
+            .map(|s| upgrades::Effect::Stat(s, 0.2))
+            .chain(
+                upgrades::Trait::ALL
+                    .into_iter()
+                    .map(|t| upgrades::Effect::Trait(t, 1)),
+            )
+            .collect();
+        game.cargo = Cargo {
+            metal: 200.0,
+            volatiles: 200.0,
+            crystal: 200.0,
+            ..Default::default()
+        };
+        game.bench_confirm();
+        let text = bench_lines(&game, 680.0, 382.0)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<String>();
+        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 382.0, "{text}");
+        assert!(text.contains("details shortened"));
+        assert!(text.contains("Spent: 60.0 METAL 20.0 CRYSTAL"));
+        assert!(text.contains("PARRY: purchase available at the bench"));
+        assert!(text.contains("positive stats x1.24"), "{text}");
+        assert!(text.contains("penalties stay"), "{text}");
+        assert!(text.contains("Enter/A act"));
+    }
+
     #[test]
     fn long_organ_description_is_bounded_and_material_costs_keep_their_colours() {
         let mut game = game();

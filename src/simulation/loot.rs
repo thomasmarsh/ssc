@@ -127,6 +127,7 @@ impl Game {
     /// Recomputes the stats from the loadout and fits the ship to them: a bigger hull or
     /// shield also arrives filled by the difference, a smaller one is trimmed.
     pub(super) fn refresh_stats(&mut self) {
+        self.guide_fitted_unlocks();
         let stats = self.loadout.stats();
         self.stats = stats;
         self.cargo.extra = self.loadout.skills.cargo_bonus();
@@ -151,6 +152,7 @@ impl Game {
 
     /// Runs the boosts on their fuel and ages notices.
     pub(super) fn update_loadout(&mut self, dt: f32, input: &Input) {
+        self.age_bench_feedback(dt);
         self.update_boosts(dt, input);
         for notice in &mut self.notices {
             notice.remaining -= dt;
@@ -542,7 +544,14 @@ mod tests {
         assert_eq!((ship.max_health, ship.health), (150.0, 150.0));
         assert_eq!(game.stats.max_hull, 150.0);
         assert!(game.power() > 1.0);
-        assert_eq!(game.notices.len(), 1);
+        assert_eq!(game.notices.len(), 2);
+        assert!(game.notices[0].text.starts_with("INSTALLED"));
+        assert!(
+            game.notices[1]
+                .text
+                .starts_with("PARRY: purchase available at the bench")
+        );
+        assert!(!game.parry_unlocked());
     }
 
     #[test]

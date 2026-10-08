@@ -1284,6 +1284,23 @@ fn smoke_run(
             30.0,
         ));
     }
+    // A bounded receipt gallery confirms real actions near capture time.
+    if run.frames + 20 == limit && std::env::var_os("SSC_BENCH_RESULT").is_some() {
+        let mode = std::env::var("SSC_BENCH_VIEW").unwrap_or_default();
+        if !matches!(mode.as_str(), "gate" | "parts") {
+            session.game.cargo = Cargo {
+                metal: 200.0,
+                volatiles: 200.0,
+                crystal: 200.0,
+                ..default()
+            };
+        }
+        session.game.bench_confirm();
+        if mode == "repeated" {
+            session.game.bench_confirm();
+            session.game.bench_confirm();
+        }
+    }
     // SSC_BUY=1: buy the bench's selected row just before the screenshot (a purchase ring).
     // SSC_KILL=1: destroy the nearest creatures just before it (floating scores, kill rings).
     if run.frames + 20 == limit && std::env::var_os("SSC_BUY").is_some() {
@@ -1665,6 +1682,41 @@ fn smoke_bench(game: &mut Game, mode: &str) {
             game.bench_select(BenchAction::Organ(Organ::Skipjack));
         }
         "stash" => game.bench_select(BenchAction::Stash(Material::Crystal)),
+        "reforge-good" | "reforge-kept" | "unlock" => {
+            let slot = if mode == "unlock" {
+                Slot::Plating
+            } else {
+                Slot::Engine
+            };
+            let rarity = match mode {
+                "reforge-good" => Rarity::Rare,
+                "unlock" => Rarity::Uncommon,
+                _ => Rarity::Rare,
+            };
+            game.loadout.parts.push(upgrades::Part {
+                name: "Test drive".into(),
+                stem: "Drive".into(),
+                slot,
+                rarity,
+                grade: 1.0,
+                effects: vec![upgrades::Effect::Stat(upgrades::Stat::Thrust, 0.2)],
+                core: 1,
+            });
+            if mode == "reforge-kept" {
+                game.loadout
+                    .parts
+                    .last_mut()
+                    .unwrap()
+                    .effects
+                    .push(upgrades::Effect::Stat(upgrades::Stat::Hull, 5.0));
+            }
+            game.bench_select(if mode == "unlock" {
+                BenchAction::Upgrade(0)
+            } else {
+                BenchAction::Reforge(0)
+            });
+        }
+        "repeated" => game.bench_select(BenchAction::Skill(Skill::BeamPower)),
         _ => panic!("unknown bench gallery"),
     }
 }
@@ -1699,16 +1751,31 @@ mod bench_input_tests {
             &mut session,
         );
         assert_eq!(session.game.loadout.skills.level(Skill::BeamPower), 1);
+        let receipt = session.game.bench_feedback.as_ref().unwrap().text.clone();
+        let cargo = session.game.cargo;
+        let cues = session.game.cues.len();
         keys.clear();
         for _ in 0..10 {
             bench_controls(&keys, &|_| false, &mut session);
         }
         assert_eq!(session.game.loadout.skills.level(Skill::BeamPower), 1);
+        assert_eq!(session.game.bench_feedback.as_ref().unwrap().text, receipt);
+        assert_eq!(session.game.cargo, cargo);
+        assert_eq!(session.game.cues.len(), cues);
         keys.release(KeyCode::Enter);
         keys.clear();
         keys.press(KeyCode::Enter);
         bench_controls(&keys, &|_| false, &mut session);
         assert_eq!(session.game.loadout.skills.level(Skill::BeamPower), 2);
+        assert!(
+            session
+                .game
+                .bench_feedback
+                .as_ref()
+                .unwrap()
+                .text
+                .contains("LEVEL 1 -> 2")
+        );
     }
     #[test]
     fn keyboard_and_controller_reach_all_tabs_and_groups_with_existing_bindings() {

@@ -317,7 +317,7 @@ Written after the pass; the sections above stay as the review. Everything here i
 
 - Docking assist (a press within 400 units eases the ship in): landing still needs speed under 80 within 80 units, and the prompt says "DOCK SLOW DOWN" when it will refuse.
 - The guided first ten minutes beyond the free ping and the lure, and "BEST BUY" at the bench.
-- The purchase show proper (the part plugging into the ship graphic, the one-line change "DASH 240 to 270"); today a ring and the notice. Pickups flying to the ship along a curve, the low-hull heartbeat cue, the respawn-grace shell and an auto-zooming camera.
+- The part-plugging animation remains proposed. Outcome-derived before/after receipts, bounded purchase rings, and fitted-part purchase guidance are built; see [BENCH.md](BENCH.md). Pickups flying to the ship along a curve, the low-hull heartbeat cue, the respawn-grace shell and an auto-zooming camera.
 - The remaining P1 and P2 items: ten skills, changed resource roles, trophy gating, lode fatigue, the Tow Rig, a single star-map pin, specimen log, controller-first map.
 
 **Judgement calls worth a look when playing**
@@ -447,4 +447,8 @@ Seamer is built, generator version 19. BESTIARY section 17 records shared-gene m
 
 ## Status: three-tab bench
 
-[BENCH.md](BENCH.md) is authoritative for the built PARTS, WEAPONS, and SKILLS surface, selected action/cost/detail layout, groups, controls, bounds, and tests. Section 3 item 11 is partly built: repair stays explicit and partial, the manual stash stays at the bottom of PARTS, and all 19 existing skills remain. The actual arsenal only buys levels of owned profiles; unowned rows explain the existing part/charge route. Adjacent reforge/rarity rows keep current navigation without adding an action mode. Skill merging, automatic stash overflow, changed economy/material roles, trophy gates, docking assist, and the fuller purchase show remain later work. Generator version remains 19; generated content and RNG draw counts are unchanged.
+[BENCH.md](BENCH.md) is authoritative for the built PARTS, WEAPONS, and SKILLS surface, selected action/cost/detail layout, groups, controls, bounds, and tests. Section 3 item 11 is partly built: repair stays explicit and partial, the manual stash stays at the bottom of PARTS, and all 19 existing skills remain. The actual arsenal only buys levels of owned profiles; unowned rows explain the existing part/charge route. Adjacent reforge/rarity rows keep current navigation without adding an action mode. Skill merging, automatic stash overflow, changed economy/material roles, trophy gates, docking assist, and the part-plugging animation remain later work. Generator version remains 19; generated content and RNG draw counts are unchanged.
+
+## Status: bench purchase feedback and existing unlock guidance
+
+[BENCH.md](BENCH.md) is authoritative for actual before/after receipts, payment, repair, both reforge outcomes, weapon/skill levels, organ replacement/removal, expiration, repeated inputs, bounded rendering, and reduce effects. Section 3 item 16 is reconciled as "purchase available at the bench", after a Rare-or-better part actually fits or crosses rarity. It includes existing SYMBIOSIS, ignores already-owned skills and scrapped parts, and does not promise affordability or ownership. Section 7 item 7 reuses the 0.7-second vector purchase ring and 0.24-second shared pickup chime with a four-second receipt; animated glyph insertion and rarity-specific chimes remain proposals. Navigation, all 19 skill identities, costs, gates, manual stash, partial repair, organs, and the existing ability NEW tags are preserved. Generator remains 19: no generation, map compatibility, or RNG draw change.

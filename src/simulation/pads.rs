@@ -1210,7 +1210,7 @@ impl Game {
     /// Refuses a transaction with the existing dry cue and notice.
     pub(super) fn bench_failed(&mut self, text: String) {
         self.cue(Cue::Dry);
-        self.notify(text, Rarity::Common);
+        self.bench_response(text, Rarity::Common, false);
     }
 
     #[cfg(test)]
@@ -1223,7 +1223,7 @@ impl Game {
         self.feel_event(super::feel::FeelEvent::Purchase {
             rarity: rarity as u8,
         });
-        self.notify(text, rarity);
+        self.bench_response(text, rarity, true);
     }
 
     /// Repairs hull and shield at once, as far as the hold pays for it.

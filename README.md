@@ -92,7 +92,7 @@ The ship’s shouldered hull turns toward the left stick’s movement direction 
 
 At the bench (landed, E opens it): Up and Down pick a row, Left and Right a tab (or 1 to 3: PARTS, WEAPONS, SKILLS), Enter or Space performs the selected action, Q takes on a stash row at the bottom of PARTS, E closes. Gamepad: D-pad up and down (or L1 and R1) pick a row, D-pad left and right a tab, A confirms, X takes on a stash row, B or Select closes.
 
-PARTS pairs reforge and rarity actions for each fitted part, with repair above and stash below. WEAPONS raises owned profiles; unowned profiles still come from found parts or charges. SKILLS groups mining, flight/utility, sonar, and organs without merging their purchases. The selected action, state, description, material costs, and hold stay visible while rows scroll. The mouse wheel also picks rows. See [docs/BENCH.md](docs/BENCH.md) for the preserved rules and layout contract.
+PARTS pairs reforge and rarity actions for each fitted part, with repair above and stash below. WEAPONS raises owned profiles; unowned profiles still come from found parts or charges. SKILLS groups mining, flight/utility, sonar, and organs without merging their purchases. The selected action, state, description, material costs, and hold stay visible while rows scroll. Purchases report their actual result and payment; the first fitted Rare-or-better part for PARRY, DASH, or SYMBIOSIS points to its bench purchase while materials remain required. The mouse wheel also picks rows. See [docs/BENCH.md](docs/BENCH.md) for the preserved rules and layout contract.
 
 On the star map: arrows move the cursor (the left stick or D-pad on a pad), F (A) pins the sector, Backspace (X) clears the pin, `[` and `]` (L1 and R1) pick the note, Z returns to the ship, J (B) starts a jump to the beacon in that sector, H or E (Y) deploys a beacon, R recalls one, G closes.
 
@@ -134,7 +134,7 @@ What the keys do, in more detail:
 - `docs/MIGRATION.md` records the reimplementation choices and current limits.
 - [docs/LEGACY_README.md](docs/LEGACY_README.md) preserves the original instructions and credits.
 
-The current presentation uses procedural shapes and UI. It has no audio yet.
+The current presentation uses procedural shapes, UI, and synthesized audio.
 
 For a bounded renderer check, set `SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=/tmp/ssc.png`, and optionally `SSC_TELEPORT="x,y"` to start somewhere else, invulnerable. Sectors away from the origin hold nests, bases and procedurally generated species (jointed, limbed, slithering and stranger); the first sectors to try are around (2, 0), (1, 1) and (-3, 0).
 
@@ -142,7 +142,7 @@ Set `SSC_SHIP_VIEW=cross`, `reverse`, `turn`, `brake`, or `coast` during a bound
 
 Set `SSC_CAMERA=wide`, `far`, or `sector` during a smoke run to check camera framing. Camera changes do not expand the simulation's active region: the current sector is always simulated, while distant neighboring sectors visible in wider views may be unloaded or frozen.
 
-Bounded bench galleries: set `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash` with `SSC_SMOKE_FRAMES`, `SSC_OFFSCREEN=1`, and `SSC_SCREENSHOT`. Use `SSC_OFFSCREEN_SIZE=800x600` to inspect the smaller layout. These hold the landed menu with existing progress.
+Bounded bench galleries: set `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash` with `SSC_SMOKE_FRAMES`, `SSC_OFFSCREEN=1`, and `SSC_SCREENSHOT`. Use `SSC_OFFSCREEN_SIZE=800x600` to inspect the smaller layout. These hold the landed menu with existing progress. Add `SSC_BENCH_RESULT=1` to confirm the selected action near capture, with extra modes `reforge-good|reforge-kept|unlock|repeated`; see [BENCH.md](docs/BENCH.md).
 
 Bounded discovery galleries: set `SSC_DISCOVERY=warning|active|well|relic|crowded` with `SSC_SMOKE_FRAMES`, `SSC_OFFSCREEN=1`, and `SSC_SCREENSHOT`. These advance a real ping and hold a readable pose; the crowded capture includes offscreen curiosity, bullets, and a mine countdown.
 

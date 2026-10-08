@@ -10,6 +10,7 @@ mod apexes;
 mod arms;
 pub mod arsenal;
 mod bench;
+mod bench_feedback;
 mod brain;
 mod chain;
 mod chart;
@@ -66,6 +67,7 @@ mod wildlife;
 pub use adapt::Resist;
 pub use apexes::{ApexInfo, ApexReport};
 pub use bench::{Bench, BenchAction, BenchPanel, BenchRow, BenchTab};
+pub use bench_feedback::BenchFeedback;
 pub use brain::Brain;
 pub use chain::{Chain, Part};
 pub use chart::{
@@ -441,6 +443,11 @@ pub struct Game {
     pub stats: Stats,
     /// Recent things worth telling the player about (pickups, wrecks).
     pub notices: Vec<Notice>,
+    /// One current bench response, independent of unrelated world notices.
+    pub bench_feedback: Option<BenchFeedback>,
+    pub unlock_guidance: Option<Notice>,
+    unlock_announced: [bool; 3],
+    unlock_pending: [bool; 3],
     /// What the ship carries, and the mining beam if it is on.
     pub cargo: Cargo,
     /// Field repair, pad kits, landing pads, the bench and what the enemy knows of them.
@@ -591,6 +598,10 @@ impl Game {
             loadout: Loadout::default(),
             stats: Stats::BASE,
             notices: Vec::new(),
+            bench_feedback: None,
+            unlock_guidance: None,
+            unlock_announced: [false; 3],
+            unlock_pending: [false; 3],
             cargo: Cargo::default(),
             pad: PadState::default(),
             parry: parry::ParryState::default(),

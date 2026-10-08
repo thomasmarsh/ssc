@@ -120,6 +120,9 @@ pub fn update(time: Res<Time>, mut session: ResMut<Session>) {
                 });
             }
             FeelEvent::Purchase { rarity } => {
+                juice
+                    .rings
+                    .retain(|r| !matches!(r.kind, RingKind::Purchase(_)));
                 if let Some(ship) = ship {
                     juice.rings.push(Ring {
                         at: ship,
@@ -133,4 +136,112 @@ pub fn update(time: Res<Time>, mut session: ResMut<Session>) {
     }
     let over = juice.rings.len().saturating_sub(12);
     juice.rings.drain(..over);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ssc::simulation::{BenchAction, Cargo, Cue, skills::Skill};
+    use std::time::Duration;
+
+    fn app(calm: bool) -> App {
+        let mut session = Session::default();
+        crate::smoke_pads(&mut session.game, "bench");
+        session.reduce_effects = calm;
+        session.game.cargo = Cargo {
+            metal: 200.0,
+            crystal: 200.0,
+            volatiles: 200.0,
+            ..Default::default()
+        };
+        session
+            .game
+            .bench_select(BenchAction::Skill(Skill::BeamPower));
+        session.game.drain_feel();
+        session.game.cues.clear();
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(session)
+            .add_systems(Update, update);
+        app
+    }
+    fn tick(app: &mut App, seconds: f32) {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs_f32(seconds));
+        app.update();
+    }
+    #[test]
+    fn repeated_success_replaces_one_ring_and_it_expires_in_real_time() {
+        let mut app = app(false);
+        for level in 1..=3 {
+            app.world_mut()
+                .resource_mut::<Session>()
+                .game
+                .bench_confirm();
+            tick(&mut app, 0.1);
+            let session = app.world().resource::<Session>();
+            assert_eq!(session.game.loadout.skills.level(Skill::BeamPower), level);
+            assert_eq!(session.juice.rings.len(), 1);
+            assert!(session.juice.rings[0].kind == RingKind::Purchase(2));
+            assert_eq!(session.juice.rings[0].age, 0.0);
+        }
+        for _ in 0..8 {
+            tick(&mut app, 0.1);
+        }
+        assert!(app.world().resource::<Session>().juice.rings.is_empty());
+    }
+    #[test]
+    fn reduce_effects_keeps_receipt_and_audio_but_removes_purchase_animation() {
+        let mut app = app(true);
+        app.world_mut()
+            .resource_mut::<Session>()
+            .game
+            .bench_confirm();
+        tick(&mut app, 0.1);
+        let session = app.world().resource::<Session>();
+        assert!(session.juice.rings.is_empty());
+        assert!(session.juice.floaters.is_empty());
+        assert!(
+            session
+                .game
+                .bench_feedback
+                .as_ref()
+                .unwrap()
+                .text
+                .contains("LEVEL 0 -> 1")
+        );
+        assert_eq!(
+            session
+                .game
+                .cues
+                .iter()
+                .filter(|c| matches!(c, Cue::Pickup { .. }))
+                .count(),
+            1
+        );
+    }
+    #[test]
+    fn same_frame_purchases_are_coalesced_visually_and_rejection_adds_no_ring() {
+        let mut app = app(false);
+        {
+            let mut session = app.world_mut().resource_mut::<Session>();
+            session.game.bench_confirm();
+            session.game.bench_confirm();
+            session.game.bench_confirm();
+        }
+        tick(&mut app, 0.1);
+        assert_eq!(app.world().resource::<Session>().juice.rings.len(), 1);
+        {
+            let mut session = app.world_mut().resource_mut::<Session>();
+            session.game.cargo = Cargo::default();
+            session.game.bench_confirm();
+        }
+        tick(&mut app, 0.1);
+        let session = app.world().resource::<Session>();
+        assert_eq!(session.game.loadout.skills.level(Skill::BeamPower), 3);
+        assert_eq!(session.juice.rings.len(), 1);
+        assert!(!session.game.bench_feedback.as_ref().unwrap().success);
+        assert_eq!(session.juice.rings[0].age, 0.1);
+    }
 }

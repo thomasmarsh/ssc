@@ -50,8 +50,10 @@ Headless scenario tests (170+ of them) cover sector math, pure generation, loadi
 
 This is a reimplementation, not a behavior-preserving port. It does not carry over ODE's contact solver, true negative-mass physics (Lunatics only approximate it with a fling rule, above), learned Smarties neural networks, the full set of enemy and weapon-upgrade behaviors, 3D camera effects, original configuration handling, or audio. The original C++ code and assets remain available in git history. These systems can be selectively revisited when they become useful to the new game's direction.
 
-The desktop app currently has procedural visuals and no audio. Build and run instructions are in the [README](../README.md).
+The desktop app has procedural visuals and synthesized audio. Build and run instructions are in the [README](../README.md).
 
 Sonar curiosity lives in `simulation/discovery.rs`, resolving bounded live handles through `ping.rs` after tick cleanup. `chart.rs` remembers generated anchors and relic sites, while the desktop adapter draws distinct glyphs and bounded labels. [DISCOVERY.md](DISCOVERY.md) is the lifecycle and presentation contract.
 
 The consolidated bench navigation and read-only rows live in `simulation/bench.rs`. Typed action identities dispatch the original transactions in `pads.rs` and `organs.rs`; `presentation.rs` bounds the list while retaining selected details and costs. [BENCH.md](BENCH.md) records the contract.
+
+Purchase snapshots and one-time fitted-part guidance live in `simulation/bench_feedback.rs`. The formatter reads outcomes after the selected bench action dispatches once, while `juice.rs` replaces the brief purchase ring. [BENCH.md](BENCH.md) records timing, presentation, and preserved rules.
