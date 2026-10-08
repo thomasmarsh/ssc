@@ -418,16 +418,13 @@ impl Game {
         let Some((strain, at)) = relic_of(self.seed, id, depth) else {
             return;
         };
-        if self
-            .pickups
-            .iter()
-            .any(|p| matches!(p.item, Item::Specimen(_)) && p.position.distance(at) < 50.0)
-        {
+        if self.pickups.iter().any(|p| p.relic == Some(id)) {
             return;
         }
         self.drop_item(at, Vec2::ZERO, Item::Specimen(strain));
         if let Some(p) = self.pickups.last_mut() {
             p.remaining = 900.0;
+            p.relic = Some(id);
         }
     }
 }

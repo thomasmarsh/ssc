@@ -376,3 +376,8 @@ The design behind it is [FLOW.md](FLOW.md); the bindings are the README's table.
 ## Legacy and wrecks (built)
 
 - The legacy is the only thing that crosses runs besides the seed (and so the universe): a capped share of mined ore, one weapon at a low level, and wrecks. A wreck's looter is the civilization whose territory (`world::territory`) holds its sector, if it still stands; the delay is a hash of seed, sector and wreck id, counted in play time.
+
+
+## Bounded curiosity discovery (built)
+
+`simulation/discovery.rs` adds live Seamer pairs and moving or changing wells to base ping, and sealed organ relics to the existing LODE ECHO upgrade. [DISCOVERY.md](DISCOVERY.md) records the authoritative reconciliation, lifecycle, budgets, glyphs, and validation. Temporary echoes track actual positions and availability; the map remembers only discovered generated well anchors/modes and uncollected relic sites. Rifts and carried/released wells never become persistent destinations. Curiosity lures are fallback choices after existing starter lures. Relic provenance now records collection in the existing one-time memory. Generator version stays 19 because generation and offline map compatibility do not change.

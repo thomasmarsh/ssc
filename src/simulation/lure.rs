@@ -18,6 +18,9 @@ pub enum LureKind {
     Planetoid,
     /// An apex elder: the biggest prize, and the worst idea.
     Apex,
+    Relic,
+    Rift,
+    Well,
 }
 
 impl LureKind {
@@ -27,6 +30,9 @@ impl LureKind {
             Self::Civilization => "CIVILIZATION",
             Self::Planetoid => "PLANETOID",
             Self::Apex => "APEX",
+            Self::Relic => "SEALED ORGAN",
+            Self::Rift => "OPEN RIFT",
+            Self::Well => "DYNAMIC WELL",
         }
     }
 
@@ -40,6 +46,9 @@ impl LureKind {
             Self::Civilization => 0.75,
             Self::Planetoid => 1.5,
             Self::Apex => 6.0,
+            Self::Relic => 0.0,
+            Self::Rift => 1.0,
+            Self::Well => 2.0,
         }
     }
 
@@ -118,7 +127,7 @@ impl Default for LureState {
 impl Game {
     /// The marker the HUD points at, if any.
     pub fn next_lure(&self) -> Option<Lure> {
-        self.lure.lure
+        self.lure.lure.or_else(|| self.curiosity_lure())
     }
 
     /// Turns the free ping on entering a sector on or off (tests that count pings turn it off).

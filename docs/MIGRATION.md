@@ -51,3 +51,5 @@ Headless scenario tests (170+ of them) cover sector math, pure generation, loadi
 This is a reimplementation, not a behavior-preserving port. It does not carry over ODE's contact solver, true negative-mass physics (Lunatics only approximate it with a fling rule, above), learned Smarties neural networks, the full set of enemy and weapon-upgrade behaviors, 3D camera effects, original configuration handling, or audio. The original C++ code and assets remain available in git history. These systems can be selectively revisited when they become useful to the new game's direction.
 
 The desktop app currently has procedural visuals and no audio. Build and run instructions are in the [README](../README.md).
+
+Sonar curiosity lives in `simulation/discovery.rs`, resolving bounded live handles through `ping.rs` after tick cleanup. `chart.rs` remembers generated anchors and relic sites, while the desktop adapter draws distinct glyphs and bounded labels. [DISCOVERY.md](DISCOVERY.md) is the lifecycle and presentation contract.

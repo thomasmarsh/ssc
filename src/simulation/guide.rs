@@ -169,6 +169,12 @@ impl Game {
         };
         let all: Vec<Bearing> = self
             .echoes()
+            .filter(|(e, _)| e.kind != EchoKind::Rift)
+            .filter(|(e, _)| {
+                !self
+                    .next_lure()
+                    .is_some_and(|l| l.position == e.position && e.discovery.is_some())
+            })
             .filter(|(e, _)| !extent_in_view(e.position, 0.0, center, half, 0.0))
             .filter_map(|(e, fade)| {
                 let direction = (e.position - center).normalize_or_zero();

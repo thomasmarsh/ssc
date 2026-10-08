@@ -2,6 +2,9 @@
 //! seats, fortresses and the player's own landing pads answer with echoes that linger and
 //! fade. The answers come from the world generator, a pure function of the seed and sector
 //! coordinates, so they reach sectors far beyond the simulated region without loading them.
+//! Curiosity (`discovery`) adds existing live rifts and dynamic wells to base ping, and sealed
+//! organ relics to LODE ECHO. Those handles resolve after tick cleanup; live targets are never
+//! inferred from generation or predicted poses.
 //! Echoes are information only: nothing in the rules reads them, and a ping costs nothing but
 //! its cooldown.
 //!
@@ -62,11 +65,19 @@ pub enum EchoKind {
     Eggs,
     /// How many hostile creatures roam a sector (predator echo); `weight` is the count.
     Predators,
+    /// Temporary, live paired doorway.
+    Rift,
+    /// Live moving or changing gravity hazard.
+    Well,
+    /// Sealed organ specimen, revealed by LODES.
+    Relic,
 }
 
 impl EchoKind {
     fn cap(self) -> usize {
         match self {
+            Self::Rift => 4,
+            Self::Well | Self::Relic => 2,
             Self::Planetoid => CAP_PLANETOID,
             Self::Civilization => CAP_CIVILIZATION,
             Self::Fortress => CAP_FORTRESS,
@@ -84,7 +95,7 @@ impl EchoKind {
     pub fn unlocked_by(self) -> Option<Skill> {
         match self {
             Self::PadAlert => Some(Skill::EchoPads),
-            Self::Lode => Some(Skill::EchoLodes),
+            Self::Lode | Self::Relic => Some(Skill::EchoLodes),
             Self::Nest | Self::Eggs => Some(Skill::EchoNests),
             Self::Predators => Some(Skill::EchoPredators),
             _ => None,
@@ -94,6 +105,10 @@ impl EchoKind {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Echo {
+    pub(super) target: Option<super::discovery::Target>,
+    pub(super) scan: Option<Ring>,
+    /// Concise live discovery information.
+    pub discovery: Option<super::discovery::Info>,
     pub kind: EchoKind,
     pub position: Vec2,
     /// Size of the thing (a planetoid's radius), for drawing its marker.
@@ -107,7 +122,7 @@ pub struct Echo {
     pub renewable: bool,
     /// Game time at which the ring reaches it and it sounds.
     pub born: f32,
-    sounded: bool,
+    pub(super) sounded: bool,
 }
 
 /// The nearest civilization as the ship's last ping reported it.
@@ -359,6 +374,9 @@ impl Game {
                         site.weight
                     };
                     found.push(Echo {
+                        target: None,
+                        scan: None,
+                        discovery: None,
                         kind,
                         position: site.position,
                         radius: site.radius,
@@ -383,6 +401,9 @@ impl Game {
             let position = near.sector.center();
             let distance = position.distance(origin);
             found.push(Echo {
+                target: None,
+                scan: None,
+                discovery: None,
                 kind: EchoKind::Nearest,
                 position,
                 radius: 0.0,
@@ -399,6 +420,9 @@ impl Game {
             if distance <= range {
                 let alert = owns(EchoKind::PadAlert) && self.pad_exposed(pad.key);
                 found.push(Echo {
+                    target: None,
+                    scan: None,
+                    discovery: None,
                     kind: if alert {
                         EchoKind::PadAlert
                     } else {
@@ -414,13 +438,14 @@ impl Game {
                 });
             }
         }
+        found.extend(self.discovery_candidates(self.ping.ring.unwrap()));
         found.sort_by(|a, b| a.born.total_cmp(&b.born));
         let extra = skills.ping_extra_targets();
         let mut taken: HashMap<EchoKind, usize> = HashMap::new();
         found.retain(|echo| {
             let n = taken.entry(echo.kind).or_default();
             *n += 1;
-            *n <= echo.kind.cap() + extra
+            echo.discovery.is_some() || *n <= echo.kind.cap() + extra
         });
         self.ping.echoes = found;
         self.cue(Cue::Ping);
@@ -437,6 +462,11 @@ impl Game {
         {
             self.ping.ring = None;
         }
+        let old = std::mem::take(&mut self.ping.echoes);
+        self.ping.echoes = old
+            .into_iter()
+            .filter_map(|e| self.refresh_discovery(e))
+            .collect();
         let mut sounded = Vec::new();
         for echo in &mut self.ping.echoes {
             if !echo.sounded && time >= echo.born {
@@ -449,7 +479,9 @@ impl Game {
         for echo in sounded {
             self.chart_learn_echo(&echo);
             self.cue(Cue::Echo { at: echo.position });
-            if let Some(kind) = super::lure::LureKind::of_echo(echo.kind, echo.renewable) {
+            if echo.discovery.is_none()
+                && let Some(kind) = super::lure::LureKind::of_echo(echo.kind, echo.renewable)
+            {
                 self.consider_lure(super::lure::Lure {
                     kind,
                     position: echo.position,
@@ -503,7 +535,7 @@ impl Game {
         self.ping
             .echoes
             .iter()
-            .filter(move |e| time >= e.born)
+            .filter(move |e| time >= e.born && time < e.born + ECHO_LIFE && self.discovery_valid(e))
             .map(move |e| (e, (1.0 - (time - e.born) / ECHO_LIFE).clamp(0.0, 1.0)))
     }
 }

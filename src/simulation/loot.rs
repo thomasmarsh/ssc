@@ -20,6 +20,8 @@ const MAX_NOTICES: usize = 5;
 
 #[derive(Clone, Debug)]
 pub struct Pickup {
+    /// Sealed relic provenance, independent of magnet motion.
+    pub relic: Option<SectorId>,
     pub position: Vec2,
     pub velocity: Vec2,
     pub item: Item,
@@ -406,6 +408,7 @@ impl Game {
             self.pickups.remove(0);
         }
         self.pickups.push(Pickup {
+            relic: None,
             position,
             velocity,
             remaining: lifetime(&item),
@@ -477,7 +480,11 @@ impl Game {
         }
         let mut items = Vec::new();
         for &index in taken.iter().rev() {
-            items.push(self.pickups.remove(index).item);
+            let pickup = self.pickups.remove(index);
+            if let Some(id) = pickup.relic {
+                self.relics_taken.insert(id);
+            }
+            items.push(pickup.item);
         }
         self.pickups.retain(|p| p.remaining > 0.0);
         for item in items.into_iter().rev() {

@@ -604,6 +604,17 @@ pub fn draw_lure(g: &mut Gizmos, hud: &HudModel, s: &Screen, time: f32) {
     let beat = 0.75 + 0.25 * pulse(time, 5.0);
     let color = LURE_GOLD.with_alpha(beat);
     let size = 9.0;
+    let discovery_kind = match lure.kind {
+        ssc::simulation::lure::LureKind::Relic => Some(ssc::simulation::EchoKind::Relic),
+        ssc::simulation::lure::LureKind::Well => Some(ssc::simulation::EchoKind::Well),
+        // The mandatory Rift marker already draws its brackets.
+        ssc::simulation::lure::LureKind::Rift => return,
+        _ => None,
+    };
+    if let Some(kind) = discovery_kind {
+        crate::presentation::draw_discovery_glyph(g, s.v(at), s.px(size), kind, color);
+        return;
+    }
     let diamond = |c: Vec2, r: f32| {
         [
             s.v(c + Vec2::new(0.0, -r)),
@@ -1216,6 +1227,7 @@ pub fn draw_hud(g: &mut Gizmos, game: &Game, hud: &HudModel, s: &Screen, time: f
 /// same pixel layout as the shapes.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tag {
+    Discovery(usize),
     Region,
     Realm,
     Sector,
@@ -1240,7 +1252,15 @@ pub enum Tag {
 }
 
 impl Tag {
-    const ALL: [Tag; 26] = [
+    const ALL: [Tag; 34] = [
+        Tag::Discovery(0),
+        Tag::Discovery(1),
+        Tag::Discovery(2),
+        Tag::Discovery(3),
+        Tag::Discovery(4),
+        Tag::Discovery(5),
+        Tag::Discovery(6),
+        Tag::Discovery(7),
         Tag::Region,
         Tag::Realm,
         Tag::Sector,
@@ -1271,6 +1291,7 @@ impl Tag {
 
     fn size(self) -> f32 {
         match self {
+            Tag::Discovery(_) => 11.0,
             Tag::Region => 19.0,
             Tag::Realm => 11.0,
             Tag::Score => 26.0,
@@ -1301,6 +1322,44 @@ pub fn setup(mut commands: Commands) {
     }
 }
 
+// Labels use a separate inset lane from mandatory attack warnings and the nearest bearing.
+fn discovery_labels(game: &Game, s: &Screen) -> Vec<(String, Vec2, f32, [f32; 3])> {
+    let mut out: Vec<(String, Vec2, f32, [f32; 3])> = Vec::new();
+    let ship = game.player().map(|p| s.px_of(p.position));
+    for (echo, fade) in game.echoes().filter(|(e, _)| e.discovery.is_some()).take(8) {
+        let info = echo.discovery.unwrap();
+        let mut text = info.label();
+        if let ssc::simulation::DiscoveryInfo::Rift { partner, .. } = info {
+            let sector = ssc::world::SectorId::containing(partner);
+            text.push_str(&format!(" >{},{}", sector.x, sector.y));
+        }
+        let raw = s.px_of(echo.position);
+        let half = text.chars().count() as f32 * 3.0 + 5.0;
+        let x = raw
+            .x
+            .clamp(half + 70.0, (s.size.x - half - 70.0).max(half + 70.0));
+        let start_y = (raw.y + (echo.radius / s.scale + 18.0).max(28.0))
+            .clamp(145.0, (s.size.y - 160.0).max(145.0));
+        for offset in [0.0, 22.0, -22.0, 44.0, -44.0, 66.0, -66.0] {
+            let at = Vec2::new(x, start_y + offset);
+            if at.y < 140.0 || at.y > s.size.y - 150.0 {
+                continue;
+            }
+            if ship.is_some_and(|p| (p.x - x).abs() < half + 50.0 && (p.y - at.y).abs() < 65.0) {
+                continue;
+            }
+            if out.iter().any(|(t, p, _, _)| {
+                (p.y - at.y).abs() < 19.0 && (p.x - x).abs() < half + t.len() as f32 * 3.0
+            }) {
+                continue;
+            }
+            out.push((text, at, 0.35 + 0.55 * fade, info.tint()));
+            break;
+        }
+    }
+    out
+}
+
 /// Text, color, anchor (x, y of the text's middle) and alignment for a tag; None hides it.
 fn describe(
     tag: Tag,
@@ -1314,6 +1373,16 @@ fn describe(
     let right = s.size.x - 28.0;
     let dim = Color::srgba(0.55, 0.66, 0.78, 0.9);
     Some(match tag {
+        Tag::Discovery(index) => {
+            let labels = discovery_labels(game, s);
+            let (text, at, fade, [r, g, b]) = labels.get(index)?;
+            (
+                text.clone(),
+                Color::srgb(*r, *g, *b).with_alpha(*fade),
+                *at,
+                Align::Center,
+            )
+        }
         Tag::Region => (
             hud.region.clone(),
             Color::srgb(0.82, 0.9, 0.98).with_alpha(hud.region_alpha),
@@ -1451,6 +1520,14 @@ fn describe(
         }
         Tag::Lure => {
             let lure = hud.lure?;
+            if matches!(
+                lure.kind,
+                ssc::simulation::lure::LureKind::Relic
+                    | ssc::simulation::lure::LureKind::Well
+                    | ssc::simulation::lure::LureKind::Rift
+            ) {
+                return None;
+            }
             let (at, inside, d) = lure_anchor(s, lure.position);
             let sectors = lure.position.distance(game.player()?.position) / ssc::world::SECTOR_SIZE;
             let text = format!("{}  {sectors:.1}", lure.kind.label());

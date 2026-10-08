@@ -1492,6 +1492,25 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
                 lifted(Some(c.tint)),
             ));
         }
+        if e.relics > 0 || e.dynamic_wells > 0 {
+            let mut discoveries = Vec::new();
+            if e.relics > 0 {
+                discoveries.push(format!("h sealed organs {}", e.relics));
+            }
+            if e.dynamic_wells > 0 {
+                let modes = e
+                    .well_modes
+                    .iter()
+                    .map(|m| m.label())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                discoveries.push(format!(
+                    "~ well anchors {} ({modes}); positions change, rescan nearby",
+                    e.dynamic_wells
+                ));
+            }
+            detail.push((format!("{}\n", discoveries.join("   ")), CYAN));
+        }
         let mut res = Vec::new();
         if e.planetoids > 0 {
             res.push(format!("o planetoids {}", e.planetoids));
@@ -1587,7 +1606,7 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
         MUTED,
     ));
     detail.push((
-        "C civ  o planetoid  R regrowing  * lode  n nest  e eggs  1-9 predators\n".into(),
+        "C civ  o planetoid  R regrowing  * lode  h sealed organ  ~ well anchor\n n nest  e eggs  1-9 predators\n".into(),
         MUTED,
     ));
     detail.push((
@@ -2346,6 +2365,7 @@ pub fn draw(
                 match game.disguise(body) {
                     Some(ssc::simulation::Disguise::Lure) => {
                         let lure = Pickup {
+                            relic: None,
                             position: p,
                             velocity: Vec2::ZERO,
                             item: Item::Material(ssc::simulation::Material::ALL[0], 8.0),
@@ -3039,6 +3059,9 @@ fn draw_guides(
         };
         let color = color.with_alpha(alpha);
         let size = size * ui_scale;
+        if let GuideKind::Echo(kind @ (EchoKind::Well | EchoKind::Relic), _) = bearing.kind {
+            draw_discovery_glyph(gizmos, at - d * size * 2.5, size, kind, color);
+        }
         let side = Vec2::new(-d.y, d.x);
         let tip = at + d * size;
         let back = at - d * size * 0.7;
@@ -3120,8 +3143,59 @@ fn draw_guides(
     }
 }
 
+pub(crate) fn draw_discovery_glyph(
+    gizmos: &mut Gizmos,
+    at: Vec2,
+    size: f32,
+    kind: EchoKind,
+    color: Color,
+) {
+    match kind {
+        EchoKind::Relic => {
+            gizmos.lineloop_2d(
+                (0..6)
+                    .map(|i| at + Vec2::from_angle(i as f32 * std::f32::consts::TAU / 6.0) * size),
+                color,
+            );
+            gizmos.line_2d(at - Vec2::Y * size * 0.5, at + Vec2::Y * size * 0.5, color);
+            gizmos.line_2d(at - Vec2::X * size * 0.4, at + Vec2::X * size * 0.4, color);
+        }
+        EchoKind::Well => {
+            for sign in [-1.0, 1.0] {
+                gizmos.linestrip_2d(
+                    [
+                        at + Vec2::new(-size, sign * size * 0.4),
+                        at + Vec2::new(0.0, sign * size),
+                        at + Vec2::new(size, sign * size * 0.4),
+                    ],
+                    color,
+                );
+            }
+            gizmos.circle_2d(at, size * 0.3, color).resolution(8);
+        }
+        EchoKind::Rift => {
+            for sign in [-1.0, 1.0] {
+                gizmos.linestrip_2d(
+                    [
+                        at + Vec2::new(sign * size, size),
+                        at + Vec2::new(sign * size * 0.5, 0.0),
+                        at + Vec2::new(sign * size, -size),
+                    ],
+                    color,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
 fn echo_color(kind: EchoKind, tint: Option<[f32; 3]>) -> Color {
     match kind {
+        EchoKind::Rift => tint.map_or(CYAN, |[r, g, b]| Color::srgb(r, g, b)),
+        EchoKind::Well => tint.map_or(Color::srgb(0.75, 0.6, 1.0), |[r, g, b]| {
+            Color::srgb(r, g, b)
+        }),
+        EchoKind::Relic => Color::srgb(1.0, 0.75, 0.35),
         EchoKind::Planetoid => Color::srgb(0.95, 0.8, 0.5),
         EchoKind::Civilization | EchoKind::Fortress | EchoKind::Nearest => lifted(tint),
         EchoKind::Pad => PAD_GREEN,
@@ -3232,13 +3306,25 @@ fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
         if !ssc::simulation::extent_in_view(echo.position, 80.0 * ui_scale, camera, half, 0.0) {
             continue;
         }
+        // Rifts already have mandatory world and edge warnings; sonar adds information only.
+        if echo.kind == EchoKind::Rift {
+            continue;
+        }
+        if game
+            .next_lure()
+            .is_some_and(|l| l.position == echo.position)
+        {
+            continue;
+        }
         let color = echo_color(echo.kind, echo.tint);
         let at = echo.position;
         let size = 34.0 * ui_scale;
         let pulse = 1.0 + 0.35 * (1.0 - fade) * 2.0;
-        gizmos
-            .circle_2d(at, size * 1.8 * pulse, color.with_alpha(0.35 * fade))
-            .resolution(32);
+        if echo.discovery.is_none() {
+            gizmos
+                .circle_2d(at, size * 1.8 * pulse, color.with_alpha(0.35 * fade))
+                .resolution(32);
+        }
         let square = |r: f32| {
             [
                 at + Vec2::new(r, r),
@@ -3249,6 +3335,9 @@ fn draw_echoes(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
         };
         let c = color.with_alpha(0.3 + 0.7 * fade);
         match echo.kind {
+            EchoKind::Rift | EchoKind::Well | EchoKind::Relic => {
+                draw_discovery_glyph(gizmos, at, size * 0.6, echo.kind, c);
+            }
             EchoKind::Planetoid => {
                 gizmos
                     .circle_2d(at, (echo.radius * 1.12).max(size), c)
@@ -3905,9 +3994,13 @@ fn draw_radar(
         let tint = crate::wellview::color(&genome, &pose);
         let offset = (body.position - origin) * scale;
         if offset.length() < radius - 2.0 * ui_scale {
-            gizmos
-                .circle_2d(center + offset, 5.5 * ui_scale, tint.with_alpha(0.8))
-                .resolution(10);
+            draw_discovery_glyph(
+                gizmos,
+                center + offset,
+                5.5 * ui_scale,
+                EchoKind::Well,
+                tint.with_alpha(0.8),
+            );
         }
         if let Some(ghost) = pose.ghost {
             let at = (ghost - origin) * scale;
@@ -3920,6 +4013,21 @@ fn draw_radar(
                     )
                     .resolution(10);
             }
+        }
+    }
+    for (echo, fade) in game
+        .echoes()
+        .filter(|(e, _)| matches!(e.kind, EchoKind::Relic | EchoKind::Rift))
+    {
+        let offset = (echo.position - origin) * scale;
+        if offset.length() < radius - 5.0 * ui_scale {
+            draw_discovery_glyph(
+                gizmos,
+                center + offset,
+                4.0 * ui_scale,
+                echo.kind,
+                echo_color(echo.kind, echo.tint).with_alpha(fade),
+            );
         }
     }
     // Pads: a diamond, green while private and amber once the enemy has seen it. One out of

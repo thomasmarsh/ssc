@@ -437,4 +437,9 @@ Runekeeper is built, generator version 18. BESTIARY section 19 records the one-p
 
 ## Status: Seamer rifts
 
-Seamer is built, generator version 19. BESTIARY section 17 records shared-gene mappings, warnings, swept whole-body transit, clearance, attribution, budgets, and cleanup. Passage is automatic on entrance, with no interact key or unlock. A bare ship can leave the warning or use a pair as an escape route. The curiosity ping layer, Seam needle, personal rifts, and beacon integration remain unbuilt.
+Seamer is built, generator version 19. BESTIARY section 17 records shared-gene mappings, warnings, swept whole-body transit, clearance, attribution, budgets, and cleanup. Passage is automatic on entrance, with no interact key or unlock. A bare ship can leave the warning or use a pair as an escape route. The bounded curiosity ping layer is built; see [DISCOVERY.md](DISCOVERY.md). Seam needle, personal rifts, and beacon integration remain unbuilt.
+
+
+## Status: bounded curiosity discovery
+
+[DISCOVERY.md](DISCOVERY.md) is authoritative for the wonder layer: base ping reveals existing live Seamer pairs and dynamic wells; the existing LODE ECHO tier adds sealed organ relics. Eight curiosity handles at most, nine-second echoes, live availability checks, paired mouth identity, fallback lures, generated-anchor well charting, and one-time relic pointers preserve the starter loop and nearest-civilization guarantee. The section 5 proposal that the map shows all lures is reconciled: temporary rifts and carried/released wells never become persistent destinations. Mimic deception, dim absorption, lens honesty, abilities, and beacon integration remain outside this slice.

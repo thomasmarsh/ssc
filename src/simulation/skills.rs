@@ -176,7 +176,7 @@ impl Skill {
             Self::PingCooldown => format!("-{:.1}s recharge", t::PING_COOLDOWN_STEP),
             Self::PingTargets => format!("+{} echo of every kind", t::PING_TARGETS_STEP),
             Self::EchoPads => "pads the enemy has found ping as alerts".to_string(),
-            Self::EchoLodes => "rich lodes and renewable planetoids".to_string(),
+            Self::EchoLodes => "rich lodes, renewables and sealed organs".to_string(),
             Self::EchoNests => "nests and egg clusters".to_string(),
             Self::EchoPredators => "how many predators roam a sector".to_string(),
             Self::Shove => format!(

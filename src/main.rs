@@ -1093,6 +1093,15 @@ fn smoke_run(
         assert_eq!(game.rifts.len(), 1, "Rift gallery failed");
         run.hold = true;
     }
+    if run.frames == 0
+        && let Ok(mode) = std::env::var("SSC_DISCOVERY")
+    {
+        assert!(
+            session.game.stage_discovery_smoke(&mode),
+            "unknown discovery gallery"
+        );
+        run.hold = true;
+    }
     // SSC_ORGANS=1: own the four organs with two slots fitted, a bond running, and a hold to
     // pay the upkeep, to check the HUD icons, the details and the RIG tab.
     if run.frames == 0 && std::env::var_os("SSC_ORGANS").is_some() {

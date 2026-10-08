@@ -18,6 +18,7 @@ mod creature;
 mod cues;
 mod dash;
 mod diplomacy;
+mod discovery;
 mod ecology;
 pub mod feel;
 mod fields;
@@ -72,6 +73,7 @@ pub use civ::{CIV_CAP, Raid, RaidStage, TerritoryReport, verdict};
 pub use civmine::Cache;
 pub use cues::Cue;
 pub use diplomacy::{Regard, Tier, TitheError, TitheHint};
+pub use discovery::Info as DiscoveryInfo;
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
 pub use food::{FOOD_RADIUS, Food, fertility};
 pub use growth::Egg;
@@ -758,7 +760,6 @@ impl Game {
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
         self.update_jam(dt, input.fire);
-        self.update_ping(dt);
         self.update_lure(dt);
         self.update_legacy(dt);
         let jumped = self.update_chart(dt);
@@ -913,6 +914,7 @@ impl Game {
         self.remove_destroyed();
         self.prune_slings();
         self.cleanup_rifts();
+        self.update_ping(dt);
         self.cue_player_damage(ship_before, sources);
     }
 

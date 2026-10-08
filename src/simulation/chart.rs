@@ -28,9 +28,10 @@ type MarkKey = (EchoKind, i32, i32);
 /// One thing the chart knows about.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mark {
+    pub well_mode: Option<crate::well::Mode>,
     pub kind: EchoKind,
     pub position: Vec2,
-    /// Predators counted, creatures in a nest, eggs in a husk, ore in a lode.
+    /// Predators counted, creatures in a nest, eggs in a husk, ore in a lode, or a well spawn index.
     pub weight: u32,
     pub renewable: bool,
     pub territory: Option<u64>,
@@ -144,6 +145,10 @@ pub struct ChartEntry {
     /// Rich ore rocks.
     pub lodes: u32,
     pub nests: u32,
+    pub relics: u32,
+    /// Discovered generated dynamic well anchors, not current destinations.
+    pub dynamic_wells: u32,
+    pub well_modes: Vec<crate::well::Mode>,
     pub eggs: u32,
     /// Predators read by a ping, when one has.
     pub predators: Option<u32>,
@@ -156,8 +161,8 @@ pub struct ChartEntry {
 
 impl ChartEntry {
     /// Five characters that sum the sector up for the chart: a civilization (C outpost, F
-    /// capital, x fallen), the best resource (R renewable planetoid, * rich lode, o planetoid),
-    /// fauna (predator count, else n nest, e eggs), your works (B beacon, ^ pad) and a mark (@
+    /// capital, x fallen), the best resource (h sealed organ, R renewable, * lode, o planetoid),
+    /// fauna (predator count, else n nest, e eggs, ~ known well anchor), your works (B beacon, ^ pad) and a mark (@
     /// the ship, W a wreck, ! a pin).
     pub fn glyphs(&self, ship: bool) -> String {
         let civ = match self.civ {
@@ -166,7 +171,9 @@ impl ChartEntry {
             Some(_) => 'C',
             None => ' ',
         };
-        let resource = if self.renewable > 0 {
+        let resource = if self.relics > 0 {
+            'h'
+        } else if self.renewable > 0 {
             'R'
         } else if self.lodes > 0 {
             '*'
@@ -179,6 +186,7 @@ impl ChartEntry {
             Some(n) if n > 0 => char::from_digit(n.min(9), 10).unwrap_or('9'),
             _ if self.nests > 0 => 'n',
             _ if self.eggs > 0 => 'e',
+            _ if self.dynamic_wells > 0 => '~',
             _ => ' ',
         };
         let works = if self.beacons > 0 {
@@ -208,6 +216,9 @@ impl ChartEntry {
             renewable: 0,
             lodes: 0,
             nests: 0,
+            relics: 0,
+            dynamic_wells: 0,
+            well_modes: Vec::new(),
             eggs: 0,
             predators: None,
             pads: 0,
@@ -306,8 +317,49 @@ impl Game {
     /// A sounded echo teaches the chart what it answered with.
     pub(super) fn chart_learn_echo(&mut self, echo: &Echo) {
         // The nearest-civilization blip is a bearing, not a place the chart can name.
-        if echo.kind == EchoKind::Nearest {
+        if matches!(echo.kind, EchoKind::Nearest | EchoKind::Rift) {
             return;
+        }
+        if let Some(target) = echo.target {
+            match target {
+                super::discovery::Target::Well(body_id) => {
+                    let Some(body) = self.bodies.iter().find(|b| b.id == body_id) else {
+                        return;
+                    };
+                    let (Some((id, index)), Some(run)) = (body.origin, body.well.as_ref()) else {
+                        return;
+                    };
+                    let anchor = run.anchor;
+                    let mode = run.genome.mode;
+                    self.learn(Mark {
+                        well_mode: Some(mode),
+                        kind: EchoKind::Well,
+                        position: anchor,
+                        weight: index,
+                        renewable: false,
+                        territory: None,
+                    });
+                    // The generated anchor belongs to its origin sector, even for a binary.
+                    debug_assert_eq!(SectorId::containing(anchor), id);
+                    return;
+                }
+                super::discovery::Target::Relic { sector: id, .. } => {
+                    if let Some((_, position)) =
+                        super::organs::relic_of(self.seed, id, world::latent(self.seed, id).depth)
+                    {
+                        self.learn(Mark {
+                            well_mode: None,
+                            kind: EchoKind::Relic,
+                            position,
+                            weight: 0,
+                            renewable: false,
+                            territory: None,
+                        });
+                    }
+                    return;
+                }
+                _ => return,
+            }
         }
         let territory = match echo.kind {
             EchoKind::Civilization | EchoKind::Fortress => {
@@ -316,6 +368,7 @@ impl Game {
             _ => None,
         };
         self.learn(Mark {
+            well_mode: None,
             kind: echo.kind,
             position: echo.position,
             weight: echo.weight.max(0.0) as u32,
@@ -347,6 +400,7 @@ impl Game {
                 (site.kind, false)
             };
             self.learn(Mark {
+                well_mode: None,
                 kind,
                 position: site.position,
                 weight: site.weight.max(0.0) as u32,
@@ -385,6 +439,30 @@ impl Game {
             e.visited = known.visited;
             for mark in known.marks.values() {
                 match mark.kind {
+                    EchoKind::Relic
+                        if self
+                            .resolve_discovery(super::discovery::Target::Relic {
+                                sector: id,
+                                live: false,
+                            })
+                            .is_some() =>
+                    {
+                        e.relics += 1
+                    }
+                    EchoKind::Well
+                        if !self
+                            .fallen
+                            .get(&id)
+                            .is_some_and(|f| f.contains(&mark.weight)) =>
+                    {
+                        e.dynamic_wells += 1;
+                        if let Some(mode) = mark.well_mode
+                            && !e.well_modes.contains(&mode)
+                        {
+                            e.well_modes.push(mode);
+                        }
+                    }
+                    EchoKind::Relic | EchoKind::Well | EchoKind::Rift => {}
                     EchoKind::Planetoid => e.planetoids += 1,
                     EchoKind::Lode if mark.renewable => {
                         e.planetoids += 1;
