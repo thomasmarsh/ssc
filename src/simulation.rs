@@ -1053,8 +1053,17 @@ impl Game {
         }
         let spawns = world::generate(self.seed, id);
         let wells = crate::well::of_sector(self.seed, id, &spawns);
+        // Residents of an elder that was slain stay gone with it (a living host's kin do not).
+        let slain_hosts: HashSet<u32> = spawns
+            .iter()
+            .filter(|s| s.apex.is_some() && fallen.contains(&s.index))
+            .map(|s| s.index)
+            .collect();
         for spawn in spawns {
             if fallen.contains(&spawn.index) || present.contains(&spawn.index) {
+                continue;
+            }
+            if spawn.rooted.is_some_and(|r| slain_hosts.contains(&r.host)) {
                 continue;
             }
             // A ruined civilization does not come back, though its walls stand as ruins.

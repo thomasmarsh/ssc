@@ -1236,4 +1236,47 @@ mod tests {
         assert!(b.provoked > 0.0 && b.panic == 0.0, "the brood swarms");
         assert!(f.provoked == 0.0 && f.panic > 0.0, "the symbiote scatters");
     }
+
+    #[test]
+    fn residents_of_a_slain_elder_do_not_return_when_its_sector_reloads() {
+        let (id, p) = hosted_sector();
+        let spawns = world::generate(42, id);
+        let resident_indices: Vec<u32> = spawns
+            .iter()
+            .filter(|s| s.rooted.is_some_and(|r| r.host as usize == p))
+            .map(|s| s.index)
+            .collect();
+        let near = spawns[p].position + Vec2::new(0.0, 900.0);
+        let here = |game: &Game| {
+            game.bodies
+                .iter()
+                .filter(|b| {
+                    b.origin
+                        .is_some_and(|(s, i)| s == id && resident_indices.contains(&i))
+                })
+                .count()
+        };
+        let mut game = Game::new(42);
+        game.teleport(near);
+        for _ in 0..30 {
+            game.step(DT, Input::default());
+        }
+        assert!(here(&game) > 0, "residents load with a living elder");
+        game.bodies
+            .iter_mut()
+            .find(|b| b.origin == Some((id, p as u32)))
+            .unwrap()
+            .health = 0.0;
+        game.step(DT, Input::default());
+        game.teleport(Vec2::new(6000.0 * 12.0, 0.0) + near);
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert_eq!(here(&game), 0, "unloaded");
+        game.teleport(near);
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert_eq!(here(&game), 0, "the slain elder's residents stay gone");
+    }
 }
