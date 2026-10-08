@@ -2,6 +2,8 @@
 
 The universe and creatures are in place (see [UNIVERSE.md](UNIVERSE.md)). The next focus is the player's side of the game: what you fly, what you shoot, what you pick up, and how the challenge grows. Items below are proposals to evaluate by playing, except the "Today" section, which describes the code.
 
+Status: BUILT - ship and stats, augmentation (parts, surges, drops), the threat curve, variety spacing, the HUD, progression loop, mining and materials, the run record, sonar, chart, beacons, renewables, insurance and legacy, civilizations and apex elders, shoving rocks, organs, the three-tab bench. PARTIAL - weapons (patterns and gear built; heat, ammo-as-pressure and swappable secondaries are ideas). TODO items are tagged `TODO:`; most are proposals to decide by playing, so none is a commitment.
+
 ## Today
 
 - **Ship:** arrow-key thrust, rotate and brake, mouse aim. The bare ship has top speed 460, one gun (0.16 s, 26 damage), 100 hull, 60 shield. Every one of those numbers is a `Stats` value (`src/simulation/upgrades.rs`) folded from whatever is bolted on.
@@ -24,9 +26,9 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 
 ## Ideas to explore
 
-**Weapons (patterns and gear built).** Stock shots coexist with mine layers, homing missile pods, dense needle cannons and nova emitters for the ship. Enemies also field rotating spiral patterns and tether launchers. A volley gene controls each enemy pattern; station types add fortress turrets and mine depots. Mines warn before detonating, missiles can be shot down, and particles use swept collisions. Playtest burst damage, pattern gaps, and projectile-cap pressure alongside the progression curve. Future options include heat, ammo and swappable secondaries.
+**Weapons (patterns and gear built).** Stock shots coexist with mine layers, homing missile pods, dense needle cannons and nova emitters for the ship. Enemies also field rotating spiral patterns and tether launchers. A volley gene controls each enemy pattern; station types add fortress turrets and mine depots. Mines warn before detonating, missiles can be shot down, and particles use swept collisions. Playtest burst damage, pattern gaps, and projectile-cap pressure alongside the progression curve. TODO (idea): heat, ammo pressure and swappable secondaries.
 
-**Powerups and drops (built, extend).** Salvage is now material (metal, volatiles, crystal) rather than bare score; `Cargo::{add, spend, can_afford, cap, room}` is the API for sinks (ammo, repairs, reforging, pads). Use the bounty gene and ecology: creatures drop things according to what they are. Permanent parts come from what is hard (see UNIVERSE.md, Stations and where parts come from): civilizations, apex elders and tough creatures, never a wild farm. Candidates: shield, hull, weapon charges, temporary speed, magnet or tractor (civilization stations already tractor rocks), a brief lunatic-style negative mass field. Dust and debris could become collectables. Consider drops that exploit emergent mechanics (flinging a rock, luring a flock), in keeping with the game's mild humor.
+**Powerups and drops (built, extend).** Salvage is now material (metal, volatiles, crystal) rather than bare score; `Cargo::{add, spend, can_afford, cap, room}` is the API for sinks (ammo, repairs, reforging, pads). Use the bounty gene and ecology: creatures drop things according to what they are. Permanent parts come from what is hard (see UNIVERSE.md, Stations and where parts come from): civilizations, apex elders and tough creatures, never a wild farm. TODO (candidates, unbuilt): shield, hull, weapon charges, temporary speed, magnet or tractor (civilization stations already tractor rocks), a brief lunatic-style negative mass field. Dust and debris could become collectables. Consider drops that exploit emergent mechanics (flinging a rock, luring a flock), in keeping with the game's mild humor.
 
 **Graded difficulty (threat curve built).** The universe is already a difficulty gradient. Decide whether progress is spatial (go farther for harder) or has structure on top, such as named routes, landmark sectors, or bosses (a base guarded by heavies is a natural one). Tame the far wilderness: tune `SECTOR_BODY_BUDGET` and the pool biases so extreme sectors are dangerous but not simply unplayable. Consider a soft difficulty curve that follows the player's strength as well as distance.
 
@@ -34,7 +36,7 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 
 **Feedback and feel.** The prototype has no audio. Hit feedback, screen shake, pickup pop, and the C++ game's subtle absurdity (named species already give some of this) will matter more than numbers.
 
-**Run record (built).** Death and game over show run stats and the species the player extirpated from their local range (see UNIVERSE.md). Possible next steps: a persisted best run, a seed-shareable run code, per-lineage ecology consequences for extirpation (predators starving, niches reopening), and tuning how the wry line responds.
+**Run record (built).** Death and game over show run stats and the species the player extirpated from their local range (see UNIVERSE.md). TODO (ideas): a persisted best run, a seed-shareable run code, per-lineage ecology consequences for extirpation (predators starving, niches reopening; offered and NOT picked by the author), and tuning how the wry line responds.
 
 ## Constraints from the generator
 
@@ -55,7 +57,16 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 - Whether a part should be pickable (leave or take) instead of auto-installed, and whether wrecks should drop more than the best part.
 - Landmark caches and bosses: civilization elders (see UNIVERSE.md) are built, with a guaranteed epic and a lasting fall; caches and named routes are not. Tune raid timing, elder strength, the depth 6 to 8 start of territories and the weak early outpost (first contact: friendly if left alone, tithes work there, see Diplomacy in UNIVERSE.md) by playing. Also tune the niche catalog (`SLOTS_PER_TIER`, the spread shares and breadth ranges), the diversity cap (`DIVERSITY_*`), belts (`BELT_*`) and the ring ramp. Next for species: affinities toward civilizations (per-species regard using `range::regional_noise`), and whether `SECTOR_SIZE` should stay 6000 now that biomes are 8 to 20 sectors.
 - Pickup labels in the world, audio and screen shake for pickups.
-- Apex elders (see UNIVERSE.md) are built with eight archetypes, ring-scaled hull and a phase change: tune their strength (`apex::base_hull`, `RING_GROWTH`), the 2 percent rate and the hoard by playing; a lesser one at rings 3 and 4 is very rare. Not yet: apex-specific loot, bulwark reflection, archetype sounds.
+- Apex elders (see UNIVERSE.md) are built with eight archetypes, ring-scaled hull and a phase change: tune their strength (`apex::base_hull`, `RING_GROWTH`), the 2 percent rate and the hoard by playing; a lesser one at rings 3 and 4 is very rare. TODO: apex-specific loot, bulwark reflection, archetype sounds.
 - Fortified cities and civilization mining (see UNIVERSE.md) are built: tune wall hull, turret reach and the fortress tier curve by playing, and consider a breach reward, maze-aware raiders, and rival civilizations contesting rocks.
 
-The three-tab bench is built. [BENCH.md](BENCH.md) records grouping, controls, preserved purchases/repair/stash, and bounded presentation. Skill merging, automatic stash overflow, and economy changes remain proposals.
+The three-tab bench is built. [BENCH.md](BENCH.md) records grouping, controls, preserved purchases/repair/stash, and bounded presentation. TODO: skill merging, automatic stash overflow, and economy changes remain proposals.
+
+## Remaining gameplay work (collected from the old handoff)
+
+- TODO: human playtest of the early game and the depth 6 to 8 civilizations (see MIGRATION.md, Known caveats, for the watch list).
+- TODO: progression pressure: trophy gates on the top skill levels, lode fatigue, a ring-entry reward (the doc found no hard farming exploit, but a slow safe path pays as well as risk).
+- TODO: bench polish from [FLOW.md](FLOW.md): docking assist, BEST BUY hints, part-plugging animation, cutting star map notes.
+- TODO: sniping and balance leftovers: accuracy spread at range (falloff only so far), a heat or cargo cost on the stock gun, realm effects on civilizations, realm tilts on well modes beyond count and pull, a realm that stresses mining or symbiosis, a distinct HUD message for Dead Reach fizzles.
+- TODO: boons at pads (a Hades-style per-run choice of one of three random modifiers; approved earlier but judged a bigger system, do after progression is clearer).
+- TODO: bestiary follow-ups listed in [BESTIARY.md](BESTIARY.md) (organs, seam needle, rune ink, dim and lens honesty).
