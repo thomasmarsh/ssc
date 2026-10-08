@@ -190,6 +190,8 @@ fn draw_plan(gizmos: &mut Gizmos, plan: &Plan, offset: Vec2, world_per_px: f32) 
                 let r = p.radius.max(world_per_px * 1.5);
                 gizmos.circle_2d(start, r, Color::srgb(0.3, 0.85, 0.95));
             }
+            // Animal roles never appear in plant plans.
+            _ => {}
         }
     }
 }

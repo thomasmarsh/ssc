@@ -1,5 +1,6 @@
 //! Deterministic gameplay, independent of the desktop renderer.
 pub mod affinity;
+pub mod anatomy;
 pub mod apex;
 pub mod backdrop;
 pub mod biome;

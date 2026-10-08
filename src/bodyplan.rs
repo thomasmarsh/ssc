@@ -1,39 +1,77 @@
-//! A creature body expressed from a grammar `Plan`. Pure and headless: it turns
-//! `grow(grammar, seed, growth)` into a short list of jointed-chain nodes (one per stem) and
-//! a list of decorations (leaves, fruit and sockets) hung on those nodes, and the simulation's
-//! chain machinery (`simulation/chain.rs`) spawns bodies and springs from it.
+//! A creature body expressed from an animal `Plan` (`anatomy`). Pure and headless: it turns
+//! `anatomy::grow` into a short list of jointed-chain nodes (one per bead) and a list of marks
+//! (eyes, weapon mounts, actuators, organs, sockets, fur, frills, fins, spines) hung on those
+//! nodes, and the simulation's chain machinery (`simulation/chain.rs`) spawns bodies and
+//! springs from it.
 //!
 //! The mapping, deliberately the simplest that moves, collides and animates like any other
 //! chain (design and limits in `docs/PROCGEN.md`):
-//! - Every `Stem` becomes one body at the stem's midpoint. A stem's parent is its nearest stem
-//!   ancestor (joints are skipped, they are only forks). The first stem is the head, so the
-//!   creature trails its plan behind it, plan up (+y) pointing backwards.
-//! - A body's radius follows its stem's length (`LENGTH_RADIUS`), the head's radius is the
-//!   genome's `radius`, and the whole plan is scaled so those agree. Bodies are beads on the
-//!   plan's skeleton: each joint's rest length is the plan's own spacing (never less than the
-//!   two bodies touching), so branches keep their spread and a fresh body starts at rest.
-//! - `rank` (the travelling wave's phase) is the node's depth in the tree, and `side` is 0 for a
-//!   stem that continues its parent's heading and +1 or -1 for a branch to the left or right.
-//! - `Leaf`, `Fruit` and `Socket` parts do not become bodies. They are decorations in the local
-//!   frame of their host node; sockets are the attachment points for hosted residents.
-//! - Hard caps: at most `BODY_PARTS` nodes (the derivation depth is lowered until the plan fits,
-//!   so a truncated body is a complete shallower plan, never a cut-off one), at most
-//!   `MAX_SOCKETS` sockets and `MAX_DECOR` decorations.
+//! - Every `Stem` becomes one body at the bead's centre. A bead's parent is the bead it grows
+//!   from. The first bead is the head, so the creature trails its plan behind it, plan up
+//!   (+y) pointing backwards.
+//! - Radii are the plan's head-relative radii times the genome's head radius (a bead never
+//!   exceeds `MAX_BULK` heads). Each joint's rest length is the plan's own spacing, never less
+//!   than the two bodies touching, so a fresh body starts at rest. `rank` (the travelling
+//!   wave's phase) is the depth in the bead tree and `side` is the plan's limb tag.
+//! - Typed nodes: the role of a bead (head, trunk, limb) and its size class are data; an
+//!   `Actuator` mark sets the local wave amplitude of its host (`Node::drive`) and a `Weapon`
+//!   mark makes its host a mount (`Node::mount`, where the creature's shots originate). Eyes,
+//!   organs and sockets are drawn only for now (see the `TODO:` tags in `docs/BESTIARY.md`).
+//! - Hard caps: at most `BODY_PARTS` nodes, `MAX_SOCKETS` sockets and `MAX_DECOR` marks.
 
 use bevy::prelude::Vec2;
 
+use crate::anatomy::{self, AnimalGenome, AnimalSpecimen, Archetype, MAX_BULK};
 use crate::genome::{Diet, Genome, Social, Trigger, Weapon};
-use crate::grammar::{GrammarGenome, GrammarSpecimen, PartKind, Plan, Template, grow};
+use crate::grammar::PartKind;
 
-/// No grammar body has more jointed bodies than this (the plan itself allows far more).
-pub const BODY_PARTS: usize = 40;
+/// No animal body has more jointed bodies than this.
+pub const BODY_PARTS: usize = anatomy::MAX_BODIES;
 pub const MAX_SOCKETS: usize = 16;
 pub const MAX_DECOR: usize = 96;
-/// Body radius per unit of stem length, before the plan is scaled to the head.
-const LENGTH_RADIUS: f32 = 0.22;
+/// Marks that carry a rule or a role (never thinned out when the body is crowded).
+const MAX_ROLE_MARKS: usize = 48;
 const MIN_PART_RADIUS: f32 = 4.0;
-/// A stem turning less than this from its parent's heading continues it (side 0).
-const CONTINUE_ANGLE: f32 = 0.3;
+/// Limb beads may be a little smaller than trunk beads (the legacy limb floor).
+const MIN_LIMB_RADIUS: f32 = 3.5;
+/// A wave drive of an actuated bead, and of the beads of a body that has actuators but not
+/// on them; a body without actuators drives everything at 1.
+const ACTUATED_DRIVE: f32 = 0.9;
+const PASSIVE_DRIVE: f32 = 0.55;
+const MAX_DRIVE: f32 = 2.0;
+
+/// What a bead is in the body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Head,
+    Trunk,
+    /// A bead of an appendage.
+    Limb,
+}
+
+/// How big a bead is compared with the head.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SizeClass {
+    Tiny,
+    Small,
+    Medium,
+    Large,
+}
+
+impl SizeClass {
+    pub fn of(radius: f32, head: f32) -> Self {
+        let ratio = radius / head.max(1e-3);
+        if ratio < 0.45 {
+            Self::Tiny
+        } else if ratio < 0.8 {
+            Self::Small
+        } else if ratio < 1.2 {
+            Self::Medium
+        } else {
+            Self::Large
+        }
+    }
+}
 
 /// One jointed body of an expressed plan.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,13 +89,19 @@ pub struct Node {
     pub radius: f32,
     /// Depth in the node tree, the phase of the travelling wave.
     pub rank: f32,
-    /// 0 for a continuing stem, +1 or -1 for a branch to the left or right.
+    /// 0 for the trunk, +1 or -1 for a bead of a limb on that side.
     pub side: f32,
+    pub role: Role,
+    pub class: SizeClass,
+    /// Multiplier of the genome's wave at this bead (1 unless the body has actuators).
+    pub drive: f32,
+    /// True when shots and contact attacks may come from this bead.
+    pub mount: bool,
 }
 
-/// A leaf, fruit or socket hung on a node, in that node's frame: `along` the direction from
-/// its parent to it (the heading of the plan there; for the head, the tail direction),
-/// `across` to the left of that, and `angle` its own heading relative to that frame.
+/// A mark hung on a node, in that node's frame: `along` the direction from its parent to it
+/// (for the head, the tail direction), `across` to the left of that, and `angle` its own
+/// heading relative to that frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Decor {
     pub kind: PartKind,
@@ -73,8 +117,29 @@ pub struct Decor {
 pub struct BodyPlan {
     pub nodes: Vec<Node>,
     pub decor: Vec<Decor>,
-    /// The derivation depth actually used (lowered if the plan did not fit `BODY_PARTS`).
+    /// The iteration depth actually used (lowered if the plan did not fit `BODY_PARTS`).
     pub depth: u8,
+}
+
+impl BodyPlan {
+    /// The unit vector of a node's frame: from its parent to it, or the tail direction.
+    pub fn frame(&self, host: usize) -> Vec2 {
+        match self.nodes[host].parent {
+            None => Vec2::Y,
+            Some(p) => (self.nodes[host].offset - self.nodes[p].offset)
+                .try_normalize()
+                .unwrap_or(Vec2::Y),
+        }
+    }
+
+    /// Where a mark rests, and its heading, in the plan frame.
+    pub fn placed(&self, decor: &Decor) -> (Vec2, f32) {
+        let frame = self.frame(decor.host);
+        (
+            self.nodes[decor.host].offset + frame * decor.along + frame.perp() * decor.across,
+            frame.to_angle() + decor.angle,
+        )
+    }
 }
 
 /// Rest distance of the joint between two touching bodies of the given radii; the same rule
@@ -87,28 +152,14 @@ fn wrap(angle: f32) -> f32 {
     (angle + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
 }
 
-/// The plan at `growth`, with the derivation depth lowered until its stems fit `BODY_PARTS`.
-fn fitted_plan(spec: &GrammarSpecimen, growth: f32) -> (Plan, u8) {
-    let mut genome = spec.genome.limited();
-    genome.depth = genome.effective_depth();
-    loop {
-        let plan = grow(&genome, spec.seed, growth);
-        if plan.count(PartKind::Stem) <= BODY_PARTS || genome.depth <= 1 {
-            return (plan, genome.depth);
-        }
-        genome.depth -= 1;
-    }
-}
-
-/// Expresses a grammar as a jointed body whose head has radius `head_radius`, at growth
-/// `growth` (1 is an adult; a smaller value is a smaller real plan). `None` when the plan has
-/// no usable stem, in which case the caller builds the ordinary chain.
-pub fn express(spec: &GrammarSpecimen, head_radius: f32, growth: f32) -> Option<BodyPlan> {
-    let (plan, depth) = fitted_plan(spec, growth);
+/// Expresses an animal plan as a jointed body whose head has radius `head_radius`. `None`
+/// when the plan has no usable bead, in which case the caller builds the ordinary chain.
+pub fn express(spec: &AnimalSpecimen, head_radius: f32) -> Option<BodyPlan> {
+    let (plan, depth) = anatomy::grow(spec);
     let mut node_of: Vec<Option<usize>> = vec![None; plan.parts.len()];
     let mut stems: Vec<usize> = Vec::new();
     for (i, part) in plan.parts.iter().enumerate() {
-        if part.kind == PartKind::Stem && part.length > 1e-3 && stems.len() < BODY_PARTS {
+        if part.kind == PartKind::Stem && stems.len() < BODY_PARTS {
             node_of[i] = Some(stems.len());
             stems.push(i);
         }
@@ -116,7 +167,7 @@ pub fn express(spec: &GrammarSpecimen, head_radius: f32, growth: f32) -> Option<
     if stems.is_empty() {
         return None;
     }
-    // The nearest stem ancestor (or itself) that became a node.
+    // The nearest bead ancestor (or itself) that became a node.
     let host_of = |mut at: Option<u32>| {
         while let Some(i) = at {
             if let Some(n) = node_of[i as usize] {
@@ -126,62 +177,93 @@ pub fn express(spec: &GrammarSpecimen, head_radius: f32, growth: f32) -> Option<
         }
         None
     };
-    // World units per plan unit: an adult's first stem is one unit long, so a juvenile's plan
-    // is smaller at the same scale rather than stretched back up to the head.
-    let scale = head_radius.max(MIN_PART_RADIUS) / LENGTH_RADIUS;
-    let mid = |i: usize| {
-        let p = &plan.parts[i];
-        p.start + Vec2::from_angle(p.angle) * (p.length * 0.5)
-    };
+    let scale = head_radius.max(MIN_PART_RADIUS);
     let mut nodes: Vec<Node> = Vec::with_capacity(stems.len());
     for (n, &i) in stems.iter().enumerate() {
         let part = &plan.parts[i];
-        let radius = (LENGTH_RADIUS * part.length * scale)
-            .clamp(MIN_PART_RADIUS, head_radius.max(MIN_PART_RADIUS));
         if n == 0 {
             nodes.push(Node {
                 stem: i as u32,
                 parent: None,
                 offset: Vec2::ZERO,
                 rest: 0.0,
-                radius: head_radius.max(MIN_PART_RADIUS),
+                radius: scale,
                 rank: 0.0,
                 side: 0.0,
+                role: Role::Head,
+                class: SizeClass::Medium,
+                drive: 1.0,
+                mount: false,
             });
             continue;
         }
         let parent = host_of(part.parent).unwrap_or(0);
-        let before = &nodes[parent];
-        let direction = (mid(i) - mid(before.stem as usize))
+        let before = nodes[parent];
+        let floor = if part.tag != 0 {
+            MIN_LIMB_RADIUS
+        } else {
+            MIN_PART_RADIUS
+        };
+        let radius = (part.radius * scale).clamp(floor, scale * MAX_BULK);
+        let from = plan.parts[before.stem as usize].end();
+        let direction = (part.end() - from)
             .try_normalize()
             .unwrap_or_else(|| Vec2::from_angle(part.angle));
-        let turn = wrap(part.angle - plan.parts[before.stem as usize].angle);
-        let side = if turn.abs() < CONTINUE_ANGLE {
-            0.0
-        } else {
-            turn.signum()
-        };
-        let spacing = (mid(i) - mid(before.stem as usize)).length() * scale;
+        let spacing = (part.end() - from).length() * scale;
         let rest = spacing.max(rest_distance(before.radius, radius));
-        let offset = before.offset + direction * rest;
-        let rank = before.rank + 1.0;
         nodes.push(Node {
             stem: i as u32,
             parent: Some(parent),
-            offset,
+            offset: before.offset + direction * rest,
             rest,
             radius,
-            rank,
-            side,
+            rank: before.rank + 1.0,
+            side: f32::from(part.tag),
+            role: if part.tag != 0 {
+                Role::Limb
+            } else {
+                Role::Trunk
+            },
+            class: SizeClass::of(radius, scale),
+            drive: 1.0,
+            mount: false,
         });
     }
-    let mut sockets = Vec::new();
-    let mut others = Vec::new();
+    // Roles that act: actuators drive their host harder (and, once a body has any, every
+    // other bead is passive), weapon marks make their host a mount.
+    let mut actuated = vec![0u32; nodes.len()];
+    for part in &plan.parts {
+        let Some(host) = host_of(part.parent) else {
+            continue;
+        };
+        match part.kind {
+            PartKind::Actuator => actuated[host] += 1,
+            PartKind::Weapon => nodes[host].mount = true,
+            _ => {}
+        }
+    }
+    if actuated.iter().any(|&a| a > 0) {
+        for (node, &count) in nodes.iter_mut().zip(&actuated) {
+            node.drive = if count > 0 {
+                (ACTUATED_DRIVE + 0.5 * count as f32).min(MAX_DRIVE)
+            } else {
+                PASSIVE_DRIVE
+            };
+        }
+    }
+    // Marks: the ones that carry a role first, then the dressing, thinned evenly to the cap.
+    let mut roles = Vec::new();
+    let mut dressing = Vec::new();
     for (i, part) in plan.parts.iter().enumerate() {
         match part.kind {
-            PartKind::Socket => sockets.push(i),
-            PartKind::Leaf | PartKind::Fruit => others.push(i),
-            _ => {}
+            PartKind::Stem => {}
+            PartKind::Eye
+            | PartKind::Weapon
+            | PartKind::Actuator
+            | PartKind::Organ
+            | PartKind::Socket
+            | PartKind::Joint => roles.push(i),
+            _ => dressing.push(i),
         }
     }
     let keep = |list: Vec<usize>, cap: usize| -> Vec<usize> {
@@ -190,23 +272,26 @@ pub fn express(spec: &GrammarSpecimen, head_radius: f32, growth: f32) -> Option<
         }
         (0..cap).map(|k| list[k * list.len() / cap]).collect()
     };
-    let sockets = keep(sockets, MAX_SOCKETS);
-    let others = keep(others, MAX_DECOR - sockets.len());
-    let mut decor = Vec::new();
-    for i in sockets.into_iter().chain(others) {
+    let (mut sockets, mut others): (Vec<usize>, Vec<usize>) = roles
+        .into_iter()
+        .partition(|&i| plan.parts[i].kind == PartKind::Socket);
+    sockets = keep(sockets, MAX_SOCKETS);
+    others = keep(others, MAX_ROLE_MARKS.saturating_sub(sockets.len()));
+    let room = MAX_DECOR.saturating_sub(sockets.len() + others.len());
+    let dressing = keep(dressing, room);
+    let mut body = BodyPlan {
+        nodes,
+        decor: Vec::new(),
+        depth,
+    };
+    for i in sockets.into_iter().chain(others).chain(dressing) {
         let part = &plan.parts[i];
         let Some(host) = host_of(part.parent) else {
             continue;
         };
-        let stem = nodes[host].stem as usize;
-        let frame = match nodes[host].parent {
-            None => Vec2::Y,
-            Some(p) => (mid(stem) - mid(nodes[p].stem as usize))
-                .try_normalize()
-                .unwrap_or(Vec2::Y),
-        };
-        let rel = (part.start - mid(stem)) * scale;
-        decor.push(Decor {
+        let frame = body.frame(host);
+        let rel = (part.start - plan.parts[body.nodes[host].stem as usize].end()) * scale;
+        body.decor.push(Decor {
             kind: part.kind,
             host,
             along: rel.dot(frame),
@@ -216,16 +301,12 @@ pub fn express(spec: &GrammarSpecimen, head_radius: f32, growth: f32) -> Option<
             radius: part.radius * scale,
         });
     }
-    Some(BodyPlan {
-        nodes,
-        decor,
-        depth,
-    })
+    Some(body)
 }
 
-/// How many jointed bodies this grammar makes (at least one), for budgets.
-pub fn part_count(spec: &GrammarSpecimen) -> u32 {
-    express(spec, 1.0, 1.0).map_or(1, |b| b.nodes.len() as u32)
+/// How many jointed bodies this plan makes (at least one), for budgets.
+pub fn part_count(spec: &AnimalSpecimen) -> u32 {
+    spec.bodies() as u32
 }
 
 // ---------------------------------------------------------------------------------------
@@ -233,9 +314,9 @@ pub fn part_count(spec: &GrammarSpecimen) -> u32 {
 // contact damage, they only react to harm, and they browse rather than hunt.
 // ---------------------------------------------------------------------------------------
 
-fn inert(grammar: GrammarSpecimen) -> Genome {
+fn inert(anatomy: AnimalSpecimen) -> Genome {
     Genome {
-        grammar: Some(grammar),
+        anatomy: Some(anatomy),
         weapon: Weapon::None,
         contact_damage: 0.0,
         trigger: Trigger::Harm,
@@ -247,122 +328,356 @@ fn inert(grammar: GrammarSpecimen) -> Genome {
     .limited()
 }
 
+fn specimen(
+    archetype: Archetype,
+    seed: u64,
+    tune: impl FnOnce(&mut AnimalGenome),
+) -> AnimalSpecimen {
+    let mut genome = AnimalGenome {
+        archetype,
+        ..AnimalGenome::default()
+    };
+    tune(&mut genome);
+    AnimalSpecimen {
+        genome: genome.limited(),
+        seed,
+    }
+}
+
 impl Genome {
-    /// A spine and ribs serpent: a long ribbed backbone that ripples as it swims, its rib tips
-    /// sockets for hosted residents.
-    pub fn ribwyrm() -> Self {
+    /// A squid: a ring of trailing tentacles (the middle pair long), a swollen mantle with
+    /// fins, eyes, tentacle-root actuators and two mounts on the tentacle tips.
+    pub fn squid() -> Self {
         Self {
-            radius: 13.0,
-            hull: 60.0,
-            mass: 10.0,
-            speed: 130.0,
-            cruise: 60.0,
-            stiffness: 320.0,
-            wave: 0.9,
-            rhythm: 2.4,
-            lag: 0.45,
+            radius: 14.0,
+            hull: 70.0,
+            mass: 9.0,
+            speed: 150.0,
+            cruise: 70.0,
+            stiffness: 300.0,
+            wave: 0.8,
+            rhythm: 2.6,
+            lag: 0.5,
             bounty: 120.0,
-            hue: 0.08,
+            hue: 0.62,
+            pale: 0.4,
+            bright: 0.95,
+            ..inert(specimen(Archetype::Squid, 0x5351_5549, |g| {
+                g.depth = 1;
+                g.segments = 3;
+                g.limbs = 8;
+                g.limb_len = 1;
+                g.taper = 0.8;
+                g.lean = 0.8;
+                g.curl = 0.12;
+                g.dress = 0.8;
+                g.eyes = 2;
+                g.mounts = 2;
+                g.actuators = 2;
+                g.organs = 1;
+            }))
+        }
+    }
+
+    /// An octopus: a round body, eight curling arms, two actuators and a socket.
+    pub fn octopus() -> Self {
+        Self {
+            radius: 15.0,
+            hull: 80.0,
+            mass: 10.0,
+            speed: 110.0,
+            cruise: 50.0,
+            stiffness: 260.0,
+            wave: 0.7,
+            rhythm: 2.0,
+            lag: 0.55,
+            bounty: 130.0,
+            hue: 0.98,
             pale: 0.35,
             bright: 0.95,
-            ..inert(GrammarSpecimen {
-                genome: GrammarGenome {
-                    template: Template::Spine,
-                    depth: 5,
-                    branch_angle: 0.95,
-                    length_ratio: 0.8,
-                    radius_ratio: 0.8,
-                    branch_rate: 0.9,
-                    asymmetry: 0.05,
-                    wobble: 0.04,
-                    leaf_rate: 0.3,
-                    fruit_rate: 0.0,
-                    thickness: 0.05,
-                },
-                seed: 0x5249_4257,
-            })
+            ..inert(specimen(Archetype::Octopus, 0x4F43_544F, |g| {
+                g.depth = 1;
+                g.limbs = 8;
+                g.limb_len = 1;
+                g.curl = 0.3;
+                g.dress = 0.7;
+                g.eyes = 2;
+                g.actuators = 2;
+                g.organs = 1;
+                g.sockets = 1;
+            }))
         }
     }
 
-    /// A coral-fan drifter: a thick stem fanning out into tight forks, swaying slowly.
-    pub fn corallid() -> Self {
+    /// A snake: the commonest long body, a line of beads of varying sizes with fins.
+    pub fn snake() -> Self {
         Self {
-            radius: 13.0,
-            hull: 90.0,
-            mass: 12.0,
-            speed: 70.0,
-            cruise: 35.0,
-            stiffness: 260.0,
-            wave: 0.35,
-            rhythm: 1.2,
+            radius: 12.0,
+            hull: 55.0,
+            mass: 8.0,
+            speed: 140.0,
+            cruise: 65.0,
+            stiffness: 320.0,
+            wave: 1.0,
+            rhythm: 2.8,
+            lag: 0.7,
+            bounty: 100.0,
+            hue: 0.3,
+            pale: 0.4,
+            bright: 0.95,
+            ..inert(specimen(Archetype::Chain, 0x534E_414B, |g| {
+                g.depth = 1;
+                g.segments = 7;
+                g.taper = 0.5;
+                g.swell = 0.2;
+                g.dress = 0.7;
+                g.eyes = 2;
+                g.mounts = 1;
+                g.actuators = 2;
+            }))
+        }
+    }
+
+    /// A crab: a short segmented trunk with paired legs and two claw mounts.
+    pub fn crab() -> Self {
+        Self {
+            radius: 15.0,
+            hull: 110.0,
+            mass: 14.0,
+            speed: 90.0,
+            cruise: 45.0,
+            stiffness: 340.0,
+            wave: 0.6,
+            rhythm: 2.2,
             lag: 0.6,
             bounty: 140.0,
-            hue: 0.93,
+            hue: 0.04,
             pale: 0.3,
-            bright: 0.95,
-            ..inert(GrammarSpecimen {
-                genome: GrammarGenome {
-                    template: Template::Coral,
-                    depth: 3,
-                    branch_angle: 0.8,
-                    length_ratio: 0.86,
-                    radius_ratio: 0.8,
-                    branch_rate: 0.9,
-                    asymmetry: 0.1,
-                    wobble: 0.08,
-                    leaf_rate: 0.8,
-                    fruit_rate: 0.2,
-                    thickness: 0.07,
-                },
-                seed: 0x434F_5241,
-            })
+            bright: 0.9,
+            ..inert(specimen(Archetype::Crab, 0x4352_4142, |g| {
+                g.depth = 1;
+                g.segments = 3;
+                g.limbs = 6;
+                g.limb_len = 1;
+                g.lean = 0.6;
+                g.dress = 0.8;
+                g.eyes = 2;
+                g.mounts = 2;
+                g.organs = 1;
+            }))
         }
     }
 
-    /// A branching colossus: a big dichotomous tree body that lumbers rather than swims.
-    pub fn colossus() -> Self {
+    /// A jellyfish: a bell with a frilled skirt, organs inside and trailing tendrils.
+    pub fn jelly() -> Self {
         Self {
-            radius: 16.0,
-            hull: 220.0,
-            mass: 40.0,
-            speed: 55.0,
-            cruise: 28.0,
-            stiffness: 420.0,
-            wave: 0.2,
-            rhythm: 0.9,
-            lag: 0.7,
-            bounty: 300.0,
-            hue: 0.55,
-            pale: 0.4,
-            bright: 0.9,
-            ..inert(GrammarSpecimen {
-                genome: GrammarGenome {
-                    template: Template::Dichotomous,
-                    depth: 5,
-                    branch_angle: 0.6,
-                    length_ratio: 0.78,
-                    radius_ratio: 0.78,
-                    branch_rate: 0.85,
-                    asymmetry: 0.15,
-                    wobble: 0.06,
-                    leaf_rate: 0.6,
-                    fruit_rate: 0.3,
-                    thickness: 0.07,
-                },
-                seed: 0x434F_4C4F,
-            })
+            radius: 17.0,
+            hull: 60.0,
+            mass: 8.0,
+            speed: 70.0,
+            cruise: 35.0,
+            stiffness: 220.0,
+            wave: 0.5,
+            rhythm: 1.6,
+            lag: 0.5,
+            bounty: 90.0,
+            hue: 0.8,
+            pale: 0.45,
+            bright: 0.95,
+            ..inert(specimen(Archetype::Jelly, 0x4A45_4C4C, |g| {
+                g.depth = 1;
+                g.limbs = 6;
+                g.limb_len = 2;
+                g.curl = 0.05;
+                g.dress = 0.8;
+                g.organs = 2;
+                g.actuators = 1;
+            }))
         }
     }
+
+    /// A manta ray: a flat body, two wing chains with fins and a tapering tail.
+    pub fn ray() -> Self {
+        Self {
+            radius: 16.0,
+            hull: 90.0,
+            mass: 12.0,
+            speed: 120.0,
+            cruise: 55.0,
+            stiffness: 280.0,
+            wave: 0.7,
+            rhythm: 1.8,
+            lag: 0.6,
+            bounty: 130.0,
+            hue: 0.52,
+            pale: 0.35,
+            bright: 0.95,
+            ..inert(specimen(Archetype::Ray, 0x5241_5900, |g| {
+                g.depth = 1;
+                g.segments = 4;
+                g.limbs = 2;
+                g.limb_len = 2;
+                g.taper = 0.45;
+                g.lean = 0.35;
+                g.dress = 0.8;
+                g.eyes = 2;
+                g.mounts = 1;
+                g.actuators = 2;
+            }))
+        }
+    }
+
+    /// A starfish: a hub with five stiff arms tipped with spines.
+    pub fn starfish() -> Self {
+        Self {
+            radius: 15.0,
+            hull: 100.0,
+            mass: 12.0,
+            speed: 60.0,
+            cruise: 30.0,
+            stiffness: 360.0,
+            wave: 0.4,
+            rhythm: 1.2,
+            lag: 0.6,
+            bounty: 120.0,
+            hue: 0.08,
+            pale: 0.3,
+            bright: 0.95,
+            ..inert(specimen(Archetype::Star, 0x5354_4152, |g| {
+                g.depth = 1;
+                g.limbs = 5;
+                g.limb_len = 1;
+                g.dress = 0.8;
+                g.organs = 1;
+                g.actuators = 1;
+            }))
+        }
+    }
+
+    /// A puffer: a short fat body in a ring of spines.
+    pub fn puffer() -> Self {
+        Self {
+            radius: 16.0,
+            hull: 90.0,
+            mass: 12.0,
+            speed: 90.0,
+            cruise: 45.0,
+            stiffness: 300.0,
+            wave: 0.5,
+            rhythm: 1.8,
+            lag: 0.6,
+            bounty: 110.0,
+            hue: 0.14,
+            pale: 0.4,
+            bright: 0.95,
+            ..inert(specimen(Archetype::Puffer, 0x5055_4646, |g| {
+                g.depth = 1;
+                g.segments = 2;
+                g.taper = 0.9;
+                g.dress = 0.9;
+                g.eyes = 2;
+                g.mounts = 1;
+            }))
+        }
+    }
+
+    /// A plumeworm: a worm with a feathered crown and a feathered tail.
+    pub fn plumeworm() -> Self {
+        Self {
+            radius: 12.0,
+            hull: 60.0,
+            mass: 8.0,
+            speed: 100.0,
+            cruise: 50.0,
+            stiffness: 300.0,
+            wave: 0.9,
+            rhythm: 2.2,
+            lag: 0.6,
+            bounty: 100.0,
+            hue: 0.36,
+            pale: 0.4,
+            bright: 0.95,
+            ..inert(specimen(Archetype::Plumeworm, 0x504C_554D, |g| {
+                g.depth = 1;
+                g.segments = 5;
+                g.taper = 0.7;
+                g.swell = 0.15;
+                g.dress = 0.8;
+                g.eyes = 2;
+                g.sockets = 1;
+            }))
+        }
+    }
+
+    /// A treeling: the rare branching form, a short trunk forking twice. A creature that
+    /// happens to look like a tree.
+    pub fn treeling() -> Self {
+        Self {
+            radius: 14.0,
+            hull: 120.0,
+            mass: 14.0,
+            speed: 55.0,
+            cruise: 28.0,
+            stiffness: 400.0,
+            wave: 0.3,
+            rhythm: 1.0,
+            lag: 0.7,
+            bounty: 150.0,
+            hue: 0.42,
+            pale: 0.4,
+            bright: 0.9,
+            ..inert(specimen(Archetype::Tree, 0x5452_4545, |g| {
+                g.depth = 2;
+                g.segments = 2;
+                g.lean = 0.6;
+                g.dress = 0.8;
+                g.sockets = 1;
+            }))
+        }
+    }
+}
+
+/// The authored animal specimens, by `SSC_SPECIMEN` name.
+pub const SPECIMENS: [&str; 10] = [
+    "squid",
+    "octopus",
+    "snake",
+    "crab",
+    "jelly",
+    "ray",
+    "starfish",
+    "puffer",
+    "plumeworm",
+    "treeling",
+];
+
+/// The genome of an animal specimen by name.
+pub fn specimen_by_name(name: &str) -> Option<Genome> {
+    Some(match name {
+        "squid" => Genome::squid(),
+        "octopus" => Genome::octopus(),
+        "snake" => Genome::snake(),
+        "crab" => Genome::crab(),
+        "jelly" => Genome::jelly(),
+        "ray" => Genome::ray(),
+        "starfish" => Genome::starfish(),
+        "puffer" => Genome::puffer(),
+        "plumeworm" => Genome::plumeworm(),
+        "treeling" => Genome::treeling(),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grammar::GrammarGenome;
     use crate::world::Rng;
 
-    fn specimens() -> [Genome; 3] {
-        [Genome::ribwyrm(), Genome::corallid(), Genome::colossus()]
+    fn specimens() -> Vec<Genome> {
+        SPECIMENS
+            .iter()
+            .map(|n| specimen_by_name(n).unwrap())
+            .collect()
     }
 
     /// Every promise `express` makes, for any input.
@@ -377,11 +692,13 @@ mod tests {
                 <= MAX_SOCKETS
         );
         assert_eq!(body.nodes[0].parent, None);
+        assert_eq!(body.nodes[0].role, Role::Head);
         let head = head.max(MIN_PART_RADIUS);
         for (n, node) in body.nodes.iter().enumerate() {
             assert!(node.offset.is_finite() && node.rest.is_finite());
-            assert!(node.radius >= MIN_PART_RADIUS && node.radius <= head);
+            assert!(node.radius >= MIN_LIMB_RADIUS && node.radius <= head * MAX_BULK + 1e-3);
             assert!(node.side == 0.0 || node.side.abs() == 1.0);
+            assert!(node.drive > 0.0 && node.drive <= MAX_DRIVE);
             match node.parent {
                 None => assert_eq!(n, 0),
                 Some(p) => {
@@ -412,126 +729,113 @@ mod tests {
     }
 
     #[test]
-    fn every_template_expresses_a_bounded_valid_body() {
+    fn every_sampled_animal_expresses_a_bounded_valid_body() {
         let mut rng = Rng::new(77);
-        for i in 0..2400 {
-            let genome = GrammarGenome::sample(&mut rng);
-            let spec = GrammarSpecimen {
-                genome,
+        for _ in 0..3000 {
+            let spec = AnimalSpecimen {
+                genome: AnimalGenome::sample(&mut rng),
                 seed: rng.next_u64(),
             };
-            let head = 6.0 + rng.f32() * 64.0;
-            let growth = [1.0, 0.7, 0.35][i % 3];
-            if let Some(body) = express(&spec, head, growth) {
-                check(&body, head);
-            }
+            let head = 4.0 + rng.f32() * 60.0;
+            let body = express(&spec, head).expect("a body");
+            check(&body, head);
+            assert_eq!(part_count(&spec) as usize, body.nodes.len());
+            let elder = express(&spec.misshapen(), head * anatomy::ELDER_SCALE).unwrap();
+            check(&elder, head * anatomy::ELDER_SCALE);
+            assert_eq!(elder.nodes.len(), body.nodes.len());
         }
     }
 
     #[test]
-    fn greedy_and_adversarial_grammars_are_cut_to_the_part_cap() {
-        for &template in Template::ALL {
-            let genome = GrammarGenome {
-                template,
+    fn greedy_and_adversarial_genomes_are_cut_to_the_part_cap() {
+        for &archetype in Archetype::ALL {
+            let genome = AnimalGenome {
+                archetype,
                 depth: 200,
-                branch_rate: 1e9,
-                length_ratio: f32::NAN,
-                branch_angle: 100.0,
-                thickness: -5.0,
-                ..GrammarGenome::default()
+                segments: 255,
+                limbs: 255,
+                limb_len: 255,
+                taper: f32::NAN,
+                dress: 1e9,
+                eyes: 255,
+                mounts: 255,
+                actuators: 255,
+                jitter: 1e9,
+                ..AnimalGenome::default()
             };
-            let spec = GrammarSpecimen { genome, seed: 3 };
-            let body = express(&spec, 30.0, 1.0).expect("a body");
+            let spec = AnimalSpecimen { genome, seed: 3 };
+            let body = express(&spec, 30.0).expect("a body");
             check(&body, 30.0);
-            // A cut plan is a whole shallower plan, not a truncated one.
-            assert!(body.depth <= template.def().max_depth);
         }
-        let greedy = GrammarGenome {
-            template: Template::Dichotomous,
-            depth: 8,
-            branch_rate: 1.0,
-            ..GrammarGenome::default()
-        };
-        let body = express(
-            &GrammarSpecimen {
-                genome: greedy,
-                seed: 9,
-            },
-            20.0,
-            1.0,
-        )
-        .unwrap();
-        assert!(body.depth < 7, "depth {}", body.depth);
-        assert!(body.nodes.len() > BODY_PARTS / 3);
     }
 
     #[test]
     fn expression_is_deterministic_and_follows_the_seed() {
         for genome in specimens() {
-            let spec = genome.grammar.unwrap();
-            let a = express(&spec, genome.radius, 1.0);
-            assert_eq!(a, express(&spec, genome.radius, 1.0));
-            let other = GrammarSpecimen {
+            let mut spec = genome.anatomy.unwrap();
+            spec.genome.jitter = 0.3;
+            let a = express(&spec, genome.radius);
+            assert_eq!(a, express(&spec, genome.radius));
+            let other = AnimalSpecimen {
                 seed: spec.seed ^ 0xABCD,
                 ..spec
             };
-            assert_ne!(a, express(&other, genome.radius, 1.0));
+            assert_ne!(a, express(&other, genome.radius));
         }
     }
 
     #[test]
     fn the_specimens_have_the_shapes_they_are_named_for() {
-        let ribs = Genome::ribwyrm();
-        let body = express(&ribs.grammar.unwrap(), ribs.radius, 1.0).unwrap();
-        check(&body, ribs.radius);
-        let sockets = body
-            .decor
-            .iter()
-            .filter(|d| d.kind == PartKind::Socket)
-            .count();
-        assert!(sockets >= 4, "rib tips are sockets: {sockets}");
-        assert!(body.nodes.iter().any(|n| n.side > 0.0) && body.nodes.iter().any(|n| n.side < 0.0));
-        let coral = Genome::corallid();
-        let body = express(&coral.grammar.unwrap(), coral.radius, 1.0).unwrap();
-        check(&body, coral.radius);
-        assert!(body.nodes.len() >= 10);
-        let colossus = Genome::colossus();
-        let body = express(&colossus.grammar.unwrap(), colossus.radius, 1.0).unwrap();
-        check(&body, colossus.radius);
-        let reach = body
-            .nodes
-            .iter()
-            .map(|n| n.offset.length())
-            .fold(0.0, f32::max);
-        assert!(reach > colossus.radius * 8.0, "a colossus is long: {reach}");
+        for genome in specimens() {
+            let body = express(&genome.anatomy.unwrap(), genome.radius).unwrap();
+            check(&body, genome.radius);
+            let name = genome.anatomy.unwrap().genome.archetype.name();
+            let limbs = body.nodes.iter().filter(|n| n.role == Role::Limb).count();
+            match name {
+                "squid" | "octopus" | "crab" | "jelly" | "ray" | "star" => {
+                    assert!(limbs >= 2, "{name}");
+                    assert!(
+                        body.nodes.iter().any(|n| n.side > 0.0)
+                            && body.nodes.iter().any(|n| n.side < 0.0)
+                    );
+                }
+                "chain" | "puffer" | "plumeworm" => assert_eq!(limbs, 0, "{name}"),
+                _ => {}
+            }
+        }
+        let squid = Genome::squid();
+        let body = express(&squid.anatomy.unwrap(), squid.radius).unwrap();
+        assert!(body.nodes.iter().any(|n| n.mount) && body.nodes.iter().any(|n| n.drive > 1.0));
+        let octopus = Genome::octopus();
+        assert_eq!(octopus.parts(), 1 + 8 * 2);
+        assert!(Genome::treeling().parts() >= 7);
     }
 
     #[test]
-    fn a_juvenile_is_a_smaller_plan_with_the_same_head() {
-        for genome in specimens() {
-            let spec = genome.grammar.unwrap();
-            let young = express(&spec, genome.radius, 0.45);
-            let adult = express(&spec, genome.radius, 1.0).unwrap();
-            if let Some(young) = young {
-                check(&young, genome.radius);
-                assert!(young.nodes.len() <= adult.nodes.len());
-                let reach = |b: &BodyPlan| {
-                    b.nodes
-                        .iter()
-                        .map(|n| n.offset.length())
-                        .fold(0.0, f32::max)
-                };
-                assert!(reach(&young) < reach(&adult));
-            }
-        }
+    fn actuators_and_mounts_become_node_rules() {
+        let mut g = AnimalGenome {
+            archetype: Archetype::Chain,
+            segments: 6,
+            ..AnimalGenome::default()
+        };
+        let plain = express(&AnimalSpecimen { genome: g, seed: 1 }, 12.0).unwrap();
+        assert!(plain.nodes.iter().all(|n| n.drive == 1.0 && !n.mount));
+        g.actuators = 2;
+        g.mounts = 2;
+        let live = express(&AnimalSpecimen { genome: g, seed: 1 }, 12.0).unwrap();
+        assert_eq!(live.nodes.iter().filter(|n| n.mount).count(), 2);
+        assert_eq!(live.nodes.iter().filter(|n| n.drive > 1.0).count(), 2);
+        assert!(live.nodes.iter().any(|n| n.drive == PASSIVE_DRIVE));
+        // The head never carries the roles of the trunk behind it.
+        assert!(!live.nodes[0].mount && live.nodes[0].drive == PASSIVE_DRIVE);
     }
 
     #[test]
     fn the_part_count_is_the_genomes_part_count() {
         for genome in specimens() {
-            let body = express(&genome.grammar.unwrap(), genome.radius, 1.0).unwrap();
+            let body = express(&genome.anatomy.unwrap(), genome.radius).unwrap();
             assert_eq!(genome.parts() as usize, body.nodes.len());
-            assert!(genome.is_jointed());
+            assert!(genome.is_jointed(), "{:?}", genome.anatomy);
         }
         assert_eq!(Genome::default().parts(), 1);
     }
@@ -543,6 +847,23 @@ mod tests {
             assert_eq!(genome.weapon, Weapon::None);
             assert_eq!(genome.contact_damage, 0.0);
             assert_eq!(genome.fling_strength(), 0.0);
+        }
+        assert!(specimen_by_name("bogey").is_none());
+    }
+
+    #[test]
+    fn decor_rests_on_its_host() {
+        for genome in specimens() {
+            let body = express(&genome.anatomy.unwrap(), genome.radius).unwrap();
+            for d in &body.decor {
+                let (at, _) = body.placed(d);
+                let host = &body.nodes[d.host];
+                assert!(
+                    at.distance(host.offset) <= host.radius * 2.5 + 1.0,
+                    "{:?}",
+                    d.kind
+                );
+            }
         }
     }
 }

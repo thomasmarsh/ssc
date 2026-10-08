@@ -35,9 +35,15 @@ pub struct Part {
     /// The joint's own rest length (grammar bodies keep their plan's spacing); `None` is
     /// the bodies touching.
     rest: Option<f32>,
+    /// Multiplier of the genome's wave at this part (an actuator node drives its host harder).
+    drive: f32,
+    /// True when shots and contact attacks come from this part (a weapon mount of an animal
+    /// body plan); other chains use the genome's hardpoint rule.
+    mount: bool,
 }
 
-/// A leaf, fruit or socket of a grammar body, hung on one of its parts (see `bodyplan`).
+/// A mark (eye, weapon, organ, fur, fin and so on) of an animal body, hung on one of its
+/// parts (see `bodyplan`).
 #[derive(Clone, Copy, Debug)]
 pub struct Decoration {
     pub kind: PartKind,
@@ -67,8 +73,10 @@ pub struct Chain {
     /// Parts in creation order (head, rest of the spine, then limbs); shrinks as parts
     /// are destroyed and the survivors close ranks.
     pub parts: Vec<Part>,
-    /// Leaves, fruit and sockets of a grammar body; empty for every other creature.
+    /// Marks of an animal body plan; empty for every other creature.
     pub decor: Vec<Decoration>,
+    /// True when the body plan names weapon mounts, which then replace the hardpoint rule.
+    mounted: bool,
     phase: f32,
 }
 
@@ -120,8 +128,8 @@ impl Game {
     pub(super) fn spawn_chain(&mut self, head: Body) -> u64 {
         let genome = head.genome;
         let back = -Vec2::from_angle(head.wander);
-        if let Some(spec) = &genome.grammar
-            && let Some(plan) = bodyplan::express(spec, head.radius, 1.0)
+        if let Some(spec) = &genome.anatomy
+            && let Some(plan) = bodyplan::express(spec, head.radius)
         {
             return self.spawn_plan_chain(head, &plan);
         }
@@ -154,6 +162,8 @@ impl Game {
                 rank: n as f32,
                 side: 0.0,
                 rest: None,
+                drive: 1.0,
+                mount: false,
             });
             bodies.push(self.part_body(&head, chain_id, id, cursor, radius, n as u8));
         }
@@ -176,6 +186,8 @@ impl Game {
                     rank: (attach + depth + 1) as f32,
                     side: sign,
                     rest: None,
+                    drive: 1.0,
+                    mount: false,
                 });
                 bodies.push(self.part_body(
                     &head,
@@ -196,14 +208,15 @@ impl Game {
                 genome,
                 parts,
                 decor: Vec::new(),
+                mounted: false,
                 phase: 0.0,
             },
         );
         head_id
     }
 
-    /// Expands a creature with a grammar body: one part per stem of the expressed plan, laid
-    /// out behind the head with the plan's up pointing backwards. Same springs, wave and
+    /// Expands a creature with an animal body plan: one part per bead of the expressed plan,
+    /// laid out behind the head with the plan's up pointing backwards. Same springs, wave and
     /// bookkeeping as any chain.
     fn spawn_plan_chain(&mut self, head: Body, plan: &bodyplan::BodyPlan) -> u64 {
         let genome = head.genome;
@@ -223,6 +236,8 @@ impl Game {
                 rank: node.rank,
                 side: node.side,
                 rest: node.parent.map(|_| node.rest),
+                drive: node.drive,
+                mount: node.mount,
             });
             bodies.push(self.part_body(
                 &head,
@@ -247,6 +262,7 @@ impl Game {
             })
             .collect();
         let head_id = parts[0].id;
+        let mounted = parts.iter().any(|p| p.mount);
         self.bodies.extend(bodies);
         self.chains.insert(
             chain_id,
@@ -254,10 +270,24 @@ impl Game {
                 genome,
                 parts,
                 decor,
+                mounted,
                 phase: 0.0,
             },
         );
         head_id
+    }
+
+    /// True when body `body` carries a gun or cord launcher: a weapon mount of its animal
+    /// body plan when the plan names any, else the genome's hardpoint rule.
+    pub(super) fn armed_part(&self, body: &Body) -> bool {
+        let chain = body.chain.and_then(|c| self.chains.get(&c));
+        match chain {
+            Some(chain) if chain.mounted => {
+                body.genome.weapon != crate::genome::Weapon::None
+                    && chain.parts.iter().any(|p| p.id == body.id && p.mount)
+            }
+            _ => body.genome.armed(body.part),
+        }
     }
 
     /// Every decoration of every grammar body, placed in the world from the bodies' current
@@ -419,7 +449,8 @@ impl Game {
                 let wave = (chain.phase - part.rank * genome.lag + part.side * FRAC_PI_2).sin();
                 let body = &mut self.bodies[slot];
                 let share = if n == 0 { HEAD_WAVE_SHARE } else { 1.0 };
-                body.velocity += normal * wave * genome.wave * SLITHER_ACCEL * share * dt;
+                body.velocity +=
+                    normal * wave * genome.wave * part.drive * SLITHER_ACCEL * share * dt;
                 if let Some(parent) = parent_slot[n] {
                     body.velocity += (speeds[parent] - body.velocity) * (dt * TRACTION).min(1.0);
                     // Only a trace of absolute drag: joint damping already burns off relative
@@ -476,7 +507,9 @@ impl Game {
 mod tests {
     use super::*;
     use crate::genome::Weapon;
+    use crate::simulation::dev;
     use crate::simulation::tests::{DT, body, empty_game, set_player};
+    use crate::world::Rng;
 
     /// The serpent point of genome space, with the body-plan genes under test.
     fn genome(stiffness: f32, wave: f32, armed: u8) -> Genome {
@@ -758,12 +791,11 @@ mod tests {
         assert!(found >= wanted, "{found} < {wanted}");
         assert!(!game.chains.is_empty());
     }
-    fn specimens() -> [(&'static str, Genome); 3] {
-        [
-            ("ribwyrm", Genome::ribwyrm()),
-            ("corallid", Genome::corallid()),
-            ("colossus", Genome::colossus()),
-        ]
+    fn specimens() -> Vec<(&'static str, Genome)> {
+        bodyplan::SPECIMENS
+            .iter()
+            .map(|n| (*n, bodyplan::specimen_by_name(n).unwrap()))
+            .collect()
     }
 
     /// Largest distance of any member from the head.
@@ -776,25 +808,28 @@ mod tests {
     }
 
     #[test]
-    fn grammar_specimens_spawn_one_bounded_tree_of_parts() {
+    fn animal_specimens_spawn_one_bounded_tree_of_parts() {
         for (name, genome) in specimens() {
             let mut game = empty_game();
             let before = game.bodies.len();
             let chain = creature(&mut game, Vec2::new(0.0, 1800.0), genome);
             let chain = &game.chains[&chain];
-            assert!((6..=bodyplan::BODY_PARTS).contains(&chain.len()), "{name}");
+            assert!((2..=bodyplan::BODY_PARTS).contains(&chain.len()), "{name}");
             assert_eq!(chain.len() as u32, genome.parts(), "{name}");
             assert_eq!(game.bodies.len() - before, chain.len(), "{name}");
             assert_eq!(chain.parts.iter().filter(|p| p.parent.is_none()).count(), 1);
             let head = body(&game, chain.parts[0].id).radius;
             for part in &chain.parts {
                 let b = body(&game, part.id);
-                assert!(b.radius >= 4.0 && b.radius <= head, "{name}");
+                assert!(
+                    b.radius >= 3.5 && b.radius <= head * crate::anatomy::MAX_BULK,
+                    "{name}"
+                );
                 assert!(b.position.is_finite() && b.mass > 0.0 && b.health > 0.0);
                 if let Some(parent) = part.parent {
                     let a = body(&game, parent);
                     // A fresh body starts at rest: joints at their own rest length.
-                    let rest = part.rest.expect("grammar joints keep their spacing");
+                    let rest = part.rest.expect("plan joints keep their spacing");
                     assert!(
                         (a.position.distance(b.position) - rest).abs() < 0.01,
                         "{name}"
@@ -806,58 +841,83 @@ mod tests {
         }
     }
 
-    #[test]
-    fn grammar_specimens_survive_a_long_swim_without_tearing() {
-        for (name, genome) in specimens() {
-            let mut game = empty_game();
-            game.player_invulnerability = 1e9;
-            let chain = creature(&mut game, Vec2::new(0.0, 1800.0), genome);
-            let head = body(&game, game.chains[&chain].parts[0].id).radius;
-            let start = spread(&game, chain);
-            let mut widest: f32 = 0.0;
-            for tick in 0..3600 {
-                if tick % 300 == 5 {
-                    // Shove the head and a branch in opposite directions.
-                    let ids: Vec<u64> = game.chains[&chain].parts.iter().map(|p| p.id).collect();
-                    for (k, v) in [
-                        (0, Vec2::new(900.0, 0.0)),
-                        (ids.len() / 2, Vec2::new(-900.0, 400.0)),
-                    ] {
-                        game.bodies
-                            .iter_mut()
-                            .find(|b| b.id == ids[k])
-                            .unwrap()
-                            .velocity = v;
-                    }
-                }
-                game.step(DT, Input::default());
-                widest = widest.max(spread(&game, chain));
-                for part in &game.chains[&chain].parts {
-                    let Some(parent) = part.parent else { continue };
-                    let (a, b) = (body(&game, parent), body(&game, part.id));
-                    assert!(b.position.is_finite() && b.velocity.is_finite(), "{name}");
-                    let limit = rest_length(a, b, part.rest) * MAX_STRETCH + 0.5;
-                    assert!(
-                        a.position.distance(b.position) <= limit,
-                        "{name} tick {tick}"
-                    );
+    /// Swims a body through repeated violent shoves and checks it never tears or blows up.
+    fn swim(name: &str, genome: Genome, ticks: usize) {
+        let mut game = empty_game();
+        game.player_invulnerability = 1e9;
+        let chain = creature(&mut game, Vec2::new(0.0, 1800.0), genome);
+        let head = body(&game, game.chains[&chain].parts[0].id).radius;
+        let start = spread(&game, chain);
+        let mut widest: f32 = 0.0;
+        for tick in 0..ticks {
+            if tick % 300 == 5 {
+                // Shove the head and a middle part in opposite directions.
+                let ids: Vec<u64> = game.chains[&chain].parts.iter().map(|p| p.id).collect();
+                for (k, v) in [
+                    (0, Vec2::new(900.0, 0.0)),
+                    (ids.len() / 2, Vec2::new(-900.0, 400.0)),
+                ] {
+                    game.bodies
+                        .iter_mut()
+                        .find(|b| b.id == ids[k])
+                        .unwrap()
+                        .velocity = v;
                 }
             }
-            assert!(
-                widest < start * 2.0 + head * 4.0,
-                "{name}: {start} to {widest}"
-            );
-            assert!(game.chains[&chain].len() <= bodyplan::BODY_PARTS);
-            assert!(
-                game.chain_decorations()
-                    .iter()
-                    .all(|d| d.position.is_finite())
-            );
+            game.step(DT, Input::default());
+            widest = widest.max(spread(&game, chain));
+            for part in &game.chains[&chain].parts {
+                let Some(parent) = part.parent else { continue };
+                let (a, b) = (body(&game, parent), body(&game, part.id));
+                assert!(b.position.is_finite() && b.velocity.is_finite(), "{name}");
+                let limit = rest_length(a, b, part.rest) * MAX_STRETCH + 0.5;
+                assert!(
+                    a.position.distance(b.position) <= limit,
+                    "{name} tick {tick}"
+                );
+            }
+        }
+        assert!(
+            widest < start * 2.0 + head * 4.0,
+            "{name}: {start} to {widest}"
+        );
+        assert!(game.chains[&chain].len() <= bodyplan::BODY_PARTS);
+        assert!(
+            game.chain_decorations()
+                .iter()
+                .all(|d| d.position.is_finite())
+        );
+    }
+
+    #[test]
+    fn animal_specimens_survive_a_long_swim_without_tearing() {
+        for (name, genome) in specimens() {
+            swim(name, genome, 3600);
         }
     }
 
     #[test]
-    fn grammar_specimens_are_inert_and_never_hurt_a_nearby_ship() {
+    fn sampled_animals_spawn_and_survive_simulated_steps() {
+        use crate::anatomy::{AnimalGenome, AnimalSpecimen};
+        let mut rng = Rng::new(2024);
+        for i in 0..330 {
+            let mut genome = Genome {
+                radius: 8.0 + rng.f32() * 14.0,
+                wave: rng.range(0.2, 1.2),
+                stiffness: rng.range(150.0, 400.0),
+                ..Genome::default()
+            };
+            genome.anatomy = Some(AnimalSpecimen {
+                genome: AnimalGenome::sample(&mut rng),
+                seed: rng.next_u64(),
+            });
+            let genome = genome.limited();
+            swim(&format!("sampled {i}"), genome, 360);
+        }
+    }
+
+    #[test]
+    fn animal_specimens_are_inert_and_never_hurt_a_nearby_ship() {
         for (name, genome) in specimens() {
             let mut game = empty_game();
             set_player(&mut game, Vec2::new(0.0, 1800.0), Vec2::ZERO);
@@ -877,9 +937,9 @@ mod tests {
     }
 
     #[test]
-    fn a_destroyed_grammar_part_leaves_a_connected_body() {
+    fn a_destroyed_animal_part_leaves_a_connected_body() {
         let mut game = empty_game();
-        let chain = creature(&mut game, Vec2::new(0.0, 1800.0), Genome::colossus());
+        let chain = creature(&mut game, Vec2::new(0.0, 1800.0), Genome::octopus());
         let count = game.chains[&chain].len();
         let victim = game.chains[&chain].parts[3].id;
         game.bodies.retain(|b| b.id != victim);
@@ -890,5 +950,149 @@ mod tests {
         assert_eq!(chain.len(), count - 1);
         assert_eq!(chain.parts.iter().filter(|p| p.parent.is_none()).count(), 1);
         assert!(game.chain_decorations().iter().all(|d| d.host != victim));
+    }
+
+    /// The backward-compat artifact: every legacy species (not already an animal plan) has a
+    /// depth-0 animal derivation that spawns the same body as its own genes do.
+    #[test]
+    fn every_legacy_species_is_a_depth_zero_animal_plan() {
+        use crate::anatomy::{Archetype, from_legacy};
+        let mut checked = 0;
+        for name in dev::SPAWNS {
+            let legacy = dev::specimen_genome(name);
+            if legacy.anatomy.is_some() {
+                continue;
+            }
+            let derived = from_legacy(&legacy).unwrap_or_else(|| panic!("{name} has no plan"));
+            assert_eq!(derived.genome.depth, 0, "{name}");
+            let snake_like = legacy.segments >= 3 && legacy.wave > 0.6 && legacy.limbs == 0;
+            if snake_like {
+                assert_eq!(derived.genome.archetype, Archetype::Chain, "{name}");
+            } else if legacy.limbs > 0 {
+                assert_eq!(derived.genome.archetype, Archetype::Crab, "{name}");
+            } else if legacy.segments <= 3 {
+                assert_eq!(derived.genome.archetype, Archetype::Bead, "{name}");
+            }
+            let twin = Genome {
+                anatomy: Some(derived),
+                ..legacy
+            };
+            assert_eq!(twin.parts(), legacy.parts(), "{name}");
+            let (mut a, mut b) = (empty_game(), empty_game());
+            let at = Vec2::new(0.0, 1800.0);
+            let (ca, cb) = (creature(&mut a, at, legacy), creature(&mut b, at, twin));
+            let (pa, pb) = (&a.chains[&ca], &b.chains[&cb]);
+            assert_eq!(pa.len(), pb.len(), "{name}: body count");
+            let index = |c: &Chain, id: u64| c.parts.iter().position(|p| p.id == id).unwrap();
+            let head_a = body(&a, pa.parts[0].id).position;
+            let head_b = body(&b, pb.parts[0].id).position;
+            for (n, (x, y)) in pa.parts.iter().zip(&pb.parts).enumerate() {
+                let (bx, by) = (body(&a, x.id), body(&b, y.id));
+                assert!(
+                    (bx.radius - by.radius).abs() < 1e-3,
+                    "{name} part {n} radius"
+                );
+                assert!((bx.mass - by.mass).abs() < 1e-3, "{name} part {n} mass");
+                assert_eq!(x.rank, y.rank, "{name} part {n} rank");
+                assert_eq!(x.side, y.side, "{name} part {n} side");
+                assert_eq!(
+                    x.parent.map(|p| index(pa, p)),
+                    y.parent.map(|p| index(pb, p)),
+                    "{name} part {n} parent"
+                );
+                assert!(
+                    ((bx.position - head_a) - (by.position - head_b)).length() < 0.05,
+                    "{name} part {n} position"
+                );
+                if let (Some(px), Some(py)) = (x.parent, y.parent) {
+                    // Joint rest lengths agree (legacy joints are the bodies touching).
+                    let ra = rest_length(body(&a, px), bx, x.rest);
+                    let rb = rest_length(body(&b, py), by, y.rest);
+                    assert!((ra - rb).abs() < 1e-3, "{name} part {n} joint");
+                }
+                assert!(!y.mount && y.drive == 1.0);
+            }
+            // Armed parts follow the same hardpoint rule.
+            for (x, y) in pa.parts.iter().zip(&pb.parts) {
+                assert_eq!(
+                    a.armed_part(body(&a, x.id)),
+                    b.armed_part(body(&b, y.id)),
+                    "{name}"
+                );
+            }
+            checked += 1;
+        }
+        assert!(checked >= 20, "{checked} species checked");
+    }
+
+    #[test]
+    fn weapon_mounts_are_where_an_animal_fires_from() {
+        use crate::anatomy::{AnimalGenome, AnimalSpecimen, Archetype};
+        let spec = AnimalSpecimen {
+            genome: AnimalGenome {
+                archetype: Archetype::Crab,
+                segments: 3,
+                limbs: 4,
+                mounts: 2,
+                actuators: 1,
+                ..AnimalGenome::default()
+            }
+            .limited(),
+            seed: 1,
+        };
+        let armed = Genome {
+            weapon: Weapon::Projectile,
+            hardpoint_every: 0,
+            anatomy: Some(spec),
+            ..Genome::serpent()
+        };
+        let mut game = empty_game();
+        let chain = creature(&mut game, Vec2::new(0.0, 1800.0), armed);
+        let chain = &game.chains[&chain];
+        assert!(chain.mounted);
+        let firing: Vec<bool> = chain
+            .parts
+            .iter()
+            .map(|p| game.armed_part(body(&game, p.id)))
+            .collect();
+        assert_eq!(firing.iter().filter(|f| **f).count(), 2);
+        assert!(!firing[0], "the head is not a mount");
+        assert!(chain.parts.iter().zip(&firing).all(|(p, f)| p.mount == *f));
+        // Without a weapon gene nothing is armed, mounts or not.
+        let mut unarmed = armed;
+        unarmed.weapon = Weapon::None;
+        let mut game = empty_game();
+        let chain = creature(&mut game, Vec2::new(0.0, 1800.0), unarmed);
+        assert!(
+            game.chains[&chain]
+                .parts
+                .iter()
+                .all(|p| !game.armed_part(body(&game, p.id)))
+        );
+    }
+
+    #[test]
+    fn actuator_nodes_drive_their_own_wave() {
+        use crate::anatomy::{AnimalGenome, AnimalSpecimen, Archetype};
+        let make = |actuators| Genome {
+            anatomy: Some(AnimalSpecimen {
+                genome: AnimalGenome {
+                    archetype: Archetype::Chain,
+                    segments: 8,
+                    actuators,
+                    ..AnimalGenome::default()
+                }
+                .limited(),
+                seed: 1,
+            }),
+            ..Genome::snake()
+        };
+        let mut game = empty_game();
+        let plain = creature(&mut game, Vec2::new(0.0, 1800.0), make(0));
+        assert!(game.chains[&plain].parts.iter().all(|p| p.drive == 1.0));
+        let driven = creature(&mut game, Vec2::new(0.0, 2600.0), make(2));
+        let drives: Vec<f32> = game.chains[&driven].parts.iter().map(|p| p.drive).collect();
+        assert_eq!(drives.iter().filter(|d| **d > 1.0).count(), 2);
+        assert!(drives.iter().any(|d| *d < 1.0));
     }
 }

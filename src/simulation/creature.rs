@@ -553,7 +553,7 @@ impl Game {
                 && body.panic <= 0.0
                 && body.fire_cooldown <= 0.0
                 && !body.phased
-                && g.armed(body.part))
+                && self.armed_part(body))
             {
                 continue;
             }

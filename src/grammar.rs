@@ -49,6 +49,8 @@ pub enum Domain {
     Structure,
     /// The debug gallery and tests.
     Gallery,
+    /// Animal body plans (`anatomy`).
+    Animal,
 }
 
 impl Domain {
@@ -60,6 +62,7 @@ impl Domain {
             Self::Builder => 0x0004_0000_0000_0000,
             Self::Structure => 0x0005_0000_0000_0000,
             Self::Gallery => 0x00FF_0000_0000_0000,
+            Self::Animal => 0x0006_0000_0000_0000,
         }
     }
 }
@@ -95,11 +98,30 @@ fn child_key(key: u64, n: usize) -> u64 {
 /// body turns joints into hinges, a builder places a block per part, sockets host residents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PartKind {
+    /// A plant's stem, or an animal's body segment (a bead at its end).
     Stem,
+    /// A fork (plants) or the root of a limb (animals).
     Joint,
     Leaf,
     Fruit,
     Socket,
+    // Animal roles (`anatomy`). All are points or short marks hung on a Stem.
+    /// A sensor, or a glare source.
+    Eye,
+    /// A motor or control point: its host swims harder.
+    Actuator,
+    /// Where shots or contact attacks come from.
+    Weapon,
+    /// An internal or external organ; can host a symbiote or parasite later.
+    Organ,
+    /// Short body hair, lashes or bristles.
+    Fur,
+    /// A fringe of plumes or a frilled rim.
+    Frill,
+    /// A flat paddle or fin.
+    Fin,
+    /// A long stiff spine.
+    Spine,
 }
 
 /// One part of a plan. Its index in `Plan::parts` is its derivation order, and `parent`
@@ -118,6 +140,9 @@ pub struct Part {
     pub order: u8,
     /// The generation that produced it, from 1; it finishes growing at `t = generation / depth`.
     pub generation: u8,
+    /// Animals only (zero for plants): 0 for the trunk, +1 or -1 for a segment of a limb on
+    /// that side, which sets its phase in the travelling wave.
+    pub tag: i8,
 }
 
 impl Part {
@@ -1309,6 +1334,7 @@ fn interpret(syms: &[Sym], progress: f32) -> Plan {
                 radius,
                 order: at.order,
                 generation: era,
+                tag: 0,
             });
             plan.parts.len() as u32 - 1
         };
