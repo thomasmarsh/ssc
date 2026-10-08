@@ -18,6 +18,35 @@ cargo run --release
 
 Desktop support is enabled by default and uses Bevy's WGPU renderer. On macOS, WGPU selects Metal. Cargo.lock pins the dependency graph for reproducible builds.
 
+### macOS app and DMG
+
+Install [create-dmg](https://github.com/create-dmg/create-dmg) once (`brew install create-dmg`), then build the app and drag-to-Applications installer:
+
+```sh
+./scripts/package-macos.sh
+```
+
+This builds the release binary, assembles and ad-hoc signs `SSC.app`, and creates
+`target/package/macos/aarch64-apple-darwin/SSC-0.1.0-arm64.dmg` on Apple Silicon.
+The version comes from Cargo.toml; the architecture defaults to the Rust toolchain's host.
+Repeated builds replace the previous output after successful packaging.
+
+Use `--app-only` to build just the app, or `--no-finder` for a headless DMG build
+without the custom Finder layout. The normal DMG build needs a logged-in macOS
+desktop and may request permission to automate Finder.
+For an Intel build, install the Rust target with `rustup target add x86_64-apple-darwin`
+and pass `--target x86_64-apple-darwin`. Each package contains one architecture.
+
+The checked-in assets in `packaging/macos/` include the icon, installer background,
+and bundle metadata. Their ship design uses the game's procedural hull outline,
+shield arc, hull segments, and engine colors. To regenerate the artwork, run
+`./scripts/generate-macos-art.sh` (uses Swift/AppKit, `sips`, and `iconutil` from macOS).
+No asset generation is needed for ordinary packaging. The game's current graphics
+and audio are generated in code, so no external runtime assets are required.
+
+These builds are for local use. Sharing publicly requires Developer ID signing and
+Apple notarization; ad-hoc signing does not bypass Gatekeeper for downloaded apps.
+
 The first build compiles Bevy and WGPU and can take several minutes. Development builds optimize dependencies but omit debug symbols and incremental artifacts to keep their disk footprint smaller. Use `CARGO_PROFILE_DEV_DEBUG=1 cargo run` when you need debug symbols.
 
 The simulation library can be built and its tests run without desktop rendering dependencies:
