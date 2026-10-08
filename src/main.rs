@@ -1,4 +1,5 @@
 mod audio;
+mod autosave;
 mod bestiaryview;
 mod devpanel;
 mod glitchview;
@@ -201,7 +202,7 @@ impl Session {
 impl Default for Session {
     fn default() -> Self {
         Self {
-            game: Game::new(ssc::config::MASTER_SEED),
+            game: autosave::load().unwrap_or_else(|| Game::new(ssc::config::MASTER_SEED)),
             input: Input::default(),
             paused: false,
             slow: false,
@@ -283,6 +284,7 @@ fn main() {
             ),
         )
         .add_systems(FixedUpdate, simulate)
+        .add_systems(Last, autosave::autosave)
         .add_systems(
             Update,
             (

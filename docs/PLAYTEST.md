@@ -95,6 +95,13 @@ In sectors out to about ring 3 a many-part creature (a serpent, a limbed crab-th
 | Reward | Does one bounty and one drop for a long serpent feel thin, now that parts no longer pay one each? | bounty scale (the pool size in heads), `drop_loot` |
 | Handover | Is the change from pooled to separate lives gradual as you go outward, or is there a ring where chains suddenly feel tougher? | threat smoothstep |
 
+## Saving (workstream 12, first slice)
+
+Run with `SSC_SAVE=1` (the menu does not exist yet; see `docs/PERSISTENCE.md`).
+- Fly, mine, buy a bench upgrade, kill something, quit, and start again with `SSC_SAVE=1`: hold, gear, score, chart, kills and pads should all be as left. Does the ship coming back in the same place with the world "re-dealt" (creatures where they were generated, not where they were) feel like continuing, or like a cheat? Knob: what `save_state` captures (`src/simulation/save.rs`); creature positions are the open part.
+- Does the 30 second autosave ever stutter a frame? Knob: `INTERVAL` in `src/autosave.rs`.
+- Dying with a save on disk: the last autosave is still there and loads alive with a sliver of hull; is that a reload-to-undo-death exploit worth closing (delete the save on death)?
+
 ## Questions to answer after the first session
 
 1. Which of the above felt wrong first? One line each is enough.

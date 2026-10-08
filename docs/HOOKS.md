@@ -78,6 +78,11 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 
 - `SSC_GRAMMAR=all|<template>|strip:<a,b>`: draw grown L-system plans on a grid instead of the world (columns of every template, a grid of one template, or growth strips t = 0.1 to 1.0 per template). Template names: monopodial, sympodial, dichotomous, whorled, fern, coral, vine, spine. `SSC_GRAMMAR_T=<growth>` sets t (default 1), `SSC_GRAMMAR_SEED=<n>` offsets the sample keys. See [PROCGEN.md](PROCGEN.md).
 
+## Saving (opt-in)
+
+- `SSC_SAVE=1`: load the saved run at start (if there is one), autosave every 30 seconds while alive, and save once more on exit (a smoke run too). Off by default so a normal run never reads or writes a save. A finished run is not saved over. Format and rules: [PERSISTENCE.md](PERSISTENCE.md).
+- `SSC_SAVE_DIR=<dir>`: where the slot lives (default the per-user data folder, macOS `~/Library/Application Support/ssc`). Use a scratch directory for checks. Check a reload: `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s SSC_TELEPORT=12000,0 SSC_SMOKE_FRAMES=60 cargo run --bin ssc` (writes on exit), then the same command without `SSC_TELEPORT` and with `SSC_SCREENSHOT=/tmp/s.png` starts where the first ended; stderr says `save: loaded`.
+
 ## Developer panel (not smoke-gated)
 
 - `SSC_DEV=1`: enable the developer toggles and panel (backquote). See [DEVTOOLS.md](DEVTOOLS.md).

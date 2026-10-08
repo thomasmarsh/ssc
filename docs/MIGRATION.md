@@ -2,7 +2,7 @@
 
 The original C++ prototype lives in git history; the implementation lives in `src/`. The Rust project separates gameplay simulation from its Bevy desktop adapter so that core rules can be iterated on and exercised without opening a window. Bevy 0.19.1 supplies the desktop app, input, UI, and WGPU rendering; native macOS rendering uses Metal. Shapes and interface elements are generated in code, so the new app does not depend on the prototype's OpenGL asset pipeline.
 
-Status: BUILT - the headless simulation, the Bevy adapter, the procedural universe, civilizations, powers, bench and developer toggles (see the other docs for each). PARTIAL - persistence (kills only), documentation of the hook list ([HOOKS.md](HOOKS.md)). TODO items are tagged `TODO:` and collected in "Next steps" and "Known caveats" below; grep `TODO:` across docs/ for all of them.
+Status: BUILT - the headless simulation, the Bevy adapter, the procedural universe, civilizations, powers, bench and developer toggles (see the other docs for each). PARTIAL - persistence (deltas saved, opt-in, no menu yet), documentation of the hook list ([HOOKS.md](HOOKS.md)). TODO items are tagged `TODO:` and collected in "Next steps" and "Known caveats" below; grep `TODO:` across docs/ for all of them.
 
 ## Gameplay carried forward
 
@@ -42,9 +42,9 @@ Headless scenario tests (about 970 `#[test]` functions at the last count) cover 
 ## Next steps
 
 - Built: the HUD, input and feel pass (see [UNIVERSE.md](UNIVERSE.md#hud-input-and-feel-built)); the three-tab bench ([BENCH.md](BENCH.md)); the Tow Rig became rock shoving (`simulation/shove.rs`); rooted life (`src/simulation/root.rs`); civilizations (`src/territory.rs`, `src/simulation/civ.rs`).
-- TODO: persist more than kills (positions, damage, bred creatures, and also chart, pins, beacons, regard, doctrine and fallen kills, which are in memory only).
+- Built: save and load of the run's deltas (kills, ore, relics, pads, chart, regard, loadout, hold, run record, legacy) as versioned RON (`simulation/save.rs`, [PERSISTENCE.md](PERSISTENCE.md)). TODO: positions and damage of creatures, bred creatures and builder structures (regenerated today), and the continue / new / delete menu.
 - TODO: rebase world coordinates near the player; `f32` positions lose precision many sectors from the origin.
-- TODO: persistence of doctrine and falls, rival civilizations, and flocks that migrate between sectors.
+- TODO: persistence of doctrine, rival civilizations, and flocks that migrate between sectors (falls and regard are saved).
 - TODO: recombination between different lineages, and taming the generated species for fairness.
 - TODO: later skill and economy redesign from [FLOW.md](FLOW.md) (skill merging, automatic stash overflow, trophy gates, docking assist).
 
@@ -83,7 +83,7 @@ These supplement CLAUDE.md.
 - Nothing has been played by a human. All balance numbers are first guesses; emergent weirdness comes first and balance is tamed afterwards, so far sectors may be unplayable. TODO: a real playtest pass, watching: depth 6 to 8 civilizations against a bare ship (threat x5 at depth 6 to 8, tier 3 fortress capital x16 to 21), apex archetypes (the Lasher and Warden looked weak only in a parked-ship test), the ring 1/2/3 ramp, the first civilization via ping, parry/dash/shove skill prices and gates, auto-repair, jam and glitch feel, nebula strength, HUD layout in a real window, whether keyboard-only dash (always facing) feels right.
 - Fragile tests (fix behaviour or fixtures, never thresholds): `start_population_stays_bounded_over_a_long_run` (peak was 81 against a limit of 81 at one point), `long_runs_in_a_territory_stay_bounded`, `a_brooding_lineage_stays_under_the_world_cap`, `start_bogeys_stay_in_schools_and_stay_calm` (seed list tuned: 42, 11, 6, 1; the pooled ring-two test judges ring 2 as a whole). Some tests depend on which wild sectors load next to HOME, so generation changes can disturb them.
 - Possible hang: an earlier agent saw `cargo clippy ... && cargo test` in one shell command hang for over 10 minutes twice (a test binary at 200 percent CPU). Not reproduced (the suite passed in about 29 s alone). Could be contention or a flaky test. TODO: investigate if it recurs.
-- Persistence is in memory only: chart, pins, beacons, regard, doctrine and fallen kills clear on restart; only legacy and wrecks cross runs within a session. TODO: decide whether to persist to disk.
+- Persistence to disk is built but opt-in (`SSC_SAVE=1`, [PERSISTENCE.md](PERSISTENCE.md)): only deltas are saved, the world around the ship is regenerated, so a reload is the same world but not the same instant. A generator bump drops the spawn-keyed deltas (cleared sectors, pads) and keeps the player's progress. TODO: the menu, builder structures.
 - Visuals have only been verified in offscreen screenshots. The nebula is stronger than subtle inside civilization territories (flat green) and oases (orange cast); the confluence core and predator streaks are hard to see; grit looks blocky; the region seam is unverified on screen; glow and neon styles were never viewed for tethers. Layout nits: the pad glyph is small, radar pad markers cluster, the banner can touch the bench panel, the details panel and notice line overlap slightly at small window sizes, and the lure label and long realm names (for example "Kordthurdvrakx Bastion") may overflow banners. TODO: tune the nebula by eye in a live window and fix these overlaps.
 - Entering a new area computes several sector backdrop looks at once (thread-local cache, cleared at 2048 entries); a stall was not measured. `ecology()` is not cached. TODO: measure, and cache `ecology()` if it shows.
 - Sector size is 6000 units (`SECTOR_SIZE`); an early design note said 1200. Unresolved, decide by playing. `SSC_TELEPORT` takes world units, so `SSC_TELEPORT="2,0"` shows sector (0,0), as expected.
