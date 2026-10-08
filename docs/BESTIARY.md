@@ -497,6 +497,10 @@ Specimen: `split` 0.5, `hull` 90, `radius` 24, `weapon` Projectile.
 
 **Player takes from it.** Splitter marrow: once per life the hull refills to 30 percent on a death-blow (a "second wind").
 
+### Grammar-bodied creatures (specimens built, no wild placement yet)
+
+A creature whose `Genome::grammar` is set has a body expressed from a grown L-system plan instead of the spine and limb genes (see [PROCGEN.md](PROCGEN.md), "Creature bodies from a plan"). It is not a power and not an enum branch: it is a genome section, crossed and mutated with the body plan, absent from every wild creature today. Mapping in one line: each stem is a bead on a jointed skeleton (the first stem is the head and steers), leaves, fruit and sockets are decorations on their host bodies, and rib tips are sockets for future residents. Limits: at most 40 bodies, no angular stiffness, circle hit shapes, adults only (`TODO:` juveniles by growth stage). Three inert authored specimens: **Ribwyrm** (spine and ribs, a fish skeleton that ripples), **Corallid** (coral fan, slow sway) and **Colossus** (a branching tree, lumbers); `SSC_SPECIMEN=ribwyrm|corallid|colossus` or the dev spawn rows. `TODO:` give apex elders grammar bodies in the wild (a generation change, bump `GENERATOR_VERSION`), hosted residents on sockets (workstream 7), weak points per stem kind.
+
 ## 6. Dynamic gravity wells (WellGenome)
 
 Today a well is one fixed dot with one number. The proposal is a **well genome**: a pure function of the seed, the sector and the spawn index, never stored in the `Spawn` (so no `Spawn` field changes and no original-stream draw moves), and evaluated as a pose at the game's time.

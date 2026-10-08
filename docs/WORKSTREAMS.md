@@ -11,7 +11,7 @@ Shared principles (from `CLAUDE.md` and the brief):
 
 ## Foundation: stochastic L-system infrastructure (feeds 1, 6, 7, 11, 3)
 
-Status: slices (a) and (b) built; design, the `Plan` type, templates, salting, caps and the shape-grammar recommendation are in [PROCGEN.md](PROCGEN.md). `TODO:` slice (c), wire into plants with workstream 1, and the `Genome` integration step described there.
+Status: slices (a) and (b) built, and slice (d), the creature `Genome` integration (an optional `grammar` section) with body expression and three authored specimens (`src/bodyplan.rs`); design, the `Plan` type, templates, salting, caps and the shape-grammar recommendation are in [PROCGEN.md](PROCGEN.md). `TODO:` slice (c), wire into plants with workstream 1; juvenile growth stages for grammar bodies.
 
 Goal: one small, deterministic, tested module that grows branching and segmented structure from a seed, used for plants (1), creature bodies including apex elders (6) and hosted or brood bodies (7).
 - Today: creature bodies are jointed chains driven by a flat gene list (`src/genome.rs`, `genome!` macro: real, int, categorical and trait genes). There is no grammar and no branching. Rooted life exists (`src/simulation/root.rs`) and plankton, but plants are not structured.
@@ -69,6 +69,7 @@ Goal: apex elders have varied bodies, produced by the same procgen mechanisms as
 - Design: give apex genomes a body-plan expression using the L-system infrastructure plus the existing chain bodies, scaled up: segmented serpents, branching coral-like colossi, multi-limbed or ring bodies, with hurtbox and weak-point implications, and fairness rules from `BESTIARY.md`. A body type should read from silhouette.
 - Slices: (1) body-plan gene set for apexes feeding the existing chain; (2) L-system bodies for two new archetypes; (3) hit and weak-point rules per body; (4) rebalance.
 - Depends on: L-system foundation.
+- Status: the foundation for slice 2 is built (grammar bodies exist as authored specimens: Ribwyrm, Corallid, Colossus, see [PROCGEN.md](PROCGEN.md)); `TODO:` placing apex elders with grammar bodies in the wild (needs a `GENERATOR_VERSION` bump), weak points per stem kind.
 
 ## 7. Creatures inside creatures
 
@@ -77,6 +78,7 @@ Goal: megafauna with symbiotic or parasitic residents, and large broods.
 - Design: a host genome gets hosted-slot genes (count, kind, relationship: symbiote, parasite, brood). Residents spawn attached, ride the host, and are released on death or damage thresholds (a death releases a brood). Relationship affects behavior: symbiotes defend or clean the host, parasites drain it, broods swarm. Use the same attach mechanics as Hullworm so the code is shared. Display: residents visible on the body.
 - Slices: (1) host slots and attached residents on one megafauna; (2) release rules and brood swarm; (3) symbiote and parasite behaviors; (4) ecology (species pairings by niche).
 - Depends on: swarm budgets (8).
+- Status: `Socket` parts of a grammar body are placed in the world each frame (`Game::chain_decorations`, kind Socket); nothing attaches to them yet (`TODO:`).
 
 ## 8. Swarms and rallied forces
 
@@ -105,6 +107,7 @@ Goal: simple controls on the pad with no overlaps and nothing that needs the key
 Goal: creatures that perform simple construction, expanding what weavers already do (gathering asteroids and stringing webs). Added 2026-10-08; design not started.
 - Direction: builders are genome expressions like everything else (a build-behavior gene set: what material they gather, what structure grammar they follow, how patient, how territorial). They gather rocks, ice or biomass and assemble nests, walls, bridges, hive structures, lures or trap fields using the same grammar infrastructure as plants and megastructures (the L-system or structure grammar produces the plan, the builder realizes it over time). Structures are persistent world state (see 12), can be mined, raided or repaired, and give the ecology new niches and the player new things to read and exploit.
 - Ties to: weaver and slinger rock care (5), asteroid-rich habitats (5, 9), the L-system foundation, megastructures (living ones may be built by creatures), and machines (builders could be allies or competitors).
+- Status: no builder yet. The grammar body slice added nothing builder-specific; builders still walk `Plan` parts in index order (parents first), and `Plan` parts expressed as bodies are the template for realizing one.
 - Slices (provisional): (1) a structure-plan type shared with the L-system output and a builder behavior that places one kind of block; (2) a nest builder species placed by niche; (3) civilizations' own construction; (4) player interaction (mine, trade for, tame or sabotage).
 
 ## 12. Persistence and save to disk
