@@ -18,7 +18,7 @@ The brief: imagine from scratch the extreme things that could live in space (sup
 2. How a rare gene is added (the one-draw convention, gates, crossover, drift)
 3. Rarity tiers and the ring ramp
 4. The shared gene block
-5. The menagerie (20 candidates)
+5. The menagerie (22 candidates)
 6. Dynamic gravity wells (WellGenome)
 7. Special attacks: telegraph, duration, counterplay, budget
 8. What the player can take from them (organs, relics, symbiotes)
@@ -496,6 +496,46 @@ Specimen: `split` 0.5, `hull` 90, `radius` 24, `weapon` Projectile.
 **Simulation effect.** `remove_destroyed` hook: when a body with `split` above the gate is killed and its generation is parent, create children through `make_creature` with the modified genome (`split` zeroed so they cannot split). Children are provisioned and drop reduced loot, and body-cap and `MAX_BODIES` checks apply as in `queen`.
 
 **Player takes from it.** Splitter marrow: once per life the hull refills to 30 percent on a death-blow (a "second wind").
+
+### 21. Foamback (bubble swarm body, bubble trail) (designed, unbuilt)
+
+**Image.** A creature made of dozens of loose spheres, glassy and slightly iridescent, that hold together as one drifting cluster the way a soap foam does. It never moves cleanly: the spheres jostle, lag and catch up. Behind it a wake of bubbles peels off and drifts, shrinking and popping over a few seconds, so you can read where it has been and which way it was going.
+
+**Silhouette.** A loose ball of 12 to 40 spheres of mixed size (large near the middle, small at the rim), drawn translucent with a bright rim. The trail is the same sphere, smaller and fainter.
+
+**Abilities.** `foam` is a gene (0 to 1). The body is one creature with a cluster of beads (the cloud/Murmur precedent for one body, many marks, and the animal `jelly`/`bead` plan for the sphere layout), not many creatures, so it respects the body budgets. Spheres bob on spring offsets from the core; a hit pops the nearest sphere (cosmetic plus a small hull loss) and the cluster refills from the trail. Trail bubbles are shed every 0.15 to 0.4 s, drift with the creature's velocity at 30 percent, live 3 to 6 s and pop on contact with anything. They are harmless by default. At `foam` above 0.6 a popping bubble releases a tiny puff that nudges a ship within 40 units (a shove, no damage); a negative `foam` makes sticky bubbles that cling to the ship for 2 s and add drag (a mild slow, never a jam).
+
+**Encounter.** Mild to Strange tier. Biome affinity: gas, dust and water-like nebulae; ring 3 and out, 1 in 200 species. It should feel playful: a cheerful thing that is hard to kill because it is mostly air.
+
+**What the player does.** Read the trail to find the core (the real hit box is the core and a few inner spheres; outer spheres are decoys that absorb shots, like the Murmur's swallowed shots at a lower chance). Fire through gaps, or use a blast to pop the lot. Flying through the trail is free; the sticky variant punishes lingering in it. The trail also shows other creatures' wakes if the player likes to hunt by it (presentation only).
+
+**Genome.** New: `foam`. Reuse: `hull`, `radius`, `mass`, the anatomy section (a bead or jelly plan with many nodes, depth 0 to 1), `speed`, `bounce`.
+
+Specimen: `foam` 0.5, `hull` 70, `radius` 26, `weapon` none or a weak spit of bubbles.
+
+**Simulation effect.** A trail emitter system (new `simulation/foam.rs`) spawning short-lived non-solid marks with a hard cap per creature (24) and per sector (200) so a crowd of them cannot flood the body or draw budget; trail bubbles are not bodies unless the shove variant is on, and then they are cheap proximity checks, not physics bodies. Presentation draws spheres from the cluster offsets; rendering never owns the rules.
+
+**Player takes from it.** Bubble sac: an organ that leaves a short trail of bubbles behind a dash that absorbs the first hostile shot passing through one (TODO: unbuilt).
+
+### 22. Oozer (amoeba, swallows things) (designed, unbuilt)
+
+**Image.** A wobbling, translucent blob with a darker nucleus and a skin that never holds one shape. It extends a pseudopod toward anything interesting, rocks, pickups, small creatures, the ship, and flows around it. What it has swallowed stays visible inside, slowly browning as it digests. When it is hit hard it pinches and spits things out.
+
+**Silhouette.** A soft irregular outline: a circle perturbed by a few moving lobes (the pseudopods), drawn as a filled blob with an inner nucleus and a small inventory of dim shapes (swallowed rocks and pickups) floating in it.
+
+**Abilities.** `engulf` is a gene (0 to 1). It crawls rather than flies (low speed, high drag, strong lateral wobble). Within `power_reach` of a target it extends a pseudopod (a 0.8 s telegraph: a lobe stretches toward the target), then closes. Things it can swallow: free rocks and pickups (it eats them, digests them for 20 s, gains a little hull and size, the Tidegorger precedent), small creatures below a mass limit (a swallowed creature is held and dealt damage over time), and the ship. A swallowed ship is carried inside the blob: it keeps its controls and weapons but is dragged along at the blob's velocity (a pull capped like the other gravity powers, never above 60 percent of thrust, so a strong thrust always escapes), takes slow digestion damage (3 hull per second, shield first, scaled by `engulf`) and its shots hit the blob from inside at full damage. The ship escapes by thrusting out, a dash, a perfect parry (which makes the blob flinch and spit), or by killing the nucleus. The blob cannot swallow while the ship is in grace or landed, or within 3 s of the last escape.
+
+**Encounter.** Strange tier. Slow and hunting, ring 4 and out, 1 in 260 species. A patient threat: easy to avoid at range, nasty in a crowd or while distracted.
+
+**What the player does.** Kite it, since it is slow. Shoot it from outside to make it pinch and shrink; lure it onto other creatures and rocks and let it spend itself. If swallowed, aim at the nucleus (the one dark blob inside; shots at the rest of the body are partly absorbed) or dash out. Do not stack it with pulling wells.
+
+**Genome.** New: `engulf`. Reuse: `hull`, `radius`, `mass`, `speed`, `drag`, `devour` (the Tidegorger eating rules), the anatomy section for the lobed jelly body.
+
+Specimen: `engulf` 0.5, `hull` 160, `radius` 36, slow speed, no gun.
+
+**Simulation effect.** New `simulation/ooze.rs` modelled on `fields.rs` devour (the eat rules and growth caps) and `parasite.rs` latch (a held ship with escape conditions). State: one optional `held: Vec<BodyId>` on `PowerState` with a hard cap of 3 held and the digestion timers; held bodies are non-colliding with the world while inside and carried by an attachment offset (the Hullworm/latch mechanism). Never held in grace, landed or during a dash. Pseudopod animation is presentation only.
+
+**Player takes from it.** Pseudopod gland: a short stretchy grab on a nearby rock or pickup that pulls it in (TODO: unbuilt).
 
 ### Animal body plans (specimens built, no wild placement yet)
 
