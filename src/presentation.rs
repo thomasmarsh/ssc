@@ -2780,12 +2780,45 @@ pub fn draw(
             }
         }
     }
+    for caster in game
+        .bodies
+        .iter()
+        .filter(|b| b.active && !b.follower && ssc::power::Power::Rune.active(&b.genome))
+    {
+        let p = caster.position;
+        let rgb = ssc::simulation::Payload::from_gene(caster.genome.rune).color();
+        let color = Color::srgb(rgb[0], rgb[1], rgb[2]);
+        let staff = p + Vec2::new(caster.radius + 12.0, 0.0);
+        gizmos.line_2d(staff - Vec2::Y * 26.0, staff + Vec2::Y * 26.0, color);
+        gizmos
+            .circle_2d(staff + Vec2::Y * 26.0, 7.0, color)
+            .resolution(5);
+        gizmos
+            .circle_2d(p, caster.radius + 7.0, color.with_alpha(0.55))
+            .resolution(32);
+        for k in 0..4 {
+            let eye = p + Vec2::from_angle(k as f32 * std::f32::consts::FRAC_PI_2)
+                * (caster.radius + 7.0);
+            gizmos.circle_2d(eye, 2.5, color).resolution(6);
+        }
+    }
     for mine in game.mines.iter().filter(|m| {
         (m.position - camera)
             .abs()
             .cmplt(half + Vec2::splat(150.0))
             .all()
     }) {
+        if let Some(sigil) = mine.sigil {
+            draw_sigil(
+                &mut gizmos,
+                mine.position,
+                mine.blast,
+                sigil.payload,
+                mine.fuse,
+                1.0,
+            );
+            continue;
+        }
         let p = mine.position;
         let color = if mine.friendly {
             CYAN
@@ -2805,6 +2838,32 @@ pub fn draw(
             gizmos
                 .circle_2d(p, 16.0 + fuse.max(0.0) * 18.0, color.with_alpha(flash))
                 .resolution(20);
+        }
+    }
+    for field in &game.rune_fields {
+        let alpha = (field.left / 0.45).min(1.0);
+        draw_sigil(
+            &mut gizmos,
+            field.position,
+            90.0,
+            field.payload,
+            None,
+            alpha,
+        );
+        let rgb = field.payload.color();
+        let tint = Color::srgb(rgb[0], rgb[1], rgb[2]);
+        let pulse = (1.0 - field.age / 0.45).max(0.0);
+        let radius = 90.0 + 55.0 * (1.0 - pulse);
+        gizmos
+            .circle_2d(field.position, radius, tint.with_alpha(pulse * 0.8))
+            .resolution(48);
+        for k in 0..8 {
+            let d = Vec2::from_angle(k as f32 * std::f32::consts::TAU / 8.0);
+            gizmos.line_2d(
+                field.position + d * (radius + 7.0),
+                field.position + d * (radius + 22.0),
+                tint.with_alpha(pulse),
+            );
         }
     }
     for effect in &game.effects {
@@ -4244,5 +4303,79 @@ fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Be
             }),
             warn,
         );
+    }
+}
+
+/// Payload shape stays legible without colour or animated flashes.
+fn draw_sigil(
+    gizmos: &mut Gizmos,
+    p: Vec2,
+    radius: f32,
+    payload: ssc::simulation::Payload,
+    fuse: Option<f32>,
+    alpha: f32,
+) {
+    use ssc::simulation::Payload;
+    let tint = Color::srgb(payload.color()[0], payload.color()[1], payload.color()[2]);
+    let bright = tint.with_alpha(alpha);
+    for scale in [1.0, 0.86, 0.72] {
+        gizmos
+            .circle_2d(p, radius * scale, tint.with_alpha(alpha * 0.35))
+            .resolution(48);
+    }
+    gizmos.circle_2d(p, 24.0, bright).resolution(24);
+    if let Some(left) = fuse {
+        let progress = (1.0 - left / 1.2).clamp(0.0, 1.0);
+        for k in 0..24 {
+            if (k as f32) < progress * 24.0 {
+                let a = k as f32 * std::f32::consts::TAU / 24.0;
+                gizmos.line_2d(
+                    p + Vec2::from_angle(a) * (radius + 5.0),
+                    p + Vec2::from_angle(a + 0.19) * (radius + 5.0),
+                    bright,
+                );
+            }
+        }
+    } else {
+        gizmos
+            .circle_2d(p, radius, tint.with_alpha(alpha * 0.7))
+            .resolution(48);
+    }
+    match payload {
+        Payload::Blast => {
+            for k in 0..8 {
+                let d = Vec2::from_angle(k as f32 * std::f32::consts::TAU / 8.0);
+                gizmos.line_2d(
+                    p + d * 6.0,
+                    p + d * if k % 2 == 0 { 20.0 } else { 14.0 },
+                    bright,
+                );
+            }
+        }
+        Payload::Slow => {
+            for x in [-7.0, 7.0] {
+                gizmos.line_2d(p + Vec2::new(x, -14.0), p + Vec2::new(x, 14.0), bright);
+            }
+        }
+        Payload::Push => {
+            for k in 0..4 {
+                let d = Vec2::from_angle(k as f32 * std::f32::consts::FRAC_PI_2);
+                let side = Vec2::new(-d.y, d.x);
+                gizmos.line_2d(p + d * 5.0, p + d * 20.0, bright);
+                gizmos.line_2d(p + d * 20.0, p + d * 12.0 + side * 6.0, bright);
+                gizmos.line_2d(p + d * 20.0, p + d * 12.0 - side * 6.0, bright);
+            }
+        }
+        Payload::Jam => {
+            let points = [
+                Vec2::new(4.0, 17.0),
+                Vec2::new(-9.0, -1.0),
+                Vec2::new(7.0, 1.0),
+                Vec2::new(-4.0, -17.0),
+            ];
+            for pair in points.windows(2) {
+                gizmos.line_2d(p + pair[0], p + pair[1], bright);
+            }
+        }
     }
 }

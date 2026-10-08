@@ -59,16 +59,20 @@ pub(super) fn strike(
         (
             amount,
             other.kind == BodyKind::Player,
-            other.sling_thrown > 0.0,
+            other.sling_thrown > 0.0 || other.rune_pushed > 0.0,
+            other.rune_pushed > 0.0,
         )
     });
-    for (target, (amount, from_ship, hostile_rock)) in [a, b].into_iter().zip(amounts) {
+    for (target, (amount, from_ship, hostile_rock, rune_push)) in [a, b].into_iter().zip(amounts) {
         let invulnerable = if target.kind == BodyKind::Player {
             invulnerability
         } else {
             0.0
         };
         let taken = damage(target, amount, invulnerable);
+        if rune_push && taken > 0.0 && target.kind != BodyKind::Player {
+            target.rune_pushed = target.rune_pushed.max(1.5);
+        }
         if hostile_rock && target.health <= 0.0 && target.kind != BodyKind::Player {
             target.hostile_rock_kill = true;
         }

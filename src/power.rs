@@ -456,6 +456,7 @@ impl Power {
                 | Self::Symbiote
                 | Self::Weave
                 | Self::Sling
+                | Self::Rune
         )
     }
 
@@ -822,6 +823,19 @@ fn style(g: &mut Genome, power: Power) {
             g.speed = g.speed.min(60.0);
             g.hull = g.hull.max(120.0);
         }
+        Power::Rune => {
+            g.segments = 1;
+            g.limbs = 0;
+            g.sides = 5;
+            g.aspect = 1.8;
+            g.radius = g.radius.clamp(16.0, 24.0);
+            g.speed = g.speed.min(80.0);
+            g.cruise = g.cruise.min(25.0);
+            g.weapon = Weapon::Mine;
+            g.volley = 1;
+            g.standoff = 350.0;
+            g.social = crate::genome::Social::Solitary;
+        }
         Power::Sling => {
             g.segments = 1;
             g.limbs = 4;
@@ -890,6 +904,23 @@ fn style(g: &mut Genome, power: Power) {
 }
 
 impl Genome {
+    /// A spindle-shaped caster. Volley does not multiply power casts.
+    pub fn runekeeper() -> Self {
+        let mut g = Self {
+            rune: 0.7,
+            power_period: 5.0,
+            power_reach: 520.0,
+            radius: 20.0,
+            hull: 70.0,
+            mass: 40.0,
+            speed: 65.0,
+            cruise: 20.0,
+            ..Self::default()
+        };
+        style(&mut g, Power::Rune);
+        g
+    }
+
     /// A compact crab that orbits small rocks and throws them on a warning.
     pub fn slinger() -> Self {
         let mut g = Self {

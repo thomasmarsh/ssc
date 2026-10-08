@@ -592,6 +592,9 @@ impl Game {
             };
             let period = (g.fire_period + (body.id % 7) as f32 * 0.13) * pace
                 / body.genes.aggression.max(0.2);
+            if g.weapon == Weapon::Mine && crate::power::Power::Rune.active(&g) {
+                continue;
+            }
             match g.weapon {
                 Weapon::None => {}
                 Weapon::Tether => {

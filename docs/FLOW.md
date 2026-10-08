@@ -428,3 +428,8 @@ The exact table is `realm::CATALOG`; adding a realm kind is one row (its stress 
 ## Status: Slinger rocks
 
 BESTIARY step 9 is built for Weaver and Slinger, generator version 17. Slinger reuses the cuttable creature-to-rock endpoints with its own harmless orbit cords and fixed-aim warning, then releases ordinary rocks through the shove and kinetic-impact rules. See BESTIARY section 18 for tuning and counters. The Tow Rig remains superseded; its Slinger sinew unlock is not part of progression. Parry still stops shots only. The escape route is ordinary lateral movement off the warned arrow, dash, or cutting or mining ammunition before release.
+
+
+## Status: Runekeeper sigils
+
+Runekeeper is built, generator version 18. BESTIARY section 19 records the one-per-cast and fixed-payload reconciliations, full arming warning, shoot and lure counters, environmental attribution, and bounds. The bare ship can leave the center at 60 percent thrust during the 1.2 s warning. Four colours also have four distinct glyphs; active dash and parry protect against Jam. Rune ink and new ship mine abilities remain outside this slice.

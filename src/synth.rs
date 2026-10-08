@@ -71,12 +71,14 @@ pub enum Sound {
     Crack,
     /// A web being strung: a rising, plucked chord.
     Weave,
+    RuneTell,
+    RuneFire,
     SlingTell,
     SlingThrow,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 46] = [
+    pub const ALL: [Sound; 48] = [
         Sound::PlayerPellet,
         Sound::PlayerNeedle,
         Sound::PlayerMissile,
@@ -121,6 +123,8 @@ impl Sound {
         Sound::Dirge,
         Sound::Crack,
         Sound::Weave,
+        Sound::RuneTell,
+        Sound::RuneFire,
         Sound::SlingTell,
         Sound::SlingThrow,
     ];
@@ -489,6 +493,13 @@ impl Sound {
                 lowpass(&mut v, 1200.0);
                 v
             }
+            Sound::RuneTell => voice(1.2, |t, _| {
+                let f = sweep(t / 1.2, 330.0, 660.0);
+                (sine(f, t) + 0.3 * sine(f * 1.5, t)) * 0.3
+            }),
+            Sound::RuneFire => voice(0.3, |t, _| {
+                (sine(660.0, t) + sine(990.0, t)) * 0.3 * (-12.0 * t).exp()
+            }),
             Sound::SlingTell => voice(0.8, |t, _| {
                 let f = sweep((t / 0.8).min(1.0), 140.0, 640.0);
                 (sine(f, t) + sine(f * 2.0, t) * 0.25) * (t / 0.04).min(1.0) * decay(t, 0.5)

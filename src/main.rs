@@ -877,6 +877,7 @@ fn smoke_run(
             "remora" => Genome::remora(),
             "weaver" => Genome::weaver(),
             "slinger" => Genome::slinger(),
+            "runekeeper" => Genome::runekeeper(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
@@ -921,7 +922,7 @@ fn smoke_run(
             run.hold = true;
         }
         let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
-        let count = if matches!(name.as_str(), "weaver" | "slinger") {
+        let count = if matches!(name.as_str(), "weaver" | "slinger" | "runekeeper") {
             1
         } else {
             3
@@ -960,6 +961,66 @@ fn smoke_run(
                 }
             }
         }
+    }
+    // Bounded four-payload gallery. Freeze the staged instant for screenshot comparison.
+    if run.frames == 0
+        && let Ok(mode) = std::env::var("SSC_RUNE")
+        && matches!(mode.as_str(), "arming" | "activation")
+    {
+        use ssc::genome::{Genome, Species};
+        use ssc::simulation::{BodyKind, Mine, Payload, Sigil};
+        let game = &mut session.game;
+        game.player_invulnerability = 1e9;
+        game.step(0.02, ssc::simulation::Input::default());
+        game.bodies.retain(|b| b.kind == BodyKind::Player);
+        game.mines.clear();
+        game.tethers.clear();
+        game.player_invulnerability = 0.0;
+        let ship = game.player().map_or(Vec2::ZERO, |p| p.position);
+        for (i, payload) in [Payload::Blast, Payload::Slow, Payload::Push, Payload::Jam]
+            .into_iter()
+            .enumerate()
+        {
+            let position = ship
+                + Vec2::new(
+                    if i % 2 == 0 { -220.0 } else { 220.0 },
+                    if i < 2 { 155.0 } else { -155.0 },
+                );
+            let mut genome = Genome::runekeeper();
+            genome.rune = (91.125 + i as f32 * 0.25) / 131.0;
+            let owner = game.place_creature(&Species::of(genome), position + Vec2::new(0.0, 140.0));
+            for body in game.bodies.iter_mut().filter(|b| b.id == owner) {
+                body.pinned = true;
+            }
+            game.mines.push(Mine {
+                sigil: Some(Sigil {
+                    owner,
+                    payload,
+                    shot: mode == "activation",
+                    fresh: false,
+                }),
+                position,
+                velocity: Vec2::ZERO,
+                friendly: false,
+                age: 0.0,
+                fuse: Some(1.2),
+                damage: 40.0,
+                blast: 90.0,
+            });
+        }
+        let steps = if mode == "activation" { 86 } else { 36 };
+        for _ in 0..steps {
+            game.step(1.0 / 60.0, ssc::simulation::Input::default());
+        }
+        assert_eq!(
+            game.mines.len(),
+            if mode == "activation" { 0 } else { 4 },
+            "Rune gallery failed to stage"
+        );
+        if mode == "activation" {
+            assert_eq!(game.rune_fields.len(), 4);
+        }
+        run.hold = true;
     }
     // SSC_ORGANS=1: own the four organs with two slots fitted, a bond running, and a hold to
     // pay the upkeep, to check the HUD icons, the details and the RIG tab.

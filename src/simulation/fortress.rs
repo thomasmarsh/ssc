@@ -135,6 +135,7 @@ impl Game {
                     let nudge =
                         Vec2::from_angle(2.4 * standing as f32 + 0.7) * 34.0 * standing as f32;
                     self.lay_mine(Mine {
+                        sigil: None,
                         position: spot + nudge,
                         velocity: Vec2::ZERO,
                         friendly: false,

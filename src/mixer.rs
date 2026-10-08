@@ -140,6 +140,18 @@ fn spec(cue: &Cue) -> Spec {
             detune: 0.03,
             at: Some(at),
         },
+        Cue::RuneTell { at } | Cue::RuneFire { at } => Spec {
+            sound: if matches!(cue, Cue::RuneTell { .. }) {
+                Sound::RuneTell
+            } else {
+                Sound::RuneFire
+            },
+            gain: 0.65,
+            reach: Some(1800.0),
+            priority: Priority::Explosion,
+            detune: 0.0,
+            at: Some(at),
+        },
         Cue::SlingTell { at } | Cue::SlingThrow { at } => Spec {
             sound: if matches!(cue, Cue::SlingTell { .. }) {
                 Sound::SlingTell
@@ -298,7 +310,7 @@ fn interval(sound: Sound) -> f32 {
         Sound::Dirge => 0.8,
         Sound::Crack => 0.2,
         Sound::Weave => 0.3,
-        Sound::SlingTell | Sound::SlingThrow => 0.15,
+        Sound::RuneTell | Sound::RuneFire | Sound::SlingTell | Sound::SlingThrow => 0.15,
     }
 }
 

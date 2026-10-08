@@ -8,7 +8,7 @@ use super::*;
 use crate::genome::Weapon;
 
 /// Hostile mines and ship mines that may exist at once.
-const MAX_MINES: usize = 90;
+pub(super) const MAX_MINES: usize = 90;
 /// How close a target must come to arm a mine, and the countdown after.
 const HOSTILE_TRIGGER: f32 = 100.0;
 const HOSTILE_FUSE: f32 = 1.2;
@@ -39,6 +39,8 @@ pub enum Shape {
 
 #[derive(Clone, Debug)]
 pub struct Mine {
+    /// None keeps ordinary mine rules unchanged.
+    pub sigil: Option<Sigil>,
     pub position: Vec2,
     pub velocity: Vec2,
     pub friendly: bool,
@@ -183,6 +185,7 @@ impl Game {
                     let spot = m.origin + self.rng.direction() * self.rng.range(60.0, 170.0);
                     let drift = self.rng.direction() * self.rng.range(10.0, 35.0);
                     self.lay_mine(Mine {
+                        sigil: None,
                         position: spot,
                         velocity: drift,
                         friendly: false,
@@ -207,6 +210,7 @@ impl Game {
 
     /// Mines drift to a stop, arm when a target comes close, and burst after the fuse.
     pub(super) fn update_mines(&mut self, dt: f32) {
+        self.update_rune_mines(dt);
         let player = self.player().map(|p| (p.position, p.radius));
         let hostile_targets: Vec<Vec2> = if self.mines.iter().any(|m| m.friendly) {
             self.bodies
@@ -226,7 +230,7 @@ impl Game {
             .map(|b| (b.position, b.radius))
             .collect();
         let mut bursts = Vec::new();
-        for mine in &mut self.mines {
+        for mine in self.mines.iter_mut().filter(|m| m.sigil.is_none()) {
             mine.age += dt;
             mine.velocity *= (-1.4 * dt).exp();
             mine.position += mine.velocity * dt;
@@ -269,7 +273,9 @@ impl Game {
         let mut index = 0;
         while index < self.mines.len() {
             let mine = &self.mines[index];
-            if mine.fuse.is_some_and(|f| f <= 0.0) {
+            if mine.sigil.is_some() {
+                index += 1;
+            } else if mine.fuse.is_some_and(|f| f <= 0.0) {
                 let mine = self.mines.remove(index);
                 bursts.push(mine);
             } else if mine.age > life(mine) {
@@ -387,6 +393,7 @@ impl Game {
             self.arm_clock[1] = 4.0 / f32::from(stats.mines);
             let behind = -Vec2::from_angle(angle);
             self.lay_mine(Mine {
+                sigil: None,
                 position: position + behind * 40.0,
                 velocity: velocity * 0.25,
                 friendly: true,
@@ -482,6 +489,7 @@ mod tests {
             let mut game = empty_game();
             if target_is_mine {
                 game.lay_mine(Mine {
+                    sigil: None,
                     position: Vec2::new(500.0, 0.0),
                     velocity: Vec2::ZERO,
                     friendly: false,
@@ -589,6 +597,7 @@ mod tests {
     fn a_mine_is_safe_to_touch_but_goes_off_after_a_countdown() {
         let mut game = empty_game();
         game.lay_mine(Mine {
+            sigil: None,
             position: Vec2::new(40.0, 0.0),
             velocity: Vec2::ZERO,
             friendly: false,
@@ -616,6 +625,7 @@ mod tests {
     fn flying_clear_during_the_countdown_avoids_a_mine() {
         let mut game = empty_game();
         game.lay_mine(Mine {
+            sigil: None,
             position: Vec2::new(40.0, 0.0),
             velocity: Vec2::ZERO,
             friendly: false,
@@ -639,6 +649,7 @@ mod tests {
     fn shooting_a_mine_sets_it_off_early() {
         let mut game = empty_game();
         game.lay_mine(Mine {
+            sigil: None,
             position: Vec2::new(300.0, 0.0),
             velocity: Vec2::ZERO,
             friendly: false,
@@ -810,6 +821,7 @@ mod tests {
         let mut game = empty_game();
         let prey = spawn(&mut game, &Species::fatso(), Vec2::new(0.0, 700.0));
         game.lay_mine(Mine {
+            sigil: None,
             position: Vec2::new(0.0, 640.0),
             velocity: Vec2::ZERO,
             friendly: true,
@@ -819,6 +831,7 @@ mod tests {
             blast: 130.0,
         });
         game.lay_mine(Mine {
+            sigil: None,
             position: Vec2::new(0.0, 20.0),
             velocity: Vec2::ZERO,
             friendly: true,

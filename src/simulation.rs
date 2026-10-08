@@ -45,6 +45,7 @@ mod regions;
 mod regrow;
 mod root;
 pub mod run;
+mod rune;
 mod shove;
 pub mod skills;
 mod sling;
@@ -90,6 +91,7 @@ pub use powers::{BlinkTell, JamKind, JamTell, PowerView};
 pub use realms::RealmState;
 pub use regions::RegionState;
 pub use root::{Root, STAND as ROOT_STAND};
+pub use rune::{Payload, RuneField, Sigil};
 pub use sling::SlingTell;
 pub use song::SongRing;
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
@@ -304,6 +306,8 @@ pub struct Body {
     /// Orbit release immunity and seconds of hostile thrown-rock attribution.
     sling_free: f32,
     pub sling_thrown: f32,
+    /// Environmental impulse credit lasts through secondary impacts.
+    pub rune_pushed: f32,
     hostile_rock_kill: bool,
     shove_clock: f32,
     grip_free: f32,
@@ -418,6 +422,7 @@ pub struct Game {
     /// Drops waiting to be collected.
     pub pickups: Vec<Pickup>,
     pub mines: Vec<Mine>,
+    pub rune_fields: Vec<RuneField>,
     /// What is bolted to the ship, and the stats that follow from it.
     pub loadout: Loadout,
     pub stats: Stats,
@@ -564,6 +569,7 @@ impl Game {
             chains: BTreeMap::new(),
             pickups: Vec::new(),
             mines: Vec::new(),
+            rune_fields: Vec::new(),
             arm_clock: [0.0; 3],
             switch_clock: 0.0,
             arsenal_flash: 0.0,
@@ -767,6 +773,7 @@ impl Game {
             body.shoved = (body.shoved - dt).max(0.0);
             body.sling_free = (body.sling_free - dt).max(0.0);
             body.sling_thrown = (body.sling_thrown - dt).max(0.0);
+            body.rune_pushed = (body.rune_pushed - dt).max(0.0);
             body.shove_clock = (body.shove_clock - dt).max(0.0);
             body.grip_free = (body.grip_free - dt).max(0.0);
             if body.since_hit > 2.0 && !(beaming && body.kind == BodyKind::Player) {
@@ -865,6 +872,7 @@ impl Game {
         self.update_dash(dt);
         self.move_bullets(dt);
         self.update_mines(dt);
+        self.update_rune_fields(dt);
         self.update_husks();
         self.update_pickups(dt);
         let travelled = match (start, self.player()) {
@@ -1168,6 +1176,7 @@ impl Game {
                 } else {
                     1.0
                 };
+            shard.rune_pushed = rock.rune_pushed;
             shard.lode = Self::fragment_lode(rock, pieces, radius);
             shard.health = radius * 1.6 * 0.8;
             shard.max_health = shard.health;
@@ -1601,7 +1610,12 @@ impl Game {
                 if let Some((index, fraction)) = mine_hit
                     && hit.is_none_or(|(_, body_fraction)| fraction < body_fraction)
                 {
-                    self.mines[index].fuse = Some(self.mines[index].fuse.unwrap_or(0.05).min(0.05));
+                    if let Some(sigil) = self.mines[index].sigil.as_mut() {
+                        sigil.shot = true;
+                    } else {
+                        self.mines[index].fuse =
+                            Some(self.mines[index].fuse.unwrap_or(0.05).min(0.05));
+                    }
                     bullet.remaining = 0.0;
                     impacts.push(previous.lerp(bullet.position, fraction));
                     continue;
@@ -1847,6 +1861,7 @@ impl Game {
             .filter(|b| b.health <= 0.0)
             .cloned()
             .collect();
+        self.cleanup_runes();
         if destroyed.is_empty() {
             return;
         }
@@ -1916,8 +1931,12 @@ impl Game {
                 BodyKind::Player => lost_player = Some(position),
                 BodyKind::Asteroid if body.rock == RockKind::Crystal => {
                     // Crystal does not break, it bursts: everything near is hurt, ship included.
-                    self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
-                    self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, true);
+                    if body.rune_pushed > 0.0 && body.hostile_rock_kill {
+                        self.rune_blast(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
+                    } else {
+                        self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
+                        self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, true);
+                    }
                 }
                 // A wall segment just comes down: no shards, no loot.
                 BodyKind::Asteroid if body.rock == RockKind::Wall => {}
@@ -2076,6 +2095,7 @@ impl Game {
             shoved: 0.0,
             sling_free: 0.0,
             sling_thrown: 0.0,
+            rune_pushed: 0.0,
             hostile_rock_kill: false,
             shove_clock: 0.0,
             grip_free: 0.0,
@@ -2545,6 +2565,7 @@ mod tests {
         let at = body(&game, id).position;
         // A mine that starts inside, and one that drifts in fast.
         game.mines.push(Mine {
+            sigil: None,
             position: Vec2::new(100.0, 0.0),
             velocity: Vec2::ZERO,
             friendly: false,
@@ -2554,6 +2575,7 @@ mod tests {
             blast: 0.0,
         });
         game.mines.push(Mine {
+            sigil: None,
             position: Vec2::new(-radius - 20.0, 0.0),
             velocity: Vec2::new(900.0, 0.0),
             friendly: false,

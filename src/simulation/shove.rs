@@ -77,6 +77,7 @@ pub(super) fn on_contact(
     // Let go of a rock that is being rammed, so the grip does not yank it back.
     other.grip_free = other.grip_free.max(t::GRIP_RELEASE);
     other.sling_thrown = 0.0;
+    other.rune_pushed = 0.0;
     if other.kind == BodyKind::Asteroid {
         other.shoved = other.shoved.max(t::SHOVE_TAG);
     }
@@ -183,6 +184,7 @@ impl Game {
             skills.shove_speed_cap(),
         );
         rock.sling_thrown = 0.0;
+        rock.rune_pushed = 0.0;
         rock.shoved = rock.shoved.max(t::SHOVE_TAG);
         rock.shove_clock = t::SHOVE_COOLDOWN;
         rock.grip_free = rock.grip_free.max(t::GRIP_RELEASE);
