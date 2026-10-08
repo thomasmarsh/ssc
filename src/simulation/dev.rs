@@ -28,7 +28,7 @@ pub fn enabled() -> bool {
 
 /// What can be spawned at the ship: the wild classics, then the authored specimens (the names
 /// `SSC_SPECIMEN` takes).
-pub const SPAWNS: [&str; 27] = [
+pub const SPAWNS: [&str; 30] = [
     "bogey",
     "fatso",
     "lunatic",
@@ -56,6 +56,9 @@ pub const SPAWNS: [&str; 27] = [
     "slinger",
     "runekeeper",
     "seamer",
+    "ribwyrm",
+    "corallid",
+    "colossus",
 ];
 
 /// The authored genome behind a spawn or `SSC_SPECIMEN` name; unknown names give the default.
@@ -88,6 +91,9 @@ pub fn specimen_genome(name: &str) -> Genome {
         "slinger" => Genome::slinger(),
         "runekeeper" => Genome::runekeeper(),
         "seamer" => Genome::seamer(),
+        "ribwyrm" => Genome::ribwyrm(),
+        "corallid" => Genome::corallid(),
+        "colossus" => Genome::colossus(),
         _ => Genome::default(),
     }
 }
@@ -796,7 +802,22 @@ mod tests {
         assert!(game.bodies.len() >= before + 3);
         assert_eq!(game.dev.spawn_name(), "bogey");
         game.dev_change(DevRow::Spawn, -1);
-        assert_eq!(game.dev.spawn_name(), "seamer");
+        assert_eq!(game.dev.spawn_name(), "colossus");
+    }
+
+    #[test]
+    fn the_grammar_specimens_spawn_three_whole_bodies_each() {
+        for name in ["ribwyrm", "corallid", "colossus"] {
+            let mut game = Game::new(5);
+            let before = game.chains.len();
+            game.dev_spawn(name);
+            assert_eq!(game.chains.len(), before + 3, "{name}");
+            let parts = specimen_genome(name).parts() as usize;
+            assert!(game.chains.values().rev().take(3).all(|c| c.len() == parts));
+            for _ in 0..300 {
+                game.step(DT, Input::default());
+            }
+        }
     }
 
     #[test]

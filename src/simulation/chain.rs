@@ -5,6 +5,8 @@
 //! simply what a long spine with a wave gene looks like.
 
 use super::*;
+use crate::bodyplan;
+use crate::grammar::PartKind;
 use std::f32::consts::FRAC_PI_2;
 
 /// Joints never stretch past this multiple of the rest distance.
@@ -30,6 +32,33 @@ pub struct Part {
     rank: f32,
     /// 0 on the spine; +1 or -1 for the side a limb sticks out on.
     side: f32,
+    /// The joint's own rest length (grammar bodies keep their plan's spacing); `None` is
+    /// the bodies touching.
+    rest: Option<f32>,
+}
+
+/// A leaf, fruit or socket of a grammar body, hung on one of its parts (see `bodyplan`).
+#[derive(Clone, Copy, Debug)]
+pub struct Decoration {
+    pub kind: PartKind,
+    /// The body it hangs on.
+    pub host: u64,
+    along: f32,
+    across: f32,
+    angle: f32,
+    length: f32,
+    radius: f32,
+}
+
+/// A decoration placed in the world, for drawing and for attaching hosted residents.
+#[derive(Clone, Copy, Debug)]
+pub struct PlacedDecoration {
+    pub kind: PartKind,
+    pub host: u64,
+    pub position: Vec2,
+    pub angle: f32,
+    pub length: f32,
+    pub radius: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -38,6 +67,8 @@ pub struct Chain {
     /// Parts in creation order (head, rest of the spine, then limbs); shrinks as parts
     /// are destroyed and the survivors close ranks.
     pub parts: Vec<Part>,
+    /// Leaves, fruit and sockets of a grammar body; empty for every other creature.
+    pub decor: Vec<Decoration>,
     phase: f32,
 }
 
@@ -61,6 +92,9 @@ impl Chain {
             while let Some(id) = up.filter(|&id| !alive(id)) {
                 up = parents[&id];
             }
+            if up != part.parent {
+                part.rest = None;
+            }
             part.parent = up;
         }
         if let Some(head) = self.parts.first().map(|p| p.id) {
@@ -75,9 +109,9 @@ impl Chain {
     }
 }
 
-/// Rest distance of the joint between two bodies.
-fn rest_length(a: &Body, b: &Body) -> f32 {
-    ((a.radius + b.radius) * 0.9).max(6.0)
+/// Rest distance of the joint between two bodies (the part's own, if it keeps one).
+fn rest_length(a: &Body, b: &Body, own: Option<f32>) -> f32 {
+    own.unwrap_or_else(|| ((a.radius + b.radius) * 0.9).max(6.0))
 }
 
 impl Game {
@@ -85,9 +119,14 @@ impl Game {
     /// head's id.
     pub(super) fn spawn_chain(&mut self, head: Body) -> u64 {
         let genome = head.genome;
+        let back = -Vec2::from_angle(head.wander);
+        if let Some(spec) = &genome.grammar
+            && let Some(plan) = bodyplan::express(spec, head.radius, 1.0)
+        {
+            return self.spawn_plan_chain(head, &plan);
+        }
         let chain_id = self.next_chain;
         self.next_chain += 1;
-        let back = -Vec2::from_angle(head.wander);
         let side = Vec2::new(-back.y, back.x);
         let spine = usize::from(genome.segments.max(1));
         let mut parts: Vec<Part> = Vec::new();
@@ -114,6 +153,7 @@ impl Game {
                 parent: (n > 0).then(|| parts[n - 1].id),
                 rank: n as f32,
                 side: 0.0,
+                rest: None,
             });
             bodies.push(self.part_body(&head, chain_id, id, cursor, radius, n as u8));
         }
@@ -135,6 +175,7 @@ impl Game {
                     parent: Some(parent),
                     rank: (attach + depth + 1) as f32,
                     side: sign,
+                    rest: None,
                 });
                 bodies.push(self.part_body(
                     &head,
@@ -154,10 +195,103 @@ impl Game {
             Chain {
                 genome,
                 parts,
+                decor: Vec::new(),
                 phase: 0.0,
             },
         );
         head_id
+    }
+
+    /// Expands a creature with a grammar body: one part per stem of the expressed plan, laid
+    /// out behind the head with the plan's up pointing backwards. Same springs, wave and
+    /// bookkeeping as any chain.
+    fn spawn_plan_chain(&mut self, head: Body, plan: &bodyplan::BodyPlan) -> u64 {
+        let genome = head.genome;
+        let chain_id = self.next_chain;
+        self.next_chain += 1;
+        let back = -Vec2::from_angle(head.wander);
+        // A proper rotation taking the plan's up (+y) to `back`, and its right (+x) beside it.
+        let place = |v: Vec2| head.position + back * v.y + Vec2::new(back.y, -back.x) * v.x;
+        let mut parts: Vec<Part> = Vec::with_capacity(plan.nodes.len());
+        let mut bodies: Vec<Body> = Vec::with_capacity(plan.nodes.len());
+        for (n, node) in plan.nodes.iter().enumerate() {
+            let id = self.next_id;
+            self.next_id += 1;
+            parts.push(Part {
+                id,
+                parent: node.parent.map(|p| parts[p].id),
+                rank: node.rank,
+                side: node.side,
+                rest: node.parent.map(|_| node.rest),
+            });
+            bodies.push(self.part_body(
+                &head,
+                chain_id,
+                id,
+                place(node.offset),
+                node.radius,
+                n as u8,
+            ));
+        }
+        let decor = plan
+            .decor
+            .iter()
+            .map(|d| Decoration {
+                kind: d.kind,
+                host: parts[d.host].id,
+                along: d.along,
+                across: d.across,
+                angle: d.angle,
+                length: d.length,
+                radius: d.radius,
+            })
+            .collect();
+        let head_id = parts[0].id;
+        self.bodies.extend(bodies);
+        self.chains.insert(
+            chain_id,
+            Chain {
+                genome,
+                parts,
+                decor,
+                phase: 0.0,
+            },
+        );
+        head_id
+    }
+
+    /// Every decoration of every grammar body, placed in the world from the bodies' current
+    /// poses (a decoration of a destroyed part is gone with it).
+    pub fn chain_decorations(&self) -> Vec<PlacedDecoration> {
+        let mut placed = Vec::new();
+        for chain in self.chains.values() {
+            for decor in &chain.decor {
+                let Some(host) = self.body(decor.host) else {
+                    continue;
+                };
+                let toward = chain
+                    .parts
+                    .iter()
+                    .find(|p| p.id == decor.host)
+                    .and_then(|p| p.parent)
+                    .and_then(|id| self.body(id))
+                    .map_or(-Vec2::from_angle(host.angle), |p| {
+                        host.position - p.position
+                    })
+                    .try_normalize()
+                    .unwrap_or(Vec2::Y);
+                let frame = toward.to_angle();
+                placed.push(PlacedDecoration {
+                    kind: decor.kind,
+                    host: decor.host,
+                    position: host.position + toward * decor.along + toward.perp() * decor.across,
+                    angle: frame + decor.angle,
+                    length: decor.length,
+                    radius: decor.radius,
+                });
+            }
+        }
+        placed
     }
 
     fn part_body(
@@ -253,8 +387,8 @@ impl Game {
                 }
                 let direction = offset / distance;
                 let closing = (b.velocity - a.velocity).dot(direction);
-                let force =
-                    genome.stiffness * (distance - rest_length(a, b)) + JOINT_DAMPING * closing;
+                let force = genome.stiffness * (distance - rest_length(a, b, chain.parts[n].rest))
+                    + JOINT_DAMPING * closing;
                 let push = direction * force * dt * 0.5;
                 a.velocity += push;
                 b.velocity -= push;
@@ -324,7 +458,7 @@ impl Game {
                 }
                 let offset = b.position - a.position;
                 let distance = offset.length();
-                let limit = rest_length(a, b) * MAX_STRETCH;
+                let limit = rest_length(a, b, part.rest) * MAX_STRETCH;
                 if distance > limit {
                     let direction = offset / distance;
                     b.position = a.position + direction * limit;
@@ -460,7 +594,8 @@ mod tests {
                     let Some(parent) = part.parent else { continue };
                     let (a, b) = (body(&game, parent), body(&game, part.id));
                     assert!(
-                        a.position.distance(b.position) <= rest_length(a, b) * MAX_STRETCH + 0.5,
+                        a.position.distance(b.position)
+                            <= rest_length(a, b, part.rest) * MAX_STRETCH + 0.5,
                         "stiffness {stiffness} tick {tick}: stretched to {}",
                         a.position.distance(b.position)
                     );
@@ -622,5 +757,138 @@ mod tests {
         let found = game.bodies.iter().filter(|b| b.chain.is_some()).count();
         assert!(found >= wanted, "{found} < {wanted}");
         assert!(!game.chains.is_empty());
+    }
+    fn specimens() -> [(&'static str, Genome); 3] {
+        [
+            ("ribwyrm", Genome::ribwyrm()),
+            ("corallid", Genome::corallid()),
+            ("colossus", Genome::colossus()),
+        ]
+    }
+
+    /// Largest distance of any member from the head.
+    fn spread(game: &Game, chain: u32) -> f32 {
+        let spots = members(game, chain);
+        spots
+            .iter()
+            .map(|p| p.distance(spots[0]))
+            .fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn grammar_specimens_spawn_one_bounded_tree_of_parts() {
+        for (name, genome) in specimens() {
+            let mut game = empty_game();
+            let before = game.bodies.len();
+            let chain = creature(&mut game, Vec2::new(0.0, 1800.0), genome);
+            let chain = &game.chains[&chain];
+            assert!((6..=bodyplan::BODY_PARTS).contains(&chain.len()), "{name}");
+            assert_eq!(chain.len() as u32, genome.parts(), "{name}");
+            assert_eq!(game.bodies.len() - before, chain.len(), "{name}");
+            assert_eq!(chain.parts.iter().filter(|p| p.parent.is_none()).count(), 1);
+            let head = body(&game, chain.parts[0].id).radius;
+            for part in &chain.parts {
+                let b = body(&game, part.id);
+                assert!(b.radius >= 4.0 && b.radius <= head, "{name}");
+                assert!(b.position.is_finite() && b.mass > 0.0 && b.health > 0.0);
+                if let Some(parent) = part.parent {
+                    let a = body(&game, parent);
+                    // A fresh body starts at rest: joints at their own rest length.
+                    let rest = part.rest.expect("grammar joints keep their spacing");
+                    assert!(
+                        (a.position.distance(b.position) - rest).abs() < 0.01,
+                        "{name}"
+                    );
+                }
+            }
+            assert!(!chain.decor.is_empty() && chain.decor.len() <= bodyplan::MAX_DECOR);
+            assert!(spread(&game, *game.chains.keys().last().unwrap()) < head * 40.0);
+        }
+    }
+
+    #[test]
+    fn grammar_specimens_survive_a_long_swim_without_tearing() {
+        for (name, genome) in specimens() {
+            let mut game = empty_game();
+            game.player_invulnerability = 1e9;
+            let chain = creature(&mut game, Vec2::new(0.0, 1800.0), genome);
+            let head = body(&game, game.chains[&chain].parts[0].id).radius;
+            let start = spread(&game, chain);
+            let mut widest: f32 = 0.0;
+            for tick in 0..3600 {
+                if tick % 300 == 5 {
+                    // Shove the head and a branch in opposite directions.
+                    let ids: Vec<u64> = game.chains[&chain].parts.iter().map(|p| p.id).collect();
+                    for (k, v) in [
+                        (0, Vec2::new(900.0, 0.0)),
+                        (ids.len() / 2, Vec2::new(-900.0, 400.0)),
+                    ] {
+                        game.bodies
+                            .iter_mut()
+                            .find(|b| b.id == ids[k])
+                            .unwrap()
+                            .velocity = v;
+                    }
+                }
+                game.step(DT, Input::default());
+                widest = widest.max(spread(&game, chain));
+                for part in &game.chains[&chain].parts {
+                    let Some(parent) = part.parent else { continue };
+                    let (a, b) = (body(&game, parent), body(&game, part.id));
+                    assert!(b.position.is_finite() && b.velocity.is_finite(), "{name}");
+                    let limit = rest_length(a, b, part.rest) * MAX_STRETCH + 0.5;
+                    assert!(
+                        a.position.distance(b.position) <= limit,
+                        "{name} tick {tick}"
+                    );
+                }
+            }
+            assert!(
+                widest < start * 2.0 + head * 4.0,
+                "{name}: {start} to {widest}"
+            );
+            assert!(game.chains[&chain].len() <= bodyplan::BODY_PARTS);
+            assert!(
+                game.chain_decorations()
+                    .iter()
+                    .all(|d| d.position.is_finite())
+            );
+        }
+    }
+
+    #[test]
+    fn grammar_specimens_are_inert_and_never_hurt_a_nearby_ship() {
+        for (name, genome) in specimens() {
+            let mut game = empty_game();
+            set_player(&mut game, Vec2::new(0.0, 1800.0), Vec2::ZERO);
+            for k in 0..3 {
+                let at = Vec2::new(150.0 + 60.0 * k as f32, 1800.0 + 80.0 * k as f32);
+                let species = Species::of(genome);
+                let head = game.make_creature(&species, at);
+                game.add_body(head);
+            }
+            let hull = game.player().unwrap().health;
+            for _ in 0..1800 {
+                game.step(DT, Input::default());
+            }
+            assert!(game.bullets.is_empty(), "{name}");
+            assert_eq!(game.player().unwrap().health, hull, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_destroyed_grammar_part_leaves_a_connected_body() {
+        let mut game = empty_game();
+        let chain = creature(&mut game, Vec2::new(0.0, 1800.0), Genome::colossus());
+        let count = game.chains[&chain].len();
+        let victim = game.chains[&chain].parts[3].id;
+        game.bodies.retain(|b| b.id != victim);
+        for _ in 0..120 {
+            game.step(DT, Input::default());
+        }
+        let chain = &game.chains[&chain];
+        assert_eq!(chain.len(), count - 1);
+        assert_eq!(chain.parts.iter().filter(|p| p.parent.is_none()).count(), 1);
+        assert!(game.chain_decorations().iter().all(|d| d.host != victim));
     }
 }

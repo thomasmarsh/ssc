@@ -2819,6 +2819,30 @@ pub fn draw(
             }
         }
     }
+    // Leaves, fruit and sockets of grammar bodies, in the color of the body they hang on.
+    for deco in game.chain_decorations() {
+        let Some(host) = game.body(deco.host) else {
+            continue;
+        };
+        let color = body_color(host);
+        let tip = deco.position + Vec2::from_angle(deco.angle) * deco.length;
+        match deco.kind {
+            ssc::grammar::PartKind::Leaf => {
+                gizmos.line_2d(deco.position, tip, color.with_alpha(0.7));
+            }
+            ssc::grammar::PartKind::Fruit => {
+                gizmos
+                    .circle_2d(deco.position, deco.radius.max(2.0), color)
+                    .resolution(10);
+            }
+            ssc::grammar::PartKind::Socket => {
+                gizmos
+                    .circle_2d(deco.position, deco.radius.max(3.0), color.with_alpha(0.8))
+                    .resolution(12);
+            }
+            _ => {}
+        }
+    }
     for rock in game
         .bodies
         .iter()
