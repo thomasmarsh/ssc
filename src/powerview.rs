@@ -165,6 +165,18 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
         eyes(gizmos, p, r, time, view.glare, tint);
     }
     match carried.power {
+        Power::Rift => {
+            let forward = Vec2::from_angle(body.angle);
+            gizmos.line_2d(p - forward * 30.0, p + forward * 40.0, tint);
+            for k in 0..5 {
+                let at = p - forward * (35.0 + k as f32 * 10.0);
+                gizmos.line_2d(
+                    at - forward.perp() * 4.0,
+                    at + forward.perp() * 4.0,
+                    tint.with_alpha(0.55),
+                );
+            }
+        }
         Power::Sling => {
             dotted_circle(gizmos, p, r + 18.0, tint.with_alpha(0.45), 16, time * 0.9);
             for k in 0..4 {
@@ -532,5 +544,71 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
             }
         }
         _ => {}
+    }
+}
+
+/// Doorways use open centers and a faint broken connection, keeping shots readable.
+/// Offscreen mouths have mandatory edge markers, independent of sensor settings or jams.
+pub fn draw_rifts(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
+    let cyan = Color::srgb(0.3, 0.95, 1.0);
+    let gold = Color::srgb(1.0, 0.75, 0.35);
+    for r in &game.rifts {
+        let warning = r.warning > 0.0;
+        let axis = (r.b - r.a).normalize_or_zero();
+        let length = r.a.distance(r.b);
+        let pieces = (length / 28.0) as u32;
+        for k in 0..pieces {
+            let d = 85.0 + k as f32 * (length - 170.0) / pieces as f32;
+            gizmos.line_2d(
+                r.a + axis * d,
+                r.a + axis * (d + 7.0),
+                cyan.with_alpha(0.16),
+            );
+        }
+        for (at, color) in [(r.a, cyan), (r.b, gold)] {
+            if warning {
+                dotted_circle(gizmos, at, 70.0, color, 20, 0.0);
+                let progress = (1.0 - r.warning / 1.2).clamp(0.0, 1.0);
+                for k in 0..(progress * 24.0) as u32 {
+                    let angle = k as f32 * TAU / 24.0;
+                    gizmos.line_2d(
+                        at + Vec2::from_angle(angle) * 83.0,
+                        at + Vec2::from_angle(angle + TAU / 32.0) * 83.0,
+                        color,
+                    );
+                }
+            } else {
+                gizmos.circle_2d(at, 70.0, color).resolution(64);
+                dotted_circle(gizmos, at, 78.0, color.with_alpha(0.4), 24, 0.0);
+            }
+            // Inward brackets distinguish the portal from wells and sigils without a fill.
+            for sign in [-1.0, 1.0] {
+                let tip = at + Vec2::X * 60.0 * sign;
+                gizmos.line_2d(tip, tip + Vec2::new(12.0 * sign, 10.0), color);
+                gizmos.line_2d(tip, tip + Vec2::new(12.0 * sign, -10.0), color);
+            }
+            let delta = at - camera;
+            if delta.x.abs() > half.x - 90.0 || delta.y.abs() > half.y - 90.0 {
+                let bounds = (half - Vec2::splat(35.0)).max(Vec2::splat(1.0));
+                let scale = (delta.x.abs() / bounds.x)
+                    .max(delta.y.abs() / bounds.y)
+                    .max(1.0);
+                let edge = camera + delta / scale;
+                dotted_circle(gizmos, edge, 12.0, color, 8, 0.0);
+                let toward = delta.normalize_or_zero();
+                gizmos.line_2d(edge, edge + toward * 18.0, color);
+            }
+        }
+    }
+    for t in &game.rift_traces {
+        for at in [t.from, t.to] {
+            gizmos
+                .circle_2d(
+                    at,
+                    12.0 + 40.0 * (1.0 - t.left / 0.35),
+                    cyan.with_alpha(t.left / 0.35),
+                )
+                .resolution(32);
+        }
     }
 }

@@ -96,6 +96,8 @@ pub struct PowerState {
     pub(super) idle: f32,
     /// Seconds before a weaver may string another rock.
     pub(super) web_clock: f32,
+    pub(super) rift_clock: f32,
+    pub(super) rift_casts: u32,
     pub(super) rune_clock: f32,
     pub(super) rune_casts: u32,
     pub(super) sling_clock: f32,
@@ -205,6 +207,7 @@ impl Game {
                     || Power::Song.active(&g)
                     || (Power::Mimic.active(&g) && Power::Mimic.fits(&g))
                     || Power::Cloud.active(&g)
+                    || Power::Rift.active(&g)
                     || Power::Rune.active(&g)
                     || Power::Weave.active(&g)
                     || (Power::Sling.active(&g) && Power::Sling.fits(&g))
@@ -222,6 +225,7 @@ impl Game {
                 shove_age: f32::MAX,
                 bulk: 1.0,
                 song_clock: 1.5 + 0.5 * (id % 4) as f32,
+                rift_clock: super::rift::period(&g),
                 rune_clock: g.power_period,
                 web_clock: 1.0 + 0.4 * (id % 5) as f32,
                 sling_clock: g.power_period,
@@ -264,6 +268,9 @@ impl Game {
             }
             if fielder && Power::Sling.active(&g) {
                 self.step_sling(index, &mut state, dt, ship, &mut cues);
+            }
+            if fielder && Power::Rift.active(&g) {
+                self.step_rift(index, &mut state, dt);
             }
             if fielder && Power::Rune.active(&g) {
                 self.step_rune(index, &mut state, dt);
@@ -1031,12 +1038,15 @@ mod tests {
             game.carrier_bonus(creature(&game, carrier)),
             Some(power::BOUNTY_BONUS.0)
         );
-        // A power the simulation does not act on yet earns nothing.
-        let mut inert = Genome::skipjack();
-        inert.blink = 0.0;
-        inert.rift = 0.9;
-        let (game, id) = arena(inert, Vec2::new(0.0, 900.0));
-        assert_eq!(game.carrier_bonus(creature(&game, id)), None);
+        // Rift is now built and earns the Mythic carrier bonus.
+        let mut mythic = Genome::skipjack();
+        mythic.blink = 0.0;
+        mythic.rift = 0.9;
+        let (game, id) = arena(mythic, Vec2::new(0.0, 900.0));
+        assert_eq!(
+            game.carrier_bonus(creature(&game, id)),
+            Some(power::BOUNTY_BONUS.1)
+        );
     }
 
     #[test]

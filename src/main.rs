@@ -878,6 +878,7 @@ fn smoke_run(
             "weaver" => Genome::weaver(),
             "slinger" => Genome::slinger(),
             "runekeeper" => Genome::runekeeper(),
+            "seamer" => Genome::seamer(),
             _ => Genome::default(),
         };
         let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
@@ -922,7 +923,10 @@ fn smoke_run(
             run.hold = true;
         }
         let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
-        let count = if matches!(name.as_str(), "weaver" | "slinger" | "runekeeper") {
+        let count = if matches!(
+            name.as_str(),
+            "weaver" | "slinger" | "runekeeper" | "seamer"
+        ) {
             1
         } else {
             3
@@ -1020,6 +1024,70 @@ fn smoke_run(
         if mode == "activation" {
             assert_eq!(game.rune_fields.len(), 4);
         }
+        run.hold = true;
+    }
+    // Bounded doorway galleries hold simulation after a precise warning/open/transit pose.
+    if run.frames == 0
+        && let Ok(mode) = std::env::var("SSC_RIFT")
+        && matches!(mode.as_str(), "warning" | "active" | "transit")
+    {
+        use ssc::genome::{Genome, Species};
+        use ssc::simulation::{BodyKind, Bullet, Rift};
+        let game = &mut session.game;
+        game.player_invulnerability = 1e9;
+        game.step(0.02, ssc::simulation::Input::default());
+        game.bodies.retain(|b| b.kind == BodyKind::Player);
+        game.bullets.clear();
+        game.mines.clear();
+        game.tethers.clear();
+        let ship = game.player().unwrap().position;
+        let owner =
+            game.place_creature(&Species::of(Genome::seamer()), ship + Vec2::new(0.0, 200.0));
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == owner)
+            .unwrap()
+            .pinned = true;
+        let a = ship + Vec2::new(-475.0, 0.0);
+        let b = ship + Vec2::new(475.0, 0.0);
+        game.rifts.push(Rift {
+            owner,
+            a,
+            b,
+            warning: 1.2,
+            left: 8.0,
+        });
+        let ticks = if mode == "warning" { 36 } else { 78 };
+        for _ in 0..ticks {
+            game.step(1.0 / 60.0, ssc::simulation::Input::default());
+        }
+        if mode == "transit" {
+            let player = game
+                .bodies
+                .iter_mut()
+                .find(|b| b.kind == BodyKind::Player)
+                .unwrap();
+            player.position = a - Vec2::X * 76.0;
+            player.velocity = Vec2::X * 460.0;
+            game.bullets.push(Bullet::hostile(
+                a - Vec2::X * 100.0 + Vec2::Y * 32.0,
+                Vec2::X * 6000.0,
+                2.0,
+                10.0,
+            ));
+            game.step(1.0 / 60.0, ssc::simulation::Input::default());
+            assert!(!game.rift_traces.is_empty(), "Rift transit gallery failed");
+        }
+        // Shots across the connection demonstrate that its faint thread does not hide fire.
+        for k in 0..8 {
+            game.bullets.push(Bullet::hostile(
+                ship + Vec2::new(-240.0 + k as f32 * 65.0, -30.0),
+                Vec2::Y * 300.0,
+                2.0,
+                10.0,
+            ));
+        }
+        assert_eq!(game.rifts.len(), 1, "Rift gallery failed");
         run.hold = true;
     }
     // SSC_ORGANS=1: own the four organs with two slots fitted, a bond running, and a hold to

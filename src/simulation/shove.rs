@@ -68,7 +68,9 @@ pub(super) fn on_contact(
     };
     let closing = -closing_speed;
     // An incoming hostile stone remains the creature's throw until the ship actually rams it.
-    if other.sling_thrown > 0.0 && ship.velocity.dot(toward) < 0.5 * closing {
+    if (other.sling_thrown > 0.0 || other.rift_redirected > 0.0)
+        && ship.velocity.dot(toward) < 0.5 * closing
+    {
         return;
     }
     if !shoveable(other) || closing < t::SHOVE_MIN_CLOSING * 0.5 {
@@ -78,6 +80,7 @@ pub(super) fn on_contact(
     other.grip_free = other.grip_free.max(t::GRIP_RELEASE);
     other.sling_thrown = 0.0;
     other.rune_pushed = 0.0;
+    other.rift_redirected = 0.0;
     if other.kind == BodyKind::Asteroid {
         other.shoved = other.shoved.max(t::SHOVE_TAG);
     }
@@ -185,6 +188,7 @@ impl Game {
         );
         rock.sling_thrown = 0.0;
         rock.rune_pushed = 0.0;
+        rock.rift_redirected = 0.0;
         rock.shoved = rock.shoved.max(t::SHOVE_TAG);
         rock.shove_clock = t::SHOVE_COOLDOWN;
         rock.grip_free = rock.grip_free.max(t::GRIP_RELEASE);

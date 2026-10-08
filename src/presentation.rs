@@ -2903,6 +2903,7 @@ pub fn draw(
             );
         }
     }
+    crate::powerview::draw_rifts(&mut gizmos, game, camera, half);
     crate::powerview::draw_song_rings(&mut gizmos, game);
     draw_parry(&mut gizmos, game);
     draw_dash(&mut gizmos, game);

@@ -433,3 +433,8 @@ BESTIARY step 9 is built for Weaver and Slinger, generator version 17. Slinger r
 ## Status: Runekeeper sigils
 
 Runekeeper is built, generator version 18. BESTIARY section 19 records the one-per-cast and fixed-payload reconciliations, full arming warning, shoot and lure counters, environmental attribution, and bounds. The bare ship can leave the center at 60 percent thrust during the 1.2 s warning. Four colours also have four distinct glyphs; active dash and parry protect against Jam. Rune ink and new ship mine abilities remain outside this slice.
+
+
+## Status: Seamer rifts
+
+Seamer is built, generator version 19. BESTIARY section 17 records shared-gene mappings, warnings, swept whole-body transit, clearance, attribution, budgets, and cleanup. Passage is automatic on entrance, with no interact key or unlock. A bare ship can leave the warning or use a pair as an escape route. The curiosity ping layer, Seam needle, personal rifts, and beacon integration remain unbuilt.

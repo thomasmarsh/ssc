@@ -43,6 +43,7 @@ mod powers;
 mod realms;
 mod regions;
 mod regrow;
+mod rift;
 mod root;
 pub mod run;
 mod rune;
@@ -90,6 +91,7 @@ pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RAN
 pub use powers::{BlinkTell, JamKind, JamTell, PowerView};
 pub use realms::RealmState;
 pub use regions::RegionState;
+pub use rift::{Rift, RiftTrace};
 pub use root::{Root, STAND as ROOT_STAND};
 pub use rune::{Payload, RuneField, Sigil};
 pub use sling::SlingTell;
@@ -308,6 +310,9 @@ pub struct Body {
     pub sling_thrown: f32,
     /// Environmental impulse credit lasts through secondary impacts.
     pub rune_pushed: f32,
+    pub rift_grace: f32,
+    /// Neutral redirected rocks and secondary impacts remain environmental.
+    pub rift_redirected: f32,
     hostile_rock_kill: bool,
     shove_clock: f32,
     grip_free: f32,
@@ -349,6 +354,7 @@ pub struct Bullet {
     rolled: u64,
     /// Already tested against the parry shield (it rolls once per shot).
     parried: bool,
+    rift_grace: f32,
 }
 
 impl Bullet {
@@ -374,6 +380,7 @@ impl Bullet {
             warped: 1.0,
             rolled: 0,
             parried: false,
+            rift_grace: 0.0,
         }
     }
 
@@ -423,6 +430,8 @@ pub struct Game {
     pub pickups: Vec<Pickup>,
     pub mines: Vec<Mine>,
     pub rune_fields: Vec<RuneField>,
+    pub rifts: Vec<Rift>,
+    pub rift_traces: Vec<RiftTrace>,
     /// What is bolted to the ship, and the stats that follow from it.
     pub loadout: Loadout,
     pub stats: Stats,
@@ -570,6 +579,8 @@ impl Game {
             pickups: Vec::new(),
             mines: Vec::new(),
             rune_fields: Vec::new(),
+            rifts: Vec::new(),
+            rift_traces: Vec::new(),
             arm_clock: [0.0; 3],
             switch_clock: 0.0,
             arsenal_flash: 0.0,
@@ -773,6 +784,8 @@ impl Game {
             body.shoved = (body.shoved - dt).max(0.0);
             body.sling_free = (body.sling_free - dt).max(0.0);
             body.sling_thrown = (body.sling_thrown - dt).max(0.0);
+            body.rift_redirected = (body.rift_redirected - dt).max(0.0);
+            body.rift_grace = (body.rift_grace - dt).max(0.0);
             body.rune_pushed = (body.rune_pushed - dt).max(0.0);
             body.shove_clock = (body.shove_clock - dt).max(0.0);
             body.grip_free = (body.grip_free - dt).max(0.0);
@@ -832,6 +845,7 @@ impl Game {
         self.update_chains(dt);
         self.update_apexes(dt);
         self.update_adapt(dt);
+        self.update_rifts(dt);
         self.update_powers(dt);
         // After steering, so a remora's drift to a calm ship wins over its shyness.
         self.update_parasites(dt, input.fire);
@@ -841,6 +855,11 @@ impl Game {
         self.cue_new_shots(in_flight);
         self.update_wells(dt);
         self.apply_gravity(dt);
+        let rift_before: Vec<_> = if self.rifts.is_empty() {
+            Vec::new()
+        } else {
+            self.bodies.iter().map(|b| (b.id, b.position)).collect()
+        };
         let shove_cap = self.loadout.skills.shove_speed_cap();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if body.shoved > 0.0 && body.kind == BodyKind::Asteroid {
@@ -862,6 +881,7 @@ impl Game {
         }
         // Rooted life rides its host, and again after contacts have shoved the host.
         self.sync_roots();
+        self.transit_bodies(&rift_before);
         self.contain_in_active_region();
         self.resolve_contacts();
         self.sync_roots();
@@ -892,6 +912,7 @@ impl Game {
         self.update_apex();
         self.remove_destroyed();
         self.prune_slings();
+        self.cleanup_rifts();
         self.cue_player_damage(ship_before, sources);
     }
 
@@ -1177,6 +1198,7 @@ impl Game {
                     1.0
                 };
             shard.rune_pushed = rock.rune_pushed;
+            shard.rift_redirected = rock.rift_redirected;
             shard.lode = Self::fragment_lode(rock, pieces, radius);
             shard.health = radius * 1.6 * 0.8;
             shard.max_health = shard.health;
@@ -1493,7 +1515,9 @@ impl Game {
     }
 
     fn move_bullets(&mut self, dt: f32) {
-        self.shoot_eggs(dt);
+        if self.rifts.is_empty() {
+            self.shoot_eggs(dt);
+        }
         let mut impacts = Vec::new();
         // Where the ship's shots hurt a creature or station: a white tick instead of a spark.
         let mut hits: Vec<Vec2> = Vec::new();
@@ -1535,7 +1559,14 @@ impl Game {
             })
             .collect();
         let seed = self.seed;
-        for bullet in &mut self.bullets {
+        let mut rift_events = Vec::new();
+        let mut egg_losses = Vec::new();
+        let mut shot_paths: Vec<Vec<(Vec2, Vec2)>> = self
+            .bullets
+            .iter()
+            .map(|b| vec![(b.position, b.position + b.velocity * dt)])
+            .collect();
+        for (shot_index, bullet) in self.bullets.iter_mut().enumerate() {
             if bullet.friendly && !clouds.is_empty() {
                 for &(id, at, radius, density) in &clouds {
                     if bullet.rolled == id || bullet.position.distance(at) >= radius {
@@ -1569,182 +1600,264 @@ impl Game {
                 bullet.velocity =
                     Vec2::from_angle(turn.clamp(-limit, limit)).rotate(bullet.velocity);
             }
-            let previous = bullet.position;
-            bullet.position += bullet.velocity * dt;
-            bullet.remaining -= dt;
-            let mut hit: Option<(usize, f32)> = None;
-            for (index, body) in self.bodies.iter().enumerate().filter(|(_, b)| b.active) {
-                let target = if bullet.friendly {
-                    body.kind != BodyKind::Player && !body.phased
-                } else {
-                    matches!(
-                        body.kind,
-                        BodyKind::Player | BodyKind::Asteroid | BodyKind::BlackHole
-                    ) && !body.phased
-                };
-                if !target || body.health <= 0.0 || bullet.struck.contains(&body.id) {
-                    continue;
-                }
-                if let Some(fraction) = segment_circle(
-                    previous,
-                    bullet.position,
-                    body.position,
-                    hit_radius(body) + bullet.radius,
-                ) && hit.is_none_or(|(_, best)| fraction < best)
-                {
-                    hit = Some((index, fraction));
-                }
+            bullet.rift_grace = (bullet.rift_grace - dt).max(0.0);
+            let start = bullet.position;
+            let flight = if self.rifts.is_empty() {
+                dt
+            } else {
+                dt.min(bullet.remaining.max(0.0))
+            };
+            let end = start + bullet.velocity * flight;
+            let route = if bullet.rift_grace <= 0.0 {
+                rift::crossing(&self.rifts, start, end, bullet.radius).filter(|(_, entry, exit)| {
+                    rift::clear_path(&self.bodies, &self.active, *exit, *exit, bullet.radius, &[])
+                        && self
+                            .active
+                            .contains(&SectorId::containing(*exit + end - *entry))
+                })
+            } else {
+                None
+            };
+            let mut paths = vec![(start, route.map_or(end, |(_, entry, _)| entry))];
+            if let Some((_, entry, exit)) = route {
+                paths.push((exit, exit + end - entry));
             }
-            // Mines use the swept path too: a rail particle can cross one in a tick.
-            if bullet.friendly {
-                let mine_hit = self
-                    .mines
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, m)| !m.friendly)
-                    .filter_map(|(i, m)| {
-                        segment_circle(previous, bullet.position, m.position, 12.0 + bullet.radius)
-                            .map(|t| (i, t))
-                    })
-                    .min_by(|a, b| a.1.total_cmp(&b.1));
-                if let Some((index, fraction)) = mine_hit
-                    && hit.is_none_or(|(_, body_fraction)| fraction < body_fraction)
-                {
-                    if let Some(sigil) = self.mines[index].sigil.as_mut() {
-                        sigil.shot = true;
-                    } else {
-                        self.mines[index].fuse =
-                            Some(self.mines[index].fuse.unwrap_or(0.05).min(0.05));
-                    }
-                    bullet.remaining = 0.0;
-                    impacts.push(previous.lerp(bullet.position, fraction));
-                    continue;
-                }
-            }
-            if hit.is_none() && bullet.friendly {
-                for &(index, from, to) in &cords {
-                    if tether::segment_distance(previous, bullet.position, from, to)
-                        < bullet.radius + 3.0
-                    {
-                        self.tethers[index].health -= tether::CORD_BULLET_DAMAGE;
-                        bullet.remaining = 0.0;
-                        impacts.push(bullet.position);
+            // A shot processes the entrance leg first. A hit there cancels the jump.
+            for (leg, &(previous, next)) in paths.iter().enumerate() {
+                if leg > 0 {
+                    if bullet.remaining <= 0.0 {
                         break;
                     }
+                    let (_, entry, exit) = route.unwrap();
+                    bullet.origin += exit - entry;
+                    bullet.rift_grace = rift::GRACE;
+                    rift_events.push((entry, exit));
                 }
-            }
-            if let Some((index, fraction)) = hit {
-                // A bulwark's plated front and an elder's bubble turn the ship's fire away; a
-                // far shot loses damage to its profile's falloff; a tough creature has built
-                // resistance to the family that has been hurting it.
-                let at = previous.lerp(bullet.position, fraction);
-                let (guarded, bubble_close) = if bullet.friendly {
-                    apexes::shield_factor(
-                        &self.apexes,
-                        &self.apex_state,
-                        &self.bodies[index],
-                        bullet,
-                    )
-                } else {
-                    (1.0, false)
-                };
-                let (reach, family, adaptive) = match (bullet.friendly, bullet.profile) {
-                    (true, Some(profile)) => {
-                        let target = &self.bodies[index];
-                        let family = profile.family();
-                        (
-                            profile.reach().at(bullet.origin.distance(at))
-                                * self.adapt.get(&target.id).map_or(1.0, |r| r.scale(family)),
-                            Some(family),
-                            adapt::adaptive(target, &self.apexes),
+                bullet.position = next;
+                let mut hit: Option<(usize, f32)> = None;
+                for (index, body) in self.bodies.iter().enumerate().filter(|(_, b)| b.active) {
+                    let target = if bullet.friendly {
+                        body.kind != BodyKind::Player && !body.phased
+                    } else {
+                        matches!(
+                            body.kind,
+                            BodyKind::Player | BodyKind::Asteroid | BodyKind::BlackHole
+                        ) && !body.phased
+                    };
+                    if !target || body.health <= 0.0 || bullet.struck.contains(&body.id) {
+                        continue;
+                    }
+                    if let Some(fraction) = segment_circle(
+                        previous,
+                        bullet.position,
+                        body.position,
+                        hit_radius(body) + bullet.radius,
+                    ) && hit.is_none_or(|(_, best)| fraction < best)
+                    {
+                        hit = Some((index, fraction));
+                    }
+                }
+                if !self.rifts.is_empty() && bullet.friendly {
+                    let egg_hit = self
+                        .eggs
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, e)| {
+                            segment_circle(previous, next, e.position, e.radius + bullet.radius)
+                                .map(|t| (i, t))
+                        })
+                        .min_by(|a, b| a.1.total_cmp(&b.1));
+                    if let Some((i, fraction)) = egg_hit
+                        && hit.is_none_or(|(_, best)| fraction < best)
+                        && !self.mines.iter().any(|m| {
+                            !m.friendly
+                                && segment_circle(previous, next, m.position, 12.0 + bullet.radius)
+                                    .is_some_and(|t| t < fraction)
+                        })
+                    {
+                        egg_losses.push(self.eggs.remove(i));
+                        if bullet.pierce == 0 {
+                            bullet.remaining = 0.0;
+                            break;
+                        }
+                    }
+                }
+                // Mines use the swept path too: a rail particle can cross one in a tick.
+                if bullet.friendly {
+                    let mine_hit = self
+                        .mines
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, m)| !m.friendly)
+                        .filter_map(|(i, m)| {
+                            segment_circle(
+                                previous,
+                                bullet.position,
+                                m.position,
+                                12.0 + bullet.radius,
+                            )
+                            .map(|t| (i, t))
+                        })
+                        .min_by(|a, b| a.1.total_cmp(&b.1));
+                    if let Some((index, fraction)) = mine_hit
+                        && hit.is_none_or(|(_, body_fraction)| fraction < body_fraction)
+                    {
+                        if let Some(sigil) = self.mines[index].sigil.as_mut() {
+                            sigil.shot = true;
+                        } else {
+                            self.mines[index].fuse =
+                                Some(self.mines[index].fuse.unwrap_or(0.05).min(0.05));
+                        }
+                        bullet.remaining = 0.0;
+                        impacts.push(previous.lerp(bullet.position, fraction));
+                        continue;
+                    }
+                }
+                if hit.is_none() && bullet.friendly {
+                    for &(index, from, to) in &cords {
+                        if tether::segment_distance(previous, bullet.position, from, to)
+                            < bullet.radius + 3.0
+                        {
+                            self.tethers[index].health -= tether::CORD_BULLET_DAMAGE;
+                            bullet.remaining = 0.0;
+                            impacts.push(bullet.position);
+                            break;
+                        }
+                    }
+                }
+                if let Some((index, fraction)) = hit {
+                    // A bulwark's plated front and an elder's bubble turn the ship's fire away; a
+                    // far shot loses damage to its profile's falloff; a tough creature has built
+                    // resistance to the family that has been hurting it.
+                    let at = previous.lerp(bullet.position, fraction);
+                    let (guarded, bubble_close) = if bullet.friendly {
+                        apexes::shield_factor(
+                            &self.apexes,
+                            &self.apex_state,
+                            &self.bodies[index],
+                            bullet,
                         )
+                    } else {
+                        (1.0, false)
+                    };
+                    let (reach, family, adaptive) = match (bullet.friendly, bullet.profile) {
+                        (true, Some(profile)) => {
+                            let target = &self.bodies[index];
+                            let family = profile.family();
+                            (
+                                profile.reach().at(bullet.origin.distance(at))
+                                    * self.adapt.get(&target.id).map_or(1.0, |r| r.scale(family)),
+                                Some(family),
+                                adapt::adaptive(target, &self.apexes),
+                            )
+                        }
+                        _ => (1.0, None, false),
+                    };
+                    let body = &mut self.bodies[index];
+                    if dashing && !bullet.friendly && body.kind == BodyKind::Player {
+                        grazes.push(bullet.position);
                     }
-                    _ => (1.0, None, false),
-                };
-                let body = &mut self.bodies[index];
-                if dashing && !bullet.friendly && body.kind == BodyKind::Player {
-                    grazes.push(bullet.position);
-                }
-                // Enemy fire is stopped by a fortress wall but never wears it down.
-                let dealt = if !bullet.friendly && body.rock == RockKind::Wall {
-                    0.0
-                } else {
-                    damage_bypassing(
-                        body,
-                        armored(
+                    // Enemy fire is stopped by a fortress wall but never wears it down.
+                    let dealt = if !bullet.friendly && body.rock == RockKind::Wall {
+                        0.0
+                    } else {
+                        damage_bypassing(
                             body,
-                            bullet.damage
-                                * if bullet.friendly {
-                                    boost * guarded * reach
-                                } else {
-                                    1.0
-                                },
-                            bullet.friendly,
-                        ),
-                        self.player_invulnerability,
-                        if bullet.friendly { 0.0 } else { bullet.pith },
-                    )
-                };
-                if !bullet.friendly
-                    && bullet.pith > 0.0
-                    && dealt > 0.0
-                    && body.kind == BodyKind::Player
-                {
-                    piths.push(previous.lerp(bullet.position, fraction));
-                }
-                if bullet.friendly && matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
-                    self.run.damage_dealt += dealt;
-                }
-                if let (true, Some(family)) = (adaptive, family) {
-                    family_hits.push((body.id, family, dealt, body.max_health + body.max_shield));
-                }
-                if bubble_close {
-                    bubble_hits.push((body.id, bullet.damage * boost * guarded * reach));
-                }
-                if bullet.friendly && dealt > 0.0 && diplomacy::civil_target(body) {
-                    self.civ_hits.push((body.id, dealt));
-                }
-                if !is_fixed(body) {
-                    body.velocity +=
-                        bullet.velocity.normalize_or_zero() * (180.0 / body.mass) * mass_sign(body);
-                }
-                if bullet.blast > 0 {
-                    blasts.push((
-                        at,
-                        blast_radius(bullet.blast),
-                        bullet.damage * 0.5,
-                        body.id,
-                        true,
-                    ));
-                }
-                if bullet.burst > 0.0 {
-                    blasts.push((
-                        at,
-                        bullet.burst,
-                        bullet.damage * 0.6,
-                        body.id,
-                        bullet.friendly,
-                    ));
-                    bullet.burst = 0.0;
-                }
-                if bullet.pierce > 0 && !matches!(body.rock, RockKind::Planetoid | RockKind::Wall) {
-                    // Passes through (but never through a planetoid or a wall: they swallow every shot), remembering what it struck.
-                    if let Some(slot) = bullet.struck.iter_mut().find(|id| **id == 0) {
-                        *slot = body.id;
+                            armored(
+                                body,
+                                bullet.damage
+                                    * if bullet.friendly {
+                                        boost * guarded * reach
+                                    } else {
+                                        1.0
+                                    },
+                                bullet.friendly,
+                            ),
+                            self.player_invulnerability,
+                            if bullet.friendly { 0.0 } else { bullet.pith },
+                        )
+                    };
+                    if !bullet.friendly
+                        && bullet.pith > 0.0
+                        && dealt > 0.0
+                        && body.kind == BodyKind::Player
+                    {
+                        piths.push(previous.lerp(bullet.position, fraction));
                     }
-                    bullet.pierce -= 1;
-                } else {
-                    bullet.remaining = 0.0;
+                    if bullet.friendly && matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
+                        self.run.damage_dealt += dealt;
+                    }
+                    if let (true, Some(family)) = (adaptive, family) {
+                        family_hits.push((
+                            body.id,
+                            family,
+                            dealt,
+                            body.max_health + body.max_shield,
+                        ));
+                    }
+                    if bubble_close {
+                        bubble_hits.push((body.id, bullet.damage * boost * guarded * reach));
+                    }
+                    if bullet.friendly && dealt > 0.0 && diplomacy::civil_target(body) {
+                        self.civ_hits.push((body.id, dealt));
+                    }
+                    if !is_fixed(body) {
+                        body.velocity += bullet.velocity.normalize_or_zero()
+                            * (180.0 / body.mass)
+                            * mass_sign(body);
+                    }
+                    if bullet.blast > 0 {
+                        blasts.push((
+                            at,
+                            blast_radius(bullet.blast),
+                            bullet.damage * 0.5,
+                            body.id,
+                            true,
+                        ));
+                    }
+                    if bullet.burst > 0.0 {
+                        blasts.push((
+                            at,
+                            bullet.burst,
+                            bullet.damage * 0.6,
+                            body.id,
+                            bullet.friendly,
+                        ));
+                        bullet.burst = 0.0;
+                    }
+                    if bullet.pierce > 0
+                        && !matches!(body.rock, RockKind::Planetoid | RockKind::Wall)
+                    {
+                        // Passes through (but never through a planetoid or a wall: they swallow every shot), remembering what it struck.
+                        if let Some(slot) = bullet.struck.iter_mut().find(|id| **id == 0) {
+                            *slot = body.id;
+                        }
+                        bullet.pierce -= 1;
+                    } else {
+                        bullet.remaining = 0.0;
+                    }
+                    if bullet.friendly
+                        && dealt > 0.0
+                        && matches!(body.kind, BodyKind::Creature | BodyKind::Base)
+                    {
+                        hits.push(at);
+                    } else {
+                        impacts.push(at);
+                    }
                 }
-                if bullet.friendly
-                    && dealt > 0.0
-                    && matches!(body.kind, BodyKind::Creature | BodyKind::Base)
-                {
-                    hits.push(at);
-                } else {
-                    impacts.push(at);
+                if bullet.remaining <= 0.0 {
+                    break;
                 }
             }
+            bullet.remaining -= dt;
+            shot_paths[shot_index] = paths;
+        }
+        for egg in egg_losses {
+            self.effect(egg.position, 12.0, 0.2, EffectKind::Impact);
+            self.note_egg_lost(&egg, true);
+        }
+        for (from, to) in rift_events {
+            self.rift_trace(from, to);
         }
         for (id, family, dealt, pool) in family_hits {
             self.note_family_hit(id, family, dealt, pool);
@@ -1768,13 +1881,17 @@ impl Game {
                 for &target in &fragile {
                     let (a, b) = (&self.bullets[shooter], &self.bullets[target]);
                     if b.remaining > 0.0
-                        && segment_circle(
-                            (a.position - a.velocity * dt) - (b.position - b.velocity * dt),
-                            a.position - b.position,
-                            Vec2::ZERO,
-                            a.radius + b.radius + 5.0,
-                        )
-                        .is_some()
+                        && shot_paths[shooter].iter().any(|&(from, to)| {
+                            shot_paths[target].iter().any(|&(other_from, other_to)| {
+                                segment_circle(
+                                    from - other_from,
+                                    to - other_to,
+                                    Vec2::ZERO,
+                                    a.radius + b.radius + 5.0,
+                                )
+                                .is_some()
+                            })
+                        })
                     {
                         let at = b.position;
                         let (damage, burst) = (b.damage, b.burst);
@@ -1862,6 +1979,7 @@ impl Game {
             .cloned()
             .collect();
         self.cleanup_runes();
+        self.cleanup_rifts();
         if destroyed.is_empty() {
             return;
         }
@@ -1931,7 +2049,9 @@ impl Game {
                 BodyKind::Player => lost_player = Some(position),
                 BodyKind::Asteroid if body.rock == RockKind::Crystal => {
                     // Crystal does not break, it bursts: everything near is hurt, ship included.
-                    if body.rune_pushed > 0.0 && body.hostile_rock_kill {
+                    if (body.rune_pushed > 0.0 || body.rift_redirected > 0.0)
+                        && body.hostile_rock_kill
+                    {
                         self.rune_blast(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
                     } else {
                         self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
@@ -2096,6 +2216,8 @@ impl Game {
             sling_free: 0.0,
             sling_thrown: 0.0,
             rune_pushed: 0.0,
+            rift_grace: 0.0,
+            rift_redirected: 0.0,
             hostile_rock_kill: false,
             shove_clock: 0.0,
             grip_free: 0.0,

@@ -350,7 +350,7 @@ impl Power {
             Self::Weave => s(330.0, Strange, 6, Danger, (5.0, 700.0, 1.0)),
             Self::Song => s(330.0, Strange, 6, Swarm, (4.0, 700.0, 1.0)),
             Self::Dim => s(500.0, Strange, 8, Distortion, (5.0, 450.0, 1.0)),
-            Self::Rift => s(1000.0, Mythic, 10, Distortion, (14.0, 900.0, 4.0)),
+            Self::Rift => s(1000.0, Mythic, 10, Distortion, (7.055_556, 490.0, 1.0)),
             Self::Sling => s(330.0, Strange, 6, Danger, (3.5, 750.0, 1.0)),
             Self::Rune => s(250.0, Strange, 6, Tech, (5.0, 520.0, 1.0)),
             Self::Split => s(180.0, Mild, 3, Aggression, (5.0, 300.0, 1.0)),
@@ -456,6 +456,7 @@ impl Power {
                 | Self::Symbiote
                 | Self::Weave
                 | Self::Sling
+                | Self::Rift
                 | Self::Rune
         )
     }
@@ -492,6 +493,7 @@ impl Power {
             Self::Symbiote => [1.0, 0.72, 0.25],
             Self::Latch => [0.75, 0.45, 1.0],
             Self::Weave => [0.65, 1.0, 0.85],
+            Self::Rift => [0.3, 0.95, 1.0],
             Self::Sling => [1.0, 0.65, 0.25],
             _ => [0.9, 0.9, 0.9],
         }
@@ -823,6 +825,19 @@ fn style(g: &mut Genome, power: Power) {
             g.speed = g.speed.min(60.0);
             g.hull = g.hull.max(120.0);
         }
+        Power::Rift => {
+            g.segments = 1;
+            g.limbs = 0;
+            g.radius = g.radius.clamp(8.0, 14.0);
+            g.sides = 3;
+            g.aspect = 1.8;
+            g.speed = g.speed.min(65.0);
+            g.cruise = g.cruise.min(20.0);
+            g.weapon = Weapon::None;
+            g.fling = 0.0;
+            g.social = crate::genome::Social::Solitary;
+            g.fear = crate::genome::Fear::Player;
+        }
         Power::Rune => {
             g.segments = 1;
             g.limbs = 0;
@@ -904,6 +919,24 @@ fn style(g: &mut Genome, power: Power) {
 }
 
 impl Genome {
+    /// A quiet stitch-thing, expressing a twenty-second cadence and 1200-unit separation.
+    pub fn seamer() -> Self {
+        let mut g = Self {
+            rift: 0.8,
+            power_period: 7.055_556,
+            power_reach: 490.0,
+            power_hold: 1.0,
+            radius: 10.0,
+            hull: 40.0,
+            mass: 12.0,
+            speed: 45.0,
+            cruise: 15.0,
+            trigger: crate::genome::Trigger::Harm,
+            ..Self::default()
+        };
+        style(&mut g, Power::Rift);
+        g
+    }
     /// A spindle-shaped caster. Volley does not multiply power casts.
     pub fn runekeeper() -> Self {
         let mut g = Self {

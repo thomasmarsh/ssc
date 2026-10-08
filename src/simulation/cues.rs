@@ -109,6 +109,15 @@ pub enum Cue {
         at: Vec2,
     },
     /// A weaver strings a harmless warning cord before it tightens.
+    RiftTell {
+        at: Vec2,
+    },
+    RiftOpen {
+        at: Vec2,
+    },
+    RiftTransit {
+        at: Vec2,
+    },
     RuneTell {
         at: Vec2,
     },
