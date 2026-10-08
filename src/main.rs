@@ -1,4 +1,5 @@
 mod audio;
+mod bestiaryview;
 mod devpanel;
 mod glitchview;
 mod grammarview;
@@ -251,6 +252,7 @@ fn main() {
         .init_resource::<Session>()
         .init_resource::<SmokeRun>()
         .insert_resource(grammarview::Gallery::from_env())
+        .insert_resource(bestiaryview::Bestiary::from_env())
         .init_resource::<audio::Audio>()
         .add_plugins(
             DefaultPlugins
@@ -276,6 +278,7 @@ fn main() {
                 settings::setup,
                 devpanel::setup,
                 nebula::setup,
+                bestiaryview::setup,
                 audio::setup,
             ),
         )
@@ -291,11 +294,14 @@ fn main() {
                 juice::update,
                 audio::apply_mute,
                 audio::play_cues,
-                presentation::draw.run_if(not(grammarview::gallery_active)),
+                presentation::draw
+                    .run_if(not(grammarview::gallery_active))
+                    .run_if(not(bestiaryview::gallery_active)),
                 grammarview::draw,
-                presentation::update_hud,
+                bestiaryview::draw,
+                presentation::update_hud.run_if(not(bestiaryview::gallery_active)),
                 presentation::scroll_panels,
-                hud::update_texts,
+                hud::update_texts.run_if(not(bestiaryview::gallery_active)),
                 settings::update,
                 devpanel::update,
                 presentation::update_summary,

@@ -609,6 +609,40 @@ impl Genome {
         }
     }
 
+    /// A ribwyrm: a long spine with paired ribs that swell and taper, fins and plumes on the
+    /// rib tips and sockets for hosted residents.
+    pub fn ribwyrm() -> Self {
+        Self {
+            radius: 13.0,
+            hull: 60.0,
+            mass: 10.0,
+            speed: 130.0,
+            cruise: 60.0,
+            stiffness: 320.0,
+            wave: 0.9,
+            rhythm: 2.4,
+            lag: 0.45,
+            bounty: 120.0,
+            hue: 0.08,
+            pale: 0.35,
+            bright: 0.95,
+            ..inert(specimen(Archetype::Ribbed, 0x5249_4257, |g| {
+                g.depth = 1;
+                g.segments = 10;
+                g.limbs = 8;
+                g.limb_len = 1;
+                g.taper = 0.6;
+                g.lean = 0.6;
+                g.curl = 0.12;
+                g.profile = 0.3;
+                g.bulge = 0.2;
+                g.dress = 0.7;
+                g.eyes = 2;
+                g.sockets = 2;
+            }))
+        }
+    }
+
     /// A treeling: the rare branching form, a short trunk forking twice. A creature that
     /// happens to look like a tree.
     pub fn treeling() -> Self {
@@ -638,7 +672,7 @@ impl Genome {
 }
 
 /// The authored animal specimens, by `SSC_SPECIMEN` name.
-pub const SPECIMENS: [&str; 10] = [
+pub const SPECIMENS: [&str; 11] = [
     "squid",
     "octopus",
     "snake",
@@ -649,6 +683,7 @@ pub const SPECIMENS: [&str; 10] = [
     "puffer",
     "plumeworm",
     "treeling",
+    "ribwyrm",
 ];
 
 /// The genome of an animal specimen by name.
@@ -664,6 +699,7 @@ pub fn specimen_by_name(name: &str) -> Option<Genome> {
         "puffer" => Genome::puffer(),
         "plumeworm" => Genome::plumeworm(),
         "treeling" => Genome::treeling(),
+        "ribwyrm" => Genome::ribwyrm(),
         _ => return None,
     })
 }

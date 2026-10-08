@@ -28,7 +28,7 @@ pub fn enabled() -> bool {
 
 /// What can be spawned at the ship: the wild classics, then the authored specimens (the names
 /// `SSC_SPECIMEN` takes).
-pub const SPAWNS: [&str; 37] = [
+pub const SPAWNS: [&str; 38] = [
     "bogey",
     "fatso",
     "lunatic",
@@ -66,6 +66,7 @@ pub const SPAWNS: [&str; 37] = [
     "puffer",
     "plumeworm",
     "treeling",
+    "ribwyrm",
 ];
 
 /// The authored genome behind a spawn or `SSC_SPECIMEN` name; unknown names give the default.
@@ -806,7 +807,7 @@ mod tests {
         assert!(game.bodies.len() >= before + 3);
         assert_eq!(game.dev.spawn_name(), "bogey");
         game.dev_change(DevRow::Spawn, -1);
-        assert_eq!(game.dev.spawn_name(), "treeling");
+        assert_eq!(game.dev.spawn_name(), "ribwyrm");
     }
 
     #[test]

@@ -72,6 +72,9 @@ pub enum Archetype {
     Plumeworm,
     /// A branching form. Rare and incidental.
     Tree,
+    /// A spine with ribs: the ribwyrm. Rib count, spacing, length profile, curvature and
+    /// pairing all vary by gene.
+    Ribbed,
 }
 
 impl Archetype {
@@ -88,6 +91,7 @@ impl Archetype {
         Self::Puffer,
         Self::Plumeworm,
         Self::Tree,
+        Self::Ribbed,
     ];
 
     pub fn name(self) -> &'static str {
@@ -103,6 +107,7 @@ impl Archetype {
             Self::Puffer => "puffer",
             Self::Plumeworm => "plumeworm",
             Self::Tree => "tree",
+            Self::Ribbed => "ribbed",
         }
     }
 
@@ -151,7 +156,7 @@ const ONE: (u8, u8, u8, u8) = (1, 1, 1, 1);
 
 /// Indexed like `Archetype::ALL`. Weights favour the common low-depth animals: beads and
 /// snakes are half of everything, branching trees are a rarity.
-const SHAPES: [Shape; 11] = [
+const SHAPES: [Shape; 12] = [
     // Bead
     Shape {
         weight: 22,
@@ -262,6 +267,16 @@ const SHAPES: [Shape; 11] = [
         depths: [0, 0, 60, 40],
         lean: (0.45, 0.9),
     },
+    // Ribbed
+    Shape {
+        weight: 10,
+        segments: (6, 14, 3, 16),
+        limbs: (4, 10, 2, 12),
+        limb_len: (1, 2, 1, 3),
+        max_depth: 2,
+        depths: [45, 42, 13, 0],
+        lean: (0.2, 1.2),
+    },
 ];
 
 /// The genes of an animal body plan: an archetype and the numbers that tune it.
@@ -297,6 +312,21 @@ pub struct AnimalGenome {
     pub jitter: f32,
     /// Left and right limbs differ in size by this much.
     pub asymmetry: f32,
+    /// Appendage reach: scales appendage radius and (with `profile`) length.
+    pub reach: f32,
+    /// Appendage length profile along the body: positive is long near the head and short
+    /// toward the tail, negative the reverse.
+    pub profile: f32,
+    /// Appendage length bulge in the middle of the body.
+    pub bulge: f32,
+    /// Size of the last two trunk beads relative to the taper (a heavy or a whip tail).
+    pub tail: f32,
+    /// How ribs pair: 0 on both sides of a bead, 1 alternating, 2 on one side only.
+    pub pairing: u8,
+    /// Trunk beads between ribs.
+    pub spacing: u8,
+    /// First trunk bead that carries a rib (ribs start behind the head).
+    pub start: u8,
 }
 
 impl Default for AnimalGenome {
@@ -319,6 +349,13 @@ impl Default for AnimalGenome {
             sockets: 0,
             jitter: 0.0,
             asymmetry: 0.0,
+            reach: 1.0,
+            profile: 0.0,
+            bulge: 0.0,
+            tail: 1.0,
+            pairing: 0,
+            spacing: 2,
+            start: 1,
         }
     }
 }
@@ -367,6 +404,41 @@ impl AnimalGenome {
                 lo: 0.0,
                 hi: 0.5,
             },
+            Gene::Real {
+                v: &mut self.reach,
+                lo: 0.6,
+                hi: 1.5,
+            },
+            Gene::Real {
+                v: &mut self.profile,
+                lo: -0.6,
+                hi: 0.6,
+            },
+            Gene::Real {
+                v: &mut self.bulge,
+                lo: 0.0,
+                hi: 0.5,
+            },
+            Gene::Real {
+                v: &mut self.tail,
+                lo: 0.5,
+                hi: 1.6,
+            },
+            Gene::Int {
+                v: &mut self.pairing,
+                lo: 0,
+                hi: 2,
+            },
+            Gene::Int {
+                v: &mut self.spacing,
+                lo: 1,
+                hi: 3,
+            },
+            Gene::Int {
+                v: &mut self.start,
+                lo: 1,
+                hi: 3,
+            },
             Gene::Int {
                 v: &mut self.depth,
                 lo: 0,
@@ -380,7 +452,7 @@ impl AnimalGenome {
             Gene::Int {
                 v: &mut self.limbs,
                 lo: 0,
-                hi: 8,
+                hi: 12,
             },
             Gene::Int {
                 v: &mut self.limb_len,
@@ -516,12 +588,34 @@ impl AnimalGenome {
             sockets: u8::from(rng.chance(0.2)),
             jitter: rng.range(0.0, 0.05),
             asymmetry: rng.range(0.0, 0.08),
+            reach: rng.range(0.8, 1.25),
+            profile: rng.range(-0.4, 0.4),
+            bulge: if rng.chance(0.4) {
+                rng.range(0.1, 0.4)
+            } else {
+                0.0
+            },
+            tail: rng.range(0.7, 1.4),
+            pairing: if archetype == Archetype::Ribbed {
+                rng.int(0, 2) as u8
+            } else {
+                0
+            },
+            spacing: rng.int(1, 3) as u8,
+            start: if rng.chance(0.6) {
+                1
+            } else {
+                rng.int(2, 3) as u8
+            },
         };
         if archetype == Archetype::Octopus {
             g.curl = rng.range(0.15, 0.35);
         }
         if archetype == Archetype::Squid {
             g.curl = rng.range(0.05, 0.2);
+        }
+        if archetype == Archetype::Ribbed {
+            g.curl = rng.range(-0.3, 0.3);
         }
         if archetype == Archetype::Jelly {
             g.curl = rng.range(-0.08, 0.08);
@@ -556,10 +650,23 @@ impl AnimalGenome {
             *v *= 1.0 + triangle(rng);
         }
         g.curl += triangle(rng) * 0.2;
+        for v in [&mut g.reach, &mut g.tail] {
+            *v *= 1.0 + triangle(rng);
+        }
+        g.profile += triangle(rng) * 0.2;
+        g.bulge = (g.bulge + triangle(rng) * 0.1).max(0.0);
         g.swell = (g.swell + triangle(rng) * 0.1).max(0.0);
         g.jitter = (g.jitter + triangle(rng) * 0.05).max(0.0);
         g.asymmetry = (g.asymmetry + triangle(rng) * 0.05).max(0.0);
-        for v in [&mut g.segments, &mut g.limbs, &mut g.limb_len, &mut g.eyes] {
+        for v in [
+            &mut g.segments,
+            &mut g.limbs,
+            &mut g.limb_len,
+            &mut g.eyes,
+            &mut g.pairing,
+            &mut g.spacing,
+            &mut g.start,
+        ] {
             if rng.chance(0.05) {
                 *v = if rng.chance(0.5) {
                     v.saturating_add(1)
@@ -812,10 +919,14 @@ impl Builder<'_> {
                     _ => 1.0,
                 };
                 let swell = 1.0 + g.swell * (i as f32 * 2.1 + phase).cos();
-                base * profile * swell
+                let tail = if n >= 3 && i + 2 >= n { g.tail } else { 1.0 };
+                base * profile * swell * tail
             })
             .collect();
-        if matches!(g.archetype, Archetype::Chain | Archetype::Plumeworm) {
+        if matches!(
+            g.archetype,
+            Archetype::Chain | Archetype::Plumeworm | Archetype::Ribbed
+        ) {
             for _ in 0..self.depth.min(2) {
                 if radii.len() * 2 - 1 > SAMPLE_BODIES {
                     break;
@@ -863,7 +974,9 @@ impl Builder<'_> {
         let mut at = parent;
         let mut dir = dir;
         for k in 0..len {
-            let r = (scale * (1.0 - step * k as f32)).max(0.15) * unequal * (1.0 + self.jitter());
+            let r = (scale * self.g.reach * (1.0 - step * k as f32)).max(0.15)
+                * unequal
+                * (1.0 + self.jitter());
             if k > 0 {
                 dir = rot(dir, curl * sign + self.jitter() * 0.5);
             }
@@ -874,6 +987,19 @@ impl Builder<'_> {
             self.mark(root, PartKind::Joint, Vec2::ZERO, 0.0, 0.0, 0.12);
         }
         beads
+    }
+
+    /// Beads for the `i`-th of `n` appendages: `base` shaped by the length profile and bulge
+    /// genes (exactly `base` when both are zero).
+    fn sized(&self, base: usize, i: usize, n: usize) -> usize {
+        let f = if n > 1 {
+            i as f32 / (n - 1) as f32
+        } else {
+            0.5
+        };
+        let factor = (1.0 + self.g.profile * (1.0 - 2.0 * f))
+            * (1.0 + self.g.bulge * 2.0 * (f * std::f32::consts::PI).sin());
+        ((base as f32 * factor).round() as usize).clamp(1, base + 2)
     }
 
     fn next_side(&mut self) -> i8 {
@@ -911,16 +1037,19 @@ fn build(g: &AnimalGenome, seed: u64, depth: u8) -> Plan {
                 let attach = (((i as f32 + 0.5) / n as f32 * spine as f32) as usize).min(spine - 1);
                 let side: i8 = if i % 2 == 0 { 1 } else { -1 };
                 let out = Vec2::new(-f32::from(side), 0.0) + Vec2::new(0.0, g.lean);
+                let len = b.sized(len, i, n);
                 limbs.push(b.limb(trunk[attach], out, side, len, scale, step, g.curl));
             }
         }
         Archetype::Squid => {
             for i in 0..n {
                 let u = (i as f32 + 0.5) / n as f32 * 2.0 - 1.0;
-                let dir = rot(Vec2::Y, u * (0.6 + 0.6 * g.lean).min(1.5));
+                // A crown of tentacles fanned across the front of the head.
+                let dir = rot(-Vec2::Y, u * (0.5 + 0.6 * g.lean).min(1.4));
                 // The middle pair of a full ring are the long feeding tentacles.
                 let long = usize::from(n >= 6 && u.abs() < 1.0 / n as f32 * 1.5);
                 let side = b.next_side();
+                let len = b.sized(len, i, n);
                 limbs.push(b.limb(head, dir, side, len + long, 0.38, 0.06, g.curl));
             }
         }
@@ -938,6 +1067,7 @@ fn build(g: &AnimalGenome, seed: u64, depth: u8) -> Plan {
             for i in 0..n {
                 let dir = rot(Vec2::Y, (i as f32 + shift) / n as f32 * TAU);
                 let side = b.next_side();
+                let len = b.sized(len, i, n);
                 limbs.push(b.limb(head, dir, side, len, scale, step, curl));
             }
         }
@@ -946,6 +1076,7 @@ fn build(g: &AnimalGenome, seed: u64, depth: u8) -> Plan {
             for i in 0..n {
                 let u = (i as f32 + 0.5) / n.max(1) as f32 * 2.0 - 1.0;
                 let side = b.next_side();
+                let len = b.sized(len, i, n);
                 limbs.push(b.limb(head, rot(Vec2::Y, u * half), side, len, 0.3, 0.05, g.curl));
             }
         }
@@ -954,6 +1085,31 @@ fn build(g: &AnimalGenome, seed: u64, depth: u8) -> Plan {
                 let tip = *trunk.last().unwrap_or(&head);
                 let r = b.radius(tip);
                 b.branch(tip, Vec2::Y, r, b.depth);
+            }
+        }
+        Archetype::Ribbed => {
+            // Ribs on every `spacing`-th bead from `start`, paired, alternating or one-sided,
+            // until `limbs` ribs are placed.
+            let hosts: Vec<usize> = (usize::from(g.start)..spine)
+                .step_by(usize::from(g.spacing.max(1)))
+                .collect();
+            let mut placed = 0;
+            'ribs: for (k, &h) in hosts.iter().enumerate() {
+                let sides: &[i8] = match g.pairing {
+                    0 => &[1, -1],
+                    1 if k % 2 == 0 => &[1],
+                    1 => &[-1],
+                    _ => &[1],
+                };
+                for &side in sides {
+                    if placed >= n {
+                        break 'ribs;
+                    }
+                    let out = Vec2::new(-f32::from(side), 0.0) + Vec2::new(0.0, g.lean);
+                    let len = b.sized(len, h, spine);
+                    limbs.push(b.limb(trunk[h], out, side, len, 0.7, 0.07, g.curl));
+                    placed += 1;
+                }
             }
         }
         Archetype::Bead | Archetype::Chain | Archetype::Puffer | Archetype::Plumeworm => {}
@@ -1257,6 +1413,28 @@ impl Builder<'_> {
                     }
                 }
             }
+            Archetype::Ribbed => {
+                // Fins on the rib tips when the body is plain, plumes when it is rich.
+                for (k, arm) in limbs.iter().enumerate() {
+                    if let Some(&tip) = arm.last() {
+                        let angle = self.plan.parts[tip as usize].angle;
+                        let r = self.radius(tip);
+                        let kind = if g.dress > 0.55 && k % 2 == 0 {
+                            PartKind::Frill
+                        } else {
+                            PartKind::Fin
+                        };
+                        self.mark(
+                            tip,
+                            kind,
+                            Vec2::from_angle(angle) * r,
+                            angle,
+                            1.1 * r,
+                            0.08 * r,
+                        );
+                    }
+                }
+            }
             Archetype::Tree => {
                 let used: Vec<bool> = {
                     let mut has_child = vec![false; self.plan.parts.len()];
@@ -1376,6 +1554,13 @@ mod tests {
                     sockets: 255,
                     jitter: 1e9,
                     asymmetry: f32::NAN,
+                    reach: 1e9,
+                    profile: -1e9,
+                    bulge: 1e9,
+                    tail: f32::NAN,
+                    pairing: 255,
+                    spacing: 0,
+                    start: 255,
                 };
                 let spec = AnimalSpecimen {
                     genome: g.limited(),
@@ -1490,7 +1675,7 @@ mod tests {
             // head ring of radial archetypes and the trunk spine of crabs and rays.
             if !matches!(a, Archetype::Tree)
                 && !a.radial()
-                && !matches!(a, Archetype::Crab | Archetype::Ray)
+                && !matches!(a, Archetype::Crab | Archetype::Ray | Archetype::Ribbed)
             {
                 let mut children = vec![0; deeper_plan.parts.len()];
                 for p in deeper_plan
@@ -1566,6 +1751,94 @@ mod tests {
         assert_eq!(a, AnimalSpecimen::for_entity(7, 1));
         assert_ne!(a, AnimalSpecimen::for_entity(7, 2));
         assert_ne!(a, AnimalSpecimen::for_entity(8, 1));
+    }
+
+    /// Mean and low-end pairwise shape distance of sampled plans of one archetype.
+    fn spread_of(a: Archetype, n: usize) -> (f32, f32, f32) {
+        let mut rng = Rng::new(99 + a.get() as u64);
+        let plans: Vec<Plan> = (0..n)
+            .map(|_| {
+                let g = AnimalGenome::sample_archetype(&mut rng, a);
+                grow(&AnimalSpecimen {
+                    genome: g,
+                    seed: rng.next_u64(),
+                })
+                .0
+            })
+            .collect();
+        let mut d = Vec::new();
+        for i in 0..n {
+            for j in i + 1..n {
+                d.push(plans[i].distance(&plans[j]));
+            }
+        }
+        d.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mean = d.iter().sum::<f32>() / d.len() as f32;
+        (mean, d[d.len() / 10], d[0])
+    }
+
+    #[test]
+    fn ribbed_spines_do_not_repeat() {
+        let (mean, tenth, _) = spread_of(Archetype::Ribbed, 60);
+        assert!(mean > 0.03, "mean {mean}");
+        assert!(tenth > 0.008, "a tenth of pairs nearly identical: {tenth}");
+        // The genes that make them differ all actually vary in samples.
+        let mut rng = Rng::new(5);
+        let genomes: Vec<AnimalGenome> = (0..200)
+            .map(|_| AnimalGenome::sample_archetype(&mut rng, Archetype::Ribbed))
+            .collect();
+        for pairing in 0..3 {
+            assert!(
+                genomes.iter().any(|g| g.pairing == pairing),
+                "pairing {pairing}"
+            );
+        }
+        for spacing in 1..4 {
+            assert!(
+                genomes.iter().any(|g| g.spacing == spacing),
+                "spacing {spacing}"
+            );
+        }
+        assert!(
+            genomes.iter().any(|g| g.profile > 0.2) && genomes.iter().any(|g| g.profile < -0.2)
+        );
+        assert!(genomes.iter().any(|g| g.bulge > 0.1) && genomes.iter().any(|g| g.bulge == 0.0));
+        assert!(genomes.iter().any(|g| g.start >= 2));
+        let ribs = |g: &AnimalGenome| {
+            build(g, 1, 0)
+                .parts
+                .iter()
+                .filter(|p| p.kind == PartKind::Joint)
+                .count()
+        };
+        let counts: std::collections::HashSet<usize> = genomes.iter().map(ribs).collect();
+        assert!(counts.len() >= 5, "rib counts {counts:?}");
+    }
+
+    #[test]
+    fn every_archetype_varies_between_samples() {
+        for &a in Archetype::ALL {
+            if a == Archetype::Bead {
+                continue;
+            }
+            let (mean, _, _) = spread_of(a, 40);
+            assert!(mean > 0.015, "{a:?} samples look alike: {mean}");
+        }
+        let (bead, _, _) = spread_of(Archetype::Bead, 40);
+        assert!(bead > 0.0);
+    }
+
+    #[test]
+    fn ribbed_is_common_but_not_dominant() {
+        let all = sampled(6000, 41);
+        let ribbed = all
+            .iter()
+            .filter(|s| s.genome.archetype == Archetype::Ribbed)
+            .count();
+        assert!(
+            ribbed * 100 >= all.len() * 5 && ribbed * 100 <= all.len() * 15,
+            "{ribbed}"
+        );
     }
 
     #[test]
