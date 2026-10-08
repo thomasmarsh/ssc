@@ -2510,10 +2510,20 @@ pub fn draw(
         match body.kind {
             BodyKind::Player => {
                 ship_view.update(body, session.input, game.time);
-                if game.player_invulnerability > 0.0
-                    && ((game.time * 12.0) as u32).is_multiple_of(2)
-                {
-                    continue;
+                // Grace shows as a thin shell that thins out as it runs down; the ship itself
+                // stays solid and readable instead of blinking away.
+                if game.player_invulnerability > 0.0 {
+                    let left = game.player_invulnerability.min(1.0);
+                    let wobble = if session.reduce_effects {
+                        1.0
+                    } else {
+                        0.8 + 0.2 * (game.time * 9.0).sin()
+                    };
+                    let shell = Color::srgba(0.55, 0.85, 1.0, 0.55 * left * wobble);
+                    gizmos.circle_2d(p, r * 3.2, shell).resolution(40);
+                    gizmos
+                        .circle_2d(p, r * 3.6, shell.with_alpha(0.2 * left * wobble))
+                        .resolution(40);
                 }
                 let active = !session.paused
                     && session.chart.is_none()

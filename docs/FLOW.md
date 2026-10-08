@@ -317,7 +317,7 @@ Written after the pass; the sections above stay as the review. Everything here i
 
 - Docking assist (a press within 400 units eases the ship in): landing still needs speed under 80 within 80 units, and the prompt says "DOCK SLOW DOWN" when it will refuse.
 - The guided first ten minutes beyond the free ping and the lure, and "BEST BUY" at the bench.
-- The part-plugging animation remains proposed. Outcome-derived before/after receipts, bounded purchase rings, and fitted-part purchase guidance are built; see [BENCH.md](BENCH.md). Pickups flying to the ship along a curve, the respawn-grace shell and an auto-zooming camera.
+- The part-plugging animation remains proposed. Outcome-derived before/after receipts, bounded purchase rings, and fitted-part purchase guidance are built; see [BENCH.md](BENCH.md). an auto-zooming camera.
 - The remaining P1 and P2 items: ten skills, changed resource roles, trophy gating, lode fatigue, the Tow Rig, a single star-map pin, specimen log, controller-first map.
 
 **Judgement calls worth a look when playing**
@@ -453,3 +453,4 @@ Seamer is built, generator version 19. BESTIARY section 17 records shared-gene m
 
 [BENCH.md](BENCH.md) is authoritative for actual before/after receipts, payment, repair, both reforge outcomes, weapon/skill levels, organ replacement/removal, expiration, repeated inputs, bounded rendering, and reduce effects. Section 3 item 16 is reconciled as "purchase available at the bench", after a Rare-or-better part actually fits or crosses rarity. It includes existing SYMBIOSIS, ignores already-owned skills and scrapped parts, and does not promise affordability or ownership. Section 7 item 7 reuses the 0.7-second vector purchase ring and 0.24-second shared pickup chime with a four-second receipt; animated glyph insertion and rarity-specific chimes remain proposals. Navigation, all 19 skill identities, costs, gates, manual stash, partial repair, organs, and the existing ability NEW tags are preserved. Generator remains 19: no generation, map compatibility, or RNG draw change.
 - The low-hull heartbeat is built: `Cue::Heartbeat` (`cue_heartbeat` in `src/simulation/cues.rs`) sounds a soft lub-dub below 30 percent hull, every 1.2 s tightening to 0.55 s near zero, silent when dead or healthy. Pure sound, no RNG, no rule reads it. Volume and tempo are first guesses and need a human ear.
+- Pickups now arc into the ship (a sideways swirl that fades near contact, in `update_pickups`), and grace after respawn or a dash draws as a thin pale-blue double shell that fades over the last second instead of blinking the ship away (`presentation.rs`; static under reduced effects). Checked in one offscreen render only; the shell sits close to the HUD rings.

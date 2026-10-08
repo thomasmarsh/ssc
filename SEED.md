@@ -102,7 +102,7 @@ Keys: arrows to fly, `Space`/mouse to fire, `M` mine (hold), `[` `]` or 1-9 weap
 3. **FLOW.md P1/P2**:
    - The three-tab bench, purchase receipts, and existing unlock guidance are built; merge the 19 skills and redesign material roles only as a later slice. Automatic stash overflow is also deferred.
    - Progression: trophy gates on the top skill levels, lode fatigue, a ring-entry reward (the doc found no hard farming exploit, but a slow safe path pays as well as risk).
-   - Docking assist, "BEST BUY" hints, the proposed part-plugging animation, pickups curving to the ship, a respawn shell, cutting star map notes.
+   - Docking assist, "BEST BUY" hints, the proposed part-plugging animation, cutting star map notes.
 4. **Sniping/balance leftovers**: accuracy spread at range (falloff only so far), a heat or cargo cost on the stock gun, realm effects on civilizations, realm tilts on well modes beyond count and pull, a realm that stresses mining or symbiosis as a primary axis, a distinct HUD message for Dead Reach fizzles.
 5. **Ideas the user approved earlier but not yet built**: boons at pads (Hades-style per-run choice of one of three random modifiers; judged a bigger system, do after progression is clearer); "wildlife reacts to extirpation" (predators migrate when prey is gone) was offered and NOT picked by the user.
 6. **Polish and hygiene**: tune the nebula by eye in a live window; fix overlaps at small sizes; investigate the possible test hang; consider caching `ecology()`; consider persistence to disk if the user wants it; keep CLAUDE.md and docs in sync.
