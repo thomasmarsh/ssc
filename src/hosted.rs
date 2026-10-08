@@ -2,7 +2,7 @@
 //! slots for residents. A host genome carries a count and a relationship; its residents are
 //! plain creatures derived from it by `resident`, spawned attached (the same mechanic as
 //! rooted life, see `simulation/attach.rs` and `simulation/root.rs`) and released when the
-//! host dies or unloads.
+//! host dies or unloads (a brood then swarms: see `simulation/root.rs`).
 //!
 //! Slice one: one megafauna host (the apex elder: rare, big and already deterministic) and
 //! residents that ride its head. The relationship shapes the resident's genome (a brood is
@@ -132,6 +132,18 @@ pub fn resident(host: &Genome, relation: Relation) -> Genome {
     .limited()
 }
 
+/// Whether `genome` is a brood resident (see `resident`): the host's armed young, the one
+/// relation that swarms when its host is lost. Read from the genes so a released resident,
+/// which no longer knows its host, still behaves as what it is.
+pub fn is_brood(genome: &Genome) -> bool {
+    genome.hosted.is_none()
+        && genome.anatomy.is_none()
+        && genome.weapon == Weapon::Projectile
+        && genome.radius == RESIDENT_RADIUS + 2.0
+        && genome.social == Social::Pack
+        && genome.diet == Diet::None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +160,12 @@ mod tests {
             assert!(g.radius < 20.0);
         }
         assert_eq!(resident(&host, Relation::Symbiote).contact_damage, 0.0);
+        for relation in Relation::ALL {
+            assert_eq!(
+                is_brood(&resident(&host, relation)),
+                relation == Relation::Brood
+            );
+        }
     }
 
     #[test]

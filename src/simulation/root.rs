@@ -19,6 +19,8 @@ use crate::genome::Habit;
 pub const DAZE: f32 = 2.5;
 /// Seconds after letting go before a creature may cling again, so it can get away.
 pub const REATTACH_DELAY: f32 = 5.0;
+/// How long a brood released by the loss of its host stays on the hunt, whatever it saw.
+pub const SWARM_RAGE: f32 = 30.0;
 /// Fraction of its radius at which a rooted body's center stands off the surface (so it
 /// sits nearly on it, a little sunk in).
 pub const STAND: f32 = 0.9;
@@ -343,7 +345,10 @@ impl Game {
             }
             None => body.position - Vec2::from_angle(body.angle),
         };
-        if dazed {
+        if dazed && crate::hosted::is_brood(&body.genome) {
+            // Orphaned young do not scatter, they swarm the one near.
+            body.provoked = SWARM_RAGE;
+        } else if dazed {
             body.panic = DAZE;
             body.panic_from = from;
         }
@@ -1197,5 +1202,38 @@ mod tests {
             body(&game, drifter).root.is_none_or(|r| r.host != host_id),
             "an elder is not a rock"
         );
+    }
+
+    #[test]
+    fn a_brood_swarms_when_its_host_is_lost_and_other_residents_scatter() {
+        use crate::hosted::{Hosted, Relation, resident};
+        let mut game = empty_game();
+        quiet(&mut game);
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        let host_species = Species::of(Genome {
+            radius: 40.0,
+            hull: 300.0,
+            mass: 100.0,
+            hosted: Some(Hosted {
+                count: 2,
+                relation: Relation::Brood,
+            }),
+            ..Genome::default()
+        });
+        let host = game.make_creature(&host_species, FAR);
+        let host_id = host.id;
+        game.bodies.push(host);
+        let brood = Species::of(resident(&host_species.genome, Relation::Brood));
+        let friend = Species::of(resident(&host_species.genome, Relation::Symbiote));
+        let b = rooted_on(&mut game, &brood, host_id, 0.5);
+        let f = rooted_on(&mut game, &friend, host_id, 2.5);
+        game.step(DT, Input::default());
+        assert_eq!(body(&game, b).provoked, 0.0, "calm while carried");
+        game.bodies.retain(|x| x.id != host_id);
+        game.step(DT, Input::default());
+        let (b, f) = (body(&game, b), body(&game, f));
+        assert!(b.root.is_none() && f.root.is_none(), "both released");
+        assert!(b.provoked > 0.0 && b.panic == 0.0, "the brood swarms");
+        assert!(f.provoked == 0.0 && f.panic > 0.0, "the symbiote scatters");
     }
 }
