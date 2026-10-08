@@ -457,7 +457,8 @@ impl Bestiary {
                     continue;
                 };
                 self.cells.push(Cell {
-                    label: format!("{} {name} n{}", a.name(), plan.nodes.len()),
+                    // Two lines: the widest one-line label ("plumeworm elder b n23") overran its cell.
+                    label: format!("{}\n{name} n{}", a.name(), plan.nodes.len()),
                     poses: vec![pose],
                     group: col,
                 });
