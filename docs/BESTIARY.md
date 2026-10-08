@@ -1,6 +1,14 @@
 # Bestiary of extremes: strange creatures, dynamic wells and special attacks
 
-This is a design document, not a record of built code. Nothing here exists yet except where a sentence says "built" and names the file. Numbers are first guesses to be tuned by playing. It extends [UNIVERSE.md](UNIVERSE.md) (genomes, niches, apex elders, wells) and [ROADMAP.md](ROADMAP.md) (progression), and it is written against the code as of the backdrop commit.
+Status: BUILT - all 20 creature powers (`Power::built` is true for every gene in `src/power.rs`), the Jam status, field powers, dynamic wells, Hullworm and Remora, four organs with the SYMBIOSIS skill, and Weaver, Slinger, Runekeeper and Seamer. PARTIAL - organs (4 of 20 in the table in section 8). TODO (see "Status: what is built" at the end for detail):
+
+- TODO: the other sixteen organs (Argus eye, Tick tonic, Lens organ, Phase gland, Spinneret, Choir throat, Gloom vesicle, Seam needle, Slinger sinew, Rune ink, Splitter marrow and so on) and apex-linked organs.
+- TODO: Lurefish inner pickup and Argus eye reveal; dim absorbing sonar echoes; lens ping honesty (blip drawn off); chant aggression buff for song.
+- TODO: Hullworm growth, eggs and part hijack; Remora kill spore.
+- TODO: Seamer seam needle, personal rifts and beacon integration; Runekeeper rune ink and new ship mine abilities.
+- TODO: a bench specimen log (codex of powers met, `Naturalist` title); not in code.
+
+Sections 1 to 16 and 20 below were written as design and have all been built in some form (the "Status: what is built" list records every deliberate difference); 17 to 19 were rewritten as the built contract. Numbers are first guesses to be tuned by playing. It extends [UNIVERSE.md](UNIVERSE.md) (genomes, niches, apex elders, wells) and [ROADMAP.md](ROADMAP.md) (progression), and it is written against the code as of the backdrop commit.
 
 The brief: imagine from scratch the extreme things that could live in space (superhero powers, mythic gods, fantasy wizards, SF technology, China Mieville weirdness, deep-sea and parasite biology) and show that every one of them is a point in genome space, not an enemy-kind branch. The game's rule stands: no code branches on a creature kind. A creature has a power because it carries a gene, and that gene can be mutated, crossed, drifted by isolation and found in an unexpected lineage.
 
@@ -82,7 +90,7 @@ Full table of genes, ranges and files is in section 11.
 
 Each entry: image, silhouette, abilities, encounter, what the player does, genome expression. "Specimen" lists the gene values of a typical carrier; unlisted genes are whatever the sampler gave the body. All creatures keep the usual rules: a body per part, the sector budget, lineage caps, drops by `Source::of_creature`.
 
-### 1. Veilwing (phase shifting)
+### 1. Veilwing (phase shifting) (built)
 
 **Image.** A moth the colour of a bruise, drawn with an outline that stutters between a solid line and a ghost of dots. For two seconds it is a creature; for the next two it is a rumour. Shots go through its wings. It cannot hurt you while it is a rumour either, which is the whole of the bargain.
 
@@ -102,7 +110,7 @@ Specimen: `phase` 0.8 (duty = 0.2 + 0.4 s = 0.48 phased of every cycle), `power_
 
 **Player takes from it.** Phase gland, see section 8: the dash passes through rocks and creatures (no stop-short) for one use per cooldown at a cost of double shield.
 
-### 2. Pushwhale (gravitational repulsion)
+### 2. Pushwhale (gravitational repulsion) (built)
 
 **Image.** A slow, barrel-sized thing that breathes in and out. Everything near it drifts away: rocks, plankton, your own bullets, you. A cleared halo hangs around it, and its flock keep to the edges of the clear space like children at the rim of a pond.
 
@@ -122,7 +130,7 @@ Specimen: `repel` 0.75, `power_reach` 420, `power_period` 7.0, `radius` 38, `mas
 
 **Player takes from it.** Antigrav bladder: a defensive Aux boost, "Repulsor", that pushes rocks and enemy bullets away from the ship within 110 units while a hostile is near (existing boost `Need::Danger`), drains volatiles per second.
 
-### 3. Tarbloom (time bubbles)
+### 3. Tarbloom (time bubbles) (built)
 
 **Image.** A translucent, slowly rotating jelly the size of a house with stars inside it that move too slowly. Where it lives the sky looks like glass poured thick. Flying into the bubble feels like running through water; bullets fired out of it crawl.
 
@@ -142,7 +150,7 @@ Specimen: `warp` -0.7 (slow), `power_reach` 360, `radius` 28, `hull` 90, `speed`
 
 **Player takes from it.** Chrono cyst: after a perfect parry the ship casts a 1.5 s slow bubble of radius 220 (a once per 12 s trigger).
 
-### 4. Lenswyrm (lensing, drawing in, and a pocket well)
+### 4. Lenswyrm (lensing, drawing in, and a pocket well) (built)
 
 **Image.** A long thin eel that is mostly the shape of the light that bends around it. You see it as a ring of stretched stars with a dark bright-edged line in the middle. When it passes between you and a rock, the rock bends. Things that come close are drawn in, slowly, like a drain.
 
@@ -162,7 +170,7 @@ Specimen: `lens` 0.85, `power_reach` 520, `segments` 9, `wave` 1.4, `radius` 12,
 
 **Player takes from it.** Lens organ: ping reach plus 1500 and a wider camera pull (the "wide" camera variant for 20 s after a ping).
 
-### 5. Skipjack (short hops)
+### 5. Skipjack (short hops) (built)
 
 **Image.** A bright fish-thing that is never where it was. It does not flee or charge; it is somewhere else, and then somewhere else, with a flash and a ring at both ends. Fast and annoying, a creature of pure timing.
 
@@ -182,7 +190,7 @@ Specimen: `blink` 0.6, `power_period` 3.4, `power_reach` 320, `speed` 220, `weap
 
 **Player takes from it.** Skip node: dash can hop through a single wall or rock thinner than 80 units to a clear landing spot.
 
-### 6. Hullpick (shield bypass)
+### 6. Hullpick (shield bypass) (built)
 
 **Image.** A thin wasp with a long violet spine that does not shoot at your shield. It shoots at what is behind the shield. You see the bolt pass through the shimmer without a spark and then the hull number moves.
 
@@ -202,7 +210,7 @@ Specimen: `bypass` 0.7 (share 0.2 + 0.6 s ~ 0.45), `weapon` Projectile, `shot_sp
 
 **Player takes from it.** Pith spur: the ship's Needles trait strips 30 percent of an enemy's shield per shot (the enemy shows a visible shield-peel).
 
-### 7. Stormcap (EMP)
+### 7. Stormcap (EMP) (built)
 
 **Image.** A medusa of blue-white fronds with a dome that flickers. It does not attack you; it turns you off. A ring tightens around it, and when the ring closes everything that runs on electricity stutters.
 
@@ -222,7 +230,7 @@ Specimen: `emp` 0.75, `power_period` 6.0, `power_reach` 320, `power_hold` 1.4, `
 
 **Player takes from it.** Ion gland: Faraday skin (immune to jams) and an optional "static discharge" on a perfect parry that jams creatures within 200 for 1 s.
 
-### 8. Argus Moth (sensor and vision glitch)
+### 8. Argus Moth (sensor and vision glitch) (built)
 
 **Image.** A many-eyed thing covered in lights that blink in patterns. It does not hurt. It makes you unsure. For one or two seconds your radar fills with ghosts, the edge arrows point wrong and the screen smears colours. It is the creature that lies about where things are.
 
@@ -242,7 +250,7 @@ Specimen: `glare` 0.8, `power_period` 5.5, `power_reach` 650, `power_hold` 1.6, 
 
 **Player takes from it.** Argus eye: clear sight, reveals mimics and cloaked creatures within 500 units and gives immunity to glare.
 
-### 9. Lurefish (mimicry and decoys)
+### 9. Lurefish (mimicry and decoys) (built)
 
 **Image.** A grey stone that drifts toward you. Or a bright pickup, hanging in the dark, the most beautiful part drop you have ever seen, hanging from an almost invisible stalk. The angler of space. The reveal is brief: a crack and a mouth.
 
@@ -262,7 +270,7 @@ Specimen: `mimic` 0.8 (lure), `power_reach` 260, `diet` Hunt, `contact_damage` 2
 
 **Player takes from it.** Lure gland: deploy a pickup-shaped decoy that creatures with the Hunt diet pursue for 4 s (a flight tool).
 
-### 10. Hullworm (parasite)
+### 10. Hullworm (parasite) (built)
 
 **Image.** A grey worm the size of a thumb. It drifts to you and sticks to your hull. Then you hear it. It is fed by your shield, or your hold, or, if it is the bad sort, the one aux part it has made dormant. It grows fatter by the second.
 
@@ -282,7 +290,7 @@ Specimen: `latch` 0.7, `diet` Siphon, `root` 0.5 (juvenile rooter with host the 
 
 **Player takes from it.** Parasite harvest: a rare organ that converts attached worms into materials rather than being drained (an "adoption", see symbiotes).
 
-### 11. Kindling Remora (symbiote)
+### 11. Kindling Remora (symbiote) (built)
 
 **Image.** The first thing in the game that wants to help you. A small amber, slow, nervous creature that hangs near big things. If you leave it alone for a few seconds it comes to the ship and sits on your hull and your ship hums. If you shoot it, it pops into a spore you can scoop.
 
@@ -302,7 +310,7 @@ Specimen: `symbiote` 0.7, `fear` Player, `trigger` Harm, `radius` 9, `shield` 12
 
 **Player takes from it.** Everything: this is the supplying creature of the whole organ system.
 
-### 12. Murmur (swarm as one organism)
+### 12. Murmur (swarm as one organism) (built)
 
 **Image.** A sky of two hundred motes that is one animal. It tightens to a ball, spreads to a net, forms an arrow and drives itself at you. A thousand bullets in your path are one bullet to it. It has a single heart.
 
@@ -322,7 +330,7 @@ Specimen: `cloud` 0.8, `radius` 60, `hull` 120, `flocking` 1.8, `speed` 150, `co
 
 **Player takes from it.** Murmur mote: an escort cloud of 3 motes that absorb one shot each and respawn on a cooldown.
 
-### 13. Tidegorger (eats wells and rocks, grows)
+### 13. Tidegorger (eats wells and rocks, grows) (built)
 
 **Image.** A drifting stomach. It eats rocks, then bigger rocks, and in the wild places it eats the wells themselves, chewing the dark out of the sector until the thing it carries in its belly is the well. It is grotesquely large and gets larger. A wanderer carrying a well is a moving hazard that drifts through a sector.
 
@@ -342,7 +350,7 @@ Specimen: `devour` 0.7, `diet` Rocks, `mass` 120, `radius` 40, `hull` 160, `spee
 
 **Player takes from it.** Gorger gut: ramming rocks heals hull a little (stone fed), and the mining beam yields 15 percent more.
 
-### 14. Weaver (builder, web trap)
+### 14. Weaver (builder, web trap) (built)
 
 **Image.** An eight-armed thing at the centre of a lattice of glowing cords strung between rocks. It builds while you watch. The web persists until you cut it. It is not trying to kill you; it is trying to make a place.
 
@@ -360,9 +368,11 @@ Specimen: `weave` 0.6, `weapon` Tether, `cord_strength` 2.0, `cord_hardness` 3, 
 
 **Simulation effect.** A Link between a creature body and a rock body: `Tether::link(owner, other)` already takes any two bodies; the step uses `closest_on_segment` for crossing, which is already generic. Cap on web links alive per weaver and in the world (`MAX_TETHERS` 64 stays).
 
-**Player takes from it.** Spinneret organ: a "web mine" that lays a cord between two of your mines.
+**Player takes from it.** Spinneret organ: a "web mine" that lays a cord between two of your mines. TODO: unbuilt.
 
-### 15. Dirgewhale (singing and sonic)
+**As built.** See "Step 9, Weaver webs" in the status list and UNIVERSE.md "Weaver webs" for tuning. Differences from the sketch: spokes join the builder to rocks (no rock-to-rock cords); a harmless dashed warning (0.9 s, 1.2 s when far) becomes a solid web; three-hit cords; 60 s expiry. Bounded hook: `SSC_SPECIMEN=weaver SSC_STEPS=15` stages a stationary specimen with three free rocks and lets the web build (see [HOOKS.md](HOOKS.md)). Human playtest questions: does the dashed-to-solid change read under pressure, do players find the gaps in a lattice, is a 60 s web a fair cage, and does pulling rocks inward make mining near a web annoying?
+
+### 15. Dirgewhale (singing and sonic) (built)
 
 **Image.** A huge round creature that sings. You hear it long before you see it, panned in the mixer from where it is. Each note is a ring of faint pressure that moves outward across the dark, and rocks shake in time. Its flock fight harder when it sings.
 
@@ -382,7 +392,7 @@ Specimen: `song` 0.7 (dirge), `power_period` 4.0, `power_reach` 700, `radius` 44
 
 **Player takes from it.** Choir throat: a ship "pulse" that shatters crystal and rattles rocks (a mining accelerator) and a ping variant that carries farther.
 
-### 16. Gloomfeeder (light eater)
+### 16. Gloomfeeder (light eater) (built)
 
 **Image.** A patch of the sky that is quietly turned down. Stars thin out. The nebula behind you loses its colour. A small bright ring sits in the middle where something is eating the light, and near it plankton goes grey and does not grow back.
 
@@ -422,7 +432,7 @@ Specimen: `dim` 0.7, `power_reach` 450, `diet` Dust, `radius` 24, `hull` 60.
 
 **Grace and cleanup.** Every group member and bullet gets **0.6 seconds** of Rift-only transit grace, shared across all pairs. It is not damage invulnerability. Grace lives in fixed scalar fields on existing entities, so destruction or unload removes it without a growing id table; body grace pauses while frozen. A fresh outside-to-inside crossing is required after grace. Pairs clean silently on owner death, consumption, loss of Rift, becoming a follower, invalidity, freezing, or actual owner unload, or when either mouth sector leaves the active simulation, or at expiry. A wandering active owner can survive unloading of its original spawn sector. There is no stored pair restored on reload. Transit rings last 0.35 seconds, with a global cap of 32 and sector cleanup. No cleanup detonation, persistence, or grace map is introduced.
 
-**Counterplay and utility.** Fly around a mouth, leave during the warning, kill the owner to close the pair, or use a doorway to escape a pursuer, take a shortcut, send your fire across cover, or redirect a hostile shot or rock. Grace allows a clean departure. Blocked exits always refuse. Seam needle, personal player rifts, beacon integration, and new player abilities remain outside the transit slice. Sonar curiosity integration is now built; [DISCOVERY.md](DISCOVERY.md) records its separate availability and presentation contract.
+**Counterplay and utility.** Fly around a mouth, leave during the warning, kill the owner to close the pair, or use a doorway to escape a pursuer, take a shortcut, send your fire across cover, or redirect a hostile shot or rock. Grace allows a clean departure. Blocked exits always refuse. TODO: seam needle, personal player rifts, beacon integration, and new player abilities remain unbuilt. Sonar curiosity integration is now built; [DISCOVERY.md](DISCOVERY.md) records its separate availability and presentation contract.
 
 **Bounded hooks and human questions.** `SSC_SPECIMEN=seamer` places one authored creature. `SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1280x800 SSC_TELEPORT=60000,0 SSC_CAMERA=wide SSC_RIFT=warning|active|transit SSC_SMOKE_FRAMES=120 SSC_SCREENSHOT=<path>` isolates and holds a pair for inspection, with bullets over the connection. Does the dashed-to-solid change read during a fight? Is the partner obvious before entering? Does center-triggered transit feel natural on a long creature? Does a blocked exit feel like a safe refusal? Are 20 seconds between pairs and eight seconds of use enough to discover deliberate shortcuts and shot redirection?
 
@@ -439,6 +449,8 @@ Specimen: `dim` 0.7, `power_reach` 450, `diet` Dust, `radius` 24, `hull` 60.
 **Encounter.** Strange tier, ring 6 and out with the existing three-ring ramp and 1-in-330 species weight. Authored specimen: `sling` 0.6, four one-part limbs, `power_period` 3.5, `power_reach` 750, radius 22, mass 80, hull 80, gunless, rock-eating, slow, standoff 400. `SSC_SPECIMEN=slinger` stages a stationary specimen and three nearby stones. Use `SSC_TELEPORT=36000,0` outside HOME, `SSC_SPECIMEN_TELL=1` for the warning, or `SSC_SPECIMEN_THROW=1` for a short flight after release.
 
 **Counterplay.** Move sideways off the fixed arrow with ordinary thrust, dash sideways during the swing or flight, shoot a cord three times, touch it with shears, start mining its rock, or kill the owner. Dash cuts any orbit cord its swept path crosses and keeps its existing invulnerability and stop-short rules for rocks. Released stones cannot be gathered again for 5 s. Mining continues normally and can remove ammunition entirely. Owner or endpoint death, consumption, unloading, freezing, loss of the power, invalid coordinates, an occupied host, or excessive separation releases the cord and cancels the warning.
+
+**Human playtest questions.** Is the fixed arrow clear under pressure? Does 0.8 s leave enough room on a busy screen? Do players discover mining and cord cuts as counters? Do ore rocks hit too hard? (Validation at build: 16 scenarios for warning timing, fixed aim, kinetic impacts, counters, cleanup, budgets, authored pinned and moving specimens, RNG-free traces.)
 
 **Design reconciliation.** Parry handles shots, not bodies. It does not reflect thrown rocks; fixed aim, a longer warning, harmless cords, close-range suppression, ordinary movement, and dash provide the escape route without a parry redesign. FLOW's Tow Rig was retired in favour of SHOVE and PLATING. Slinger sinew remains an unbuilt organ idea, with no Tow Rig unlock or new ship ability in this slice.
 
@@ -463,9 +475,9 @@ Specimen: `dim` 0.7, `power_reach` 450, `diet` Dust, `radius` 24, `hull` 60.
 
 **Encounter and smoke hooks.** Strange tier, ring 6 and out, existing 1-in-250 species weight and three-ring ramp. Generator version 18 enables `Power::Rune.built()`. `SSC_SPECIMEN=runekeeper` places an authored specimen. For bounded four-payload galleries, use `SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1280x800 SSC_TELEPORT=36000,0 SSC_RUNE=arming|activation SSC_SMOKE_FRAMES=120 SSC_SCREENSHOT=<path>`. These isolate four stationary specimens and capture at 0.6 s of arming or about 0.23 s after activation.
 
-**Outside this slice and playtest questions.** Rune ink and new ship mine abilities remain unbuilt. Numbers are first guesses: do the glyphs read under pressure, does a stationary 90-unit circle leave enough room in a crowded sector, does the armed waiting state read differently from a fired patch, and do players discover the shoot-and-lure tradeoff without expecting every environmental kill to pay?
+**Outside this slice and playtest questions.** TODO: rune ink and new ship mine abilities remain unbuilt. Numbers are first guesses: do the glyphs read under pressure, does a stationary 90-unit circle leave enough room in a crowded sector, does the armed waiting state read differently from a fired patch, and do players discover the shoot-and-lure tradeoff without expecting every environmental kill to pay?
 
-### 20. Splitter (mitosis, the hydra)
+### 20. Splitter (mitosis, the hydra) (built)
 
 **Image.** A grey fat bag that, when it dies, becomes two. They are smaller, faster, and each of them can be killed, but you now have two. It is a short sharp lesson about burst damage.
 
@@ -593,7 +605,7 @@ The existing progression has three shapes: **parts** (physical, five slots, grad
 | Choir throat | Dirgewhale | Pulse that shatters crystal and rattles rocks | a ping variant |
 | Gloom vesicle | Gloomfeeder | Veil: creatures notice you at 70 percent range while not firing | `sensor` |
 | Seam needle | Seamer | A personal rift pair to a beacon within the sector | `chart.rs` beacons |
-| Slinger sinew | Slinger | Unbuilt organ idea; Tow Rig unlock retired in favour of SHOVE and PLATING | `skills.rs` |
+| Slinger sinew | Slinger | TODO: unbuilt organ idea; Tow Rig unlock retired in favour of SHOVE and PLATING | `skills.rs` |
 | Rune ink | Runekeeper | Mine layer can lay Slow and Push mines | `Trait::Mines` |
 | Splitter marrow | Splitter | Second wind once per life at 30 percent hull | `lives` |
 
@@ -687,17 +699,17 @@ Rates sum to about 7 percent of sampled species (a species has at most one from 
 
 Steps 1 to 6, 8 (symbiote, latch, four organs) and the cheap half of 7 and 10 are built (see the lists below); Seamer rifts are built; Runekeeper sigils are built; Weaver webs and Slinger orbits are built. Numbers are in the tuning constants at the top of `src/power.rs`, `src/well.rs` and the consts in `src/simulation/powers.rs`.
 
-- **Step 1, the block.** All 23 tail genes exist (names, ranges and defaults as in section 11; `lens` and `dim` rates 1 in 500, `rift` 1 in 1000). `Genome::sample` takes one extra final draw (`power::sample`); weights are the rate times a smoothstep over three rings past the power's first ring (Mild 3, Strange 5 to 8, Severe 7, Mythic 10) times a sector lean of 0.75 + 1.0 * above(parameter). A far species carries a power about 7.1 percent of the time. Awakening is `Genome::individual_in`: ring 3 and out, a quarter of the 1 percent outlier band (1 in 400), Mild or Strange only, intensity 0.35 to 0.6, no carriers among civilization people. The block never drifts (`drifted` skips it) and `mutate` keeps a carried intensity at 0.32 or more. A power that the body cannot carry is not given (a chain cannot blink). The sector map names carrier species ("not awake yet" for the seventeen without simulation) and has a powers layer; `GENERATOR_VERSION` is 7. Seventeen powers are carried but inert; no Jam status exists yet.
+- **Step 1, the block.** All 23 tail genes exist (names, ranges and defaults as in section 11; `lens` and `dim` rates 1 in 500, `rift` 1 in 1000). `Genome::sample` takes one extra final draw (`power::sample`); weights are the rate times a smoothstep over three rings past the power's first ring (Mild 3, Strange 5 to 8, Severe 7, Mythic 10) times a sector lean of 0.75 + 1.0 * above(parameter). A far species carries a power about 7.1 percent of the time. Awakening is `Genome::individual_in`: ring 3 and out, a quarter of the 1 percent outlier band (1 in 400), Mild or Strange only, intensity 0.35 to 0.6, no carriers among civilization people. The block never drifts (`drifted` skips it) and `mutate` keeps a carried intensity at 0.32 or more. A power that the body cannot carry is not given (a chain cannot blink). The sector map names carrier species ("not awake yet" for the seventeen without simulation) and has a powers layer; `GENERATOR_VERSION` was 7 at this step (19 now). Every power is live now; the later steps below record their behaviour.
 - **Step 2, wells.** As in section 6, with these choices: Drift, Pulse start at ring 5 (rings 3 and 4 stay Static, as the fairness rules say, over the table's ring 4 for Drift); a mode whose room (distance to the nearest keep-clear circle or the border) is under 150 stays Static; Hop destinations are hashed points within the swing of the anchor, so a hop is up to twice the swing; a hop that cannot land (ship within 800, a body in the way) holds collapsed and retries every step rather than waiting 3 s; a Binary pair orbits the first well's anchor and the second well's own generated position is unused; Static wells now vary (pull 0.8 to 1.4, reach 450 to 700, core 24 to 40, dps 35 to 50) while bodies placed without a genome keep the original constants. Presentation: ring pulses along the pull, red hazard edge, violet ghost ring and flash for Hop, white for a pushing Reverse, bold orange ring and dotted lane for a Maw, arc between a Binary pair; the radar rings every non-static well and shows a hop's ghost.
 - **Step 3, blink and phase.** Skipjack (blink) and the lifted Phantom share one move; the telegraph is 0.35 s (so the Phantom, which used to land at once, is now announced); hop reach is `power_reach * (1 + 2.2 * strength)`, landing on a ring of 0.65 to 1.0 of `power_reach` around the ship, never within 180 of it. Veilwing (phase): duty 0.2 + 0.4 strength, never under a 1 s solid window, 0.4 s lead-in.
 - **Step 6, bypass.** Hullpick as in section 5 (share 0.2 + 0.6 strength, cap 0.8; shots capped at 260 and violet). The sampler gives a carrier species the silhouette and kit of its specimen (Veilwing a triangle, Skipjack a stretched diamond, Hullpick a needle with a gun, no shield and little hull) so the player can tell them; an awakened individual shows only its halo.
 - **Sampling gate.** Only built powers are sampled or awakened (`Power::built`), so there are no dud carriers; the sector map lists only live carriers. The weights are unchanged for the built ones, so a far species carries a power about 5 to 6 percent of the time now and the rate rises as powers are built.
-- **Step 4, the Jam status.** `simulation/jam.rs`: weapons, dash, parry, boost and HUD timers, at most 1.5 s (glitch 2.0 s), 6 s immunity counted from the end, never stacked, never in grace or landed, never dash with parry, one or two of the four systems. Emp (Stormcap), glare (Argus Moth), dim (Gloomfeeder) and a new gene, `confuse` (Dizzard, appended last in the block: Severe, ring 7, 1 in 400). Charge rings 0.9 s (floor 0.6), glare eyes 0.7 s, one charge in the world at a time, charge cancelled by shield break. HUD: greyed rings with static and seconds left, static HUD, a screen glitch (`src/glitchview.rs`, off under reduce effects) that only adds faint lines, radar false blips and shuffled arrows; confusion has a pink halo and a swaying reticle. Elder stamps from ring 7: Maelstrom emp, Warden glare, Phantom confuse. Not built from the table: the Faraday and Argus organs, and the echo absorption of dim.
-- **Step 5, field powers.** `simulation/fields.rs`: repel (inhale 1.0 s, shove 600 s, field 420 s, escape cap 0.6 thrust), warp (slow 0.45 s with a 0.55 floor, haste 0.4 s, one bubble per sector), lens (pocket pull 0.4 s, shot bending, radar blip off by 120 s), devour (rocks, growth 3 percent per rock up to 1 + 2 s, weak wells at 8 percent per second, pocket well, release on death fading over 90 s). Not built: the organs they pay and lens ping honesty.
-- **Step 7, body logic.** Cloud (Murmur) and split (Splitter) as in UNIVERSE.md. Song (Dirgewhale) with the dirge ring (gap placed off the line to the ship, jam from strength 0.7) and the chant (neighbours fire 25 percent faster; the aggression buff is not built). Mimic (Lurefish): rock and lure disguises, reveal rules; the lure's inner pickup and the Argus eye reveal are not built.
+- **Step 4, the Jam status.** `simulation/jam.rs`: weapons, dash, parry, boost and HUD timers, at most 1.5 s (glitch 2.0 s), 6 s immunity counted from the end, never stacked, never in grace or landed, never dash with parry, one or two of the four systems. Emp (Stormcap), glare (Argus Moth), dim (Gloomfeeder) and a new gene, `confuse` (Dizzard, appended last in the block: Severe, ring 7, 1 in 400). Charge rings 0.9 s (floor 0.6), glare eyes 0.7 s, one charge in the world at a time, charge cancelled by shield break. HUD: greyed rings with static and seconds left, static HUD, a screen glitch (`src/glitchview.rs`, off under reduce effects) that only adds faint lines, radar false blips and shuffled arrows; confusion has a pink halo and a swaying reticle. Elder stamps from ring 7: Maelstrom emp, Warden glare, Phantom confuse. The Faraday organ is built (step 8). TODO: the Argus organ and the echo absorption of dim.
+- **Step 5, field powers.** `simulation/fields.rs`: repel (inhale 1.0 s, shove 600 s, field 420 s, escape cap 0.6 thrust), warp (slow 0.45 s with a 0.55 floor, haste 0.4 s, one bubble per sector), lens (pocket pull 0.4 s, shot bending, radar blip off by 120 s), devour (rocks, growth 3 percent per rock up to 1 + 2 s, weak wells at 8 percent per second, pocket well, release on death fading over 90 s). TODO: the organs they would pay (Antigrav bladder, Chrono cyst, Lens organ, Gorger gut) and lens ping honesty.
+- **Step 7, body logic.** Cloud (Murmur) and split (Splitter) as in UNIVERSE.md. Song (Dirgewhale) with the dirge ring (gap placed off the line to the ship, jam from strength 0.7) and the chant (neighbours fire 25 percent faster; TODO: the aggression buff). Mimic (Lurefish): rock and lure disguises, reveal rules; TODO: the lure's inner pickup and the Argus eye reveal.
 - **Tuning** lives at the top of `src/power.rs` (`JAM_*`, `EMP_*`, `GLARE_*`, `CONFUSE_*`, `DIM_*`, `REPEL_*`, `WARP_*`, `LENS_*`, `DEVOUR_*`, `POCKET_*`, `SPLIT_*`, `CLOUD_*`, `SONG_*`, `MIMIC_*`).
-- **Step 8, symbiote, latch and the organs (built).** `simulation/parasite.rs` and `simulation/organs.rs`; numbers in `power.rs` (`LATCH_*`, `GROOM_*`) and `tuning.rs` (`ORGAN_*`, `GRAFT_*`, `BOND_LOAN`, `HARVEST_CHANCE`, `RELIC_*`, `REMORA_*`, `FARADAY_CUT`, `VEIL_TIME`, `SKIP_THICK`, `PRICE_SYMBIOSIS`). Differences from the design above, all to keep it arcade simple: the Hullworm does not grow, lay eggs or hijack a part (it is a drain with counterplay: a dash, a perfect parry, a hit on something solid at 150 closing speed that scrapes the nearest worm off and hurts it, a pad in 2 s, or a shot, at most three aboard, ring 5 and out, never in grace or while dashing; hull drain stops at a fifth); the Remora's grooming is 3 s within 120 units at under 60 speed after 2 s of not firing, it drifts to a calm ship, and a kill gives no spore, only bounty. Organs: four of the table, chosen to pair with built powers: **Remora** (hull mends 0.8 a second when quiet), **Faraday** (the Ion gland idea: jams and glitches 30 percent shorter times strength, none at level 3), **Veil** (phase: intangible 0.35 s after a dash, so it needs DASH) and **Skip node** (blink: a dash hops a wall under 80 thick and lands clear). Levels 1 to 3 (1, 1.5, 2 times), magnitude 0.6 to 1.6 from the donor's power strength, shield and radius. Bond works for 300 s without a slot and settles into a free slot with no graft cost (instead of a bench "domesticate" option); harvest is one time in four on a generated carrier's first kill (Stormcap, Veilwing, Skipjack), rolled last in the loot stream; relic is a sealed specimen in one sector in 14 from depth 2 (the existing LODE ECHO tier now points to it). SYMBIOSIS is a SKILLS-tab organ-group skill (3 levels, 40 volatiles and 20 crystal growing 1.8 times a level, needs a Rare core) and the organs are rows in the ORGANS group on the same tab; a first graft costs 8 crystal and 20 volatiles a level, a swap is free, upkeep 0.4 volatiles a minute a fitted organ, asleep at an empty hold. Same strain again raises it, a lesser one pays 12 volatiles a level; the legacy carries the best at level 1 when insured. Not built: the other sixteen organs (Argus eye, Tick tonic, Lens organ and so on), apex-linked organs. Sonar and in-run map pointers to existing sealed relics are built; see [DISCOVERY.md](DISCOVERY.md).
-- **Step 9, Weaver webs (built).** `simulation/weave.rs`, `TetherKind::Web`, numbers in `power::WEB_*`; see UNIVERSE.md "Weaver webs" for limits and counters. The sampler gives it six two-part limbs and a slow tether-launching body; those launchers build webs instead of firing ship latches. Awakened individuals retain their body. Webs build while calm, with a harmless warning, three-hit cords, spaced spokes, gentle pull, a 60 s expiry, and removal with either endpoint. Differences from the sketch: spokes join the builder to rocks, with no rock-to-rock cords, and owner death releases them immediately; hardness stays three hits regardless of depth, while the strength gene tunes pull inside the 80 acceleration ceiling. Spinneret organ is not built. Slinger uses separate orbit and release rules, as described in section 18.
+- **Step 8, symbiote, latch and the organs (built).** `simulation/parasite.rs` and `simulation/organs.rs`; numbers in `power.rs` (`LATCH_*`, `GROOM_*`) and `tuning.rs` (`ORGAN_*`, `GRAFT_*`, `BOND_LOAN`, `HARVEST_CHANCE`, `RELIC_*`, `REMORA_*`, `FARADAY_CUT`, `VEIL_TIME`, `SKIP_THICK`, `PRICE_SYMBIOSIS`). Differences from the design above, all to keep it arcade simple: the Hullworm does not grow, lay eggs or hijack a part (it is a drain with counterplay: a dash, a perfect parry, a hit on something solid at 150 closing speed that scrapes the nearest worm off and hurts it, a pad in 2 s, or a shot, at most three aboard, ring 5 and out, never in grace or while dashing; hull drain stops at a fifth); the Remora's grooming is 3 s within 120 units at under 60 speed after 2 s of not firing, it drifts to a calm ship, and a kill gives no spore, only bounty. Organs: four of the table, chosen to pair with built powers: **Remora** (hull mends 0.8 a second when quiet), **Faraday** (the Ion gland idea: jams and glitches 30 percent shorter times strength, none at level 3), **Veil** (phase: intangible 0.35 s after a dash, so it needs DASH) and **Skip node** (blink: a dash hops a wall under 80 thick and lands clear). Levels 1 to 3 (1, 1.5, 2 times), magnitude 0.6 to 1.6 from the donor's power strength, shield and radius. Bond works for 300 s without a slot and settles into a free slot with no graft cost (instead of a bench "domesticate" option); harvest is one time in four on a generated carrier's first kill (Stormcap, Veilwing, Skipjack), rolled last in the loot stream; relic is a sealed specimen in one sector in 14 from depth 2 (the existing LODE ECHO tier now points to it). SYMBIOSIS is a SKILLS-tab organ-group skill (3 levels, 40 volatiles and 20 crystal growing 1.8 times a level, needs a Rare core) and the organs are rows in the ORGANS group on the same tab; a first graft costs 8 crystal and 20 volatiles a level, a swap is free, upkeep 0.4 volatiles a minute a fitted organ, asleep at an empty hold. Same strain again raises it, a lesser one pays 12 volatiles a level; the legacy carries the best at level 1 when insured. TODO: the other sixteen organs (Argus eye, Tick tonic, Lens organ and so on), apex-linked organs, worm growth/eggs/part hijack, Remora kill spore. Sonar and in-run map pointers to existing sealed relics are built; see [DISCOVERY.md](DISCOVERY.md).
+- **Step 9, Weaver webs (built).** `simulation/weave.rs`, `TetherKind::Web`, numbers in `power::WEB_*`; see UNIVERSE.md "Weaver webs" for limits and counters. The sampler gives it six two-part limbs and a slow tether-launching body; those launchers build webs instead of firing ship latches. Awakened individuals retain their body. Webs build while calm, with a harmless warning, three-hit cords, spaced spokes, gentle pull, a 60 s expiry, and removal with either endpoint. Differences from the sketch: spokes join the builder to rocks, with no rock-to-rock cords, and owner death releases them immediately; hardness stays three hits regardless of depth, while the strength gene tunes pull inside the 80 acceleration ceiling. TODO: Spinneret organ. Slinger uses separate orbit and release rules, as described in section 18.
 - **Step 9, Slinger (built).** `simulation/sling.rs`, `TetherKind::Sling`, and `power::SLING_*`; section 18 is authoritative for tuning and the reconciled parry and Tow Rig design. Generator version 17 enables the existing sling gene in sampling and awakening.
 - **Step 10, Runekeeper (built).** `simulation/rune.rs`, optional `Mine::sigil`, and generator version 18; section 19 is authoritative for payloads, counterplay, ownership, cleanup, and the reconciled one-per-cast specimen. Rune ink remains unbuilt.
 - **Step 10, Seamer (built).** `simulation/rift.rs`, generator version 19; section 17 is authoritative for gene mappings, swept transit, group clearance, warnings, attribution, grace, and cleanup. Seam needle and personal rifts remain unbuilt.
