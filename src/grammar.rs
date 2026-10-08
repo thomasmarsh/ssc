@@ -30,6 +30,8 @@ const FINISH_SYMBOLS: usize = 3;
 /// bounded by the depth no matter what the ratio genes and asymmetry say.
 const MAX_LENGTH_STEP: f32 = 0.97;
 const MAX_RADIUS_STEP: f32 = 0.98;
+/// Leaves and fruit never grow past this size (plan units), however long the stem they close.
+const LEAF_MAX: f32 = 0.28;
 /// The ratio genes are multiples of this nominal ratio inside the templates.
 const NOMINAL_RATIO: f32 = 0.75;
 
@@ -524,7 +526,7 @@ const CORAL: &[Rule] = &[
     ),
     rule(
         Nt::Main,
-        Weight::Branch(0.35),
+        Weight::Branch(0.8),
         Cond::Always,
         &[
             Draw,
@@ -545,7 +547,7 @@ const CORAL: &[Rule] = &[
     ),
     rule(
         Nt::Main,
-        Weight::Stay(0.5),
+        Weight::Stay(0.3),
         Cond::Always,
         &[Draw, apex(Side::Main, 0.95, 0.97)],
     ),
@@ -601,7 +603,7 @@ const VINE: &[Rule] = &[
 const SPINE: &[Rule] = &[
     rule(
         Nt::Main,
-        Weight::Fixed(1.0),
+        Weight::Branch(1.0),
         Cond::Always,
         &[
             Draw,
@@ -616,6 +618,28 @@ const SPINE: &[Rule] = &[
             Pop,
             apex(Side::Main, 1.25, 0.97),
         ],
+    ),
+    // A node with a rib on one side only, so spines are not perfectly mirrored.
+    rule(
+        Nt::Main,
+        Weight::Fixed(0.25),
+        Cond::Always,
+        &[
+            Draw,
+            Joint,
+            Push,
+            Turn(1.2),
+            rib(1.1, 0.7),
+            Pop,
+            Turn(-0.1),
+            apex(Side::Main, 1.25, 0.97),
+        ],
+    ),
+    rule(
+        Nt::Main,
+        Weight::Stay(1.0),
+        Cond::Always,
+        &[Draw, Turn(0.12), apex(Side::Main, 1.25, 0.97)],
     ),
     // Ribs curl back toward the spine and stop when they get short.
     rule(
@@ -672,7 +696,7 @@ pub const TEMPLATES: [TemplateDef; 8] = [
         name: "coral",
         max_depth: 7,
         typical_depth: (4, 7),
-        typical_angle: 0.55,
+        typical_angle: 0.45,
         rules: CORAL,
         finish: FINISH_LEAFY,
     },
@@ -882,7 +906,7 @@ impl GrammarGenome {
             branch_angle: def.typical_angle * rng.range(0.75, 1.3),
             length_ratio: rng.range(0.62, 0.86),
             radius_ratio: rng.range(0.6, 0.85),
-            branch_rate: rng.range(0.3, 1.0),
+            branch_rate: rng.range(0.55, 1.0),
             asymmetry: rng.range(0.0, 0.3),
             wobble: rng.range(0.02, 0.25),
             leaf_rate: rng.range(0.2, 1.0),
@@ -1056,7 +1080,7 @@ fn weight_of(w: Weight, g: &GrammarGenome) -> f32 {
     match w {
         Weight::Fixed(x) => x,
         Weight::Branch(x) => x * g.branch_rate,
-        Weight::Stay(x) => x * (1.0 - g.branch_rate + 0.05),
+        Weight::Stay(x) => x * (1.0 - g.branch_rate + 0.05) * 0.5,
     }
 }
 
@@ -1118,8 +1142,8 @@ fn expand(
                 let tilt = (rng.f32() * 2.0 - 1.0) * 0.6;
                 if roll < g.leaf_rate {
                     out.push(Sym::Leaf {
-                        len: len * 0.9,
-                        width: len * 0.22,
+                        len: (len * 0.9).min(LEAF_MAX),
+                        width: (len * 0.22).min(LEAF_MAX * 0.3),
                         tilt,
                         era,
                     });
@@ -1128,7 +1152,7 @@ fn expand(
             Tok::FruitMaybe => {
                 if rng.f32() < g.fruit_rate {
                     out.push(Sym::Fruit {
-                        rad: len * 0.18 + rad,
+                        rad: (len * 0.1 + rad * 0.6).min(LEAF_MAX * 0.3),
                         era,
                     });
                 }

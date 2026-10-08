@@ -1,6 +1,7 @@
 mod audio;
 mod devpanel;
 mod glitchview;
+mod grammarview;
 mod hud;
 mod juice;
 mod nebula;
@@ -249,6 +250,7 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(60.0))
         .init_resource::<Session>()
         .init_resource::<SmokeRun>()
+        .insert_resource(grammarview::Gallery::from_env())
         .init_resource::<audio::Audio>()
         .add_plugins(
             DefaultPlugins
@@ -289,7 +291,8 @@ fn main() {
                 juice::update,
                 audio::apply_mute,
                 audio::play_cues,
-                presentation::draw,
+                presentation::draw.run_if(not(grammarview::gallery_active)),
+                grammarview::draw,
                 presentation::update_hud,
                 presentation::scroll_panels,
                 hud::update_texts,
