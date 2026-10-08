@@ -14,6 +14,7 @@ Residents ride an elder's head. Is it readable and is it fun?
 | Count | 2 to 4 riders: a crowd or a trickle? Do they hide the elder's silhouette? | `Hosted::from_hash`, `hosted::MAX_RESIDENTS` |
 | Rider size | Small bodies on the head: visible at play zoom, clear collar, not confused with loot or weak points | `hosted::RESIDENT_RADIUS` |
 | Brood swarm on host death | Kill the elder: do orphans swarm you within a second or two? Too deadly, too weak, a pleasant mop-up? Does the swarm outlast its welcome (30 s)? | `root::SWARM_RAGE`, brood stats in `hosted::resident` (fire period 2.6 s, shot 340, range 600, contact 6, hull 40) |
+| Brood shed under fire | Wound a brood-carrying elder: does a young one drop off and swarm at each fraction of health lost (4 riders: at 75, 50, 25 percent)? Does it feel like a reward for hitting, or like the fight getting out of hand? | `root::shed_brood` (keeps `ceil(count x health fraction)`), `SWARM_RAGE` |
 | Symbiote and parasite scatter | They only scatter dazed today (slice 3 adds real behavior). Is a stinging parasite loose in the sector acceptable meanwhile? | `root::DAZE`, `root::KICK`, parasite `contact_damage` 9 |
 | Kill reward | Do riders pay enough bounty to be worth shooting before the elder falls? Can you shoot them off the head at all while it fights you? | `bounty` per relation in `resident` |
 | Elder fight | Do riders make the head-only fight easier or harder (they block shots, add fire)? | brood weapon stats, rider placement `Hosted::anchor` |

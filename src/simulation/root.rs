@@ -242,6 +242,7 @@ impl Game {
         for (index, dazed) in released {
             self.release(index, dazed);
         }
+        self.shed_brood();
         // Free creatures that want a rock take hold of one they touch.
         let seekers: Vec<usize> = self
             .bodies
@@ -318,6 +319,43 @@ impl Game {
             )
             .collect();
         attach::free_angle(&taken, host_radius, wanted, size)
+    }
+
+    /// A hurt host sheds its young: it keeps at most `ceil(count * health fraction)` brood
+    /// residents, so each blow past a threshold lets one go, swarming. Stateless, so a
+    /// reloaded host settles to the same number.
+    fn shed_brood(&mut self) {
+        let mut keep: HashMap<u64, usize> = HashMap::new();
+        for host in self.bodies.iter().filter(|b| carries_residents(b)) {
+            let (Some(hosted), true) = (host.genome.hosted, host.max_health > 0.0) else {
+                continue;
+            };
+            let fraction = (host.health / host.max_health).clamp(0.0, 1.0);
+            let allowed = (f32::from(hosted.limited().count) * fraction).ceil() as usize;
+            keep.insert(host.id, allowed);
+        }
+        if keep.is_empty() {
+            return;
+        }
+        let mut seen: HashMap<u64, usize> = HashMap::new();
+        let mut shed = Vec::new();
+        for (index, body) in self.bodies.iter().enumerate() {
+            let Some(root) = body.root else { continue };
+            let Some(&allowed) = keep.get(&root.host) else {
+                continue;
+            };
+            if !crate::hosted::is_brood(&body.genome) {
+                continue;
+            }
+            let n = seen.entry(root.host).or_default();
+            *n += 1;
+            if *n > allowed {
+                shed.push(index);
+            }
+        }
+        for index in shed {
+            self.release(index, true);
+        }
     }
 
     /// Lets go of the host: the creature is pushed gently off and may not cling again for a
@@ -1235,6 +1273,56 @@ mod tests {
         assert!(b.root.is_none() && f.root.is_none(), "both released");
         assert!(b.provoked > 0.0 && b.panic == 0.0, "the brood swarms");
         assert!(f.provoked == 0.0 && f.panic > 0.0, "the symbiote scatters");
+    }
+
+    #[test]
+    fn a_hurt_host_sheds_brood_at_health_thresholds_and_keeps_other_residents() {
+        use crate::hosted::{Hosted, Relation, resident};
+        let mut game = empty_game();
+        quiet(&mut game);
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        let host_species = Species::of(Genome {
+            radius: 60.0,
+            hull: 300.0,
+            mass: 100.0,
+            hosted: Some(Hosted {
+                count: 4,
+                relation: Relation::Brood,
+            }),
+            ..Genome::default()
+        });
+        let host = game.make_creature(&host_species, FAR);
+        let host_id = host.id;
+        game.bodies.push(host);
+        let brood = Species::of(resident(&host_species.genome, Relation::Brood));
+        let friend = Species::of(resident(&host_species.genome, Relation::Symbiote));
+        let kids: Vec<u64> = (0..4)
+            .map(|k| rooted_on(&mut game, &brood, host_id, 0.4 + k as f32 * 1.4))
+            .collect();
+        let pal = rooted_on(&mut game, &friend, host_id, 5.9);
+        let attached = |game: &Game| {
+            kids.iter()
+                .filter(|&&k| body(game, k).root.is_some())
+                .count()
+        };
+        game.step(DT, Input::default());
+        assert_eq!(attached(&game), 4, "a healthy host keeps all its young");
+        let max = body(&game, host_id).max_health;
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == host_id)
+            .unwrap()
+            .health = max * 0.5;
+        game.step(DT, Input::default());
+        assert_eq!(attached(&game), 2, "half health sheds half the brood");
+        let shed = kids
+            .iter()
+            .find(|&&k| body(&game, k).root.is_none())
+            .unwrap();
+        assert!(body(&game, *shed).provoked > 0.0, "shed young swarm");
+        game.step(DT, Input::default());
+        assert_eq!(attached(&game), 2, "no further loss without more damage");
+        assert!(body(&game, pal).root.is_some(), "the symbiote stays");
     }
 
     #[test]

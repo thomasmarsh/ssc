@@ -45,7 +45,7 @@ Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
 Current focus (user decision): complete the creature set so mechanics can be tuned together. Farming, population scaling and economy come after, in the order of WORKSTREAMS phases. The gamepad audit, feeling view-model (a poor name, rename when built), weaver rock care and edge-density measurement are anytime items, not next.
 
 0. Playtest (the user), at any time. Nothing has been played by a human; all balance is a guess. The checklist is `docs/PLAYTEST.md`: add a section per feature when it lands.
-1. [L] NEXT: bestiary fill (weak points per node kind on elder bodies if the playtest asks for them): nested creatures and broods (7: slices 2 to 4 remain - damage-threshold release (the brood swarm on host loss and the reload skip are done), symbiote and parasite behaviors, niche pairings, and residents respawning free after a host kill), builder creatures (11), swarms and flock budgets (8), the Foamback and Oozer (designs 21 and 22 in `docs/BESTIARY.md`), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
+1. [L] NEXT: bestiary fill (weak points per node kind on elder bodies if the playtest asks for them): nested creatures and broods (7: slices 3 and 4 remain - symbiote and parasite behaviors, niche pairings), builder creatures (11), swarms and flock budgets (8), the Foamback and Oozer (designs 21 and 22 in `docs/BESTIARY.md`), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
 2. Then farming (with persistence first, workstream 12), population scaling and rally forces, economy and megastructures, hyperlanes.
 3. Alongside: DEVTOOLS B then C (register new constants at birth); hygiene and `TODO:` lists as files are touched.
 
@@ -53,6 +53,7 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
+- Nested creatures slice 2c: a hurt elder sheds brood at health thresholds (`root::shed_brood`), swarming. Slice 2 complete.
 - Nested creatures slice 2b: residents of a slain elder no longer respawn free when its sector reloads.
 - Nested creatures slice 2a: a brood whose host is lost swarms (provoked 30 s) instead of scattering dazed; `hosted::is_brood`, `root::SWARM_RAGE`.
 - Nested creatures slice 1 (generator version 21): shared attach mechanic in `src/simulation/attach.rs`, optional `hosted` genome section, apex elders carry 2 to 4 capped residents (symbiote, parasite, brood) that ride the head and are released when the host is lost. See `docs/WORKSTREAMS.md` section 7.
