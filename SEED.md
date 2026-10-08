@@ -44,7 +44,7 @@ Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
 Current focus (user decision): complete the creature set so mechanics can be tuned together. Farming, population scaling and economy come after, in the order of WORKSTREAMS phases. The gamepad audit, feeling view-model (a poor name, rename when built), weaver rock care and edge-density measurement are anytime items, not next.
 
 0. Playtest (the user), at any time. Nothing has been played by a human; all balance is a guess.
-1. [L] NEXT: bestiary fill (weak points per node kind on elder bodies if the playtest asks for them): nested creatures and broods (7, extract the shared attach mechanic first), builder creatures (11), swarms and flock budgets (8), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
+1. [L] NEXT: bestiary fill (weak points per node kind on elder bodies if the playtest asks for them): nested creatures and broods (7, extract the shared attach mechanic first), builder creatures (11), swarms and flock budgets (8), the Foamback and Oozer (designs 21 and 22 in `docs/BESTIARY.md`), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
 2. Then farming (with persistence first, workstream 12), population scaling and rally forces, economy and megastructures, hyperlanes.
 3. Alongside: DEVTOOLS B then C (register new constants at birth); hygiene and `TODO:` lists as files are touched.
 
