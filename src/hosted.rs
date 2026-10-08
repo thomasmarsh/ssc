@@ -14,7 +14,7 @@
 //! a gene value read by one function.
 
 use crate::biome::BiomeKind;
-use crate::genome::{Diet, Fecundity, Genome, Social, Trigger, Weapon};
+use crate::genome::{Diet, Fecundity, GenePool, Genome, PoolEntry, Social, Trigger, Weapon};
 use crate::world::hash2;
 use std::f32::consts::TAU;
 
@@ -109,10 +109,43 @@ impl Hosted {
 /// single-bodied, without a brain or an anatomy, in the host's colours (a symbiote's hue is
 /// turned toward green so it reads as a friend).
 pub fn resident(host: &Genome, relation: Relation) -> Genome {
+    resident_of(host, relation, None)
+}
+
+/// The partner species of a host: a small neighbour drawn from the species living in its
+/// sector (the range pairing), never the host's own lineage. Smaller and commoner species
+/// are likelier, so a rider is the kind of creature that is always underfoot. A pure
+/// function of the pool and the hash; `None` when the host is alone in its country.
+pub fn partner(pool: &GenePool, host_lineage: u64, h: u64) -> Option<Genome> {
+    let others: Vec<(&PoolEntry, f32)> = pool
+        .entries
+        .iter()
+        .filter(|e| e.species.lineage != host_lineage && e.weight > 0.0)
+        .map(|e| (e, e.weight / e.species.genome.radius.max(1.0)))
+        .collect();
+    let total: f32 = others.iter().map(|(_, w)| w).sum();
+    let mut pick = (h & 0xFFFF) as f32 / 65_536.0 * total;
+    for (e, w) in &others {
+        if pick < *w {
+            return Some(e.species.genome);
+        }
+        pick -= w;
+    }
+    others.last().map(|(e, _)| e.species.genome)
+}
+
+/// Like `resident`, but a symbiote or parasite borrows the look (colours and outline) of a
+/// `partner` species from the host's range, so riders read as a local kind rather than a
+/// tint of the host. A brood is the host's own young and ignores the partner. Gameplay
+/// genes are untouched, so the relation is still read from the genes alone.
+pub fn resident_of(host: &Genome, relation: Relation, partner: Option<&Genome>) -> Genome {
+    let look = match (relation, partner) {
+        (Relation::Brood, _) | (_, None) => host,
+        (_, Some(p)) => p,
+    };
     let base = Genome {
         segments: 1,
         limbs: 0,
-        sides: 3,
         radius: RESIDENT_RADIUS,
         mass: 4.0,
         hull: 40.0,
@@ -125,9 +158,14 @@ pub fn resident(host: &Genome, relation: Relation) -> Genome {
         trigger: Trigger::Sight,
         diet: Diet::None,
         fecundity: Fecundity::Rare,
-        hue: host.hue,
-        pale: host.pale,
-        bright: host.bright,
+        sides: if std::ptr::eq(look, host) {
+            3
+        } else {
+            look.sides
+        },
+        hue: look.hue,
+        pale: look.pale,
+        bright: look.bright,
         ..Genome::default()
     };
     match relation {
@@ -150,7 +188,11 @@ pub fn resident(host: &Genome, relation: Relation) -> Genome {
         Relation::Symbiote => Genome {
             contact_damage: 0.0,
             bounty: 0.0,
-            hue: (host.hue + 0.33).rem_euclid(1.0),
+            hue: if partner.is_some() {
+                base.hue
+            } else {
+                (host.hue + 0.33).rem_euclid(1.0)
+            },
             ..base
         },
     }
@@ -214,6 +256,36 @@ mod tests {
             assert_eq!(is_symbiote(&g), relation == Relation::Symbiote);
             assert_eq!(is_parasite(&g), relation == Relation::Parasite);
         }
+    }
+
+    #[test]
+    fn partners_come_from_the_range_and_only_change_the_look() {
+        let pool = GenePool::home();
+        let host = Genome::fatso();
+        let own = pool.entries[3].species.lineage;
+        for h in 0..200u64 {
+            let p = partner(&pool, own, hash2(h, 7, 8)).unwrap();
+            assert_ne!(p, host);
+            for relation in Relation::ALL {
+                let g = resident_of(&host, relation, Some(&p));
+                assert_eq!(is_brood(&g), relation == Relation::Brood);
+                assert_eq!(is_symbiote(&g), relation == Relation::Symbiote);
+                assert_eq!(is_parasite(&g), relation == Relation::Parasite);
+                if relation == Relation::Brood {
+                    assert_eq!(g.hue, host.hue);
+                } else {
+                    assert_eq!(g.hue, p.hue);
+                }
+            }
+        }
+        let alone = GenePool {
+            entries: vec![pool.entries[3]],
+        };
+        assert!(partner(&alone, own, 1).is_none());
+        assert_eq!(
+            resident_of(&host, Relation::Parasite, None),
+            resident(&host, Relation::Parasite)
+        );
     }
 
     #[test]

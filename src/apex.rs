@@ -18,7 +18,7 @@ use crate::biome::{BiomeKind, biome};
 use crate::genome::{
     Diet, Fear, Fecundity, GenePool, Genome, Nest, Social, Species, Trigger, Weapon,
 };
-use crate::hosted::{HOSTED_SALT, Hosted, resident};
+use crate::hosted::{HOSTED_SALT, Hosted, partner, resident_of};
 use crate::power::Power;
 use crate::region::{harsh_name, soft_name};
 use crate::world::{
@@ -615,7 +615,14 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
         ..Spawn::creature(species, at)
     });
     if let Some(hosted) = hosting {
-        seed_residents(seed, id, &genome, hosted, host_index, at, genes, out);
+        let friend = partner(
+            pool,
+            source.lineage,
+            hash2(seed ^ HOSTED_SALT ^ 0x70, id.x, id.y),
+        );
+        seed_residents(
+            seed, id, &genome, hosted, friend, host_index, at, genes, out,
+        );
     }
 }
 
@@ -642,13 +649,14 @@ fn seed_residents(
     id: SectorId,
     host: &Genome,
     hosted: Hosted,
+    friend: Option<Genome>,
     host_index: u32,
     at: Vec2,
     genes: &Phenotype,
     out: &mut Vec<Spawn>,
 ) {
     let key = hash2(seed ^ HOSTED_SALT, id.x, id.y);
-    let kind = resident(host, hosted.relation);
+    let kind = resident_of(host, hosted.relation, friend.as_ref());
     // The first residents take the body's sockets, the rest ride the head as before.
     let sockets = host
         .anatomy

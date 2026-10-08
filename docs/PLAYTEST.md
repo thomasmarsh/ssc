@@ -20,6 +20,7 @@ Residents ride an elder: on its body's socket marks first (cyan in the bestiary 
 | Symbiote and parasite release | On host loss they scatter dazed. Is a stinging parasite loose in the sector acceptable? | `root::DAZE`, `root::KICK`, parasite `contact_damage` 9 |
 | Kill reward | Do riders pay enough bounty to be worth shooting before the elder falls? Can you shoot them off the head at all while it fights you? | `bounty` per relation in `resident` |
 | Socket seating | Do riders sit on the elder's body (ribs, arms, tail) and swing with it as it turns, not floating or on the wrong bead? Does a body with no sockets still wear them all on the head? Do riders stay readable when the elder lunges? | `bodyplan` socket marks (`sockets` gene), `apex::seed_residents`, `Root::socket` |
+| Rider look | Do symbiote and parasite riders look like a small local species (its colours and outline) rather than a tint of the host? Can you still tell friend from parasite at a glance (collar, the sting)? | `hosted::partner` (weights), `hosted::resident_of` |
 | Elder fight | Do riders make the head-only fight easier or harder (they block shots, add fire)? | brood weapon stats, rider placement `Hosted::anchor` |
 | Reload | Leave and return after killing an elder: no riders reappear (tested). After leaving it alive: riders are back and seated | none, report if wrong |
 | Frame cost | Sector with a hosted elder plus a busy biome: any hitch? | `world::SECTOR_BODY_BUDGET` |
