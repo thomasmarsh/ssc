@@ -2,6 +2,8 @@
 
 This is a design review, not a record of built code. It reads the current control and progression surface (README controls, `src/presentation.rs` HUD text, the bench, arsenal, pads, beacons, star map, diplomacy, titles, legacy) as an arcade player who wants to be in flow: a clear goal every few seconds, feedback you can read without reading, and no friction between wanting to do something and doing it. It borrows from No Man's Sky (a legible discovery loop, scanning that tells you where to go, upgrades you can feel, a safe start, hooks that make you want to see the next place) and from classic arcade games (one screen of information, a few verbs, instant restart).
 
+Status: BUILT - the whole P0 pass (geometric HUD, single interact key, auto repair, boosts always on, settings screen, shake/hit-stop/chain feedback, free ping and next-lure marker), P1 rock shoving (replacing the Tow Rig), the three-tab bench with purchase receipts and unlock guidance ([BENCH.md](BENCH.md)), organs and symbiotes, the realm balance dimensions, the low-hull heartbeat, and the Slinger, Runekeeper, Seamer and discovery slices (status notes at the end). PARTIAL - section 3 item 11 (bench merge) and item 16 (unlock guidance). TODO items are tagged `TODO:` in "Status: what the P0 pass built" and the bench status notes: docking assist, "BEST BUY" hint, guided first ten minutes, part-plugging animation and rarity-specific chimes, skill merge to about ten, changed material roles, automatic stash overflow, trophy gates, lode fatigue, ring-entry reward, one star-map pin (cutting notes), specimen log, controller-first map, arcade versus tinkerer presets, auto-zooming camera. Section 8 (the Tow Rig) is superseded and not built.
+
 Priorities: **P0** is what to do before anyone else plays the game, **P1** is the next pass, **P2** is polish and later. "Cut" means remove the surface from the player's face; the simulation may keep the system. I have read the code and docs, not playtested this pass, so numbers here are proposals, and where I say "I did not verify" I mean it.
 
 ## 1. Where the game is today
@@ -315,10 +317,12 @@ Written after the pass; the sections above stay as the review. Everything here i
 
 **Not built yet (still as written above)**
 
-- Docking assist (a press within 400 units eases the ship in): landing still needs speed under 80 within 80 units, and the prompt says "DOCK SLOW DOWN" when it will refuse.
-- The guided first ten minutes beyond the free ping and the lure, and "BEST BUY" at the bench.
-- The part-plugging animation remains proposed. Outcome-derived before/after receipts, bounded purchase rings, and fitted-part purchase guidance are built; see [BENCH.md](BENCH.md). an auto-zooming camera.
-- The remaining P1 and P2 items: ten skills, changed resource roles, trophy gating, lode fatigue, the Tow Rig, a single star-map pin, specimen log, controller-first map.
+- TODO: docking assist (a press within 400 units eases the ship in): landing still needs speed under 80 within 80 units, and the prompt says "DOCK SLOW DOWN" when it will refuse.
+- TODO: the guided first ten minutes beyond the free ping and the lure, and "BEST BUY" at the bench.
+- TODO: the part-plugging animation (proposed). Outcome-derived before/after receipts, bounded purchase rings, and fitted-part purchase guidance are built; see [BENCH.md](BENCH.md).
+- TODO: an auto-zooming camera (the camera is a setting: close, wide, far, whole sector).
+- TODO: the remaining P1 and P2 items: ten skills, changed resource roles, trophy gating, lode fatigue, a ring-entry reward, a single star-map pin (the notes and 24 pins still exist), specimen log, controller-first map, arcade versus tinkerer presets, automatic stash overflow.
+- The Tow Rig is dropped (see "Status: shoving rocks").
 
 **Judgement calls worth a look when playing**
 
@@ -337,7 +341,7 @@ The Tow Rig of section 8 (a hook, a cord, a thruster pod, a sling) is not built 
 - **The whip.** A dash that ends within 140 of a free rock ahead (inside a 41 degree cone) cracks it with an impulse of 4500 (+30 percent a level), capped at 520 of speed; the dash's invulnerability keeps the ship safe.
 - **PLATING.** The ship's half share of an impact is cut by 20 percent a level when the ship caused it (it supplied half the closing speed, or the other body was shoved), and from level 3 every collision by 15 percent a level from there. A rock's plain touch (12 hull) is not covered.
 - **Skills.** SHOVE and PLATING are locked at level 0 (shown on the RIG tab and as `locked` in the details panel), levels 1 to 4, prices from `tuning.rs` (metal builds, crystal tunes), kept through death and cleared on restart. PLATING needs SHOVE level 1 to buy.
-- **Not built for the ship:** pods, cords on rocks, guidance, a second rock, credit for a shoved rock's kills to the ship beyond the existing ram rules (a shoved rock is still a rock; regard and score follow existing impact rules).
+- **TODO, not built for the ship:** pods, cords on rocks, guidance, a second rock, credit for a shoved rock's kills to the ship beyond the existing ram rules (a shoved rock is still a rock; regard and score follow existing impact rules).
 
 ## Status: organs and symbiotes
 
@@ -432,22 +436,22 @@ BESTIARY step 9 is built for Weaver and Slinger, generator version 17. Slinger r
 
 ## Status: Runekeeper sigils
 
-Runekeeper is built, generator version 18. BESTIARY section 19 records the one-per-cast and fixed-payload reconciliations, full arming warning, shoot and lure counters, environmental attribution, and bounds. The bare ship can leave the center at 60 percent thrust during the 1.2 s warning. Four colours also have four distinct glyphs; active dash and parry protect against Jam. Rune ink and new ship mine abilities remain outside this slice.
+Runekeeper is built, generator version 18. BESTIARY section 19 records the one-per-cast and fixed-payload reconciliations, full arming warning, shoot and lure counters, environmental attribution, and bounds. The bare ship can leave the center at 60 percent thrust during the 1.2 s warning. Four colours also have four distinct glyphs; active dash and parry protect against Jam. TODO: rune ink and new ship mine abilities remain unbuilt.
 
 
 ## Status: Seamer rifts
 
-Seamer is built, generator version 19. BESTIARY section 17 records shared-gene mappings, warnings, swept whole-body transit, clearance, attribution, budgets, and cleanup. Passage is automatic on entrance, with no interact key or unlock. A bare ship can leave the warning or use a pair as an escape route. The bounded curiosity ping layer is built; see [DISCOVERY.md](DISCOVERY.md). Seam needle, personal rifts, and beacon integration remain unbuilt.
+Seamer is built, generator version 19. BESTIARY section 17 records shared-gene mappings, warnings, swept whole-body transit, clearance, attribution, budgets, and cleanup. Passage is automatic on entrance, with no interact key or unlock. A bare ship can leave the warning or use a pair as an escape route. The bounded curiosity ping layer is built; see [DISCOVERY.md](DISCOVERY.md). TODO: seam needle, personal rifts, and beacon integration remain unbuilt.
 
 
 ## Status: bounded curiosity discovery
 
-[DISCOVERY.md](DISCOVERY.md) is authoritative for the wonder layer: base ping reveals existing live Seamer pairs and dynamic wells; the existing LODE ECHO tier adds sealed organ relics. Eight curiosity handles at most, nine-second echoes, live availability checks, paired mouth identity, fallback lures, generated-anchor well charting, and one-time relic pointers preserve the starter loop and nearest-civilization guarantee. The section 5 proposal that the map shows all lures is reconciled: temporary rifts and carried/released wells never become persistent destinations. Mimic deception, dim absorption, lens honesty, abilities, and beacon integration remain outside this slice.
+[DISCOVERY.md](DISCOVERY.md) is authoritative for the wonder layer: base ping reveals existing live Seamer pairs and dynamic wells; the existing LODE ECHO tier adds sealed organ relics. Eight curiosity handles at most, nine-second echoes, live availability checks, paired mouth identity, fallback lures, generated-anchor well charting, and one-time relic pointers preserve the starter loop and nearest-civilization guarantee. The section 5 proposal that the map shows all lures is reconciled: temporary rifts and carried/released wells never become persistent destinations. TODO: mimic deception, dim absorption, lens honesty, abilities, and beacon integration remain unbuilt.
 
 
 ## Status: three-tab bench
 
-[BENCH.md](BENCH.md) is authoritative for the built PARTS, WEAPONS, and SKILLS surface, selected action/cost/detail layout, groups, controls, bounds, and tests. Section 3 item 11 is partly built: repair stays explicit and partial, the manual stash stays at the bottom of PARTS, and all 19 existing skills remain. The actual arsenal only buys levels of owned profiles; unowned rows explain the existing part/charge route. Adjacent reforge/rarity rows keep current navigation without adding an action mode. Skill merging, automatic stash overflow, changed economy/material roles, trophy gates, docking assist, and the part-plugging animation remain later work. Generator version remains 19; generated content and RNG draw counts are unchanged.
+[BENCH.md](BENCH.md) is authoritative for the built PARTS, WEAPONS, and SKILLS surface, selected action/cost/detail layout, groups, controls, bounds, and tests. Section 3 item 11 is partly built (TODO: the rest, listed below): repair stays explicit and partial, the manual stash stays at the bottom of PARTS, and all 19 existing skills remain. The actual arsenal only buys levels of owned profiles; unowned rows explain the existing part/charge route. Adjacent reforge/rarity rows keep current navigation without adding an action mode. TODO: skill merging, automatic stash overflow, changed economy/material roles, trophy gates, docking assist, and the part-plugging animation remain later work. Generator version remains 19; generated content and RNG draw counts are unchanged.
 
 ## Status: bench purchase feedback and existing unlock guidance
 
