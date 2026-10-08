@@ -37,19 +37,18 @@ Decide per slice, and say which in one line.
 - Briefs must be long and concrete: reading list, the working rules above verbatim, the user's stated design (quote it), the slices with the tests required, and a final report format (commits, tuning numbers, tests changed and why, test counts, what was and was not verified visually, caveats). Verify with `git log` and the test suite after each agent, then summarize to the user in plain language.
 - Ask the user before any harness feature that spawns a large swarm of subagents. If an agent is cut off by a usage limit, resume it with SendMessage and tell it to continue from the working tree.
 
-## Queue (the full plan and rationale are in `docs/WORKSTREAMS.md`, "Order of operations")
+## Queue (rationale in `docs/WORKSTREAMS.md`, "Order of operations"; reset 2026-10-08 by the user's priority)
 
-Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices. Reorder with playtest notes.
+Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
 
-0. Playtest (the user), now and at each checkpoint. Nothing has been played by a human; all balance is a guess.
-1. Phase 1, groundwork. [S] gamepad audit (docs; includes contextual interact rule and reserved bindings); [S] feeling view-model 9.1; [S] weaver and slinger rock care 5.1; [S] edge-density measuring test 4.1 (measure only; also confirm which tests read the HOME golden); investigate the clippy-plus-test hang.
-2. Phase 2: [M] gamepad implementation with the input test; [S] sector-load budget measure; [L] persistence (workstream 12: state inventory, `SaveState` with a round-trip test, disk format, continue UI). Persistence precedes farming.
-3. Phase 3, generation batch under one `GENERATOR_VERSION` bump with one golden re-baseline: edge fix, feeling presentation and tilts, desert and asteroid fields, weaver retuning. Playtest checkpoint.
-4. Phase 4: [L] farming slices 1 and 2 with a trivial bench sink. Playtest checkpoint.
-5. Phase 5: [M] cross-sector placement framework, then [L] hyperlanes (no interdiction first).
-6. Phase 6: [L] flock budget then rally forces; apex bodies; nested creatures (attach extraction first).
-7. Phase 7: [L] machines, pricing and traders; builder creatures (workstream 11); teleports; megastructures (ruin first).
-8. Alongside: [M slices] DEVTOOLS B then C (register new constants at birth; never blocks features). Hygiene and the `TODO:` lists in `docs/` as files are touched.
+Current focus (user decision): complete the creature set so mechanics can be tuned together. Farming, population scaling and economy come after, in the order of WORKSTREAMS phases. The gamepad audit, feeling view-model (a poor name, rename when built), weaver rock care and edge-density measurement are anytime items, not next.
+
+0. Playtest (the user), at any time. Nothing has been played by a human; all balance is a guess.
+1. [M] Creature genome grammar integration: a `nested { grammar }` section in `genome!` (own draws only when a grammar is present, existing draws unmoved), body expression from a `Plan` (chain or jointed body built from the plan, sockets for residents), authored specimens viewable by `SSC_SPECIMEN` and the dev spawn. No wild placement, so no generation change yet.
+2. [L] Apex body types (workstream 6) using it, then place them in the wild (this is a generation change: bump `GENERATOR_VERSION`, re-baseline the golden once, batch with any other generation changes).
+3. [L] Bestiary fill: nested creatures and broods (7, extract the shared attach mechanic first), builder creatures (11), swarms and flock budgets (8), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
+4. Then farming (with persistence first, workstream 12), population scaling and rally forces, economy and megastructures, hyperlanes.
+5. Alongside: DEVTOOLS B then C (register new constants at birth); hygiene and `TODO:` lists as files are touched.
 
 Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to disk wanted (multiplayer eventually, out of scope); crops only on planetoids (stations only inside a greenroom); one contextual interact for now, full-button pad design long term. Open: sector density tuning after the first playtest.
 
