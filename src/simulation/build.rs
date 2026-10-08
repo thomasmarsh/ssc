@@ -2,7 +2,8 @@
 //! section follows a blueprint (`StructurePlan`, grown from its grammar genes) and places
 //! one block per work interval, in plan index order, so a child block never exists before
 //! the block it hangs from. Blocks are pinned rocks of the builder's material: ordinary
-//! bodies that collide, can be shot or mined, and unload with their sector.
+//! bodies that collide, can be shot or mined, and are remembered (`Structure`, saved and restored
+//! block by block) when their sector unloads or the game is saved.
 //!
 //! Civilizations build too (slice three, `update_civ_builders`): a rank-and-file member who
 //! is not mining lays a structure from the territory's own gene set, near where it stands,
@@ -16,10 +17,44 @@
 //! player interaction are later slices (`docs/WORKSTREAMS.md`, 11).
 
 use super::*;
-use crate::builder::Builder;
+use crate::builder::{Builder, Material};
 use crate::grammar::entity_key;
 use crate::structure::StructurePlan;
 use crate::territory::{CivRole, Standing};
+use crate::world::SectorId;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
+
+/// The identity of a structure across unloads and saves: the spawn of the wild builder that
+/// raised it, or a territory and the ordinal of the structure it raised.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum StructureKey {
+    Wild(SectorId, u32),
+    Civ(u64, u8),
+}
+
+/// One block of a kept structure, by site index in its plan.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub(super) struct Block {
+    pub at: Vec2,
+    pub radius: f32,
+    pub health: f32,
+}
+
+/// What survives of a structure when its blocks leave the world (a sector unloads) or the
+/// game is saved: where it stands, how far it got and which blocks are still whole. Blocks
+/// that are not listed were destroyed. The plan is not kept: a wild builder regrows it from
+/// its genome and spawn, and a finished block needs only its place and health.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(super) struct Structure {
+    pub material: Material,
+    /// The territory that raised it, for tinting.
+    pub civ: Option<u64>,
+    pub origin: Vec2,
+    pub cursor: u16,
+    pub done: bool,
+    pub blocks: BTreeMap<u16, Block>,
+}
 
 /// Most structures under construction at once, across the loaded world.
 pub const MAX_WORKS: usize = 6;
@@ -41,6 +76,8 @@ pub const STALL: f32 = 90.0;
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Work {
     pub builder: u64,
+    /// Its identity for saving; none for a builder with no spawn (a bred one, a dev spawn).
+    pub key: Option<StructureKey>,
     /// The genes it follows: the builder's own, or its territory's style.
     pub gene: Builder,
     /// The territory that raises it, for a civilization's work.
@@ -65,6 +102,9 @@ pub(super) struct BuildState {
     pub works: Vec<Work>,
     /// Structures each territory has started this session (the budget `CIV_STRUCTURES`).
     pub civ_started: std::collections::HashMap<u64, u8>,
+    /// Every structure the world has seen, as of the last sync: the memory that outlives
+    /// unloaded sectors and the game. See `Game::sync_structures`.
+    pub kept: BTreeMap<StructureKey, Structure>,
 }
 
 impl Game {
@@ -78,9 +118,17 @@ impl Game {
             .filter(|b| b.kind == BodyKind::Creature)
             .map(|b| b.id)
             .collect();
+        if self
+            .builds
+            .works
+            .iter()
+            .any(|w| !alive.contains(&w.builder))
+        {
+            self.sync_structures();
+        }
         self.builds.works.retain(|w| alive.contains(&w.builder));
 
-        let starters: Vec<(u64, Vec2, Builder, u64)> = self
+        let starters: Vec<(u64, Vec2, Builder, u64, Option<StructureKey>)> = self
             .bodies
             .iter()
             .filter(|b| can_build(b, false) && b.genome.builder.is_some())
@@ -89,10 +137,13 @@ impl Game {
                 let key = b
                     .origin
                     .map_or(b.id, |(sector, index)| entity_key(sector, index));
-                Some((b.id, b.position, b.genome.builder?, key))
+                let kept = b
+                    .origin
+                    .map(|(sector, index)| StructureKey::Wild(sector, index));
+                Some((b.id, b.position, b.genome.builder?, key, kept))
             })
             .collect();
-        for (id, at, builder, key) in starters {
+        for (id, at, builder, key, kept) in starters {
             if self
                 .builds
                 .works
@@ -104,17 +155,33 @@ impl Game {
                 break;
             }
             let plan = builder.blueprint(self.seed, key);
+            // A builder that reloads picks its structure up where it was left (or leaves a
+            // finished one alone) instead of raising a second one.
+            let resumed = kept
+                .and_then(|k| self.builds.kept.get(&k).map(|s| (k, s.clone())))
+                .filter(|(_, s)| s.cursor as usize <= plan.len());
+            let (origin, cursor, done) = resumed.as_ref().map_or((at, 0, false), |(_, s)| {
+                (s.origin, s.cursor as usize, s.done)
+            });
+            let placed = resumed.as_ref().map_or_else(Vec::new, |(k, _)| {
+                (0..cursor).map(|i| self.block_id(*k, i as u16)).collect()
+            });
+            let finished = cursor >= plan.len();
             self.builds.works.push(Work {
                 builder: id,
+                key: kept,
                 gene: builder,
                 civ: None,
-                clock: plan.sites.first().map_or(0.0, |s| builder.work(s.reach)),
+                clock: plan
+                    .sites
+                    .get(cursor)
+                    .map_or(0.0, |s| builder.work(s.reach)),
                 plan,
-                origin: at,
-                cursor: 0,
-                placed: Vec::new(),
+                origin,
+                cursor,
+                placed,
                 stalled: 0.0,
-                done: false,
+                done: done || finished,
             });
         }
 
@@ -151,15 +218,9 @@ impl Game {
                 work.done = work.stalled >= STALL;
                 continue;
             }
-            let (toughness, density) = builder.material.toughness_density();
-            let mut block = self.make_body(BodyKind::Asteroid, at);
-            block.rock = builder.material.rock();
-            block.radius = radius;
-            block.health = radius * 80.0 / 35.0 * toughness;
-            block.max_health = block.health;
-            block.mass = 25.0 * (radius / 35.0).powi(2) * density;
-            block.pinned = true;
+            let mut block = self.block_body(builder.material, at, radius);
             let block_id = block.id;
+            block.structure = self.builds.works[w].key.map(|k| (k, cursor as u16));
             self.bodies.push(block);
             let next = builder.work(
                 self.builds.works[w]
@@ -237,8 +298,10 @@ impl Game {
             *n += 1;
             let gene = civ_style(tid);
             let plan = gene.blueprint(self.seed, key);
+            let ordinal = *self.builds.civ_started.get(&tid).unwrap_or(&1) - 1;
             self.builds.works.push(Work {
                 builder: id,
+                key: Some(StructureKey::Civ(tid, ordinal)),
                 gene,
                 civ: Some(tid),
                 clock: plan.sites.first().map_or(0.0, |s| gene.work(s.reach)),
@@ -284,13 +347,108 @@ impl Game {
 
     /// The tint of a civilization's block, if `id` is one.
     pub(super) fn civ_block_tint(&self, id: u64) -> Option<[f32; 3]> {
-        let tid = self
-            .builds
-            .works
-            .iter()
-            .find(|w| w.civ.is_some() && w.placed.contains(&id))?
-            .civ?;
+        let (key, _) = self.body(id)?.structure?;
+        let StructureKey::Civ(tid, _) = key else {
+            return None;
+        };
         self.civ_colors.get(&tid).copied()
+    }
+
+    /// A block of `material` at `at`: a pinned rock, tough and heavy as the material makes it.
+    fn block_body(&mut self, material: Material, at: Vec2, radius: f32) -> Body {
+        let (toughness, density) = material.toughness_density();
+        let mut block = self.make_body(BodyKind::Asteroid, at);
+        block.rock = material.rock();
+        block.radius = radius;
+        block.health = radius * 80.0 / 35.0 * toughness;
+        block.max_health = block.health;
+        block.mass = 25.0 * (radius / 35.0).powi(2) * density;
+        block.pinned = true;
+        block
+    }
+
+    /// The id of the live block at `site` of structure `key`, or none (`u64::MAX`, which no
+    /// body has) when it is destroyed or its sector is not loaded.
+    fn block_id(&self, key: StructureKey, site: u16) -> u64 {
+        self.bodies
+            .iter()
+            .find(|b| b.structure == Some((key, site)))
+            .map_or(u64::MAX, |b| b.id)
+    }
+
+    /// Every structure as it stands now: the kept memory overlaid with the live works and the
+    /// live blocks. A kept block whose sector is loaded but which has no body was destroyed
+    /// and is dropped; one in an unloaded sector keeps its last state. Pure.
+    pub(super) fn structures_snapshot(&self) -> BTreeMap<StructureKey, Structure> {
+        let mut map = self.builds.kept.clone();
+        for w in &self.builds.works {
+            let Some(key) = w.key else { continue };
+            let s = map.entry(key).or_insert_with(|| Structure {
+                material: w.gene.material,
+                civ: w.civ,
+                origin: w.origin,
+                cursor: 0,
+                done: false,
+                blocks: BTreeMap::new(),
+            });
+            s.origin = w.origin;
+            s.cursor = w.cursor as u16;
+            s.done = w.done;
+        }
+        let mut live: HashSet<(StructureKey, u16)> = HashSet::new();
+        for b in &self.bodies {
+            let Some((key, site)) = b.structure else {
+                continue;
+            };
+            if let Some(s) = map.get_mut(&key) {
+                s.blocks.insert(
+                    site,
+                    Block {
+                        at: b.position,
+                        radius: b.radius,
+                        health: b.health,
+                    },
+                );
+                live.insert((key, site));
+            }
+        }
+        for (key, s) in &mut map {
+            s.blocks.retain(|site, b| {
+                live.contains(&(*key, *site)) || !self.loaded.contains(&SectorId::containing(b.at))
+            });
+        }
+        map
+    }
+
+    /// Writes the current structures into the kept memory; called before the blocks can
+    /// leave the world (a sector unloads, a builder is lost).
+    pub(super) fn sync_structures(&mut self) {
+        self.builds.kept = self.structures_snapshot();
+    }
+
+    /// Raises again the kept blocks that lie in sector `id`, which has just loaded.
+    pub(super) fn restore_structures(&mut self, id: SectorId) {
+        let live: HashSet<(StructureKey, u16)> =
+            self.bodies.iter().filter_map(|b| b.structure).collect();
+        let due: Vec<(StructureKey, u16, Material, Block)> = self
+            .builds
+            .kept
+            .iter()
+            .flat_map(|(key, s)| {
+                s.blocks
+                    .iter()
+                    .filter(|(site, b)| {
+                        SectorId::containing(b.at) == id && !live.contains(&(*key, **site))
+                    })
+                    .map(|(site, b)| (*key, *site, s.material, *b))
+            })
+            .collect();
+        for (key, site, material, saved) in due {
+            let mut block = self.block_body(material, saved.at, saved.radius);
+            block.health = saved.health.min(block.max_health);
+            block.structure = Some((key, site));
+            self.bodies.push(block);
+        }
     }
 
     /// Where each builder with a structure in progress works: the next site, so a builder
@@ -361,6 +519,8 @@ fn can_build(body: &Body, civ: bool) -> bool {
 mod tests {
     use super::*;
     use crate::genome::{Genome, Species};
+    use crate::sectormap::GENERATOR_VERSION;
+    use crate::simulation::save::SaveState;
 
     const DT: f32 = 1.0 / 60.0;
 
@@ -766,5 +926,160 @@ mod tests {
             game.step(0.05, Input::default());
         }
         assert!(game.builds.works.iter().all(|w| w.civ != Some(t.id)));
+    }
+
+    /// Every block of a kept structure now in the world: key, site, place and health, sorted.
+    fn laid(game: &Game) -> Vec<(StructureKey, u16, [u32; 2], u32)> {
+        let mut out: Vec<_> = game
+            .bodies
+            .iter()
+            .filter_map(|b| {
+                let (key, site) = b.structure?;
+                Some((
+                    key,
+                    site,
+                    b.position.to_array().map(f32::to_bits),
+                    b.health.to_bits(),
+                ))
+            })
+            .collect();
+        out.sort_by_key(|(k, s, ..)| (*k, *s));
+        out
+    }
+
+    fn play(game: &mut Game, seconds: f32) {
+        for _ in 0..(seconds / DT) as usize {
+            game.step(DT, Input::default());
+        }
+    }
+
+    /// A sector where a wild nest builder lives, and a game that has watched it work there.
+    fn wild_scene() -> (Game, crate::world::SectorId) {
+        let seed = crate::config::MASTER_SEED;
+        let id = (-40..=40)
+            .flat_map(|x| (-40..=40).map(move |y| crate::world::SectorId { x, y }))
+            .filter(|id| crate::range::ring(*id) >= 5)
+            .find(|id| {
+                crate::range::ecology(seed, *id)
+                    .presence
+                    .iter()
+                    .any(|p| p.species.genome.builder.is_some() && p.weight > 0.3)
+            })
+            .expect("a sector with a nest builder");
+        let mut game = Game::new(seed);
+        game.player_invulnerability = 1e9;
+        game.teleport(id.center());
+        play(&mut game, 150.0);
+        (game, id)
+    }
+
+    /// Wounds one block and destroys another, returning the destroyed key.
+    fn hurt_blocks(game: &mut Game) -> (StructureKey, u16) {
+        let tagged: Vec<u64> = game
+            .bodies
+            .iter()
+            .filter(|b| b.structure.is_some())
+            .map(|b| b.id)
+            .collect();
+        assert!(tagged.len() >= 3, "the builders laid blocks");
+        let wounded = game.bodies.iter_mut().find(|b| b.id == tagged[0]).unwrap();
+        wounded.health *= 0.5;
+        let doomed = game.bodies.iter().find(|b| b.id == tagged[1]).unwrap();
+        let gone = doomed.structure.unwrap();
+        game.bodies.retain(|b| b.id != tagged[1]);
+        gone
+    }
+
+    #[test]
+    fn a_wild_structure_survives_its_sector_unloading_and_reloading() {
+        let (mut game, id) = wild_scene();
+        let gone = hurt_blocks(&mut game);
+        let before = laid(&game);
+        let wounded_before = before.len();
+        // Fly far away: the sector unloads and its blocks leave the world.
+        game.teleport(id.center() + Vec2::new(crate::world::SECTOR_SIZE * 14.0, 0.0));
+        play(&mut game, 5.0);
+        assert!(
+            !laid(&game)
+                .iter()
+                .any(|(k, ..)| matches!(k, StructureKey::Wild(s, _) if *s == id)),
+            "unloaded"
+        );
+        // Come back: the same blocks stand where they stood, wounded and missing as left.
+        game.teleport(id.center());
+        game.step(DT, Input::default());
+        let after = laid(&game);
+        assert!(after.len() >= wounded_before - 1);
+        for block in before.iter().filter(|(k, s, ..)| (*k, *s) != gone) {
+            assert!(after.contains(block), "block {block:?} came back as it was");
+        }
+        assert!(
+            !after.iter().any(|(k, s, ..)| (*k, *s) == gone),
+            "a destroyed block stays destroyed"
+        );
+        // The builders pick their work up where it was left: no site is laid twice.
+        play(&mut game, 200.0);
+        let sites: Vec<_> = laid(&game).iter().map(|(k, s, ..)| (*k, *s)).collect();
+        let mut unique = sites.clone();
+        unique.dedup();
+        assert_eq!(sites, unique);
+        for key in game.builds.works.iter().filter_map(|w| w.key) {
+            let works = game.builds.works.iter().filter(|w| w.key == Some(key));
+            assert_eq!(works.count(), 1, "one work per structure");
+        }
+        assert!(
+            !after.iter().any(|(k, s, ..)| (*k, *s) == gone)
+                && !laid(&game).iter().any(|(k, s, ..)| (*k, *s) == gone),
+            "never rebuilt"
+        );
+    }
+
+    #[test]
+    fn a_wild_structure_survives_save_and_load() {
+        let (mut game, id) = wild_scene();
+        hurt_blocks(&mut game);
+        let before = laid(&game);
+        assert!(!before.is_empty());
+        let text = game.save_state().to_text();
+        let (state, generator) = SaveState::from_text(&text).unwrap();
+        let (loaded, report) = Game::from_save(state, generator);
+        assert!(report.world_deltas_kept);
+        assert_eq!(laid(&loaded), before, "every block, in place, as hurt");
+        assert!(
+            before
+                .iter()
+                .any(|(k, ..)| matches!(k, StructureKey::Wild(s, _) if *s == id))
+        );
+        // The save is a fixed point and does not depend on map order.
+        assert_eq!(text, loaded.save_state().to_text());
+        // A generator change drops the spawn-keyed structures like every other spawn delta.
+        let (state, _) = SaveState::from_text(&text).unwrap();
+        let (other, _) = Game::from_save(state, GENERATOR_VERSION + 1);
+        assert!(other.builds.kept.is_empty());
+    }
+
+    #[test]
+    fn a_civilization_structure_and_its_budget_survive_save_and_load() {
+        let (game, t) = visit(240.0);
+        let before = laid(&game);
+        assert!(
+            before
+                .iter()
+                .any(|(k, ..)| matches!(k, StructureKey::Civ(id, _) if *id == t.id)),
+            "the horde built something"
+        );
+        let started = game.builds.civ_started.clone();
+        let text = game.save_state().to_text();
+        let (state, generator) = SaveState::from_text(&text).unwrap();
+        let (loaded, _) = Game::from_save(state, generator);
+        assert_eq!(laid(&loaded), before);
+        assert_eq!(loaded.builds.civ_started, started, "the budget is kept");
+        // Blocks still wear the territory's tint.
+        let block = loaded
+            .bodies
+            .iter()
+            .find(|b| b.structure.is_some())
+            .unwrap();
+        assert!(loaded.civ_block_tint(block.id).is_some());
     }
 }

@@ -241,6 +241,9 @@ pub struct Body {
     pub origin: Option<(SectorId, u32)>,
     /// Fixed in place regardless of impacts (the stones of a nest).
     pub pinned: bool,
+    /// A block of a creature-built structure: which one, and which site of its plan (see
+    /// `build`). Lets the structure be saved and restored block by block.
+    pub structure: Option<(build::StructureKey, u16)>,
     /// Jointed creatures: the chain this body belongs to, whether it trails a head, and
     /// its index within the creature (0 is the head), which decides hardpoints.
     pub chain: Option<u32>,
@@ -983,6 +986,14 @@ impl Game {
             self.focus = player.position;
         }
         let home = self.sector();
+        // Structures are saved before any sector that holds their blocks is unloaded.
+        if self
+            .loaded
+            .iter()
+            .any(|id| id.chebyshev_distance(home) > UNLOAD_DISTANCE)
+        {
+            self.sync_structures();
+        }
         self.active = SectorId::overlapping(self.focus, ACTIVE_HALF);
         for id in self.active.clone() {
             if self.loaded.insert(id) {
@@ -1223,6 +1234,7 @@ impl Game {
                 self.tethers.push(Tether::link(partner, head));
             }
         }
+        self.restore_structures(id);
         self.reload_pads(id);
     }
 
@@ -2275,6 +2287,7 @@ impl Game {
             mass,
             origin: None,
             pinned: false,
+            structure: None,
             chain: None,
             follower: false,
             part: 0,

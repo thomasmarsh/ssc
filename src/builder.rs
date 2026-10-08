@@ -16,7 +16,7 @@ use crate::world::{Rng, RockKind};
 use std::f32::consts::TAU;
 
 /// What a builder gathers and lays.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Material {
     Stone,
     Ice,

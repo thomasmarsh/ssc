@@ -101,6 +101,12 @@ pub struct SaveState {
     mined: Vec<((SectorId, u32), f32)>,
     regrow: Vec<((SectorId, u32), f32)>,
     relics: Vec<SectorId>,
+    /// Creature-built structures: what is left of each, block by block (see `build`).
+    #[serde(default)]
+    structures: Vec<(build::StructureKey, build::Structure)>,
+    /// Structures each territory has started, so its building budget survives a reload.
+    #[serde(default)]
+    civ_started: Vec<(u64, u8)>,
     streams: Streams,
 }
 
@@ -217,6 +223,8 @@ impl Game {
             mined: sorted(&self.mined),
             regrow: sorted(&self.regrow_stamp),
             relics,
+            structures: self.structures_snapshot().into_iter().collect(),
+            civ_started: sorted(&self.builds.civ_started),
             streams: Streams {
                 rng: self.rng.clone(),
                 loot: self.loot.clone(),
@@ -255,6 +263,8 @@ impl Game {
             game.mined = state.mined.into_iter().collect();
             game.regrow_stamp = state.regrow.into_iter().collect();
             game.relics_taken = state.relics.into_iter().collect();
+            game.builds.kept = state.structures.into_iter().collect();
+            game.builds.civ_started = state.civ_started.into_iter().collect();
         } else {
             // Pads are keyed by spawn too: keep the kits and settings, drop the placed pads and
             // plant the home pad afresh below.

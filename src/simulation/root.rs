@@ -1491,6 +1491,62 @@ mod tests {
         assert_eq!(here(&game), 0, "the slain elder's residents stay gone");
     }
 
+    /// Saving and loading keeps the dead dead: a resident slain while its elder lives stays
+    /// gone while the rest ride on, and once the elder is slain none of its residents return.
+    #[test]
+    fn slain_residents_and_elders_stay_slain_through_a_save() {
+        use crate::simulation::save::SaveState;
+        let (id, p) = hosted_sector();
+        let spawns = world::generate(42, id);
+        let residents: Vec<u32> = spawns
+            .iter()
+            .filter(|s| s.rooted.is_some_and(|r| r.host as usize == p))
+            .map(|s| s.index)
+            .collect();
+        let near = spawns[p].position + Vec2::new(0.0, 900.0);
+        let alive =
+            |game: &Game, index: u32| game.bodies.iter().any(|b| b.origin == Some((id, index)));
+        let reload = |game: &Game| {
+            let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+            Game::from_save(state, generator).0
+        };
+        let mut game = Game::new(42);
+        game.teleport(near);
+        for _ in 0..30 {
+            game.step(DT, Input::default());
+        }
+        // One resident is slain through the real death path.
+        let victim = residents[0];
+        game.bodies
+            .iter_mut()
+            .find(|b| b.origin == Some((id, victim)))
+            .unwrap()
+            .health = 0.0;
+        game.step(DT, Input::default());
+        let loaded = reload(&game);
+        assert!(!alive(&loaded, victim), "the slain resident stays slain");
+        assert!(alive(&loaded, p as u32), "the elder lives");
+        let kin = residents.iter().filter(|i| **i != victim);
+        assert_eq!(
+            kin.clone().filter(|i| alive(&loaded, **i)).count(),
+            kin.filter(|i| alive(&game, **i)).count(),
+            "the living residents are regenerated"
+        );
+        // Then the elder falls.
+        game.bodies
+            .iter_mut()
+            .find(|b| b.origin == Some((id, p as u32)))
+            .unwrap()
+            .health = 0.0;
+        game.step(DT, Input::default());
+        let loaded = reload(&game);
+        assert!(!alive(&loaded, p as u32), "the slain elder stays slain");
+        assert!(
+            residents.iter().all(|i| !alive(&loaded, *i)),
+            "and takes its residents with it"
+        );
+    }
+
     /// An animal host with at least `want` socket marks, and its slots.
     fn socketed_host(want: usize) -> (Genome, Vec<u8>) {
         crate::bodyplan::SPECIMENS
