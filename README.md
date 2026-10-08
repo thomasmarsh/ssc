@@ -146,6 +146,10 @@ Bounded bench galleries: set `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|o
 
 Bounded discovery galleries: set `SSC_DISCOVERY=warning|active|well|relic|crowded` with `SSC_SMOKE_FRAMES`, `SSC_OFFSCREEN=1`, and `SSC_SCREENSHOT`. These advance a real ping and hold a readable pose; the crowded capture includes offscreen curiosity, bullets, and a mine countdown.
 
+## Developer toggles
+
+Set `SSC_DEV=1` to enable the developer panel; without it nothing below exists and the game is unchanged. Press backquote (or the guide button on a pad) to open it; the game waits while it is open. Up and down choose a row, left and right change it, Enter does it, backquote or Esc closes. Rows: invulnerable hull and shield, infinite fuel and ammo, free purchases, no parry, dash or ping cooldowns, unlimited lives, freeze enemies, time scale (0.25x to 4x), max materials, grant all skills, all weapons, all organs, a fitted part of a chosen rarity, teleport to a target sector, and spawn a chosen species or authored specimen at the ship. A small DEV tag shows on the HUD while any toggle is on. For a bounded check, add `SSC_DEV_PANEL=<row>` (and `SSC_DEV_ON=1` to switch the toggles on) to a smoke run. See [docs/DEVTOOLS.md](docs/DEVTOOLS.md).
+
 ## License
 
 SSC is distributed under GPL-2.0-only. See [LICENSE](LICENSE).

@@ -25,6 +25,8 @@ A headless `DevState` on `Game` (pure data, tested) plus a panel toggled by a ke
 - spawn a chosen species or specimen at the ship, force a realm view
 - show-state toggles: sector borders, hit circles, creature genes, sim sector bounds
 
+Status (2026-10-08): built. `DevState` and its hooks live in `src/simulation/dev.rs` (on `Game::dev`, tested, default state proven to change nothing); the panel is `src/devpanel.rs` (`SSC_DEV=1`, backquote or the guide button, pauses the game); the HUD shows a DEV tag while a toggle is on. Built: invulnerable, infinite fuel and ammo (the hold is kept full), free purchases (`Cargo::dev_free` waives every price), max materials, grant all skills, weapons and organs, grant a fitted part of a chosen rarity (private roll stream), no cooldowns, unlimited lives, time scale, freeze enemies, teleport to a target sector, spawn a species or specimen. Skipped: ring teleport, hide HUD, force a realm view, and the show-state toggles (sector borders, hit circles, genes, sim bounds), which need gizmo work in presentation and are left for a later slice.
+
 ## Phase B: one tunables registry
 
 Replace scattered consts that are gameplay numbers with entries in a typed registry (name, default, min, max, unit, group, whether it needs a universe regen). Reads go through a cheap accessor (a resolved struct, not a map lookup per use). Defaults must equal today's values so every test and the golden stay unchanged. Do it module by module, tuning.rs first, each in its own commit with a test that defaults equal the old constants. Do not touch constants that are structural (array sizes, versioning, math epsilons).

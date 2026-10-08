@@ -111,7 +111,11 @@ Keys: arrows to fly, `Space`/mouse to fire, `M` mine (hold), `[` `]` or 1-9 weap
 
 The user prefers work delivered by fresh subagents (general-purpose), one at a time, each with a long, concrete brief that includes: the reading list, the rules above (no em dash, no co-author, tests/clippy/fmt clean, commit per slice, long-run population tests unchanged), the exact design the user stated (quote it), slices with tests, and a final report format (commits, tuning numbers, tests changed and why, test counts, caveats). Before launching, check `git status` is clean and `df -h .` has space. After each agent, verify `git log` and, when cheap, run the test suite yourself, then give the user a short summary in plain language (what was built, what was checked and not, caveats, what is next). Two agents were cut off by usage-limit errors; the fix was to resume the same agent with SendMessage and tell it to continue from the working tree. The action classifier occasionally failed transiently; retrying later worked.
 
-## Latest slice: low-hull heartbeat
+## Latest slice: developer toggles (DEVTOOLS Phase A)
+
+`SSC_DEV=1` plus backquote opens the dev panel; headless state is `DevState` in `src/simulation/dev.rs` (on `Game::dev`), the view is `src/devpanel.rs`. Next is DEVTOOLS Phase B (tunables registry); see `docs/DEVTOOLS.md`.
+
+## Previous slice: low-hull heartbeat
 
 See the last note in `docs/FLOW.md`. One new cue and synth sound (52 sounds now); generator version unchanged. Needs a human ear for volume and tempo.
 
