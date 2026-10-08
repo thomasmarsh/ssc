@@ -474,7 +474,16 @@ impl Game {
                 let reach = magnet + radius;
                 if distance < reach {
                     let pull = 300.0 + 1500.0 * (1.0 - distance / reach);
-                    pickup.velocity += offset / distance.max(1.0) * pull * dt;
+                    let toward = offset / distance.max(1.0);
+                    // A sideways swirl that dies out near the ship, so salvage arcs in
+                    // instead of sliding straight. It keeps the side it is already moving on.
+                    let side = if toward.perp_dot(pickup.velocity) < 0.0 {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    let swirl = side * 0.5 * pull * (distance / reach).powi(2);
+                    pickup.velocity += (toward + toward.perp() * swirl / pull) * pull * dt;
                     pickup.velocity = pickup.velocity.clamp_length_max(1100.0);
                 }
             }
@@ -852,6 +861,27 @@ mod tests {
             game.step(DT, Input::default());
         }
         assert!(game.pickups.is_empty());
+    }
+
+    #[test]
+    fn pickups_arc_into_the_ship_instead_of_sliding_straight() {
+        let mut game = empty_game();
+        game.player_invulnerability = 1e9;
+        let ship = game.player().unwrap().position;
+        game.drop_item(
+            ship + Vec2::new(120.0, 0.0),
+            Vec2::ZERO,
+            Item::Material(Material::Metal, 50.0),
+        );
+        let mut widest = 0.0_f32;
+        for _ in 0..180 {
+            if let Some(p) = game.pickups.first() {
+                widest = widest.max((p.position.y - ship.y).abs());
+            }
+            game.step(DT, Input::default());
+        }
+        assert!(widest > 5.0, "path stayed straight: {widest}");
+        assert!(game.pickups.is_empty(), "an arcing pickup is still taken");
     }
 
     #[test]
