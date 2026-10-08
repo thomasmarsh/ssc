@@ -1,5 +1,7 @@
 # Consolidated bench
 
+Status: BUILT - the three-tab bench (PARTS, WEAPONS, SKILLS), typed actions, partial repair, paired reforge/upgrade rows, manual stash, purchase receipts and fitted-part guidance, bounded galleries. TODO: skill merging, automatic stash overflow, changed material roles and prices, trophy gates, docking assist, BEST BUY hints, the part-plugging animation, rarity-specific purchase chimes, and any new weapon acquisition purchase (all later slices; see [FLOW.md](FLOW.md)). Bench hooks are listed in [HOOKS.md](HOOKS.md).
+
 This is the built contract for the three-tab bench after discovery `3018f3b`. The bench opens while landed with E or B/Select. Navigation and display live in `simulation/bench.rs`; repairs, part rolls, weapon levels, skill purchases, and stash transfers remain in `simulation/pads.rs`, and grafting/removal remain in `simulation/organs.rs`. Rendering and controls dispatch the selected typed action, never infer a transaction from its label.
 
 ## Reconciliation with FLOW
