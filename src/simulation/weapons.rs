@@ -301,7 +301,10 @@ impl Game {
             }
             if friendly {
                 // A phased body is out of reach of a nova and a mine.
-                if body.kind != BodyKind::Player && !body.phased {
+                if body.kind != BodyKind::Player
+                    && !body.phased
+                    && !super::apexes::is_part(&self.apexes, body)
+                {
                     let resist = self
                         .adapt
                         .get(&body.id)

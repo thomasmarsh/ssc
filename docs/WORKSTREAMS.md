@@ -69,7 +69,7 @@ Goal: apex elders have varied bodies, produced by the same procgen mechanisms as
 - Design: give apex genomes a body-plan expression using the L-system infrastructure plus the existing chain bodies, scaled up: segmented serpents, branching coral-like colossi, multi-limbed or ring bodies, with hurtbox and weak-point implications, and fairness rules from `BESTIARY.md`. A body type should read from silhouette.
 - Slices: (1) body-plan gene set for apexes feeding the existing chain; (2) L-system bodies for two new archetypes; (3) hit and weak-point rules per body; (4) rebalance.
 - Depends on: L-system foundation.
-- Status: the foundation for slice 2 is built (animal body plans exist as authored specimens and elders are the same plan misshapen and scaled by `ELDER_SCALE`, see [PROCGEN.md](PROCGEN.md)); `TODO:` placing apex elders with animal bodies in the wild (needs a `GENERATOR_VERSION` bump), weak points per node role.
+- Status: the foundation for slice 2 is built (animal body plans exist as authored specimens and elders are the same plan misshapen and scaled by `ELDER_SCALE`, see [PROCGEN.md](PROCGEN.md)); Built: wild elders have animal bodies (generator version 20, one silhouette per species lineage, see UNIVERSE.md "Apex elders"). `TODO:` weak points per node role (the trailing parts are untouchable armour today), then slice 4 rebalance after playtest.
 
 ## 7. Creatures inside creatures
 

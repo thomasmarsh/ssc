@@ -13,10 +13,12 @@
 //! bounded) but a pure function of archetype and ring (`hull`, `shield`). The simulation
 //! remembers a slain apex by its spawn index like any kill, so it never returns in that world.
 
+use crate::anatomy::{AnimalSpecimen, ELDER_SCALE};
 use crate::biome::{BiomeKind, biome};
 use crate::genome::{
     Diet, Fear, Fecundity, GenePool, Genome, Nest, Social, Species, Trigger, Weapon,
 };
+use crate::power::Power;
 use crate::region::{harsh_name, soft_name};
 use crate::world::{Phenotype, Rng, SECTOR_BODY_BUDGET, SECTOR_SIZE, SectorId, Spawn, hash2};
 use bevy::prelude::Vec2;
@@ -41,6 +43,9 @@ pub const RING_GROWTH: f32 = 0.02;
 pub const GROWTH_CAP: f32 = 3.0;
 /// Shield of a major apex at `APEX_RING`.
 pub const BASE_SHIELD: f32 = 160.0;
+/// No elder's body reaches further than this many head radii from its head (so a species keeps
+/// one silhouette whatever archetype its elder is stamped with).
+pub const MAX_REACH: f32 = 14.0;
 /// A phase change (enrage, shed armour) comes below this share of the hull.
 pub const ENRAGE_AT: f32 = 0.35;
 
@@ -506,6 +511,48 @@ fn stamp_realm(g: &mut Genome, seed: u64, id: SectorId, rank: Rank, archetype: A
     }
 }
 
+/// The elder's animal body: its source species' silhouette (plan seed and archetype come from
+/// the species lineage, so every elder grown from one species wears the same shape), made
+/// misshapen, with the genome's `radius` and `hull` scaled by `ELDER_SCALE`. The specimen's own
+/// weapon mounts are dropped (the archetype's weapon fires from the head, as before), and the
+/// body is cut back until it reaches no further than `MAX_REACH` from the head. Weak points per
+/// node kind are open: today every part is plain armour and only the head is the fight (see
+/// `Game::register_apex`). Pure function of `seed` and `lineage`.
+pub fn body(seed: u64, lineage: u64) -> AnimalSpecimen {
+    let key = hash2(
+        seed ^ APEX_SALT ^ 0xB0D1,
+        lineage as u32 as i32,
+        (lineage >> 32) as u32 as i32,
+    );
+    let mut spec = AnimalSpecimen::for_entity(seed, key).misshapen();
+    spec.genome.mounts = 0;
+    while reach(&spec) > MAX_REACH {
+        let g = &mut spec.genome;
+        if g.depth > 0 {
+            g.depth -= 1;
+        } else if g.segments > 2 {
+            g.segments -= 1;
+        } else if g.limb_len > 1 {
+            g.limb_len -= 1;
+        } else {
+            break;
+        }
+    }
+    spec
+}
+
+/// How far from the head the farthest bead of `spec`'s body sits, in head radii.
+pub fn reach(spec: &AnimalSpecimen) -> f32 {
+    const UNIT: f32 = 100.0;
+    crate::bodyplan::express(spec, UNIT).map_or(0.0, |plan| {
+        plan.nodes
+            .iter()
+            .map(|n| n.offset.length() + n.radius)
+            .fold(0.0, f32::max)
+            / UNIT
+    })
+}
+
 /// Appends the sector's apex, if it has one and the pool offers a species to grow it from.
 /// Called last, so nothing earlier moves.
 pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &mut Vec<Spawn>) {
@@ -527,8 +574,24 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
         archetype(seed, id),
         crate::range::ring(id),
     );
+    // The animal body (see `body`), scaled up. A sector too full for it keeps the old single
+    // body, so which sectors hold an apex never changes with the body.
+    let single = genome;
+    genome.radius *= ELDER_SCALE;
+    genome.hull *= ELDER_SCALE;
+    genome.anatomy = Some(body(seed, source.lineage));
+    // A power that needs a single body (a phantom's blink, a mimic) keeps the old one.
+    if Power::ALL
+        .iter()
+        .any(|p| p.active(&single) && !p.fits(&genome))
+    {
+        genome = single;
+    }
     if SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + genome.parts() {
-        return;
+        genome = single;
+        if SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + genome.parts() {
+            return;
+        }
     }
     let extent = SECTOR_SIZE / 2.0 - 600.0;
     let at = id.center() + Vec2::new(rng.range(-extent, extent), rng.range(-extent, extent));

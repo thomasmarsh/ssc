@@ -123,6 +123,15 @@ pub(super) fn guard(
     }
 }
 
+/// Whether `body` trails an elder's head (see `Game::is_apex_part`). Friendly fire, blasts
+/// and mines pass through such a part, so the head stays the whole fight: its hull, bubble,
+/// guard and resistances are unchanged by the body behind it.
+pub(super) fn is_part(apexes: &BTreeMap<(SectorId, u32), ApexInfo>, body: &Body) -> bool {
+    body.kind == BodyKind::Creature
+        && body.follower
+        && body.origin.is_some_and(|key| apexes.contains_key(&key))
+}
+
 /// What a friendly shot meets on an elder: the bulwark's plated front (`guard`) and a bubble
 /// (shots from beyond `BUBBLE_RANGE` leak `BUBBLE_LEAK`, a lance passes whole, a close shot
 /// goes through and hurts the bubble). Returns the share of damage that lands and whether the
@@ -201,12 +210,19 @@ impl Game {
         self.apex_state.get(&body.id).is_some_and(|s| s.enraged)
     }
 
-    /// The apex a body is, if it is one.
+    /// The apex a body is, if it is one. Only the head of an elder's animal body is the apex
+    /// (its trailing parts are armour: see `is_apex_part`).
     pub fn apex_of(&self, body: &Body) -> Option<&ApexInfo> {
-        if body.kind != BodyKind::Creature {
+        if body.kind != BodyKind::Creature || body.follower {
             return None;
         }
         self.apexes.get(&body.origin?)
+    }
+
+    /// Whether a body is a trailing part of an elder's animal body: plain armour with no weak
+    /// point (open design question), never a kill, a bounty or a drop of its own.
+    pub fn is_apex_part(&self, body: &Body) -> bool {
+        is_part(&self.apexes, body)
     }
 
     /// The apexes' signature moves and phase change, run each step after steering and before
@@ -576,8 +592,9 @@ impl Game {
         for body in self.bodies.iter().filter(|b| b.active && !b.consumed) {
             if let Some(key) = body.origin
                 && !self.apex_seen.contains(&key)
+                && !stirred.iter().any(|(seen, _)| *seen == key)
                 && body.position.distance(ship) < t::APEX_NOTICE_RANGE
-                && let Some(info) = self.apex_of(body)
+                && let Some(info) = self.apexes.get(&key)
             {
                 stirred.push((key, info.name.clone()));
             }
@@ -781,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn an_apex_is_a_grown_up_single_body_within_the_sector_budget() {
+    fn an_apex_is_a_grown_up_animal_within_the_sector_budget() {
         for seed in [SEED, 42, 7] {
             let mut checked = 0;
             for x in -25..=25 {
@@ -792,7 +809,8 @@ mod tests {
                         continue;
                     };
                     let g = spawn.species.unwrap().genome;
-                    assert_eq!(g.parts(), 1);
+                    // An animal body (or the single body a blink or the budget keeps).
+                    assert!((1..=crate::anatomy::MAX_BODIES as u32).contains(&g.parts()));
                     assert!(
                         g.radius >= 34.0 && g.hull >= 100.0 && g.shield >= 40.0,
                         "{g:?}"
@@ -809,6 +827,190 @@ mod tests {
             }
             assert!(checked >= 3, "{seed}: {checked}");
         }
+    }
+
+    /// Every generated elder: (seed, sector, genome), over a few seeds.
+    fn elders() -> Vec<(u64, SectorId, crate::genome::Genome)> {
+        let mut out = Vec::new();
+        for seed in [SEED, 42, 7] {
+            for x in -45..=45 {
+                for y in -45..=45 {
+                    let id = SectorId { x, y };
+                    if crate::apex::rank(seed, id).is_none() {
+                        continue;
+                    }
+                    if let Some(spawn) = world::generate(seed, id)
+                        .last()
+                        .filter(|s| s.apex.is_some())
+                    {
+                        out.push((seed, id, spawn.species.unwrap().genome));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Elder bodies are a pure function of the seed and the sector, keep within the animal caps
+    /// (depth at most 3, mostly 0 or 1; reach bounded in head radii) and, where a blink or the
+    /// sector budget does not forbid it, most elders have a real animal body.
+    #[test]
+    fn elder_bodies_are_deterministic_shallow_and_bounded() {
+        let all = elders();
+        assert!(all.len() > 100, "{}", all.len());
+        let (mut animals, mut shallow) = (0, 0);
+        for (seed, id, genome) in &all {
+            let again = world::generate(*seed, *id)
+                .pop()
+                .unwrap()
+                .species
+                .unwrap()
+                .genome;
+            assert_eq!(*genome, again, "{seed} {id:?} is not deterministic");
+            let Some(spec) = genome.anatomy else { continue };
+            animals += 1;
+            let (_, depth) = crate::anatomy::grow(&spec);
+            assert!(depth <= crate::anatomy::MAX_DEPTH);
+            shallow += usize::from(depth <= 1);
+            assert!(crate::apex::reach(&spec) <= crate::apex::MAX_REACH + 0.01);
+            assert_eq!(spec.genome.mounts, 0);
+        }
+        assert!(animals * 10 >= all.len() * 7, "{animals} of {}", all.len());
+        assert!(
+            shallow * 10 >= animals * 8,
+            "{shallow} of {animals} shallow"
+        );
+    }
+
+    /// A species keeps ONE silhouette: elders grown from the same species share a plan seed and
+    /// the same specimen, whatever their archetype, sector or rank. And a power that needs a
+    /// single body (a blink) never lands on an animal body.
+    #[test]
+    fn elders_of_a_species_share_one_silhouette() {
+        let mut by_seed: std::collections::HashMap<u64, Vec<crate::anatomy::AnimalGenome>> =
+            std::collections::HashMap::new();
+        for (_, _, genome) in elders() {
+            if let Some(spec) = genome.anatomy {
+                assert!(
+                    !crate::power::Power::Blink.active(&genome) || genome.parts() == 1,
+                    "a blinker with a body"
+                );
+                by_seed.entry(spec.seed).or_default().push(spec.genome);
+            }
+        }
+        let shared: Vec<_> = by_seed.values().filter(|v| v.len() > 1).collect();
+        assert!(!shared.is_empty(), "no species grew two elders");
+        for group in shared {
+            assert!(
+                group.iter().all(|g| *g == group[0]),
+                "one species, two silhouettes"
+            );
+        }
+        // And the body is a function of the lineage alone.
+        for lineage in [1, 77, 0xDEAD_BEEF_0000_1234] {
+            assert_eq!(
+                crate::apex::body(SEED, lineage),
+                crate::apex::body(SEED, lineage)
+            );
+            assert_ne!(
+                crate::apex::body(SEED, lineage),
+                crate::apex::body(SEED, lineage + 2)
+            );
+        }
+    }
+
+    /// The parts an elder's body spawns are valid hitboxes: bounded in number, finite, with
+    /// positive radii, parents before children, and as many as the genome counts.
+    #[test]
+    fn elder_bodies_express_valid_hitbox_parts() {
+        for (_, _, genome) in elders() {
+            let Some(spec) = genome.anatomy else { continue };
+            let plan = crate::bodyplan::express(&spec, genome.radius).expect("a body");
+            assert!(plan.nodes.len() <= crate::bodyplan::BODY_PARTS);
+            assert_eq!(plan.nodes.len() as u32, genome.parts());
+            assert!(genome.radius > 0.0 && genome.hull.is_finite());
+            for (n, node) in plan.nodes.iter().enumerate() {
+                assert!(node.offset.is_finite() && node.radius.is_finite() && node.radius > 0.0);
+                assert!(node.parent.is_none_or(|p| p < n));
+            }
+        }
+    }
+
+    /// An elder with a body in play: the head is the whole fight. Shots pass through the body
+    /// behind it, the body falls with the head, and the kill, the bounty and the hoard are paid
+    /// once.
+    #[test]
+    fn an_elder_with_a_body_is_slain_once_and_falls_whole() {
+        let (seed, id, _) = elders()
+            .into_iter()
+            .find(|(_, _, g)| g.parts() >= 4)
+            .expect("an elder with a body");
+        let at = apex_spawn(seed, id).position;
+        let mut game = Game::new(seed);
+        game.player_invulnerability = 1e9;
+        game.teleport(at + Vec2::new(0.0, 900.0));
+        game.step(DT, Input::default());
+        let head = the_apex(&game).clone();
+        let chain = head.chain.expect("a jointed body");
+        let parts = |game: &Game| {
+            game.bodies
+                .iter()
+                .filter(|b| b.chain == Some(chain))
+                .count()
+        };
+        assert!(parts(&game) >= 4);
+        assert!(
+            game.is_apex_part(
+                game.bodies
+                    .iter()
+                    .find(|b| b.chain == Some(chain) && b.follower)
+                    .unwrap()
+            )
+        );
+        // Friendly fire and blasts pass through the armour behind the head.
+        let armour: Vec<_> = game
+            .bodies
+            .iter()
+            .filter(|b| b.chain == Some(chain) && b.follower)
+            .map(|b| (b.id, b.health))
+            .collect();
+        for (_, spot) in game
+            .bodies
+            .iter()
+            .filter(|b| b.chain == Some(chain) && b.follower)
+            .map(|b| (b.id, b.position))
+            .collect::<Vec<_>>()
+        {
+            game.explode(spot, 40.0, 500.0, true);
+        }
+        for (part, health) in armour {
+            let now = game.bodies.iter().find(|b| b.id == part).map(|b| b.health);
+            assert!(
+                now.is_none_or(|h| h >= health - 0.001),
+                "armour took friendly fire"
+            );
+        }
+        // Kill the head: everything goes in that step, once.
+        let (kills, score) = (game.run.kills, game.score);
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == head.id)
+            .unwrap()
+            .health = 0.0;
+        game.step(DT, Input::default());
+        assert_eq!(parts(&game), 0, "the body outlived its head");
+        assert_eq!(game.run.apex_slain.len(), 1);
+        assert_eq!(game.run.kills, kills + 1);
+        let bounty = (head.genome.bounty * head.genes.threat) as u64;
+        assert!(game.score >= score);
+        assert!(
+            game.score - score < 40 * bounty,
+            "the parts paid a bounty each"
+        );
+        for _ in 0..60 {
+            game.step(DT, Input::default());
+        }
+        assert_eq!(game.run.apex_slain.len(), 1, "slain twice");
     }
 
     #[test]

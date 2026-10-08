@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 19;
+pub const GENERATOR_VERSION: u32 = 20;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
@@ -792,6 +792,13 @@ mod tests {
         })
         .unwrap();
         assert_ne!(a, other);
+    }
+
+    /// Generation changed when apex elders got animal bodies (version 20); a later bump is
+    /// fine, going back is not.
+    #[test]
+    fn the_generator_version_covers_elder_animal_bodies() {
+        const { assert!(GENERATOR_VERSION >= 20) };
     }
 
     #[test]

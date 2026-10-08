@@ -1670,7 +1670,9 @@ impl Game {
                 let mut hit: Option<(usize, f32)> = None;
                 for (index, body) in self.bodies.iter().enumerate().filter(|(_, b)| b.active) {
                     let target = if bullet.friendly {
-                        body.kind != BodyKind::Player && !body.phased
+                        body.kind != BodyKind::Player
+                            && !body.phased
+                            && !apexes::is_part(&self.apexes, body)
                     } else {
                         matches!(
                             body.kind,
@@ -1962,11 +1964,9 @@ impl Game {
         let invulnerability = self.guard_time();
         let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();
         for (at, radius, amount, direct, friendly) in blasts {
-            for body in self
-                .bodies
-                .iter_mut()
-                .filter(|b| b.active && b.id != direct)
-            {
+            for body in self.bodies.iter_mut().filter(|b| {
+                b.active && b.id != direct && !(friendly && apexes::is_part(&self.apexes, b))
+            }) {
                 if body.position.distance(at) >= radius + body.radius {
                     continue;
                 }
@@ -2005,6 +2005,21 @@ impl Game {
     }
 
     fn remove_destroyed(&mut self) {
+        // An elder's whole animal body falls with its head (the rest is armour, not a second
+        // life), in the same step, so no trailing part is ever promoted to a head and slain twice.
+        let fallen: Vec<u32> = self
+            .bodies
+            .iter()
+            .filter(|b| b.health <= 0.0 && self.apex_of(b).is_some())
+            .filter_map(|b| b.chain)
+            .collect();
+        if !fallen.is_empty() {
+            for body in &mut self.bodies {
+                if body.chain.is_some_and(|c| fallen.contains(&c)) {
+                    body.health = body.health.min(0.0);
+                }
+            }
+        }
         let destroyed: Vec<Body> = self
             .bodies
             .iter()
@@ -2038,7 +2053,8 @@ impl Game {
                 .base
                 .as_ref()
                 .is_some_and(|b| b.kind == BaseKind::Turret);
-            let bounty = if body.hostile_rock_kill {
+            let apex_part = self.is_apex_part(body);
+            let bounty = if body.hostile_rock_kill || apex_part {
                 0
             } else {
                 match kind {
@@ -2103,7 +2119,7 @@ impl Game {
             }
             if kind != BodyKind::Player {
                 self.civ_destroyed(body);
-                if !body.hostile_rock_kill {
+                if !body.hostile_rock_kill && !apex_part {
                     self.civ_killed(body);
                     self.wildlife_killed(body);
                     self.apex_slain(body);

@@ -257,7 +257,7 @@ impl Game {
         }
         let name = body.genome.name();
         // An apex is one named elder, not a species: its death is not an extirpation.
-        let apex = self.apex_of(body).is_some();
+        let apex = self.apex_of(body).is_some() || self.is_apex_part(body);
         if eaten {
             self.run.lost_to_nature += 1;
         } else if !body.follower {

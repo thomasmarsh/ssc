@@ -296,7 +296,14 @@ impl Game {
             let by_distance = g.trigger != Trigger::Harm
                 && !posture.calm
                 && player_distance < if body.alert && !hidden { lose } else { sight };
+            // An apex elder hurt from beyond its sight is no less angry for it: it answers a
+            // sniper (see `apexes::closers`) however far the shots came from.
+            let elder_hurt = is_hurt(body)
+                && body
+                    .origin
+                    .is_some_and(|key| self.apexes.contains_key(&key));
             let provoked = (g.trigger != Trigger::Sight && is_hurt(body))
+                || elder_hurt
                 || body.provoked > 0.0
                 || (body.enraged
                     && player_distance < RAGE_PURSUIT_RANGE
