@@ -12,6 +12,8 @@
 //! draws from its own salted streams, never from the stream that places the original
 //! population.
 
+use crate::bodyplan;
+use crate::grammar::{GRAMMAR_SALT, GrammarSpecimen};
 use crate::power::{self, POWER_GENES};
 use crate::world::{Rng, SectorParams, hash2};
 
@@ -106,6 +108,7 @@ macro_rules! genome {
         int { $($if_:ident: $ilo:expr, $ihi:expr, $id:expr;)* }
         cat { $($cf:ident: $ct:ident = $cd:ident::$cv:ident;)* }
         tail { $($tf:ident: $tlo:expr, $thi:expr, $td:expr;)* }
+        nested { $($nf:ident: $nt:ty = $nd:expr;)* }
     ) => {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct Genome {
@@ -113,11 +116,12 @@ macro_rules! genome {
             $(pub $if_: u8,)*
             $(pub $cf: $ct,)*
             $(pub $tf: f32,)*
+            $(pub $nf: $nt,)*
         }
         impl Default for Genome {
             /// An inert drifter; every authored or sampled genome starts from here.
             fn default() -> Self {
-                Self { $($rf: $rd,)* $($if_: $id,)* $($cf: $cd::$cv,)* $($tf: $td,)* }
+                Self { $($rf: $rd,)* $($if_: $id,)* $($cf: $cd::$cv,)* $($tf: $td,)* $($nf: $nd,)* }
             }
         }
         impl Genome {
@@ -250,6 +254,14 @@ genome! {
         split: 0.0, 1.0, 0.0;
         confuse: 0.0, 1.0, 0.0;
     }
+    // Structured sections that are not flat genes: not in `genes()`, never drawn by
+    // `sample`, and only crossed or mutated when present, so a genome without one keeps
+    // every existing draw.
+    nested {
+        // An optional grammar-grown body (see `bodyplan`): the grammar genome and its plan
+        // seed. `None` for every creature that exists in the wild today.
+        grammar: Option<GrammarSpecimen> = None;
+    }
 }
 
 /// `root` below this roams free; from here to `ROOT_LIFE` it is rooted while young.
@@ -312,8 +324,17 @@ pub fn volley_for(weapon: Weapon, rng: &mut Rng) -> u8 {
 }
 
 impl Genome {
-    /// Bodies in the creature: the spine plus every limb joint.
+    /// Bodies in the creature: the spine plus every limb joint, or the stems of its grammar
+    /// body when it has one (see `bodyplan`, at most `bodyplan::BODY_PARTS`).
     pub fn parts(&self) -> u32 {
+        match &self.grammar {
+            Some(spec) => bodyplan::part_count(spec),
+            None => self.chain_parts(),
+        }
+    }
+
+    /// The spine and limb joints alone, which is all `parts` counts without a grammar.
+    fn chain_parts(&self) -> u32 {
         u32::from(self.segments) + u32::from(self.limbs) * u32::from(self.limb_len)
     }
 
@@ -431,11 +452,14 @@ impl Genome {
                 Gene::Cat { .. } => {}
             }
         }
-        while self.parts() > MAX_PARTS && self.limbs > 0 {
+        while self.chain_parts() > MAX_PARTS && self.limbs > 0 {
             self.limbs -= 1;
         }
-        while self.parts() > MAX_PARTS && self.segments > 1 {
+        while self.chain_parts() > MAX_PARTS && self.segments > 1 {
             self.segments -= 1;
+        }
+        if let Some(spec) = &mut self.grammar {
+            spec.genome = spec.genome.limited();
         }
         self
     }
@@ -664,6 +688,11 @@ impl Genome {
             g.learn_rate *= 1.0 + triangle(rng);
         }
         power::mutate(&mut g, || triangle(rng));
+        if let Some(spec) = &mut g.grammar {
+            // Its own stream, drawn from only here: genomes without a grammar skip this.
+            let mut own = Rng::new(rng.next_u64() ^ GRAMMAR_SALT);
+            spec.genome = spec.genome.mutate(&mut own);
+        }
         let mut g = g.limited();
         g.lose = g.lose.max(g.sight);
         g.limited()
@@ -736,6 +765,16 @@ impl Genome {
         child.detach_crowd = body.detach_crowd;
         // So does a power: whole from the body-plan parent, never a feeble half.
         child.take_powers_from(&body);
+        // A grammar body is part of the body plan: it comes whole (plan seed included) from
+        // the body-plan parent, and recombines with the other parent's only when both have one.
+        child.grammar = body.grammar;
+        if let (Some(mine), Some(other)) = (a.grammar, b.grammar) {
+            let mut own = Rng::new(rng.next_u64() ^ GRAMMAR_SALT);
+            if let Some(spec) = &mut child.grammar {
+                spec.genome =
+                    crate::grammar::GrammarGenome::crossover(mine.genome, other.genome, &mut own);
+            }
+        }
         let temper = pick(rng);
         child.social = temper.social;
         child.trigger = temper.trigger;
@@ -1656,11 +1695,86 @@ mod tests {
             let c = Genome::crossover(a, b, &mut rng);
             let m = c.mutate(&mut rng);
             for g in [&a, &b, &c, &m] {
+                assert!(g.grammar.is_none());
                 fingerprint(g, &mut h);
             }
             h = hash2(h, (rng.next_u64() & 0x7FFF_FFFF) as i32, 1);
         }
         assert_eq!(h, GOLDEN_NO_GRAMMAR, "{h:#x}");
+    }
+
+    #[test]
+    fn grammar_genomes_cross_and_mutate_to_valid_bounded_bodies() {
+        let mut rng = Rng::new(404);
+        let gram = [Genome::ribwyrm(), Genome::corallid(), Genome::colossus()];
+        let plain = [Genome::bogey(), Genome::serpent(), Genome::fatso()];
+        for i in 0..3000 {
+            let a = gram[i % 3];
+            let b = match i % 4 {
+                0 => gram[(i / 3) % 3],
+                1 => plain[(i / 3) % 3],
+                2 => a,
+                _ => Genome::default(),
+            };
+            let (x, y) = if i % 2 == 0 { (a, b) } else { (b, a) };
+            let mut child = Genome::crossover(x, y, &mut rng);
+            for _ in 0..(i % 5) {
+                child = child.mutate(&mut rng);
+            }
+            assert_eq!(child, child.limited());
+            // The grammar comes whole from the body-plan parent: present only if a parent has one.
+            if let Some(spec) = child.grammar {
+                assert!(x.grammar.is_some() || y.grammar.is_some());
+                assert!(spec.genome == spec.genome.limited());
+                let n = child.parts();
+                assert!((1..=crate::bodyplan::BODY_PARTS as u32).contains(&n));
+                if let Some(body) = crate::bodyplan::express(&spec, child.radius, 1.0) {
+                    assert_eq!(body.nodes.len() as u32, n);
+                }
+            } else {
+                assert!(child.parts() <= MAX_PARTS);
+            }
+            assert!(child.lose >= child.sight);
+        }
+        // Without a grammar on either side, none appears; with only one side it may.
+        let mut seen = [false; 2];
+        for _ in 0..200 {
+            let none = Genome::crossover(plain[0], plain[1], &mut rng).mutate(&mut rng);
+            assert!(none.grammar.is_none());
+            seen[usize::from(
+                Genome::crossover(gram[0], plain[0], &mut rng)
+                    .grammar
+                    .is_some(),
+            )] = true;
+        }
+        assert_eq!(seen, [true, true]);
+        // Deterministic.
+        let one = Genome::crossover(gram[0], gram[1], &mut Rng::new(5));
+        assert_eq!(one, Genome::crossover(gram[0], gram[1], &mut Rng::new(5)));
+        assert_eq!(
+            gram[2].mutate(&mut Rng::new(8)),
+            gram[2].mutate(&mut Rng::new(8))
+        );
+    }
+
+    #[test]
+    fn mutation_keeps_a_grammar_body_recognizable_and_its_seed() {
+        let mut rng = Rng::new(9);
+        let base = Genome::corallid();
+        let seed = base.grammar.unwrap().seed;
+        let mut g = base;
+        for _ in 0..40 {
+            g = g.mutate(&mut rng);
+            assert_eq!(g.grammar.unwrap().seed, seed);
+        }
+        assert!(
+            g.grammar
+                .unwrap()
+                .genome
+                .normalized()
+                .iter()
+                .all(|v| v.is_finite())
+        );
     }
 
     #[test]
