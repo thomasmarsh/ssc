@@ -987,6 +987,29 @@ fn smoke_run(
                 .retain(|b| b.kind == ssc::simulation::BodyKind::Player || rocks.contains(&b.id));
             session.game.tethers.clear();
         }
+        if name == "oozer" && std::env::var_os("SSC_OOZER_ISOLATE").is_some() {
+            // Only the ship and two free stones remain, so nothing else interferes.
+            session.game.player_invulnerability = 1e9;
+            session.game.step(0.02, ssc::simulation::Input::default());
+            // A gate run is about the squeeze, so the ship is safe from the blob.
+            session.game.player_invulnerability = if std::env::var_os("SSC_OOZER_GATE").is_some() {
+                1e9
+            } else {
+                0.0
+            };
+            let rocks: Vec<_> = session
+                .game
+                .bodies
+                .iter()
+                .filter(|b| b.kind == ssc::simulation::BodyKind::Asteroid && !b.pinned)
+                .take(2)
+                .map(|b| b.id)
+                .collect();
+            session
+                .game
+                .bodies
+                .retain(|b| b.kind == ssc::simulation::BodyKind::Player || rocks.contains(&b.id));
+        }
         if name == "slinger"
             && (std::env::var_os("SSC_SPECIMEN_TELL").is_some()
                 || std::env::var_os("SSC_SPECIMEN_THROW").is_some())
@@ -1006,6 +1029,15 @@ fn smoke_run(
             let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (near + 90.0 * k as f32);
             let id = session.game.place_creature(&Species::of(genome), at);
             if name == "oozer" {
+                // SSC_OOZER_FED=<0..1> starts it grown; SSC_OOZER_GATE=<gap> walls the way.
+                let env = |k: &str| {
+                    std::env::var(k)
+                        .ok()
+                        .and_then(|v| v.trim().parse::<f32>().ok())
+                };
+                session
+                    .game
+                    .dev_stage_ooze(id, env("SSC_OOZER_FED"), env("SSC_OOZER_GATE"));
                 // Two free stones beside it, so the skin and the digesting contents show.
                 let rocks: Vec<u64> = session
                     .game
