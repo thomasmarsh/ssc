@@ -6,6 +6,7 @@ pub mod biome;
 pub mod config;
 pub mod fortress;
 pub mod genome;
+pub mod grammar;
 pub mod mixer;
 pub mod power;
 pub mod range;
