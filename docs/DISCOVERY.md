@@ -1,5 +1,7 @@
 # Bounded sonar curiosity
 
+Status: BUILT - base-ping discovery of live Seamer pairs and dynamic wells, LODE ECHO sealed relics, paired labels, fallback curiosity lure, generated-anchor charting, one-time relic collection, and the five bounded galleries. TODO: mimic deception, dim absorbing sonar echoes, lens ping honesty, new organs, personal rifts, beacon integration and new player abilities (all outside this slice). Hooks are listed in [HOOKS.md](HOOKS.md).
+
 This is the built contract for the discovery slice after Seamer `09ad7e8`, Runekeeper `7125751`, and Slinger `73def65`. FLOW's wonder layer reuses X, the free sector-entry ping, the SKILLS tab's SONAR group, and the current map. There is no new action, ability, organ, beacon link, or generation rule.
 
 ## Eligibility and truth
