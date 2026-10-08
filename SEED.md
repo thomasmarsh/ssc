@@ -16,6 +16,7 @@ Do not read all of `docs/` up front. `BESTIARY.md`, `UNIVERSE.md` and `FLOW.md` 
 - `docs/WORKSTREAMS.md`: the big upcoming areas (farming, machines and trade, megastructures, fast travel, weavers and asteroid habitats, apex bodies, nested creatures, swarms, urban/wild/desert feelings, gamepad), each with goal, design, slices, dependencies, open questions. The thinking for the queue below.
 - `docs/DEVTOOLS.md`: developer tooling plan (toggles built; tunables registry and overlay queued).
 - `docs/ROADMAP.md`: gameplay and progression. `docs/FLOW.md`: arcade flow, HUD, core loop, P0/P1/P2 list. `docs/BENCH.md`: bench. `docs/DISCOVERY.md`: sonar discovery. `docs/BESTIARY.md`: creatures, powers, organs, apex. `docs/UNIVERSE.md`: procedural universe. `docs/MIGRATION.md`: architecture, invariants, known caveats. `docs/HOOKS.md`: every `SSC_*` screenshot and debug hook.
+- `docs/PROCGEN.md`: the L-system and Plan foundation (`src/grammar.rs`): templates, salting, caps, how plants, bodies, builders and megastructures consume a Plan, and the shape-grammar recommendation.
 - Code: `src/simulation.rs` and `src/simulation/` (headless rules), `src/world.rs` and `src/genome.rs` (generation), `src/main.rs` and `src/presentation.rs` (Bevy adapter, never owns rules), `src/config.rs` (shared config such as `MASTER_SEED`), `src/simulation/dev.rs` and `src/devpanel.rs` (dev toggles, `SSC_DEV=1`, backquote).
 
 ## Working rules
@@ -41,7 +42,7 @@ Decide per slice, and say which in one line.
 Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices. Reorder with playtest notes.
 
 0. Playtest (the user), now and at each checkpoint. Nothing has been played by a human; all balance is a guess.
-1. Phase 1, groundwork. FIRST: [M] L-system and structure-grammar foundation (user priority; everything procgen from the single master seed). Then: [S] gamepad audit (docs; includes contextual interact rule and reserved bindings); [S] feeling view-model 9.1; [S] weaver and slinger rock care 5.1; [S] edge-density measuring test 4.1 (measure only; also confirm which tests read the HOME golden); investigate the clippy-plus-test hang.
+1. Phase 1, groundwork. [S] gamepad audit (docs; includes contextual interact rule and reserved bindings); [S] feeling view-model 9.1; [S] weaver and slinger rock care 5.1; [S] edge-density measuring test 4.1 (measure only; also confirm which tests read the HOME golden); investigate the clippy-plus-test hang.
 2. Phase 2: [M] gamepad implementation with the input test; [S] sector-load budget measure; [L] persistence (workstream 12: state inventory, `SaveState` with a round-trip test, disk format, continue UI). Persistence precedes farming.
 3. Phase 3, generation batch under one `GENERATOR_VERSION` bump with one golden re-baseline: edge fix, feeling presentation and tilts, desert and asteroid fields, weaver retuning. Playtest checkpoint.
 4. Phase 4: [L] farming slices 1 and 2 with a trivial bench sink. Playtest checkpoint.
@@ -54,6 +55,7 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
+- L-system foundation slices a and b: `src/grammar.rs` (Plan, 8 templates, `GrammarGenome`, caps, growth, 25 tests), `SSC_GRAMMAR` gallery; design in `docs/PROCGEN.md`. Slice c (plants) is farming's first step.
 - Developer toggles (`SSC_DEV=1`, backquote panel, `DevState`), phase A of `docs/DEVTOOLS.md`.
 - Master seed extracted to `src/config.rs`.
 - Low-hull heartbeat cue, pickups arcing into the ship, grace drawn as a shell instead of blinking.

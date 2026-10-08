@@ -59,6 +59,10 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 - `SSC_RIFT=warning|active|transit`: one isolated Seamer pair with bullets over the connection; `transit` has the ship mid-crossing. Typically `SSC_TELEPORT=60000,0 SSC_CAMERA=wide`; `SSC_CAMERA=far` shows both transit ends.
 - `SSC_DISCOVERY=warning|active|well|relic|crowded`: stage existing entities near a generated relic sector, send a real ping, advance 0.6 s (warning) or 1.5 s (others), hold. Typically `SSC_CAMERA=wide`. See [DISCOVERY.md](DISCOVERY.md).
 
+## Grammar gallery
+
+- `SSC_GRAMMAR=all|<template>|strip:<a,b>`: draw grown L-system plans on a grid instead of the world (columns of every template, a grid of one template, or growth strips t = 0.1 to 1.0 per template). Template names: monopodial, sympodial, dichotomous, whorled, fern, coral, vine, spine. `SSC_GRAMMAR_T=<growth>` sets t (default 1), `SSC_GRAMMAR_SEED=<n>` offsets the sample keys. See [PROCGEN.md](PROCGEN.md).
+
 ## Developer panel (not smoke-gated)
 
 - `SSC_DEV=1`: enable the developer toggles and panel (backquote). See [DEVTOOLS.md](DEVTOOLS.md).

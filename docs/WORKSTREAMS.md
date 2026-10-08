@@ -9,7 +9,9 @@ Shared principles (from `CLAUDE.md` and the brief):
 - Rendering never owns rules. Simulation stays headless and deterministic.
 - Performance: only sectors near the player simulate; every new population gets a hard cap and a test of that cap.
 
-## Foundation: stochastic L-system infrastructure (feeds 1, 6, 7)
+## Foundation: stochastic L-system infrastructure (feeds 1, 6, 7, 11, 3)
+
+Status: slices (a) and (b) built; design, the `Plan` type, templates, salting, caps and the shape-grammar recommendation are in [PROCGEN.md](PROCGEN.md). `TODO:` slice (c), wire into plants with workstream 1, and the `Genome` integration step described there.
 
 Goal: one small, deterministic, tested module that grows branching and segmented structure from a seed, used for plants (1), creature bodies including apex elders (6) and hosted or brood bodies (7).
 - Today: creature bodies are jointed chains driven by a flat gene list (`src/genome.rs`, `genome!` macro: real, int, categorical and trait genes). There is no grammar and no branching. Rooted life exists (`src/simulation/root.rs`) and plankton, but plants are not structured.
