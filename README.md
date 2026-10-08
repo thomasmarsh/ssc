@@ -2,18 +2,20 @@
 
 SSC is an arena shooter being rebuilt from its C++ prototype in Rust with Bevy 0.19.1 and WGPU. The Rust version is a basis for further iteration: it keeps the prototype's top-down ship combat and flocking enemies, now in an unbounded, panning universe divided into sectors, while simplifying the physics and presentation.
 
+Status: BUILT - a playable game with an endless procedural universe of sectors, a living ecosystem, civilizations and diplomacy, apex elders, realms, rare creature powers (Weaver, Slinger, Runekeeper and Seamer included), mining, parts, a three-tab bench, sonar and charting, a geometric HUD, procedural audio and developer toggles. PARTIAL - persistence (only legacy and wrecks cross runs, and only within a session). TODO: human playtesting and balance, plus the items tagged `TODO:` across [docs/](docs/); nothing has been played by a human yet and all balance numbers are first guesses.
+
 ## Build and run
 
-The desktop build targets native Apple Silicon Macs, including an M1 MacBook Air. Install Rust 1.95 or newer and Apple's Xcode Command Line Tools, then run:
+The desktop build targets native Apple Silicon Macs, including an M1 MacBook Air. Install Rust 1.95 or newer and Apple's Xcode Command Line Tools, then run (the package has two binaries, so name the game):
 
 ```sh
-cargo run
+cargo run --bin ssc
 ```
 
 For an optimized build:
 
 ```sh
-cargo run --release
+cargo run --release --bin ssc
 ```
 
 Desktop support is enabled by default and uses Bevy's WGPU renderer. On macOS, WGPU selects Metal. Cargo.lock pins the dependency graph for reproducible builds.
@@ -67,7 +69,7 @@ See [docs/UNIVERSE.md](docs/UNIVERSE.md#sector-map-built) for the options and wh
 
 The final bindings. Everything else in the game is reached through these, the bench, the star map or the settings screen.
 
-Xbox controllers use the existing gilrs input path and its built-in mappings. For an Xbox Series X/S controller on macOS, pair it in System Settings → Bluetooth, then run `cargo run`; connecting while the game is running also works. The Switch 2 Pro controller bridge mapping remains supported. Face-button names below use Xbox labels; L1/R1 are LB/RB, L2/R2 are LT/RT, and L3/R3 mean clicking the sticks. Menu (Start) opens settings, and View (Select) is an alternate interact button.
+Xbox controllers use the existing gilrs input path and its built-in mappings. For an Xbox Series X/S controller on macOS, pair it in System Settings → Bluetooth, then run `cargo run --bin ssc`; connecting while the game is running also works. The Switch 2 Pro controller bridge mapping remains supported. Face-button names below use Xbox labels; L1/R1 are LB/RB, L2/R2 are LT/RT, and L3/R3 mean clicking the sticks. Menu (Start) opens settings, and View (Select) is an alternate interact button.
 
 | Action | Keyboard and mouse | Gamepad |
 |---|---|---|
@@ -131,12 +133,14 @@ What the keys do, in more detail:
 
 - `src/` contains the Rust simulation and Bevy desktop app. The original C++ prototype lives in git history (before the commit that removed it).
 - [docs/UNIVERSE.md](docs/UNIVERSE.md) describes the procedural universe design and what is built.
-- `docs/MIGRATION.md` records the reimplementation choices and current limits.
+- [docs/MIGRATION.md](docs/MIGRATION.md) records the reimplementation choices, invariants, known caveats and current limits.
+- [docs/ROADMAP.md](docs/ROADMAP.md), [docs/FLOW.md](docs/FLOW.md), [docs/BESTIARY.md](docs/BESTIARY.md), [docs/BENCH.md](docs/BENCH.md), [docs/DISCOVERY.md](docs/DISCOVERY.md) and [docs/DEVTOOLS.md](docs/DEVTOOLS.md) cover gameplay plan, flow review, creature powers, the bench, sonar curiosity and developer tooling; each opens with a status line and tags open work `TODO:`.
+- [docs/HOOKS.md](docs/HOOKS.md) lists every `SSC_*` environment hook for bounded screenshot runs.
 - [docs/LEGACY_README.md](docs/LEGACY_README.md) preserves the original instructions and credits.
 
 The current presentation uses procedural shapes, UI, and synthesized audio.
 
-For a bounded renderer check, set `SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=/tmp/ssc.png`, and optionally `SSC_TELEPORT="x,y"` to start somewhere else, invulnerable. Sectors away from the origin hold nests, bases and procedurally generated species (jointed, limbed, slithering and stranger); the first sectors to try are around (2, 0), (1, 1) and (-3, 0).
+For a bounded renderer check, set `SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=/tmp/ssc.png`, and optionally `SSC_TELEPORT="x,y"` (world units; a sector is 6000 wide) to start somewhere else, invulnerable. Sectors away from the origin hold nests, bases and procedurally generated species (jointed, limbed, slithering and stranger); for example `SSC_TELEPORT=12000,0` is sector (2, 0). Every hook is listed in [docs/HOOKS.md](docs/HOOKS.md).
 
 Set `SSC_SHIP_VIEW=cross`, `reverse`, `turn`, `brake`, or `coast` during a bounded smoke run to exercise the ship visuals with fixed weapon aim. `SSC_ARM=20` equips the ship for checking upgrade clarity, and `SSC_OFFSCREEN=1` captures without relying on the window display.
 
