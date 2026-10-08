@@ -107,32 +107,55 @@ fn eyes(gizmos: &mut Gizmos, p: Vec2, r: f32, time: f32, open: f32, tint: Color)
 }
 
 /// An Oozer: the soft skin as a closed curve through its nodes (the simulation owns the
-/// shape), a darker nucleus that lags inside, what it has swallowed browning away, and a second
-/// inner membrane while it holds the ship.
+/// shape), a darker nucleus that lags inside, what it has swallowed browning away, a second
+/// inner membrane while it holds the ship, a long pseudopod when it reaches, and a body that
+/// flattens (area kept) as it squeezes through a gap. Its fed reserve tints the skin.
 pub fn draw_ooze(gizmos: &mut Gizmos, game: &Game, body: &Body, color: Color) {
     let Some(view) = game.power_view(body).ooze else {
         return;
     };
     let (p, r) = (body.position, body.radius);
     let tint = tinted(Power::Engulf);
+    // Squeezed: the hit circle is `squeeze` of the free size, so the drawn blob keeps its area
+    // by stretching along the passage (perpendicular to the gap line), within reason.
+    let squeeze = view.squeeze.clamp(0.2, 1.0);
+    let free = r / squeeze;
+    let along_gap = Vec2::from_angle(view.squeeze_axis);
+    let along_passage = Vec2::new(-along_gap.y, along_gap.x);
+    let stretch = (1.0 / squeeze).min(1.7);
+    let place = |local: Vec2| {
+        p + along_gap * local.dot(along_gap) * squeeze
+            + along_passage * local.dot(along_passage) * stretch
+    };
     let skin = |scale: f32| {
         (0..=64).map(move |k| {
             let a = k as f32 / 64.0 * TAU;
-            p + Vec2::from_angle(a) * (r * ssc::simulation::skin_radius(&view.skin, a) * scale)
+            place(
+                Vec2::from_angle(a) * (free * ssc::simulation::skin_radius(&view.skin, a) * scale),
+            )
         })
     };
+    // A well-fed one is deeper in colour.
+    let rich = tint.mix(&Color::srgb(0.9, 0.95, 0.4), 0.5 * view.fed);
     let held = if view.held { 1.0 } else { 0.0 };
-    gizmos.linestrip_2d(skin(1.0), color.mix(&tint, 0.5).with_alpha(0.9));
-    gizmos.linestrip_2d(skin(0.9), tint.with_alpha(0.22 + 0.3 * held));
+    gizmos.linestrip_2d(skin(1.0), color.mix(&rich, 0.5).with_alpha(0.9));
+    gizmos.linestrip_2d(
+        skin(0.9),
+        rich.with_alpha(0.22 + 0.3 * held + 0.2 * view.fed),
+    );
     if view.held {
-        gizmos.linestrip_2d(skin(0.78), tint.with_alpha(0.5));
+        gizmos.linestrip_2d(skin(0.78), rich.with_alpha(0.5));
     }
     // Swallowed rocks, browning and shrinking as they digest.
     for &(angle, size, digested) in view.inside.iter().filter(|i| i.1 > 0.0) {
-        let at = p + Vec2::from_angle(angle) * r * 0.45;
+        let at = place(Vec2::from_angle(angle) * free * 0.45);
         let brown = Color::srgb(0.62 - 0.3 * digested, 0.5 - 0.1 * digested, 0.38);
         gizmos
-            .circle_2d(at, r * size * (1.0 - 0.6 * digested), brown.with_alpha(0.7))
+            .circle_2d(
+                at,
+                free * size * (1.0 - 0.6 * digested),
+                brown.with_alpha(0.7),
+            )
             .resolution(10);
     }
     let nucleus = p + view.nucleus;
@@ -150,18 +173,27 @@ pub fn draw_ooze(gizmos: &mut Gizmos, game: &Game, body: &Body, color: Color) {
             Color::srgb(0.2, 0.4, 0.12).with_alpha(0.9),
         )
         .resolution(14);
-    // The lobe about to close: a bright tip.
-    if let Some((angle, along)) = view.lobe {
-        let tip = p + Vec2::from_angle(angle)
-            * r
-            * ssc::simulation::skin_radius(&view.skin, angle)
-            * 1.02;
+    // The pseudopod: a tapering finger that sways as it feels its way out, ending in a bright
+    // tip. Its base sits on the skin where it points.
+    if let Some((angle, len)) = view.reach.filter(|r| r.1 > 1.0) {
+        let dir = Vec2::from_angle(angle);
+        let side = Vec2::new(-dir.y, dir.x);
+        let base = p + dir * (r * ssc::simulation::skin_radius(&view.skin, angle) * 0.92);
+        let width = (r * 0.38).min(len * 0.5 + 4.0);
+        let sway =
+            |t: f32| side * (game.time * 3.0 + t * 4.0 + body.id as f32).sin() * len * 0.05 * t;
+        let spine = |t: f32| base + dir * (len * t) + sway(t);
+        let edge = |sign: f32| {
+            (0..=10).map(move |k| {
+                let t = k as f32 / 10.0;
+                let w = width * (1.0 - t * t).max(0.0).sqrt() * (1.0 - 0.55 * t);
+                spine(t) + side * w * sign
+            })
+        };
+        gizmos.linestrip_2d(edge(1.0), color.mix(&rich, 0.5).with_alpha(0.9));
+        gizmos.linestrip_2d(edge(-1.0), color.mix(&rich, 0.5).with_alpha(0.9));
         gizmos
-            .circle_2d(
-                tip,
-                3.0 + 4.0 * along,
-                Color::WHITE.with_alpha(0.4 + 0.5 * along),
-            )
+            .circle_2d(spine(1.0), 3.0 + 0.05 * width, Color::WHITE.with_alpha(0.7))
             .resolution(8);
     }
 }

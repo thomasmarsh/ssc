@@ -222,13 +222,17 @@ impl Game {
                     perch = Some((distance_squared, -offset));
                 }
                 // A creature looking for a rock to cling to is not repelled by one.
+                // An Oozer is not repelled by solid rock: it flows into the gaps between them.
+                let squeezes = other.heavy && rock_eater;
                 if !((seeking || rock_eater) && other.rock)
+                    && !squeezes
                     && distance_squared < range * range
                     && distance_squared > 0.1
                 {
                     crowding += offset / distance_squared * 6500.0;
                 }
                 if other.heavy
+                    && !squeezes
                     && distance_squared < HEAVY_RANGE * HEAVY_RANGE
                     && heavy.is_none_or(|(best, _)| distance_squared < best)
                 {

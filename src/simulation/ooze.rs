@@ -3,22 +3,29 @@
 //! **Soft body.** The skin is a ring of `SKIN` radial spring nodes (`Skin`): each node is
 //! pulled to rest, to its two neighbours (an elastic membrane) and by a little volume
 //! preservation, and is pushed by the body's own acceleration (the blob lags and slops), by the
-//! lobe it is stretching toward a target, by a ship pressing near, and by a faint ambient
-//! tremble. It is simulated here, headless and deterministic, and only drawn by the adapter;
-//! the hit box stays the plain circle, so the rules never depend on the shape.
+//! pseudopod it is reaching out, by a ship pressing near, and by a faint ambient tremble. It is
+//! simulated here, headless and deterministic, and only drawn by the adapter; the hit box is
+//! the plain circle (its radius follows size and squeeze, never the wobble), so the rules never
+//! depend on the shape.
 //!
-//! **Engulf.** A ship within lobe reach (`power_reach * ENGULF_LOBE` past the skin) makes the
-//! blob stretch a lobe for `ENGULF_TELL` s, then close. A swallowed ship is drawn into the blob,
-//! keeps its controls and weapons (its shots start inside the body, so they land at full
-//! damage), is carried along but never held harder than `ENGULF_PULL` of its thrust, and is
-//! digested slowly. It gets out by thrusting clear, a dash, a perfect parry, or by killing the
-//! blob; after an escape it cannot be swallowed again for `ENGULF_FREE` s. Never in grace, a
-//! dash or while landed.
+//! **Reach.** A ship within `power_reach * ENGULF_REACH` (times its size) past the skin makes
+//! the blob extend a long pseudopod toward it (else toward the nearest free rock), at a limited
+//! speed and turn rate, retracting when the target is out of reach. The tip touching the ship
+//! swallows it. A swallowed ship keeps its controls and weapons (its shots start inside the
+//! body, so they land at full damage), is carried but never held harder than `ENGULF_PULL` of
+//! its thrust, and is digested slowly. It gets out by thrusting clear, a dash, a perfect parry,
+//! or by killing the blob; after an escape it cannot be swallowed again for `ENGULF_FREE` s.
+//! Never in grace, a dash or while landed.
 //!
-//! Free rocks it touches are eaten: it grows a little (up to `1 + ENGULF_BULK * s`) and the rock
-//! stays visible inside while it browns away over `ENGULF_DIGEST` s. Numbers live in
-//! `power.rs`. `TODO:` small creatures as prey, the nucleus as the one soft spot, and spitting
-//! things out when hit hard (see BESTIARY.md, design 22).
+//! **Digest and grow.** Rocks it eats and the ship it digests fill a fed reserve (0 to 1) that
+//! hunger drains; size follows the reserve slowly between the made size and a generous cap
+//! (`bulk_cap`), with radius, mass and hull together.
+//!
+//! **Squeeze.** Between fixed solids it can pass a gap down to `ENGULF_SQUEEZE` of its width:
+//! the hit circle shrinks to fit (`squeeze_for`) and the drawn body flattens, area kept.
+//!
+//! Numbers live in `power.rs`. `TODO:` small creatures as prey, the nucleus as the one soft
+//! spot, and spitting things out when hit hard (see BESTIARY.md, design 22).
 
 use super::powers::{OozeView, PowerState};
 use super::*;
@@ -124,11 +131,52 @@ pub fn skin_radius(off: &[f32; SKIN], angle: f32) -> f32 {
     1.0 + off[i] * (1.0 - f) + off[(i + 1) % SKIN] * f
 }
 
-/// A pseudopod: where it points and seconds left.
+/// A pseudopod reaching for a target: where it points and how far it has come out past the skin.
 #[derive(Clone, Copy, Debug)]
-pub struct Lobe {
+pub struct Reach {
     pub angle: f32,
-    pub left: f32,
+    pub len: f32,
+    /// The rock it reaches for; `None` is the ship.
+    target: Option<u64>,
+}
+
+/// The fed reserve's bulk: 1 is the size it was made, up to `bulk_cap`.
+pub fn bulk_cap(s: f32) -> f32 {
+    power::ENGULF_BULK_BASE + power::ENGULF_BULK_GENE * s
+}
+
+/// How far a pseudopod may reach past the skin at size `bulk`.
+pub fn reach_max(g: &Genome, bulk: f32) -> f32 {
+    g.power_reach * power::ENGULF_REACH * bulk
+}
+
+/// The squeeze factor (smallest 0.35, 1 is free) a blob of radius `full` at `at` needs to pass
+/// between the solids in `solids` (centre, radius), and the bearing of the gap line. A gap is
+/// two solids that do not touch, with the blob on the line between them and room for the blob
+/// only if it squeezes; anything tighter than `ENGULF_SQUEEZE` of its width is a wall.
+pub fn squeeze_for(at: Vec2, full: f32, solids: &[(Vec2, f32)]) -> (f32, f32) {
+    let mut best = (1.0_f32, 0.0_f32);
+    let min_gap = 2.0 * full * power::ENGULF_SQUEEZE;
+    for (i, &(pa, ra)) in solids.iter().enumerate() {
+        for &(pb, rb) in &solids[i + 1..] {
+            let gap = pa.distance(pb) - ra - rb;
+            if gap < min_gap || gap >= 2.0 * full {
+                continue;
+            }
+            // The blob sits on the line between them, near the gap.
+            let line = pb - pa;
+            let t = ((at - pa).dot(line) / line.length_squared().max(1e-3)).clamp(0.0, 1.0);
+            let nearest = pa + line * t;
+            if nearest.distance(at) > full * 1.1 {
+                continue;
+            }
+            let s = ((gap * 0.5 - 1.0) / full).clamp(power::ENGULF_SQUEEZE, 1.0);
+            if s < best.0 {
+                best = (s, line.to_angle());
+            }
+        }
+    }
+    best
 }
 
 impl Game {
@@ -142,12 +190,47 @@ impl Game {
         Some(OozeView {
             skin: state.skin.off,
             nucleus: state.skin.nucleus,
-            lobe: state
-                .lobe
-                .map(|l| (l.angle, 1.0 - l.left / power::ENGULF_TELL)),
+            reach: state.reach.map(|r| (r.angle, r.len)),
             inside,
             held: self.engulf.is_some_and(|e| e.ooze == body.id),
+            fed: state.fed,
+            squeeze: 1.0 - state.pinch,
+            squeeze_axis: state.pinch_axis,
         })
+    }
+
+    /// Dev staging (`SSC_OOZER_FED`, `SSC_OOZER_GATE`): the Oozer `id` starts with the fed
+    /// reserve `fed` and its size already grown to match, and with `gate` a wall of pinned
+    /// stones across the middle of the line to `ship`, with a gap that wide.
+    pub fn dev_stage_ooze(&mut self, id: u64, fed: Option<f32>, gate: Option<f32>) {
+        let Some(index) = self.bodies.iter().position(|b| b.id == id) else {
+            return;
+        };
+        if let Some(fed) = fed {
+            let body = &self.bodies[index];
+            let mut state = self.power_state.remove(&id).unwrap_or_default();
+            state.base = Some((body.radius, body.mass, body.max_health));
+            state.fed = fed.clamp(0.0, 1.0);
+            let s = Power::Engulf.strength(&body.genome);
+            let bulk = 1.0 + (bulk_cap(s) - 1.0) * state.fed;
+            self.grow_to(index, &mut state, bulk);
+            self.power_state.insert(id, state);
+        }
+        let (Some(gap), Some(ship)) = (gate, self.player().map(|p| p.position)) else {
+            return;
+        };
+        let at = self.bodies[index].position;
+        let across = Vec2::from_angle((at - ship).to_angle() + std::f32::consts::FRAC_PI_2);
+        let middle = (at + ship) * 0.5;
+        for side in [-1.0, 1.0] {
+            for k in 0..8 {
+                let offset = side * (gap * 0.5 + 38.0 + k as f32 * 60.0);
+                let mut rock = self.make_body(BodyKind::Asteroid, middle + across * offset);
+                rock.radius = 38.0;
+                rock.pinned = true;
+                self.bodies.push(rock);
+            }
+        }
     }
 
     /// The ship inside a blob, if any.
@@ -204,112 +287,197 @@ impl Game {
         if state.base.is_none() {
             state.base = Some((body.radius, body.mass, body.max_health));
         }
+        let base_radius = state.base.map_or(body.radius, |b| b.0);
         let thrust = self.stats.thrust;
-        let ship = self
-            .player()
-            .map(|p| (p.position, p.velocity, p.radius, thrust));
+        let ship = self.player().map(|p| (p.position, p.radius, thrust));
         let held = self.engulf.filter(|e| e.ooze == id);
-        // Digestion of what is inside.
-        for (_, age) in state.inside.iter_mut() {
+
+        // The reserve: digestion turns what is inside into fed, hunger eats it, and the size
+        // follows it slowly (never below the size it was made, never past the cap).
+        let mut gain = 0.0;
+        for ((_, size), age) in state.inside.iter_mut() {
+            gain += *size * power::ENGULF_FEED_ROCK / power::ENGULF_DIGEST * dt;
             *age += dt;
         }
         state.inside.retain(|(_, age)| *age < power::ENGULF_DIGEST);
+        state.fed = (state.fed + gain - power::ENGULF_HUNGER * dt).clamp(0.0, 1.0);
+        let target = 1.0 + (bulk_cap(s) - 1.0) * state.fed;
+        let step = if target > state.bulk {
+            power::ENGULF_GROW_RATE
+        } else {
+            power::ENGULF_SHRINK_RATE
+        } * dt;
+        let bulk = state.bulk + (target - state.bulk).clamp(-step, step);
+        if (bulk - state.bulk).abs() > 1e-5 {
+            self.grow_to(index, state, bulk);
+        }
+        let full = base_radius * state.bulk;
 
-        let mut lobe_push = None;
+        // Squeezing through gaps: the hit circle shrinks to what the gap allows.
+        let solids: Vec<(Vec2, f32)> = self
+            .bodies
+            .iter()
+            .filter(|b| {
+                b.active
+                    && b.id != id
+                    && b.kind == BodyKind::Asteroid
+                    && is_fixed(b)
+                    && b.position.distance(at) < full * 3.0 + 260.0
+            })
+            .map(|b| (b.position, b.radius))
+            .collect();
+        let (wanted, axis) = squeeze_for(at, full, &solids);
+        let now = 1.0 - state.pinch;
+        let next = if wanted < now {
+            (now - power::ENGULF_SQUEEZE_IN * dt).max(wanted)
+        } else {
+            (now + power::ENGULF_SQUEEZE_OUT * dt).min(wanted)
+        };
+        state.pinch = 1.0 - next;
+        if wanted < 1.0 {
+            state.pinch_axis = axis;
+        }
+        self.bodies[index].radius = full * next;
+
+        // Reaching: a long pseudopod toward the ship, else toward a rock.
+        let radius = self.bodies[index].radius;
+        let lmax = reach_max(&g, state.bulk);
         let mut dent = None;
-        if let Some((ship_at, ship_v, ship_r, thrust)) = ship {
+        let mut taken: Vec<(u64, f32, Vec2)> = Vec::new();
+        let mut aim: Option<(f32, f32, Option<u64>, f32)> = None;
+        if let Some((ship_at, ship_r, thrust)) = ship {
             let distance = at.distance(ship_at);
-            let radius = self.bodies[index].radius;
-            let lobe = g.power_reach * power::ENGULF_LOBE;
-            let reach = radius + lobe + ship_r;
             if let Some(held) = held {
-                self.hold_ship(index, held, dt, thrust, s, cues);
+                let eaten = self.hold_ship(index, held, dt, thrust, s, cues);
+                state.fed = (state.fed + eaten * power::ENGULF_SHIP_FEED).min(1.0);
+                state.reach = None;
             } else {
                 let free = self.engulf.is_none()
                     && self.engulf_free <= 0.0
                     && self.player_invulnerability <= 0.0
                     && !self.is_landed()
-                    && !self.dashing();
+                    && !self.dashing()
+                    && self.bodies[index].alert;
                 if distance < radius + ship_r + 80.0 {
                     dent = Some((
                         (ship_at - at).normalize_or_zero(),
                         1.0 - distance / (radius + ship_r + 80.0),
                     ));
                 }
-                match state.lobe {
-                    Some(mut l) => {
-                        let to = (ship_at - at).to_angle();
-                        // The lobe follows the ship a little, but never snaps round.
-                        let turn = (to - l.angle + std::f32::consts::PI).rem_euclid(TAU)
-                            - std::f32::consts::PI;
-                        l.angle += turn.clamp(-1.2 * dt, 1.2 * dt);
-                        l.left -= dt;
-                        if !free || distance > reach + 40.0 {
-                            state.lobe = None;
-                        } else if l.left <= 0.0 {
-                            state.lobe = None;
-                            if distance <= reach {
-                                self.engulf = Some(Engulf { ooze: id, age: 0.0 });
-                                self.notify(
-                                    "SWALLOWED  thrust out, dash or parry".into(),
-                                    upgrades::Rarity::Rare,
-                                );
-                                cues.push(Cue::Devour { at: ship_at });
-                            }
-                        } else {
-                            state.lobe = Some(l);
-                            lobe_push = Some((l.angle, 1.0 - l.left / power::ENGULF_TELL));
-                        }
-                    }
-                    None if free && distance <= reach - 8.0 && self.bodies[index].alert => {
-                        state.lobe = Some(Lobe {
-                            angle: (ship_at - at).to_angle(),
-                            left: power::ENGULF_TELL,
-                        });
-                    }
-                    None => {}
+                if free && distance <= radius + lmax + ship_r {
+                    aim = Some(((ship_at - at).to_angle(), distance, None, ship_r));
                 }
             }
-            let _ = ship_v;
-        } else {
-            state.lobe = None;
+        }
+        if aim.is_none() && held.is_none() && state.fed < 0.95 {
+            // Hungry for a rock within reach.
+            let nearest = self
+                .bodies
+                .iter()
+                .filter(|b| {
+                    b.active
+                        && ecology::edible(b)
+                        && !self.bodies[index].root.is_some_and(|r| r.host == b.id)
+                        && b.position.distance(at) <= radius + lmax + b.radius
+                })
+                .min_by(|a, b| {
+                    a.position
+                        .distance_squared(at)
+                        .total_cmp(&b.position.distance_squared(at))
+                });
+            if let Some(rock) = nearest {
+                aim = Some((
+                    (rock.position - at).to_angle(),
+                    rock.position.distance(at),
+                    Some(rock.id),
+                    rock.radius,
+                ));
+            }
+        }
+        match (aim, state.reach) {
+            (Some((angle, distance, target, target_r)), reach) => {
+                let mut r = match reach {
+                    Some(r) if r.target == target => r,
+                    // A new target restarts the reach from the skin.
+                    _ => Reach {
+                        angle,
+                        len: reach.map_or(0.0, |r| r.len.min(radius * 0.3)),
+                        target,
+                    },
+                };
+                let turn =
+                    (angle - r.angle + std::f32::consts::PI).rem_euclid(TAU) - std::f32::consts::PI;
+                r.angle += turn.clamp(-power::ENGULF_TURN * dt, power::ENGULF_TURN * dt);
+                // How far past the skin the target's near edge lies.
+                let need = (distance - radius - target_r * 0.6).clamp(0.0, lmax);
+                r.len = (r.len + power::ENGULF_REACH_SPEED * dt).min(need);
+                let tip = at + Vec2::from_angle(r.angle) * (radius + r.len);
+                let goal = match target {
+                    None => ship.map(|s| s.0),
+                    Some(rock) => self.body(rock).map(|b| b.position),
+                };
+                let touching =
+                    goal.is_some_and(|g| tip.distance(g) <= target_r + 6.0 && r.len >= need - 1.0);
+                if touching {
+                    match target {
+                        None => {
+                            self.engulf = Some(Engulf { ooze: id, age: 0.0 });
+                            self.notify(
+                                "SWALLOWED  thrust out, dash or parry".into(),
+                                upgrades::Rarity::Rare,
+                            );
+                            if let Some((p, _, _)) = ship {
+                                cues.push(Cue::Devour { at: p });
+                            }
+                        }
+                        Some(rock) => {
+                            if let Some(b) = self.body(rock) {
+                                taken.push((rock, b.radius, tip));
+                            }
+                        }
+                    }
+                    state.reach = None;
+                } else {
+                    state.reach = Some(r);
+                }
+            }
+            (None, Some(mut r)) => {
+                r.len -= power::ENGULF_RETRACT_SPEED * dt;
+                state.reach = (r.len > 0.0).then_some(r);
+            }
+            (None, None) => {}
         }
 
-        // Rocks it touches.
-        let cap = 1.0 + power::ENGULF_BULK * s;
+        // Rocks it touches with the body itself.
         let body = &self.bodies[index];
-        let mut taken = Vec::new();
         for rock in self
             .bodies
             .iter()
             .filter(|b| b.active && ecology::edible(b))
         {
-            if body.root.is_some_and(|r| r.host == rock.id) {
+            if taken.len() >= 2 {
+                break;
+            }
+            if body.root.is_some_and(|r| r.host == rock.id) || taken.iter().any(|t| t.0 == rock.id)
+            {
                 continue;
             }
-            if at.distance(rock.position) < body.radius + rock.radius + 6.0
-                && state.bulk + power::ENGULF_GROW * (taken.len() + 1) as f32 <= cap + 1e-3
-            {
+            if at.distance(rock.position) < body.radius + rock.radius + 6.0 {
                 taken.push((rock.id, rock.radius, rock.position));
-                if taken.len() >= 2 {
-                    break;
-                }
             }
         }
         if !taken.is_empty() {
-            let grown = (state.bulk + power::ENGULF_GROW * taken.len() as f32).min(cap);
             cues.push(Cue::Devour { at });
             for (_, radius, position) in &taken {
                 let angle = (*position - at).to_angle();
-                state.inside.push((
-                    (angle, (radius / self.bodies[index].radius).clamp(0.12, 0.4)),
-                    0.0,
-                ));
+                // A rock's food is its own size, not the blob's: a big blob grazes on gravel.
+                let size = (radius / power::ENGULF_FOOD_RADIUS).clamp(0.1, 1.2);
+                state.inside.push(((angle, size.min(0.4)), 0.0));
                 if state.inside.len() > INSIDE {
                     state.inside.remove(0);
                 }
+                state.fed = (state.fed + size * power::ENGULF_FEED_BITE).min(1.0);
             }
-            self.grow_to(index, state, grown);
         }
 
         // The skin.
@@ -318,7 +486,9 @@ impl Game {
         state.skin.last_velocity = body.velocity;
         let push = Push {
             accel: accel.clamp_length_max(400.0),
-            lobe: lobe_push,
+            lobe: state
+                .reach
+                .map(|r| (r.angle, (r.len / lmax.max(1.0)).clamp(0.0, 1.0))),
             dent,
             time: self.time,
             seed: (id % 97) as f32,
@@ -329,7 +499,7 @@ impl Game {
     }
 
     /// The ship inside blob `index`: drawn in, carried at a capped pull, digested, let out when
-    /// it thrusts clear.
+    /// it thrusts clear. Returns the hull and shield it took this step.
     fn hold_ship(
         &mut self,
         index: usize,
@@ -338,14 +508,14 @@ impl Game {
         thrust: f32,
         s: f32,
         cues: &mut Vec<Cue>,
-    ) {
+    ) -> f32 {
         let (centre, velocity, radius) = {
             let b = &self.bodies[index];
             (b.position, b.velocity, b.radius)
         };
         let invulnerability = self.player_invulnerability;
         let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
-            return;
+            return 0.0;
         };
         let age = held.age + dt;
         if age < CLOSE {
@@ -358,7 +528,7 @@ impl Game {
                 e.age = age;
             }
             self.release_engulfed(true);
-            return;
+            return 0.0;
         }
         // Carried along, never held harder than a share of thrust.
         let want = (velocity - ship.velocity) * 3.0 + (centre - ship.position) * 2.0;
@@ -366,7 +536,7 @@ impl Game {
         ship.velocity += want.clamp_length_max(cap) * dt;
         // Digested: shield first (the usual damage rules), and the shield will not recharge.
         let eaten = power::ENGULF_DPS * (power::ENGULF_DPS_GAIN + s) * dt;
-        damage(ship, eaten, invulnerability);
+        let dealt = damage(ship, eaten, invulnerability);
         let at = ship.position;
         if let Some(e) = self.engulf.as_mut() {
             e.age = age;
@@ -375,6 +545,7 @@ impl Game {
         if beat != (held.age * 0.8) as i32 {
             cues.push(Cue::Devour { at });
         }
+        dealt
     }
 }
 
@@ -450,17 +621,89 @@ mod tests {
     }
 
     #[test]
-    fn a_near_ship_is_telegraphed_then_swallowed_and_digested() {
-        let (mut game, _) = oozer_game(Vec2::new(90.0, 0.0));
+    fn a_ship_in_reach_is_reached_for_then_swallowed_and_digested() {
+        let (mut game, _) = oozer_game(Vec2::new(200.0, 0.0));
         game.bodies.iter_mut().for_each(|b| b.alert = true);
-        run(&mut game, 0.4);
-        assert!(game.engulfed().is_none(), "the lobe is still stretching");
-        run(&mut game, 1.0);
+        run(&mut game, 0.2);
+        assert!(
+            game.engulfed().is_none(),
+            "the pseudopod is still on its way out"
+        );
+        let id = game
+            .bodies
+            .iter()
+            .find(|b| b.kind == BodyKind::Creature)
+            .unwrap()
+            .id;
+        let reach = game.power_view(game.body(id).unwrap()).ooze.unwrap().reach;
+        assert!(reach.is_some_and(|(_, len)| len > 20.0), "{reach:?}");
+        run(&mut game, 1.2);
         assert!(game.engulfed().is_some());
         let before = ship_hull(&game);
         run(&mut game, 2.0);
         let lost = before - ship_hull(&game);
         assert!(lost > 2.0 && lost < 12.0, "digestion is slow: {lost}");
+    }
+
+    #[test]
+    fn the_pseudopod_reaches_far_follows_a_moving_ship_and_gives_up_when_it_leaves() {
+        let (mut game, id) = oozer_game(Vec2::new(250.0, 0.0));
+        game.bodies.iter_mut().for_each(|b| b.alert = true);
+        game.player_invulnerability = 0.0;
+        run(&mut game, 0.3);
+        let (angle, len) = game
+            .power_view(game.body(id).unwrap())
+            .ooze
+            .unwrap()
+            .reach
+            .unwrap();
+        assert!(angle.abs() > 3.0 && len > 60.0, "{angle} {len}");
+        // The ship slips round the side: the finger turns after it, but only so fast.
+        set_player(&mut game, Vec2::new(50.0, 200.0), Vec2::ZERO);
+        let angle = angle.rem_euclid(TAU);
+        run(&mut game, 0.2);
+        let (angle2, _) = game
+            .power_view(game.body(id).unwrap())
+            .ooze
+            .unwrap()
+            .reach
+            .unwrap();
+        let angle2 = angle2.rem_euclid(TAU);
+        assert!(
+            angle2 < angle - 0.1 && angle2 > 2.5,
+            "turns at a limited rate: {angle2}"
+        );
+        // Far out of reach: it draws back in.
+        set_player(&mut game, Vec2::new(-1500.0, 0.0), Vec2::ZERO);
+        run(&mut game, 1.5);
+        assert!(
+            game.power_view(game.body(id).unwrap())
+                .ooze
+                .unwrap()
+                .reach
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn it_reaches_for_a_rock_beyond_its_skin_and_eats_it() {
+        let (mut game, id) = oozer_game(Vec2::new(500.0, 0.0));
+        game.player_invulnerability = 1e9;
+        let rock = add(&mut game, BodyKind::Asteroid, Vec2::new(500.0, 160.0));
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == rock)
+            .unwrap()
+            .radius = 9.0;
+        run(&mut game, 0.15);
+        let view = game.power_view(game.body(id).unwrap()).ooze.unwrap();
+        assert!(
+            view.reach.is_some_and(|(a, _)| a > 1.0),
+            "pointing at the rock: {view:?}"
+        );
+        run(&mut game, 1.5);
+        assert!(game.body(rock).is_none_or(|r| r.consumed));
+        assert!(game.power_state.get(&id).unwrap().fed > 0.0);
     }
 
     #[test]
@@ -519,27 +762,215 @@ mod tests {
     }
 
     #[test]
-    fn rocks_are_eaten_within_the_growth_cap_and_show_inside() {
+    fn fed_grows_it_slowly_to_a_generous_cap_and_hunger_shrinks_it_back_to_default() {
         let (mut game, id) = oozer_game(Vec2::new(500.0, 0.0));
+        game.player_invulnerability = 1e9;
+        let (r0, m0, h0) = {
+            let b = game.body(id).unwrap();
+            (b.radius, b.mass, b.max_health)
+        };
+        let s = Power::Engulf.strength(&Genome::oozer());
+        let cap = power::ENGULF_BULK_BASE + power::ENGULF_BULK_GENE * s;
+        assert!(cap > 2.5, "a well-fed one is several times the size: {cap}");
+        // Keep it full: it grows steadily, never past the cap, and the hit box follows.
+        let mut last = r0;
+        for k in 0..(60.0 / DT) as usize {
+            if let Some(st) = game.power_state.get_mut(&id) {
+                st.fed = 1.0;
+            }
+            game.step(DT, Input::default());
+            let r = game.body(id).unwrap().radius;
+            assert!(r >= last - 0.01 && r <= r0 * cap + 0.01, "{k}: {r}");
+            last = r;
+        }
+        let b = game.body(id).unwrap();
+        assert!(b.radius > r0 * 2.0, "{}", b.radius);
+        assert!(b.mass > m0 * 2.0 && b.max_health > h0 * 2.0);
+        assert!(
+            (b.radius / r0 - b.max_health / h0).abs() < 0.05,
+            "size, hull and mass scale together"
+        );
+        // Starve it: size falls back, slowly, never below the size it was made.
+        game.power_state.get_mut(&id).unwrap().fed = 0.0;
+        let big = game.body(id).unwrap().radius;
+        run(&mut game, 5.0);
+        let after = game.body(id).unwrap().radius;
+        assert!(
+            after < big && after > big - 0.02 * r0 * 5.0 - 1.0,
+            "slowly: {big} to {after}"
+        );
+        run(&mut game, 120.0);
+        assert!((game.body(id).unwrap().radius - r0).abs() < 0.5);
+    }
+
+    #[test]
+    fn eating_and_digesting_fill_the_reserve_over_time() {
+        let (mut game, id) = oozer_game(Vec2::new(500.0, 0.0));
+        game.player_invulnerability = 1e9;
         let at = Vec2::new(500.0, 0.0);
-        for k in 0..30 {
+        for k in 0..10 {
             let rock = add(&mut game, BodyKind::Asteroid, at + Vec2::new(k as f32, 0.0));
             game.bodies
                 .iter_mut()
                 .find(|b| b.id == rock)
                 .unwrap()
-                .radius = 6.0;
+                .radius = 12.0;
         }
-        run(&mut game, 1.0);
-        let base = Genome::oozer();
-        let body = game.body(id).unwrap();
-        let cap = 1.0 + power::ENGULF_BULK * Power::Engulf.strength(&base);
-        assert!(body.radius > 36.0 && body.radius <= 36.0 * cap + 0.01);
+        run(&mut game, 0.5);
+        let bitten = game.power_state.get(&id).unwrap().fed;
+        assert!(bitten > 0.05, "{bitten}");
         assert!(
-            game.power_view(body)
+            game.power_view(game.body(id).unwrap())
                 .ooze
                 .is_some_and(|o| o.inside[0].1 > 0.0)
         );
+        run(&mut game, 10.0);
+        let digesting = game.power_state.get(&id).unwrap().fed;
+        assert!(
+            digesting > bitten,
+            "digestion keeps feeding it: {bitten} to {digesting}"
+        );
+        assert!(game.body(id).unwrap().radius > 36.0);
+    }
+
+    #[test]
+    fn digesting_the_ship_feeds_it() {
+        let (mut game, id) = oozer_game(Vec2::new(90.0, 0.0));
+        run(&mut game, 2.0);
+        assert!(game.engulfed().is_some());
+        let before = game.power_state.get(&id).unwrap().fed;
+        run(&mut game, 6.0);
+        let after = game.power_state.get(&id).unwrap().fed;
+        assert!(after > before + 0.015, "{before} to {after}");
+    }
+
+    /// A wall of stones across x = 300 with a gate `gap` wide at y = 0.
+    fn wall_with_gate(game: &mut Game, gap: f32) {
+        for side in [-1.0, 1.0] {
+            for k in 0..10 {
+                let y = side * (gap * 0.5 + 38.0 + k as f32 * 60.0);
+                let id = add(game, BodyKind::Asteroid, Vec2::new(300.0, y));
+                let b = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+                b.radius = 38.0;
+                b.pinned = true;
+                b.rock = crate::world::RockKind::Plain;
+            }
+        }
+    }
+
+    fn crossing(gap: f32, genome: Genome) -> (f32, f32) {
+        let mut game = empty_game();
+        game.player_invulnerability = 1e9;
+        set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
+        wall_with_gate(&mut game, gap);
+        let id = spawn(&mut game, &Species::of(genome), Vec2::new(560.0, 0.0));
+        let mut least = 1.0f32;
+        for _ in 0..(40.0 / DT) as usize {
+            // Only the staged bodies, as the other power tests do.
+            game.bodies
+                .retain(|b| b.kind == BodyKind::Player || b.id == id || b.pinned);
+            game.step(DT, Input::default());
+            let b = game.body(id).unwrap();
+            least = least.min(b.radius / 36.0);
+            if b.position.x < 200.0 {
+                break;
+            }
+        }
+        (game.body(id).unwrap().position.x, least)
+    }
+
+    #[test]
+    fn it_squeezes_through_a_gate_narrower_than_itself_where_a_plain_body_cannot() {
+        let plain = Genome {
+            radius: 36.0,
+            hull: 160.0,
+            mass: 90.0,
+            speed: 45.0,
+            cruise: 16.0,
+            sight: 900.0,
+            lose: 900.0,
+            standoff: 0.0,
+            weapon: crate::genome::Weapon::None,
+            contact_damage: 0.0,
+            ..Genome::default()
+        };
+        let (x_plain, _) = crossing(60.0, plain);
+        assert!(
+            x_plain > 330.0,
+            "a plain 36-radius body cannot fit a 60 gate: {x_plain}"
+        );
+        let mut oozer = Genome::oozer();
+        oozer.sight = 900.0;
+        oozer.lose = 900.0;
+        let (x, least) = crossing(60.0, oozer);
+        assert!(x < 250.0, "the oozer got through: {x}");
+        assert!(
+            (power::ENGULF_SQUEEZE..0.9).contains(&least),
+            "its hit circle shrank to fit: {least}"
+        );
+        // Too tight even for it (under `ENGULF_SQUEEZE` of its width): stopped like anything else.
+        let (x_tight, _) = crossing(20.0, oozer);
+        assert!(x_tight > 330.0, "{x_tight}");
+    }
+
+    #[test]
+    fn squeeze_is_measured_from_the_gap_and_never_in_the_open_or_against_a_wall() {
+        let c = Vec2::ZERO;
+        // In the open and beside a single stone: free.
+        assert_eq!(squeeze_for(c, 36.0, &[]).0, 1.0);
+        assert_eq!(squeeze_for(c, 36.0, &[(Vec2::new(60.0, 0.0), 20.0)]).0, 1.0);
+        // Between two stones 60 apart (surfaces): squeezed to fit (radius about 29).
+        let gate = [(Vec2::new(0.0, 68.0), 38.0), (Vec2::new(0.0, -68.0), 38.0)];
+        let (s, axis) = squeeze_for(c, 36.0, &gate);
+        assert!((s - 29.0 / 36.0).abs() < 0.03, "{s}");
+        assert!((axis.abs() - std::f32::consts::FRAC_PI_2).abs() < 0.01);
+        // A seam between touching stones is a wall, not a gap.
+        let seam = [(Vec2::new(0.0, 40.0), 38.0), (Vec2::new(0.0, -40.0), 38.0)];
+        assert_eq!(squeeze_for(c, 36.0, &seam).0, 1.0);
+        // Overlapping wall pieces beside it are not gaps either.
+        let wall = [(Vec2::new(80.0, 0.0), 38.0), (Vec2::new(80.0, 60.0), 38.0)];
+        assert_eq!(squeeze_for(c, 36.0, &wall).0, 1.0);
+    }
+
+    #[test]
+    fn a_large_blob_stays_sound_it_swallows_holds_and_releases_the_ship() {
+        let (mut game, id) = oozer_game(Vec2::new(400.0, 0.0));
+        game.player_invulnerability = 1e9;
+        for _ in 0..(50.0 / DT) as usize {
+            if let Some(st) = game.power_state.get_mut(&id) {
+                st.fed = 1.0;
+            }
+            game.step(DT, Input::default());
+        }
+        let r = game.body(id).unwrap().radius;
+        assert!(r > 80.0, "{r}");
+        game.player_invulnerability = 0.0;
+        let at = game.body(id).unwrap().position;
+        set_player(&mut game, at + Vec2::new(-r - 120.0, 0.0), Vec2::ZERO);
+        game.bodies.iter_mut().for_each(|b| b.alert = true);
+        run(&mut game, 3.0);
+        assert!(
+            game.engulfed().is_some(),
+            "a looming one still reaches and swallows"
+        );
+        // The pull is capped, so thrusting out still frees the ship.
+        let mut freed = false;
+        for _ in 0..(8.0 / DT) as usize {
+            let away = (game.player().unwrap().position - game.body(id).unwrap().position)
+                .normalize_or_zero();
+            game.step(
+                DT,
+                Input {
+                    move_direction: Some(away),
+                    ..Input::default()
+                },
+            );
+            if game.engulfed().is_none() {
+                freed = true;
+                break;
+            }
+        }
+        assert!(freed);
     }
 
     #[test]

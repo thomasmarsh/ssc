@@ -145,20 +145,41 @@ pub const LENS_BLIP: f32 = 120.0;
 /// of the well per second, gaining a pocket well (at most `POCKET_MAX` of a full one, reach
 /// `POCKET_REACH`). If it dies holding at least `POCKET_RELEASE` the well is released where it
 /// died and fades over `RELEASE_LIFE` seconds.
-/// Engulf (Oozer): a lobe `power_reach * ENGULF_LOBE` long stretches for `ENGULF_TELL` s toward
-/// a ship within its reach, then closes; a swallowed ship is pulled along at no more than
-/// `ENGULF_PULL` of its thrust (so a full thrust always gets out), digested at
-/// `ENGULF_DPS * (ENGULF_DPS_GAIN + s)` a second (shield first), and cannot be swallowed again for
-/// `ENGULF_FREE` s after an escape. Rocks it touches add `ENGULF_GROW` to its bulk (up to
-/// `1 + ENGULF_BULK * s`) and show inside for `ENGULF_DIGEST` s.
-pub const ENGULF_LOBE: f32 = 0.4;
-pub const ENGULF_TELL: f32 = 0.8;
+/// Engulf (Oozer): a pseudopod up to `power_reach * ENGULF_REACH` (times its size) long
+/// extends at `ENGULF_REACH_SPEED` (retracts at `ENGULF_RETRACT_SPEED`, turns at `ENGULF_TURN`
+/// rad/s) toward the ship in reach, else a rock; touching the ship swallows it, touching a rock
+/// eats it. A swallowed ship is pulled along at no more than `ENGULF_PULL` of its thrust (so a
+/// full thrust always gets out), digested at `ENGULF_DPS * (ENGULF_DPS_GAIN + s)` a second
+/// (shield first), and cannot be swallowed again for `ENGULF_FREE` s after an escape.
+/// Size follows a fed reserve (0 to 1): a rock adds `size * ENGULF_FEED_BITE` when eaten and
+/// `size * ENGULF_FEED_ROCK` more while it digests over `ENGULF_DIGEST` s (`size` is the rock's
+/// radius over `ENGULF_FOOD_RADIUS`), the ship's hull and shield it digests add
+/// `ENGULF_SHIP_FEED` a point, and hunger takes `ENGULF_HUNGER` a second. Bulk (radius, mass and
+/// hull together) is 1 empty and `ENGULF_BULK_BASE + ENGULF_BULK_GENE * s` full (2.9 times at
+/// the specimen gene, 5 at the strongest), growing at `ENGULF_GROW_RATE` and shrinking at
+/// `ENGULF_SHRINK_RATE` a second. It squeezes through a gap between solids as narrow as
+/// `ENGULF_SQUEEZE` of its width, the hit circle shrinking at `ENGULF_SQUEEZE_IN` a second and
+/// recovering at `ENGULF_SQUEEZE_OUT`.
+pub const ENGULF_REACH: f32 = 0.8;
+pub const ENGULF_REACH_SPEED: f32 = 300.0;
+pub const ENGULF_RETRACT_SPEED: f32 = 450.0;
+pub const ENGULF_TURN: f32 = 1.5;
 pub const ENGULF_PULL: f32 = 0.5;
 pub const ENGULF_DPS: f32 = 3.0;
 pub const ENGULF_DPS_GAIN: f32 = 0.5;
 pub const ENGULF_FREE: f32 = 3.0;
-pub const ENGULF_GROW: f32 = 0.04;
-pub const ENGULF_BULK: f32 = 0.6;
+pub const ENGULF_FEED_BITE: f32 = 0.08;
+pub const ENGULF_FEED_ROCK: f32 = 0.2;
+pub const ENGULF_FOOD_RADIUS: f32 = 30.0;
+pub const ENGULF_SHIP_FEED: f32 = 0.004;
+pub const ENGULF_HUNGER: f32 = 0.005;
+pub const ENGULF_BULK_BASE: f32 = 2.0;
+pub const ENGULF_BULK_GENE: f32 = 3.0;
+pub const ENGULF_GROW_RATE: f32 = 0.05;
+pub const ENGULF_SHRINK_RATE: f32 = 0.02;
+pub const ENGULF_SQUEEZE: f32 = 0.35;
+pub const ENGULF_SQUEEZE_IN: f32 = 3.0;
+pub const ENGULF_SQUEEZE_OUT: f32 = 1.5;
 pub const ENGULF_DIGEST: f32 = 20.0;
 pub const DEVOUR_GROW: f32 = 0.03;
 pub const DEVOUR_BULK: f32 = 2.0;

@@ -106,7 +106,12 @@ pub struct PowerState {
     /// Engulf (Oozer): the soft skin, the lobe being stretched, and rocks digesting inside
     /// as ((bearing, size share), age).
     pub(super) skin: super::ooze::Skin,
-    pub(super) lobe: Option<super::ooze::Lobe>,
+    pub(super) reach: Option<super::ooze::Reach>,
+    /// The fed reserve (0 to 1) that sets its size, and how pinched it is (0 free) and along
+    /// which gap line.
+    pub(super) fed: f32,
+    pub(super) pinch: f32,
+    pub(super) pinch_axis: f32,
     pub(super) inside: Vec<((f32, f32), f32)>,
 }
 
@@ -143,8 +148,13 @@ pub struct OozeView {
     pub skin: [f32; super::ooze::SKIN],
     /// The nucleus, offset from the centre.
     pub nucleus: Vec2,
-    /// A lobe stretching: its bearing and how far along (0 to 1).
-    pub lobe: Option<(f32, f32)>,
+    /// A pseudopod reaching out: its bearing and how far past the skin it is (world units).
+    pub reach: Option<(f32, f32)>,
+    /// The fed reserve, 0 to 1 (size follows it).
+    pub fed: f32,
+    /// Squeeze factor of the hit circle (1 free) and the bearing of the gap line.
+    pub squeeze: f32,
+    pub squeeze_axis: f32,
     /// Rocks inside: bearing, share of the radius, and how digested (0 fresh, 1 gone).
     pub inside: [(f32, f32, f32); super::ooze::INSIDE],
     pub held: bool,
