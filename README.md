@@ -38,12 +38,14 @@ See [docs/UNIVERSE.md](docs/UNIVERSE.md#sector-map-built) for the options and wh
 
 The final bindings. Everything else in the game is reached through these, the bench, the star map or the settings screen.
 
+Xbox controllers use the existing gilrs input path and its built-in mappings. For an Xbox Series X/S controller on macOS, pair it in System Settings → Bluetooth, then run `cargo run`; connecting while the game is running also works. The Switch 2 Pro controller bridge mapping remains supported. Face-button names below use Xbox labels; L1/R1 are LB/RB, L2/R2 are LT/RT, and L3/R3 mean clicking the sticks. Menu (Start) opens settings, and View (Select) is an alternate interact button.
+
 | Action | Keyboard and mouse | Gamepad |
 |---|---|---|
-| Thrust, brake, turn | Up, Down, Left and Right | left stick (any direction), L2 or A brakes |
+| Thrust, brake, turn | Up, Down, Left and Right | left stick (any direction), LT / L2 or A brakes |
 | Fire | Space or A, or hold the left mouse button to aim at the cursor and fire | right stick (past 30 percent) |
-| Mine | hold M | R2 |
-| Switch weapon | `[` and `]`, or 1 to 9 | L1 and R1 |
+| Mine | hold M | RT / R2 |
+| Switch weapon | `[` and `]`, or 1 to 9 | LB / L1 and RB / R1 |
 | Parry (a later upgrade) | D | D-pad right |
 | Dash (a later upgrade) | Shift | L3 |
 | Sonar ping | X | R3 |
@@ -53,9 +55,9 @@ The final bindings. Everything else in the game is reached through these, the be
 | Details panel and radar | hold Tab, or F3 to latch | |
 | Key list and HUD key | F1 | |
 | Pause | P | |
-| Settings (and quit) | Esc | Start |
+| Settings (and quit) | Esc | Menu / Start |
 | Fullscreen | F11 | |
-| New run after game over | Enter | |
+| New run after game over | Enter | A |
 
 The ship’s shouldered hull turns toward the left stick’s movement direction and holds its heading while coasting. The weapon spine, cannons and aim chevron turn independently toward weapon aim. Orange rear flames show main propulsion; blue front and side RCS jets show reverse thrust, strafing, braking and hull turns. These are inferred visual effects: movement and firing rules are unchanged. Equipment retains its rarity colors, and hull, shield and weapon indicators keep their existing meanings.
 

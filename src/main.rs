@@ -446,9 +446,12 @@ fn controls(
             let _ = session.game.deploy_beacon();
         }
     }
-    // Enter starts a new run once the last ship is lost (restarting mid-run is in the settings).
-    if keys.just_pressed(KeyCode::Enter) && session.game.game_over {
+    // Enter or the south face button (Xbox A) starts a new run once the last ship is lost.
+    // Restarting mid-run is in the settings.
+    if session.game.game_over && (keys.just_pressed(KeyCode::Enter) || pad(GamepadButton::South)) {
         restart(&mut session);
+        session.input = Input::default();
+        return;
     }
     // Cursor steering is active while firing; keyboard-only play keeps its heading.
     let aim_direction = if mouse.pressed(MouseButton::Left) {

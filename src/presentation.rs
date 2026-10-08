@@ -1281,7 +1281,11 @@ fn summary_lines(session: &Session) -> Vec<(String, Color, f32)> {
         if !best.is_empty() {
             out.push((best, CYAN, 14.0));
         }
-        out.push(("Press ENTER to launch again".into(), CYAN, 16.0));
+        out.push((
+            "Press ENTER or gamepad A to launch again".into(),
+            CYAN,
+            16.0,
+        ));
     } else if game.run.recap > 0.0 {
         let r = &game.run;
         out.push((
