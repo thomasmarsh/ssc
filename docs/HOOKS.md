@@ -26,6 +26,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 - `SSC_TELEPORT="x,y"`: start at those world coordinates, invulnerable.
 - `SSC_TIME=<seconds>`: start the game clock there (wells and anything posed by time).
 - `SSC_STEPS=<seconds>`: run the game that far ahead just before the screenshot (for example `SSC_SPECIMEN=weaver SSC_STEPS=15` lets a web build; a remora needs a few calm seconds).
+- `SSC_AT_STRUCTURE=1`: after `SSC_STEPS`, move the ship to the middle of the biggest structure laid (`Game::structure_focus`). For a civilization, teleport near a horde capital and run a few hundred seconds, for example `SSC_TELEPORT=-209900,23700 SSC_CAMERA=wide SSC_STEPS=400 SSC_AT_STRUCTURE=1` (seed-dependent).
 - `SSC_OUTPOST=1`: start at the early outpost's capital (standing meter, tithe seat).
 
 ## Panels and HUD

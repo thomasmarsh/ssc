@@ -4,15 +4,22 @@
 //! the block it hangs from. Blocks are pinned rocks of the builder's material: ordinary
 //! bodies that collide, can be shot or mined, and unload with their sector.
 //!
-//! Slice one stays where the builder stands: the structure is laid out around the place the
-//! builder first worked from, and building waits while the builder is out of reach or the
-//! site is occupied. Steering to gather and walk the site, nests as a species, civilization
-//! construction and player interaction are later slices (`docs/WORKSTREAMS.md`, 11).
+//! Civilizations build too (slice three, `update_civ_builders`): a rank-and-file member who
+//! is not mining lays a structure from the territory's own gene set, near where it stands,
+//! by the same machinery. The gene set and plan are the territory's, not the worker's, so a
+//! civilization has a recognisable building style and the nth structure is the same whoever
+//! lays it. Blocks stay plain pinned rocks; those of a civilization wear its tint.
+//!
+//! A builder lays its structure around the place it first worked from and walks it as it rises
+//! (the leash target is the next site, `builder_homes`); building waits while the builder is
+//! out of reach or a fixed body sits on the site. Gathering rocks as a visible step and
+//! player interaction are later slices (`docs/WORKSTREAMS.md`, 11).
 
 use super::*;
 use crate::builder::Builder;
 use crate::grammar::entity_key;
 use crate::structure::StructurePlan;
+use crate::territory::{CivRole, Standing};
 
 /// Most structures under construction at once, across the loaded world.
 pub const MAX_WORKS: usize = 6;
@@ -20,6 +27,13 @@ pub const MAX_WORKS: usize = 6;
 pub const REACH: f32 = 260.0;
 /// A wandering builder is drawn back toward its site beyond this distance (see `home_pull`).
 pub const LEASH: f32 = 130.0;
+/// Most civilization structures under construction at once, across the loaded world (their
+/// own cap, so civilizations never starve wild builders of slots, nor the reverse).
+pub const MAX_CIV_WORKS: usize = 4;
+/// Structures one civilization starts in a session: a few landmarks, not an endless sprawl.
+pub const CIV_STRUCTURES: u8 = 3;
+/// Salt for a territory's building style.
+const CIV_SALT: u64 = 0xC171_B01D_0000_0051;
 /// Seconds a site may stay blocked before the builder gives the structure up as it stands.
 pub const STALL: f32 = 90.0;
 
@@ -27,6 +41,10 @@ pub const STALL: f32 = 90.0;
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Work {
     pub builder: u64,
+    /// The genes it follows: the builder's own, or its territory's style.
+    pub gene: Builder,
+    /// The territory that raises it, for a civilization's work.
+    pub civ: Option<u64>,
     pub plan: StructurePlan,
     pub origin: Vec2,
     /// The next site to place; the sites before it are laid.
@@ -45,6 +63,8 @@ pub(super) struct Work {
 #[derive(Clone, Debug, Default)]
 pub(super) struct BuildState {
     pub works: Vec<Work>,
+    /// Structures each territory has started this session (the budget `CIV_STRUCTURES`).
+    pub civ_started: std::collections::HashMap<u64, u8>,
 }
 
 impl Game {
@@ -55,7 +75,7 @@ impl Game {
         let alive: Vec<u64> = self
             .bodies
             .iter()
-            .filter(|b| b.kind == BodyKind::Creature && b.genome.builder.is_some())
+            .filter(|b| b.kind == BodyKind::Creature)
             .map(|b| b.id)
             .collect();
         self.builds.works.retain(|w| alive.contains(&w.builder));
@@ -63,7 +83,7 @@ impl Game {
         let starters: Vec<(u64, Vec2, Builder, u64)> = self
             .bodies
             .iter()
-            .filter(|b| can_build(b))
+            .filter(|b| can_build(b, false) && b.genome.builder.is_some())
             .filter(|b| !self.builds.works.iter().any(|w| w.builder == b.id))
             .filter_map(|b| {
                 let key = b
@@ -73,12 +93,21 @@ impl Game {
             })
             .collect();
         for (id, at, builder, key) in starters {
-            if self.builds.works.iter().filter(|w| !w.done).count() >= MAX_WORKS {
+            if self
+                .builds
+                .works
+                .iter()
+                .filter(|w| !w.done && w.civ.is_none())
+                .count()
+                >= MAX_WORKS
+            {
                 break;
             }
             let plan = builder.blueprint(self.seed, key);
             self.builds.works.push(Work {
                 builder: id,
+                gene: builder,
+                civ: None,
                 clock: plan.sites.first().map_or(0.0, |s| builder.work(s.reach)),
                 plan,
                 origin: at,
@@ -88,6 +117,8 @@ impl Game {
                 done: false,
             });
         }
+
+        self.update_civ_builders();
 
         for w in 0..self.builds.works.len() {
             let (id, cursor, origin) = {
@@ -103,10 +134,12 @@ impl Game {
             if work.done || work.clock > 0.0 {
                 continue;
             }
-            let Some(body) = self.body(id).filter(|b| can_build(b)) else {
-                continue;
-            };
-            let Some(builder) = body.genome.builder else {
+            let builder = self.builds.works[w].gene;
+            let civ = self.builds.works[w].civ.is_some();
+            let Some(body) = self
+                .body(id)
+                .filter(|b| can_build(b, civ) && b.active && b.kind == BodyKind::Creature)
+            else {
                 continue;
             };
             let at = origin + site.offset;
@@ -144,24 +177,162 @@ impl Game {
         }
     }
 
-    /// Where each builder with a structure in progress works from: the places it is tethered
-    /// to (see `home_pull`).
+    /// Civilization construction: a rank-and-file member of a living territory who is not
+    /// mining and has no work of its own starts the territory's next structure, one at a
+    /// time per territory, up to `CIV_STRUCTURES` a session and `MAX_CIV_WORKS` at once.
+    fn update_civ_builders(&mut self) {
+        let live = |g: &Game| {
+            g.builds
+                .works
+                .iter()
+                .filter(|w| !w.done && w.civ.is_some())
+                .count()
+        };
+        if live(self) >= MAX_CIV_WORKS {
+            return;
+        }
+        let mut starts: Vec<(u64, u64, Vec2)> = Vec::new();
+        for body in self
+            .bodies
+            .iter()
+            .filter(|b| !b.follower && can_build(b, true))
+        {
+            let Some((tid, CivRole::Member)) = self.civ_of(body) else {
+                continue;
+            };
+            let n = self.builds.civ_started.get(&tid).copied().unwrap_or(0);
+            let busy = self
+                .builds
+                .works
+                .iter()
+                .any(|w| w.civ == Some(tid) && !w.done)
+                || starts.iter().any(|s| s.0 == tid);
+            let digging = self
+                .civ_mining
+                .get(&tid)
+                .is_some_and(|m| m.miners.iter().any(|m| m.body == body.id));
+            let has_work = self.builds.works.iter().any(|w| w.builder == body.id);
+            if n >= CIV_STRUCTURES
+                || busy
+                || digging
+                || has_work
+                || self.civ_standing(tid) == Standing::Fallen
+            {
+                continue;
+            }
+            // Only where the whole plan fits among the walls and rocks already there.
+            let gene = civ_style(tid);
+            let plan = gene.blueprint(self.seed, civ_key(tid, n));
+            if self.plan_blocked(body.position, &plan) > 0 {
+                continue;
+            }
+            starts.push((tid, body.id, body.position));
+        }
+        for (tid, id, at) in starts {
+            if live(self) >= MAX_CIV_WORKS {
+                break;
+            }
+            let n = self.builds.civ_started.entry(tid).or_insert(0);
+            let key = civ_key(tid, *n);
+            *n += 1;
+            let gene = civ_style(tid);
+            let plan = gene.blueprint(self.seed, key);
+            self.builds.works.push(Work {
+                builder: id,
+                gene,
+                civ: Some(tid),
+                clock: plan.sites.first().map_or(0.0, |s| gene.work(s.reach)),
+                plan,
+                origin: at,
+                cursor: 0,
+                placed: Vec::new(),
+                stalled: 0.0,
+                done: false,
+            });
+        }
+    }
+
+    /// How many sites of `plan`, laid out around `origin`, sit on a fixed body (a wall, a
+    /// planetoid, a rock). Creatures do not count: they move off.
+    fn plan_blocked(&self, origin: Vec2, plan: &StructurePlan) -> usize {
+        plan.sites
+            .iter()
+            .filter(|site| {
+                let at = origin + site.offset;
+                let radius = Builder::block_radius(site.radius);
+                self.bodies.iter().any(|b| {
+                    b.active
+                        && b.kind != BodyKind::Creature
+                        && b.kind != BodyKind::Player
+                        && b.position.distance(at) < b.radius + radius
+                })
+            })
+            .count()
+    }
+
+    /// The middle of the structure with the most blocks laid (finished or not), for bounded
+    /// renders that need the camera beside a structure (`SSC_AT_STRUCTURE`).
+    pub fn structure_focus(&self) -> Option<Vec2> {
+        let work = self.builds.works.iter().max_by_key(|w| w.placed.len())?;
+        let laid: Vec<Vec2> = work
+            .placed
+            .iter()
+            .filter_map(|id| self.body(*id).map(|b| b.position))
+            .collect();
+        (!laid.is_empty()).then(|| laid.iter().sum::<Vec2>() / laid.len() as f32)
+    }
+
+    /// The tint of a civilization's block, if `id` is one.
+    pub(super) fn civ_block_tint(&self, id: u64) -> Option<[f32; 3]> {
+        let tid = self
+            .builds
+            .works
+            .iter()
+            .find(|w| w.civ.is_some() && w.placed.contains(&id))?
+            .civ?;
+        self.civ_colors.get(&tid).copied()
+    }
+
+    /// Where each builder with a structure in progress works: the next site, so a builder
+    /// walks its structure as it rises and stays within reach of every block (see `home_pull`).
     pub(super) fn builder_homes(&self) -> std::collections::HashMap<u64, Vec2> {
         self.builds
             .works
             .iter()
             .filter(|w| !w.done)
-            .map(|w| (w.builder, w.origin))
+            .map(|w| {
+                let site = w.plan.sites.get(w.cursor).map_or(Vec2::ZERO, |s| s.offset);
+                (w.builder, w.origin + site)
+            })
             .collect()
     }
 
     /// Whether a block of `radius` at `at` would overlap a body other than the structure's own
-    /// blocks (`own`, which overlap by design).
+    /// blocks (`own`, which overlap by design). Creatures do not count: they are pushed clear
+    /// of a block, and a crowd around a civilization's worker would otherwise stall it.
     fn site_occupied(&self, at: Vec2, radius: f32, own: &[u64]) -> bool {
         self.bodies.iter().any(|b| {
-            b.active && !own.contains(&b.id) && b.position.distance(at) < b.radius + radius
+            b.active
+                && b.kind != BodyKind::Creature
+                && !own.contains(&b.id)
+                && b.position.distance(at) < b.radius + radius
         })
     }
+}
+
+/// The identity of a territory's `n`th structure, for its blueprint stream.
+fn civ_key(territory: u64, n: u8) -> u64 {
+    territory.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(n)
+}
+
+/// A territory's building style: a gene set fixed by its identity (so every structure it
+/// raises shares material, grammar and scale), made a little more industrious than a nest
+/// builder (patience at most 5 s) and at least 14 blocks big, so a city has presence.
+pub fn civ_style(territory: u64) -> Builder {
+    let mut b = Builder::from_hash(territory ^ CIV_SALT);
+    b.patience = b.patience.min(5.0);
+    b.blocks = b.blocks.max(14);
+    b.limited()
 }
 
 /// The steering a builder with a structure in progress adds to its wandering: nothing within
@@ -175,14 +346,15 @@ pub(super) fn home_pull(at: Vec2, home: Vec2, cruise: f32) -> Vec2 {
     (home - at) / gap * cruise * ((gap - LEASH) / LEASH).min(2.0)
 }
 
-/// An adult builder that is up and about.
-fn can_build(body: &Body) -> bool {
+/// A creature that is up and about and may lay a block. A civilization's worker also stops
+/// while it is alert (a fight comes first).
+fn can_build(body: &Body, civ: bool) -> bool {
     body.active
         && body.kind == BodyKind::Creature
-        && body.genome.builder.is_some()
         && body.health > 0.0
         && !body.phased
         && body.panic <= 0.0
+        && !(civ && body.alert)
 }
 
 #[cfg(test)]
@@ -450,5 +622,149 @@ mod tests {
         assert!(!game.builds.works.is_empty(), "no works started");
         let laid: usize = game.builds.works.iter().map(|w| w.placed.len()).sum();
         assert!(laid > 0, "{} works, no blocks", game.builds.works.len());
+    }
+
+    #[test]
+    fn a_builder_walks_its_structure_staying_within_reach_of_the_next_site() {
+        let (mut game, id) = builder_game(Genome::builder(), 5);
+        game.update_builders(DT);
+        let work = game.builds.works[0].clone();
+        assert_eq!(
+            game.builder_homes()[&id],
+            work.origin + work.plan.sites[0].offset
+        );
+        run(&mut game, 400.0);
+        // Finished: no longer tethered anywhere.
+        assert!(game.builder_homes().is_empty());
+        let farthest = work
+            .plan
+            .sites
+            .iter()
+            .map(|s| s.offset.length())
+            .fold(0.0, f32::max);
+        assert!(
+            farthest > LEASH,
+            "plan reaches beyond the leash, so walking matters"
+        );
+    }
+
+    #[test]
+    fn the_structure_focus_is_the_middle_of_the_laid_blocks() {
+        let (mut game, _) = builder_game(Genome::builder(), 5);
+        assert_eq!(game.structure_focus(), None);
+        run(&mut game, 400.0);
+        let focus = game.structure_focus().expect("blocks laid");
+        let origin = game.builds.works[0].origin;
+        assert!(focus.distance(origin) < 400.0);
+    }
+
+    fn horde() -> crate::territory::Territory {
+        let seed = crate::config::MASTER_SEED;
+        for x in -40..=40 {
+            for y in -40..=40 {
+                if let Some(t) = crate::world::territory(seed, crate::world::SectorId { x, y })
+                    && t.capital == (crate::world::SectorId { x, y })
+                    && t.shape == crate::territory::CivShape::Horde
+                {
+                    return t;
+                }
+            }
+        }
+        panic!("no horde");
+    }
+
+    /// A player's visit to a quiet corner of a horde's capital sector, held for `seconds`.
+    fn visit(seconds: f32) -> (Game, crate::territory::Territory) {
+        let t = horde();
+        let spot = t.capital.center() + Vec2::new(0.0, 2800.0);
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        game.player_invulnerability = 1e9;
+        game.teleport(spot);
+        for _ in 0..(seconds / 0.05) as usize {
+            crate::simulation::tests::set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+        }
+        (game, t)
+    }
+
+    #[test]
+    fn a_civilization_raises_structures_in_its_own_style_within_every_cap() {
+        let (game, t) = visit(240.0);
+        let mine: Vec<&Work> = game
+            .builds
+            .works
+            .iter()
+            .filter(|w| w.civ == Some(t.id))
+            .collect();
+        assert!(!mine.is_empty(), "the horde started a structure");
+        assert!(mine.len() <= usize::from(CIV_STRUCTURES));
+        assert!(
+            mine.iter().filter(|w| !w.done).count() <= 1,
+            "one at a time"
+        );
+        assert!(mine.iter().all(|w| w.gene == civ_style(t.id)));
+        let laid: usize = mine.iter().map(|w| w.placed.len()).sum();
+        assert!(laid > 0, "blocks were laid");
+        // Its workers are rank-and-file members, never the miners' rocks or the wild's slots.
+        for w in &mine {
+            let body = game.body(w.builder).expect("builder lives");
+            assert_eq!(game.civ_of(body), Some((t.id, CivRole::Member)));
+            assert!(body.genome.builder.is_none());
+        }
+        let block = game.body(mine[0].placed[0]).unwrap();
+        assert!(game.civ_tint(block).is_some(), "blocks wear the tint");
+        assert!(
+            game.builds
+                .works
+                .iter()
+                .filter(|w| !w.done && w.civ.is_some())
+                .count()
+                <= MAX_CIV_WORKS
+        );
+    }
+
+    #[test]
+    fn civ_building_is_deterministic_and_each_territory_has_its_own_style() {
+        let layout = || {
+            let (game, t) = visit(120.0);
+            let w = game
+                .builds
+                .works
+                .iter()
+                .find(|w| w.civ == Some(t.id))
+                .cloned();
+            w.map(|w| {
+                w.plan
+                    .sites
+                    .iter()
+                    .map(|s| s.offset.to_array().map(f32::to_bits))
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(layout(), layout());
+        assert_ne!(civ_style(1), civ_style(2));
+        assert_eq!(civ_style(1), civ_style(1).limited());
+        assert!(civ_style(7).blocks >= 14);
+    }
+
+    #[test]
+    fn a_fallen_civilization_starts_nothing() {
+        let t = horde();
+        let spot = t.capital.center() + Vec2::new(0.0, 2800.0);
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        game.player_invulnerability = 1e9;
+        game.civ_fall.insert(
+            t.id,
+            crate::territory::Fall {
+                capital: true,
+                elder: true,
+            },
+        );
+        game.teleport(spot);
+        for _ in 0..(120.0 / 0.05) as usize {
+            crate::simulation::tests::set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+        }
+        assert!(game.builds.works.iter().all(|w| w.civ != Some(t.id)));
     }
 }

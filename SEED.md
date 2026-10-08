@@ -45,7 +45,7 @@ Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
 Current focus (user decision): complete the creature set so mechanics can be tuned together. Farming, population scaling and economy come after, in the order of WORKSTREAMS phases. The gamepad audit, feeling view-model (a poor name, rename when built), weaver rock care and edge-density measurement are anytime items, not next.
 
 0. Playtest (the user), at any time. Nothing has been played by a human; all balance is a guess. The checklist is `docs/PLAYTEST.md`: add a section per feature when it lands.
-1. [L] NEXT: bestiary fill (weak points per node kind on elder bodies if the playtest asks for them): builder creatures (11; slices 1 and 2 done, slices 3 and 4 remain: civilizations' own construction, player interaction; also builders visibly gathering rocks), swarms and flock budgets (8), the Foamback and Oozer (designs 21 and 22 in `docs/BESTIARY.md`), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
+1. [L] NEXT: bestiary fill (weak points per node kind on elder bodies if the playtest asks for them): builder creatures (11; slices 1 to 3 done, slice 4 remains: player interaction (mine, trade for, tame, sabotage); also builders visibly gathering rocks, still open), swarms and flock budgets (8), the Foamback and Oozer (designs 21 and 22 in `docs/BESTIARY.md`), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
 2. Then farming (with persistence first, workstream 12), population scaling and rally forces, economy and megastructures, hyperlanes.
 3. Alongside: DEVTOOLS B then C (register new constants at birth); hygiene and `TODO:` lists as files are touched.
 
@@ -53,6 +53,7 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
+- Builder creatures slice 3 (no generation change): civilizations build (`update_civ_builders`: members lay 3 structures per territory in `civ_style`, tinted blocks), and all builders now walk their structure (leash target is the next site).
 - Builder creatures slice 2 (generator version 25): 18 percent of power-free sampled species are calm nest builders (`Genome::nest_builder`, ring 4+), leashed to their site (`build::home_pull`); finished or blocked works free their slot.
 - Builder creatures slice 1: `StructurePlan` (`src/structure.rs`) built from a grammar `Plan`, optional `Genome::builder` section (`src/builder.rs`), and `simulation/build.rs` placing one pinned block per interval in plan order; authored `builder` via dev spawn. No generation change.
 - Nested creatures slice 4c (generator version 24): symbiote and parasite residents wear a local partner species' look (`hosted::partner`, `resident_of`). Workstream 7 done bar active symbiote defense.
@@ -60,5 +61,3 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 - Nested creatures slice 4a (generator version 22): the resident relation is chosen by the host country's biome character (`hosted::niche_weights`).
 - Nested creatures slice 3: symbiote residents heal the host, parasites drain it and feed (`root::tend_hosts`, floored at 40 percent health).
 - Nested creatures slice 2c: a hurt elder sheds brood at health thresholds (`root::shed_brood`), swarming. Slice 2 complete.
-- Nested creatures slice 2b: residents of a slain elder no longer respawn free when its sector reloads.
-- Nested creatures slice 2a: a brood whose host is lost swarms (provoked 30 s) instead of scattering dazed; `hosted::is_brood`, `root::SWARM_RAGE`.

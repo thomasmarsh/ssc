@@ -262,6 +262,8 @@ Code: `src/apex.rs` (generation, archetypes, names, strength), `src/simulation/a
 
 ## Civilization mining and fortified cities (built)
 
+Civilizations also build small structures (`simulation/build.rs`, workstream 11 slice 3): a member who is not mining lays a few dozen tinted blocks near where it stands, three per territory per session, in a style fixed by the territory id. See WORKSTREAMS.md section 11.
+
 Code: `src/simulation/civmine.rs` (mining), `src/fortress.rs` (pure layouts), `src/simulation/fortress.rs` (walls and turrets in play), `Territory::{fort_tier, fort_archetype, turret_arms, fortification}` in `src/territory.rs`.
 
 - **Mining.** Rank-and-file members (`CivRole::Member`, the "workers") of a territory mine rocks inside it by the player's lode rules (`Game::drain_rock`: shrink toward the 14 floor, crumble and record as fallen, spent ore in the shared `mined` map, so a civilization can drain a planetoid before the player arrives). At most `MAX_MINERS` (2) per territory, one rock each, never shared. A miner is the lowest-spawn-index free generated member and its rock one of the three lowest-index minable rocks within `SEARCH` (2600) with a clear line (no wall), picked with `civ_rng`; crystal, husks and the rock under the ship's beam are skipped. A miner with the ship within `FLEE_RANGE` (900) and no warrior or elder within 520 runs and rests; with an escort it keeps working. A miner stuck for `PATIENCE` (25 s) gives up. Ore worked is capped per territory per session (`ORE_BUDGET` 450 + 200 x strength), so a civilization cannot strip a sector.

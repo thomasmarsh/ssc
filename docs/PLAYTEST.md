@@ -52,6 +52,20 @@ Wild builder species from ring 4 (about 7 percent of sectors from ring 5 hold on
 | Slot use | Do finished or blocked nests stop and the world keep making new ones, or does it feel static? | `build::MAX_WORKS` (6), `STALL` (90 s) |
 | Obstruction | Do nests rise through rocks or around you sensibly? | `site_occupied` |
 
+## Civilization construction (workstream 11, slice 3)
+
+Rank-and-file members of a living civilization (not the miners) lay a structure near where they stand: a few dozen small blocks in the civilization's tint, one at a time per territory, three per session. Go to a civilization (the early outpost, or any horde or court) and wait a few minutes beside its members. With `SSC_DEV=1` the structure is easiest to find from the far camera.
+
+| Question | What to check | Knob |
+|---|---|---|
+| Readability | Do the blocks read as a built thing and as the civilization's, or as a drifting pebble field? Blocks are small (radius 7 to 16) against a plan of 30 to 90 units per step. | `builder::BLOCK_MIN`, `BLOCK_MAX`, `civ_style` scale |
+| Pace | Does a structure rise at a watchable pace, or take too long to notice? A first structure finishes in under 400 s near a horde capital. | `civ_style` patience (at most 5 s) |
+| Amount | Are three per civilization a landmark or clutter? Do the walls and rocks it avoids leave it too few places? | `build::CIV_STRUCTURES`, `MAX_CIV_WORKS`, `plan_blocked` |
+| Walking | Does the worker visibly walk its structure as it rises, or hover oddly? | `builder_homes` (next site), `LEASH` |
+| Fights | Does building stop when members fight, and resume after? | `can_build` (alert) |
+
+Not built yet, so do not judge: gathering rocks as a visible step, repair or raiding, structures surviving a reload.
+
 ## Questions to answer after the first session
 
 1. Which of the above felt wrong first? One line each is enough.

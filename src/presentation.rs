@@ -2503,7 +2503,11 @@ pub fn draw(
         let r = body.radius;
         let direction = Vec2::from_angle(body.angle);
         let color = if body.kind == BodyKind::Asteroid && body.pinned {
-            Color::srgb(0.62, 0.5, 0.38)
+            // A civilization's blocks wear its tint; other pinned stone is plain tan.
+            match game.civ_tint(body) {
+                Some(tint) => lifted(Some(tint)),
+                None => Color::srgb(0.62, 0.5, 0.38),
+            }
         } else {
             body_color(body)
         };

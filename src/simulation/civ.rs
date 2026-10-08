@@ -204,6 +204,9 @@ impl Game {
     /// The tint of the civilization a creature or station belongs to, if any.
     pub fn civ_tint(&self, body: &Body) -> Option<[f32; 3]> {
         let tid = match body.kind {
+            BodyKind::Asteroid if body.origin.is_none() => {
+                return self.civ_block_tint(body.id);
+            }
             BodyKind::Base | BodyKind::Asteroid => {
                 let key = body.origin?;
                 self.civ_bases

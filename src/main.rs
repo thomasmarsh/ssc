@@ -1255,6 +1255,13 @@ fn smoke_run(
             session.game.step(0.02, ssc::simulation::Input::default());
         }
     }
+    // SSC_AT_STRUCTURE=1: after SSC_STEPS, put the ship beside the biggest structure raised.
+    if run.frames + 3 == limit
+        && std::env::var_os("SSC_AT_STRUCTURE").is_some()
+        && let Some(at) = session.game.structure_focus()
+    {
+        session.game.teleport(at);
+    }
     // SSC_SPECIMEN_TELL=1: advance to the specimen warning before the screenshot.
     if run.frames + 3 == limit && std::env::var_os("SSC_SPECIMEN_TELL").is_some() {
         for _ in 0..4000 {
