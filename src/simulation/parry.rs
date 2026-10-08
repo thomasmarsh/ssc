@@ -18,7 +18,7 @@ pub struct ParryState {
     age: f32,
     window: f32,
     /// Seconds until it can be raised again.
-    cooldown: f32,
+    pub(super) cooldown: f32,
     /// Whether this raise already earned its perfect-parry reward (the cooldown refund and the
     /// hit-stop come once per raise), and the shield refunded so far this raise.
     perfected: bool,

@@ -165,6 +165,9 @@ impl Game {
             }
         }
         next.begin_with(legacy);
+        // Developer toggles ride through a restart (all off in a normal run).
+        next.dev = self.dev;
+        next.sync_dev();
         next
     }
 

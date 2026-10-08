@@ -1059,7 +1059,7 @@ impl Game {
                 }
             }
             if self.pad.landed == Some(key) {
-                let invulnerability = self.player_invulnerability;
+                let invulnerability = self.guard_time();
                 if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
                     damage(ship, harm * SIEGE_SHIP, invulnerability);
                 }

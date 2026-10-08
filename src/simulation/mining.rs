@@ -69,6 +69,8 @@ pub struct Cargo {
     pub crystal: f32,
     /// Hold space added to every material by cargo upgrades.
     pub extra: f32,
+    /// Developer toggle: every price is waived (see `dev`). Never set in a normal run.
+    pub dev_free: bool,
 }
 
 impl Cargo {
@@ -132,20 +134,24 @@ impl Cargo {
 
     /// Whether every part of a price is on board.
     pub fn can_afford(&self, price: &[(Material, f32)]) -> bool {
-        Material::ALL.into_iter().all(|kind| {
-            let due: f32 = price
-                .iter()
-                .filter(|(k, _)| *k == kind)
-                .map(|(_, a)| a.max(0.0))
-                .sum();
-            self.amount(kind) + 1e-4 >= due
-        })
+        self.dev_free
+            || Material::ALL.into_iter().all(|kind| {
+                let due: f32 = price
+                    .iter()
+                    .filter(|(k, _)| *k == kind)
+                    .map(|(_, a)| a.max(0.0))
+                    .sum();
+                self.amount(kind) + 1e-4 >= due
+            })
     }
 
     /// Pays a price in full or not at all.
     pub fn spend(&mut self, price: &[(Material, f32)]) -> bool {
         if !self.can_afford(price) {
             return false;
+        }
+        if self.dev_free {
+            return true;
         }
         for &(kind, amount) in price {
             let slot = self.slot(kind);
@@ -162,6 +168,7 @@ impl Cargo {
             volatiles: self.volatiles * f,
             crystal: self.crystal * f,
             extra: 0.0,
+            dev_free: false,
         };
         self.metal -= lost.metal;
         self.volatiles -= lost.volatiles;

@@ -19,6 +19,7 @@ mod civmine;
 mod creature;
 mod cues;
 mod dash;
+pub mod dev;
 mod diplomacy;
 mod discovery;
 mod ecology;
@@ -480,6 +481,8 @@ pub struct Game {
     pub run: run::RunStats,
     lore: run::Lore,
     pub lives: u32,
+    /// Developer toggles; all off unless the panel (SSC_DEV=1) turns them on. See `dev`.
+    pub dev: dev::DevState,
     pub game_over: bool,
     pub time: f32,
     pub player_invulnerability: f32,
@@ -626,6 +629,7 @@ impl Game {
             run: run::RunStats::default(),
             lore: run::Lore::default(),
             lives: 3,
+            dev: dev::DevState::default(),
             game_over: false,
             time: 0.0,
             player_invulnerability: 2.0,
@@ -739,6 +743,7 @@ impl Game {
             return;
         }
         let dt = dt.min(0.05);
+        self.sync_dev();
         // A perfect parry freezes everything for a few ticks.
         if self.hold_hit_stop(dt) {
             return;
@@ -840,18 +845,26 @@ impl Game {
                 }
             }
         }
-        self.update_wildlife(dt);
-        self.steer_creatures(dt);
+        // Developer toggle: frozen enemies skip what makes them move, hunt and shoot.
+        let frozen = self.dev.freeze_enemies;
+        if !frozen {
+            self.update_wildlife(dt);
+            self.steer_creatures(dt);
+        }
         self.update_civ_mining(dt);
         self.update_roots(dt);
-        self.update_bases(dt);
-        self.update_turrets(dt);
+        if !frozen {
+            self.update_bases(dt);
+            self.update_turrets(dt);
+        }
         self.tend_broods(dt);
         self.graze();
         self.update_food(dt);
         self.update_metabolism(dt);
         self.graze_plankton();
-        self.hunt(dt);
+        if !frozen {
+            self.hunt(dt);
+        }
         self.update_growth(dt);
         self.update_reproduction(dt);
         self.update_eggs(dt);
@@ -865,7 +878,9 @@ impl Game {
         self.update_parasites(dt, input.fire);
         self.update_splits(dt);
         self.update_song_rings(dt);
-        self.fire_weapons();
+        if !frozen {
+            self.fire_weapons();
+        }
         self.cue_new_shots(in_flight);
         self.update_wells(dt);
         self.apply_gravity(dt);
@@ -909,6 +924,7 @@ impl Game {
         self.update_rune_fields(dt);
         self.update_husks();
         self.update_pickups(dt);
+        self.apply_dev();
         let travelled = match (start, self.player()) {
             (Some(from), Some(ship)) => from.distance(ship.position),
             _ => 0.0,
@@ -1328,7 +1344,7 @@ impl Game {
                 ),
             })
             .collect();
-        let invulnerability = self.player_invulnerability;
+        let invulnerability = self.guard_time();
         // A heavy realm pulls harder (see `realm::Effects`).
         let gravity = self.realm_effects().gravity;
         for body in self.bodies.iter_mut().filter(|b| b.active) {
@@ -1358,7 +1374,7 @@ impl Game {
     }
 
     fn resolve_contacts(&mut self) {
-        let invulnerability = self.player_invulnerability;
+        let invulnerability = self.guard_time();
         let mut flings = Vec::new();
         let mut rammed = 0.0;
         let mut ship_rammed = false;
@@ -1531,6 +1547,7 @@ impl Game {
     }
 
     fn move_bullets(&mut self, dt: f32) {
+        let guard = self.guard_time();
         if self.rifts.is_empty() {
             self.shoot_eggs(dt);
         }
@@ -1789,7 +1806,7 @@ impl Game {
                                     },
                                 bullet.friendly,
                             ),
-                            self.player_invulnerability,
+                            guard,
                             if bullet.friendly { 0.0 } else { bullet.pith },
                         )
                     };
@@ -1942,7 +1959,7 @@ impl Game {
         for at in piths {
             self.cue(Cue::Pith { at });
         }
-        let invulnerability = self.player_invulnerability;
+        let invulnerability = self.guard_time();
         let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();
         for (at, radius, amount, direct, friendly) in blasts {
             for body in self
@@ -2103,7 +2120,9 @@ impl Game {
         if let Some(position) = lost_player {
             self.run.deaths += 1;
             self.run.recap = run::RECAP_SECONDS;
-            self.lives = self.lives.saturating_sub(1);
+            if !self.dev.unlimited_lives {
+                self.lives = self.lives.saturating_sub(1);
+            }
             self.bullets.retain(|bullet| bullet.friendly);
             self.tethers.retain(|t| t.kind != TetherKind::Latch);
             let best = self

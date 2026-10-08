@@ -17,7 +17,7 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DashState {
-    cooldown: f32,
+    pub(super) cooldown: f32,
     /// The last jump, for the trail: where from, where to, and seconds since.
     trail: Option<(Vec2, Vec2, f32)>,
     /// Seconds of the invulnerable window left, and whether this dash has grazed already.

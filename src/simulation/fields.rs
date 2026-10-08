@@ -193,7 +193,7 @@ impl Game {
         let (at, radius, g) = (body.position, body.radius, body.genome);
         let s = Power::Cloud.strength(&g);
         let dps = power::CLOUD_STING.0 + power::CLOUD_STING.1 * s;
-        let invulnerability = self.player_invulnerability;
+        let invulnerability = self.guard_time();
         if body.phased {
             return;
         }
