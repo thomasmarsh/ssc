@@ -102,4 +102,33 @@ Goal: simple controls on the pad with no overlaps and nothing that needs the key
 
 - Developer tooling (`docs/DEVTOOLS.md`): Phase A done. B (tunables registry), C (overlay) and D (separate app) queued. Each new workstream should register its numbers in the registry once B exists.
 - Playtest after each major workstream: all balance is first-guess.
-- Suggested order: 10 audit, 9.1, 5.1, 4.1, foundation L-system, 1, 6, 4.2-3, 8, 7, 2, 3, 4.4-6. Reorder with playtest notes.
+- Order of operations: see the next section.
+
+## Order of operations (planned 2026-10-08)
+
+Hard dependencies: L-system (a to c) before farming (1) and apex bodies (6). Feeling view-model (9.1) then presentation (9.2) then generation tilts (9.3) then desert and asteroid fields (9.4 = 5.2) then weaver retuning (5.3); megastructures (3) need feelings. Gamepad audit before any feature that adds an input. Flock budget (8.1) before rally forces (8.2) and nested creatures (7). Machines (2) before the living megastructure (3.3). Lanes to megastructures (4.6) after both.
+
+Hidden dependencies to respect:
+- Generation batch: edge fix (4.1), feeling tilts (9.3), asteroid fields (9.4), the megastructure plan (3) and any planetoid soil placement (1.2) all change generation. Land them together under one `GENERATOR_VERSION` bump (19 to 20) and re-baseline the HOME golden and population tests once, with a documented diff. First step: confirm which tests read the golden and how many population tests will move.
+- One cross-sector placement framework (a pure plan query: seed and sector give that sector's part of a realm-anchored multi-sector plan, with a load-order-independence test) shared by hyperlane routes (4) and megastructures (3). Build it once, before either.
+- One sector-load budget measure (max simulated entities, per-sector cost) in the headless sim, used by flock size, rally forces, nested residents and hyperlane speed cap.
+- Extract the generic attach/host mechanic (Hullworm, Remora, parasites) as the first slice of workstream 7, not before.
+- Define a minimal `price(good, sector)` early; the pricing pass, trader prices and civ teleport fees all use it. Farming ships with a trivial bench sink for BIOMASS so it is not pointless.
+- Register new constants in the tunables registry at birth (DEVTOOLS B); migrate the old scattered ones module by module in the background. The registry never blocks a feature slice.
+- Keep player-created persistent state (pads, crops, machines) in one serializable struct so a later save is a serializer, not a refactor.
+- One contextual interact button serves plant, lane, trade and bench (priority by proximity); decided in the gamepad audit.
+
+Phases (tags: S in-session small, M one subagent, L several sequential subagent slices):
+0. Human playtest (user), in parallel with phase 1. Feeds every reorder below.
+1. Zero-risk groundwork, files mostly disjoint: gamepad audit (docs, S); feeling view-model 9.1 (S); weaver and slinger care rule 5.1 (S); edge-density measuring test 4.1, measure only, the test stays as a regression (S); L-system a to c (M); investigate the clippy-plus-test hang early.
+2. Controls and tooling: gamepad implementation with the every-action-has-a-route and no-shared-button-per-context test (M); decide persistence; define the sector-load budget measure (S).
+3. Generation batch, one version bump: edge fix if measurement confirms, feeling presentation 9.2, feeling tilts 9.3, desert and asteroid fields 9.4/5.2, weaver retuning 5.3, single golden re-baseline. Playtest checkpoint: first new texture. If density is the main complaint, move this before phase 2.
+4. Farming slices 1 and 2 (L) with a trivial bench sink; breeding deferred. Playtest checkpoint.
+5. Fast travel without teleport: cross-sector placement framework (M), then hyperlane sim, rendering, then realm-border lanes (L). First version has no interdiction. If travel tedium is the top playtest note, this replaces phase 4.
+6. Population scaling: flock structure with cap tests then rally forces (L); apex bodies (L); nested creatures (L, attach extraction first).
+7. Economy: machines and one pricing pass, traders, price model (L); pad and civ teleports (L); megastructures, ruin first with no defender respawn, then living (L).
+Tooling runs alongside: DEVTOOLS B on `tuning.rs` after phase 2 (interleaved), C after B covers it, D deferred.
+
+Cut line (most new playable value soonest): phase 1, the gamepad implementation, phase 3, farming slices 1 and 2. Defer crop breeding, apex bodies, nested creatures, rally forces beyond the flock budget, machines, traders, teleports, megastructures, overlay and the app.
+
+Top rework risks and the cheap-to-reverse measure: repeated version bumps (batch, salted generators); edge hypothesis wrong (measure first); input map redone (audit with reserved bindings and the no-shared-button test); registry migrating against moving code (register at birth); framework built twice (one pure plan query with no gameplay state); lane speed outrunning streaming (cap is one registry value, a test asserts it); entity budgets (hard caps with tests before populations); persistence late (one serializable state struct).

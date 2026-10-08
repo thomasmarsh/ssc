@@ -36,25 +36,21 @@ Decide per slice, and say which in one line.
 - Briefs must be long and concrete: reading list, the working rules above verbatim, the user's stated design (quote it), the slices with the tests required, and a final report format (commits, tuning numbers, tests changed and why, test counts, what was and was not verified visually, caveats). Verify with `git log` and the test suite after each agent, then summarize to the user in plain language.
 - Ask the user before any harness feature that spawns a large swarm of subagents. If an agent is cut off by a usage limit, resume it with SendMessage and tell it to continue from the working tree.
 
-## Queue (in order; reorder with playtest notes)
+## Queue (the full plan and rationale are in `docs/WORKSTREAMS.md`, "Order of operations")
 
-Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
+Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices. Reorder with playtest notes.
 
-0. Playtest (the user). Nothing has been played by a human; all balance is a guess. Ask for notes and reorder this queue from them.
-1. [S] Gamepad audit (workstream 10): one table of every action, keyboard key, pad binding, flagged overlaps and keyboard-only actions; propose the final map. Docs only first. Do before anything adds input.
-2. [S] Feeling view-model (9.1): pure `feeling(seed, sector)` with tests, no generation change.
-3. [S] Weaver and slinger rock care rule (5.1) with tests.
-4. [S] Sector-edge density check (4.1): investigate the boundary corridor that lets the ship fly nearly unimpeded; fix placement margins if confirmed.
-5. [M] Gamepad implementation of the audit map, with an input test that every action has a pad route and no context shares a button.
-6. [M] Stochastic L-system foundation (slices a to c): module, property tests, debug view.
-7. [L] Farming (workstream 1), then apex body types (6).
-8. [L] Fast travel hyperlanes and pad teleporters (4.2 to 4.6).
-9. [L] Swarms and rallied forces (8), then nested creatures (7).
-10. [L] Machines and trade (2), then megastructures (3).
-11. [M] Developer tooling Phase B (tunables registry, module by module) and C (live overlay); register new workstream numbers as they land. Can be interleaved earlier if tuning pain grows.
-12. Hygiene and leftovers, any time: the possible clippy-plus-test hang, caching `ecology()`, overlaps at small window sizes, nebula tuning by eye, show-state dev overlays (sector borders, hit circles, genes), the FLOW P1/P2 and BESTIARY follow-up lists (grep `TODO:`), bench skill merge, trophy gates and lode fatigue, boons at pads (approved, big, after progression is clear).
+0. Playtest (the user), now and at each checkpoint. Nothing has been played by a human; all balance is a guess.
+1. Phase 1, groundwork: [S] gamepad audit (docs; includes contextual interact rule and reserved bindings); [S] feeling view-model 9.1; [S] weaver and slinger rock care 5.1; [S] edge-density measuring test 4.1 (measure only; also confirm which tests read the HOME golden); [M] L-system a to c; investigate the clippy-plus-test hang.
+2. Phase 2: [M] gamepad implementation with the input test; decide persistence; [S] sector-load budget measure.
+3. Phase 3, generation batch under one `GENERATOR_VERSION` bump with one golden re-baseline: edge fix, feeling presentation and tilts, desert and asteroid fields, weaver retuning. Playtest checkpoint.
+4. Phase 4: [L] farming slices 1 and 2 with a trivial bench sink. Playtest checkpoint.
+5. Phase 5: [M] cross-sector placement framework, then [L] hyperlanes (no interdiction first).
+6. Phase 6: [L] flock budget then rally forces; apex bodies; nested creatures (attach extraction first).
+7. Phase 7: [L] machines, pricing and traders; teleports; megastructures (ruin first).
+8. Alongside: [M slices] DEVTOOLS B then C (register new constants at birth; never blocks features). Hygiene and the `TODO:` lists in `docs/` as files are touched.
 
-Open decisions for the user: sector size 6000 vs 1200 (decide by playing); the planned order above; whether persistence to disk is wanted.
+Open decisions for the user: sector size 6000 vs 1200 (decide from the first playtest, before the generation batch); one deliberate HOME golden re-baseline in phase 3; persistence to disk (recommended: not yet, keep built state in one serializable struct); crops only on planetoids and hulls; one contextual interact button.
 
 ## Recently done
 
