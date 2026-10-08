@@ -23,3 +23,4 @@ A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (pr
 - Only sectors near the player are simulated; enemies are not bound to their sector and may chase across borders.
 - Sectors are 6000 units wide (`SECTOR_SIZE`); an earlier design note said 1200. Unresolved, decide by playing.
 - Known fragility: some tests depend on which wild sectors load next to HOME, so changes to generation can disturb them.
+- NO SAVE-MIGRATION FIXTURES OR MIGRATION CODE until the game reaches 1.0 (user decision, 2026-10-08, permanent until the user lifts it). Before 1.0 a save-format change that cannot be defaulted just bumps `SAVE_VERSION` and old saves are refused or discarded; do not write migration arms, stored old-version fixtures or migration tests, and do not queue such slices.

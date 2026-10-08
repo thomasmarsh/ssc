@@ -36,7 +36,7 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 
 RON text, `Save(version: N, generator: G, state: (...))`, human readable and diffable. `version` is this layout (`SAVE_VERSION`), `generator` is `GENERATOR_VERSION` when it was written.
 - Newer than the build: refused (`SaveError::TooNew`), never guessed. Unparseable or truncated: `SaveError::Parse`.
-- Older layout: `migrate` rewrites the text one version at a time. There is none yet (version 1 is the first). New fields get `#[serde(default)]` and need no bump; a change that cannot be defaulted bumps `SAVE_VERSION` and adds a `match` arm plus a fixture of the old text in the tests.
+- Older layout: `migrate` rewrites the text one version at a time. There is none yet (version 1 is the first). New fields get `#[serde(default)]` and need no bump; a change that cannot be defaulted bumps `SAVE_VERSION`. **Until 1.0 there are no migration arms and no fixtures (user decision): an older save is simply refused.**
 - Different generator version: spawn indices no longer name the same things, so the ship's progress, chart and run record load but `fallen`, `mined`, `regrow_stamp`, `relics_taken` and placed pads are dropped (`LoadReport::world_deltas_kept` is false). Every generation bump therefore resets the cleared world but never the player.
 - Deterministic bytes: every map and set in the state is ordered, so one state always writes the same text.
 - Disk: one slot, `run.ron`, in `SSC_SAVE_DIR` or the per-user data folder (macOS `~/Library/Application Support/ssc`). Written to a temporary file and renamed over the slot, the previous save kept as `run.bak`; a missing slot falls back to the backup.
@@ -56,4 +56,4 @@ Tested in `simulation/save.rs`: the text round trip is a fixed point (apart from
 - Builder structures and slain residents: not saved yet. They need their own delta (structure plan, placed blocks by builder spawn key), added with a `#[serde(default)]` field and no version bump.
 - Crops, machines: they will add their own delta structs to `SaveState` when built.
 - Legacy and wrecks ride in the run file (decided, see above); a separate file depends on what 'new game' erases.
-- Migration tests need a stored fixture per old version once version 2 exists.
+- Migration fixtures and tests: NOT until 1.0 (user decision, permanent until lifted).
