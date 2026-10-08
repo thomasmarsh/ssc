@@ -4010,7 +4010,7 @@ mod tests {
 
     #[test]
     fn far_sectors_hold_novel_species_that_survive_a_long_flight() {
-        let seed = 0x535343;
+        let seed = crate::config::MASTER_SEED;
         let mut names = std::collections::HashSet::new();
         // Eight probes: a sector holds two to four species now (it used to hold more), so
         // the cast is varied across more places.

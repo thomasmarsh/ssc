@@ -626,7 +626,7 @@ mod tests {
     use super::*;
     use crate::range::ring;
 
-    const SEED: u64 = 0x53_5343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn dist(a: &Backdrop, b: &Backdrop) -> f32 {
         let c = |p: [f32; 3], q: [f32; 3]| (0..3).map(|k| (p[k] - q[k]).abs()).sum::<f32>();

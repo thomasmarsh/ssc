@@ -680,7 +680,7 @@ mod tests {
     use crate::simulation::tests::{DT, set_player};
     use crate::world::Spawn;
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     /// The first sector holding an apex of `rank`, nearest HOME first.
     fn find(seed: u64, rank: Rank) -> SectorId {

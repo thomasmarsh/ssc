@@ -939,7 +939,7 @@ mod tests {
     use super::*;
     use std::collections::{HashMap, HashSet};
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn sectors(reach: i32, step: usize) -> impl Iterator<Item = SectorId> {
         (-reach..=reach).step_by(step).flat_map(move |x| {

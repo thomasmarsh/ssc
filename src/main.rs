@@ -196,7 +196,7 @@ impl Session {
 impl Default for Session {
     fn default() -> Self {
         Self {
-            game: Game::new(0x535343),
+            game: Game::new(ssc::config::MASTER_SEED),
             input: Input::default(),
             paused: false,
             slow: false,

@@ -187,7 +187,7 @@ pub fn region(seed: u64, id: SectorId) -> Region {
 mod tests {
     use super::*;
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn map(reach: i32) -> Vec<(SectorId, Region)> {
         let mut out = Vec::new();

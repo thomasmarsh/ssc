@@ -989,7 +989,7 @@ fn fort_spawns(t: &Territory, seed: u64, fort: &Layout, wearing: &Phenotype, out
 mod tests {
     use super::*;
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn all_territories(seed: u64, reach: i32) -> Vec<(SectorId, Territory)> {
         let mut out = Vec::new();

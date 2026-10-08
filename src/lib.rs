@@ -3,6 +3,7 @@ pub mod affinity;
 pub mod apex;
 pub mod backdrop;
 pub mod biome;
+pub mod config;
 pub mod fortress;
 pub mod genome;
 pub mod mixer;

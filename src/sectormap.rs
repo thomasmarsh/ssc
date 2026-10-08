@@ -24,7 +24,7 @@ pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.
 pub const MAX_CELLS: u64 = 65_536;
 /// The seed the game starts with (`Game::new` in `src/main.rs`).
-pub const DEFAULT_SEED: u64 = 0x53_5343;
+pub const DEFAULT_SEED: u64 = crate::config::MASTER_SEED;
 
 const TEMPLATE: &str = include_str!("sectormap/template.html");
 
@@ -770,7 +770,7 @@ pub fn render(options: MapOptions) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn small(cols: u32, rows: u32) -> MapOptions {
         MapOptions {

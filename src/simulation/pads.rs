@@ -2583,7 +2583,7 @@ mod tests {
 
     #[test]
     fn pads_survive_unloading_and_find_their_planetoid_again() {
-        let seed = 0x535343;
+        let seed = crate::config::MASTER_SEED;
         let q = crate::simulation::tests::find_sector(seed, |spawns| {
             spawns.iter().any(|s| s.rock == RockKind::Planetoid)
         });
@@ -2769,7 +2769,7 @@ mod tests {
 
     fn civ_game() -> (Game, crate::territory::Territory) {
         use crate::territory::{CivRole, CivShape};
-        let seed = 0x535343;
+        let seed = crate::config::MASTER_SEED;
         let t = (-40..=40)
             .flat_map(|x| (-40..=40).map(move |y| SectorId { x, y }))
             .find_map(|q| world::territory(seed, q).filter(|t| t.shape == CivShape::Horde))
@@ -2816,7 +2816,7 @@ mod tests {
     #[test]
     fn peaceful_settlers_never_learn_of_a_pad() {
         use crate::territory::CivRole;
-        let seed = 0x535343;
+        let seed = crate::config::MASTER_SEED;
         let t = crate::territory::outpost(seed);
         let mut game = empty_game();
         game.seed = seed;

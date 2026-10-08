@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn a_territory_is_recorded_but_announced_by_its_own_notice() {
-        let seed = 0x535343;
+        let seed = crate::config::MASTER_SEED;
         let t = crate::territory::outpost(seed);
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;

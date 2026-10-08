@@ -417,7 +417,7 @@ mod tests {
     use crate::simulation::tests::{DT, add, empty_game, set_player, spawn};
     use crate::territory::{CivShape, Fall};
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn horde() -> crate::territory::Territory {
         for x in -40..=40 {

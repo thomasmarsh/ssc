@@ -5,7 +5,7 @@ use ssc::world::SectorId;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: sectormap [--seed N] [--cols C] [--rows R] [--center X,Y] [--out FILE]\n  \
-    seed: decimal or 0x hex (default 0x535343, the game's); cols, rows: 1 to {MAX} (default 41);\n  \
+    seed: decimal or 0x hex (default: the game's master seed); cols, rows: 1 to {MAX} (default 41);\n  \
     center: sector at the middle of the grid (default 0,0); out: default sectormap.html";
 
 fn number(name: &str, value: Option<String>) -> Result<String, String> {

@@ -624,7 +624,7 @@ mod tests {
     #[test]
     fn every_station_can_be_shot_down_and_stays_destroyed_on_return() {
         for kind in BaseKind::ALL {
-            let seed = 0x535343;
+            let seed = crate::config::MASTER_SEED;
             let sector = crate::simulation::tests::find_sector(seed, |spawns| {
                 spawns.iter().any(|s| s.base_kind == Some(kind))
             });

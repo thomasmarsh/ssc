@@ -1257,7 +1257,7 @@ mod tests {
     #[test]
     fn identical_runs_mine_identically() {
         let run = || {
-            let mut game = Game::new(0x535343);
+            let mut game = Game::new(crate::config::MASTER_SEED);
             game.player_invulnerability = 1e9;
             game.bodies[0].max_shield = 1e6;
             game.bodies[0].shield = 1e6;

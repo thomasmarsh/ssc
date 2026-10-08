@@ -215,7 +215,7 @@ pub fn biome(seed: u64, id: SectorId) -> Biome {
 mod tests {
     use super::*;
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     #[test]
     fn biomes_are_pure_and_all_kinds_appear() {

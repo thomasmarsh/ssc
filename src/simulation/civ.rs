@@ -616,7 +616,7 @@ mod tests {
     use crate::simulation::tests::{DT, empty_game, set_player, spawn};
     use crate::territory::CivShape;
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     /// A territory of the wanted shape and the sector of its capital.
     fn find(seed: u64, shape: CivShape) -> Territory {

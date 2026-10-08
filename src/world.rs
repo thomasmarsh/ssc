@@ -1136,8 +1136,8 @@ mod tests {
         for x in 3..=12 {
             for y in 3..=12 {
                 let id = SectorId { x, y };
-                let spawns = generate(0x535343, id);
-                assert_eq!(spawns, generate(0x535343, id));
+                let spawns = generate(crate::config::MASTER_SEED, id);
+                assert_eq!(spawns, generate(crate::config::MASTER_SEED, id));
                 for spawn in spawns.into_iter().filter(|s| s.fort.is_none()) {
                     // No spawn points in the wild: stations belong to civilizations.
                     assert!(
@@ -1165,7 +1165,7 @@ mod tests {
             rocks[4] >= 20 && hollows >= 160,
             "inhabited rocks and hollows should be common"
         );
-        for spawn in generate(0x535343, SectorId::ORIGIN) {
+        for spawn in generate(crate::config::MASTER_SEED, SectorId::ORIGIN) {
             assert!(matches!(spawn.rock, RockKind::Plain | RockKind::Planetoid));
             assert!(spawn.base_kind.is_none() && spawn.den.is_none());
         }
@@ -1258,9 +1258,9 @@ mod tests {
 
     #[test]
     fn creatures_are_individuals_with_stable_genomes() {
-        let id = crate::range::start_sector(0x535343, Species::bogey());
-        let a = generate(0x535343, id);
-        let b = generate(0x535343, id);
+        let id = crate::range::start_sector(crate::config::MASTER_SEED, Species::bogey());
+        let a = generate(crate::config::MASTER_SEED, id);
+        let b = generate(crate::config::MASTER_SEED, id);
         let genomes = |v: &[Spawn]| -> Vec<_> { v.iter().filter_map(|s| s.species).collect() };
         assert_eq!(genomes(&a), genomes(&b));
         let bogeys: Vec<_> = genomes(&a)
@@ -1292,7 +1292,7 @@ mod tests {
     fn sector_zero_is_the_peaceful_home_the_golden_pins() {
         assert_eq!(latent(7, SectorId::ORIGIN), SectorParams::HOME);
         for (seed, expected, checksum) in [
-            (0x535343, [15, 15, 0], 6261.067),
+            (crate::config::MASTER_SEED, [15, 15, 0], 6261.067),
             (1, [18, 18, 0], 5613.966),
             (42, [15, 15, 0], 28916.180),
         ] {
@@ -1571,7 +1571,7 @@ mod tests {
         let mut slitherers = 0;
         for x in -20..=20 {
             for y in -20..=20 {
-                for s in generate(0x535343, SectorId { x, y }) {
+                for s in generate(crate::config::MASTER_SEED, SectorId { x, y }) {
                     if let Some(sp) = s.species {
                         let slithers = sp.genome.segments >= 4 && sp.genome.wave >= 0.8;
 
@@ -1605,7 +1605,7 @@ mod tests {
             Species::lunatic().lineage,
         );
         let (mut fatsos, mut bogeys, mut lunatics) = (0, 0, 0);
-        for seed in [0x535343, 1, 42, 7, 99] {
+        for seed in [crate::config::MASTER_SEED, 1, 42, 7, 99] {
             for x in -2..=2 {
                 for y in -2..=2 {
                     let id = SectorId { x, y };
@@ -1644,7 +1644,7 @@ mod tests {
             }
         }
         // Lunatics wait for ring three, where they debut.
-        for seed in [0x535343, 1, 42, 7, 99] {
+        for seed in [crate::config::MASTER_SEED, 1, 42, 7, 99] {
             for x in -3..=3 {
                 for y in -3..=3 {
                     let id = SectorId { x, y };

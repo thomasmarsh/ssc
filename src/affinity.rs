@@ -211,7 +211,7 @@ mod tests {
     use super::*;
     use crate::territory::CivShape;
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn civ(id: u64, shape: CivShape) -> Territory {
         Territory {

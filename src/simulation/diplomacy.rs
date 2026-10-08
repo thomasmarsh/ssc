@@ -558,7 +558,7 @@ mod tests {
     use crate::simulation::tests::{DT, add, set_player, spawn};
     use crate::territory::{CivShape, outpost};
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn find(shape: CivShape) -> Territory {
         for x in -40..=40 {

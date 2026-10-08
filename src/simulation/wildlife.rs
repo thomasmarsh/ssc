@@ -848,7 +848,7 @@ mod tests {
 
     #[test]
     fn real_territories_and_their_wildlife_stay_bounded_and_the_early_outpost_survives() {
-        let seed = 0x535343;
+        let seed = crate::config::MASTER_SEED;
         let outpost = crate::territory::outpost(seed);
         let ship = outpost.capital.center() + Vec2::new(0.0, 2500.0);
         let mut game = visit(seed, ship);

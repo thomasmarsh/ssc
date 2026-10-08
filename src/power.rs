@@ -1453,7 +1453,10 @@ mod tests {
 
     #[test]
     fn sampling_is_deterministic_and_leaves_every_older_gene_alone() {
-        let params = latent(0x53_5343, crate::world::SectorId { x: 12, y: 9 });
+        let params = latent(
+            crate::config::MASTER_SEED,
+            crate::world::SectorId { x: 12, y: 9 },
+        );
         for i in 0..400u64 {
             let a = Genome::sample(&mut Rng::new(i), &params);
             let b = Genome::sample(&mut Rng::new(i), &params);

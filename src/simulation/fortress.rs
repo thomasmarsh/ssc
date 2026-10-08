@@ -173,7 +173,7 @@ mod tests {
     use crate::simulation::tests::{DT, set_player};
     use crate::territory::{CivRole, CivShape, Territory};
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     /// A territory capital sector of the wanted fortress archetype.
     fn capital(seed: u64, wanted: Archetype) -> Territory {

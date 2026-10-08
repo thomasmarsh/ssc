@@ -1136,7 +1136,7 @@ mod tests {
     #[test]
     fn counts_and_budgets_hold_through_a_long_flight_deterministically() {
         let run = || {
-            let mut game = Game::new(0x535343);
+            let mut game = Game::new(crate::config::MASTER_SEED);
             for step in 0..60 * 90 {
                 let t = step as f32 / 60.0;
                 game.step(

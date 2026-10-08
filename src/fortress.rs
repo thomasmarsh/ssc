@@ -751,7 +751,7 @@ mod tests {
     #[test]
     fn every_archetype_and_tier_is_connected_in_budget_and_deterministic() {
         let mut counts = [[0usize; 4]; 4];
-        for seed in [1_u64, 42, 0x535343] {
+        for seed in [1_u64, 42, crate::config::MASTER_SEED] {
             for key in 0..40_u64 {
                 for (a, archetype) in Archetype::ALL.into_iter().enumerate() {
                     for tier in 0..=MAX_TIER {

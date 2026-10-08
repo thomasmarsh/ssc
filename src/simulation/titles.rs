@@ -281,13 +281,13 @@ mod tests {
 
     #[test]
     fn a_friendly_civilization_makes_a_friend_and_the_warmest_wins() {
-        let a = crate::territory::outpost(0x535343);
-        let mut game = Game::new(0x535343);
+        let a = crate::territory::outpost(crate::config::MASTER_SEED);
+        let mut game = Game::new(crate::config::MASTER_SEED);
         game.register_territory(a);
         game.set_regard(a.id, 80.0);
         game.step(DT, Input::default());
         let facts = game.title_facts();
-        let name = title_case(&a.name(0x535343));
+        let name = title_case(&a.name(crate::config::MASTER_SEED));
         assert_eq!(facts.friend.as_deref(), Some(name.as_str()));
         assert_eq!(game.run_title(), format!("Friend of the {name}"));
         // A fallen civilization is no friend.

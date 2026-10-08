@@ -1012,7 +1012,7 @@ pub(crate) fn calm_spot(seed: u64, id: SectorId) -> Vec2 {
 mod tests {
     use super::*;
 
-    const SEED: u64 = 0x535343;
+    const SEED: u64 = crate::config::MASTER_SEED;
     const SEEDS: [u64; 5] = [SEED, 1, 42, 99, 7];
     /// Abundance at which a test counts a species as living somewhere.
     const PRESENT: f32 = 0.1;

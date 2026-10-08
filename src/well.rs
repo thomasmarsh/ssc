@@ -526,7 +526,7 @@ pub fn of_sector(seed: u64, id: SectorId, spawns: &[Spawn]) -> Vec<SectorWell> {
 mod tests {
     use super::*;
 
-    const SEED: u64 = 0x53_5343;
+    const SEED: u64 = crate::config::MASTER_SEED;
 
     fn sample(mode: Mode, swing: f32, period: f32) -> WellGenome {
         WellGenome {
