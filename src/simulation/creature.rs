@@ -199,6 +199,8 @@ impl Game {
             let mut meal: Option<(f32, Vec2)> = None;
             let mut perch: Option<(f32, Vec2)> = None;
             let seeking = body.wants_host();
+            // An Oozer eats rocks, so rocks do not push it away.
+            let rock_eater = crate::power::Power::Engulf.active(&g);
             let mut prey: Option<(f32, Vec2)> = None;
             let civ = self.civ_lineages.get(&body.species).copied();
             let pull = pulls.get(&body.id).copied();
@@ -220,7 +222,7 @@ impl Game {
                     perch = Some((distance_squared, -offset));
                 }
                 // A creature looking for a rock to cling to is not repelled by one.
-                if !(seeking && other.rock)
+                if !((seeking || rock_eater) && other.rock)
                     && distance_squared < range * range
                     && distance_squared > 0.1
                 {

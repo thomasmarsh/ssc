@@ -145,6 +145,21 @@ pub const LENS_BLIP: f32 = 120.0;
 /// of the well per second, gaining a pocket well (at most `POCKET_MAX` of a full one, reach
 /// `POCKET_REACH`). If it dies holding at least `POCKET_RELEASE` the well is released where it
 /// died and fades over `RELEASE_LIFE` seconds.
+/// Engulf (Oozer): a lobe `power_reach * ENGULF_LOBE` long stretches for `ENGULF_TELL` s toward
+/// a ship within its reach, then closes; a swallowed ship is pulled along at no more than
+/// `ENGULF_PULL` of its thrust (so a full thrust always gets out), digested at
+/// `ENGULF_DPS * (ENGULF_DPS_GAIN + s)` a second (shield first), and cannot be swallowed again for
+/// `ENGULF_FREE` s after an escape. Rocks it touches add `ENGULF_GROW` to its bulk (up to
+/// `1 + ENGULF_BULK * s`) and show inside for `ENGULF_DIGEST` s.
+pub const ENGULF_LOBE: f32 = 0.4;
+pub const ENGULF_TELL: f32 = 0.8;
+pub const ENGULF_PULL: f32 = 0.5;
+pub const ENGULF_DPS: f32 = 3.0;
+pub const ENGULF_DPS_GAIN: f32 = 0.5;
+pub const ENGULF_FREE: f32 = 3.0;
+pub const ENGULF_GROW: f32 = 0.04;
+pub const ENGULF_BULK: f32 = 0.6;
+pub const ENGULF_DIGEST: f32 = 20.0;
 pub const DEVOUR_GROW: f32 = 0.03;
 pub const DEVOUR_BULK: f32 = 2.0;
 pub const DEVOUR_WELL_FROM: f32 = 0.6;
@@ -286,6 +301,8 @@ pub enum Power {
     Split,
     /// Scrambles the ship's controls briefly (a jam of the pilot, not of a system).
     Confuse,
+    /// Swallows rocks and, briefly, the ship (Oozer).
+    Engulf,
 }
 
 /// What a power is: its species rate (one in `n`), tier, first ring, bias and typical shared
@@ -299,7 +316,7 @@ struct Spec {
 }
 
 impl Power {
-    pub const ALL: [Power; 21] = [
+    pub const ALL: [Power; 22] = [
         Self::Phase,
         Self::Repel,
         Self::Warp,
@@ -321,6 +338,7 @@ impl Power {
         Self::Rune,
         Self::Split,
         Self::Confuse,
+        Self::Engulf,
     ];
 
     fn spec(self) -> Spec {
@@ -355,6 +373,7 @@ impl Power {
             Self::Rune => s(250.0, Strange, 6, Tech, (5.0, 520.0, 1.0)),
             Self::Split => s(180.0, Mild, 3, Aggression, (5.0, 300.0, 1.0)),
             Self::Confuse => s(400.0, Severe, 7, Distortion, (7.0, 320.0, 1.4)),
+            Self::Engulf => s(260.0, Strange, 4, Danger, (5.0, 300.0, 1.0)),
         }
     }
 
@@ -396,6 +415,7 @@ impl Power {
             Self::Rune => "rune",
             Self::Split => "split",
             Self::Confuse => "confuse",
+            Self::Engulf => "engulf",
         }
     }
 
@@ -423,6 +443,7 @@ impl Power {
             Self::Rune => "Runekeeper",
             Self::Split => "Splitter",
             Self::Confuse => "Dizzard",
+            Self::Engulf => "Oozer",
         }
     }
 
@@ -458,6 +479,7 @@ impl Power {
                 | Self::Sling
                 | Self::Rift
                 | Self::Rune
+                | Self::Engulf
         )
     }
 
@@ -486,6 +508,7 @@ impl Power {
             Self::Warp => [0.4, 0.7, 1.0],
             Self::Lens => [0.7, 1.0, 0.85],
             Self::Devour => [0.8, 1.0, 0.5],
+            Self::Engulf => [0.6, 0.9, 0.45],
             Self::Split => [0.8, 0.8, 0.8],
             Self::Cloud => [0.95, 0.85, 0.4],
             Self::Song => [0.6, 0.8, 1.0],
@@ -523,6 +546,7 @@ impl Power {
             Self::Rune => g.rune,
             Self::Split => g.split,
             Self::Confuse => g.confuse,
+            Self::Engulf => g.engulf,
         }
     }
 
@@ -549,6 +573,7 @@ impl Power {
             Self::Rune => g.rune = v,
             Self::Split => g.split = v,
             Self::Confuse => g.confuse = v,
+            Self::Engulf => g.engulf = v,
         }
     }
 
@@ -719,8 +744,8 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 
 /// The species-level weight of each power at `params`: rate, times the ramp past its first
 /// ring, times the sector's lean.
-pub fn weights(params: &SectorParams) -> [f32; 21] {
-    let mut out = [0.0; 21];
+pub fn weights(params: &SectorParams) -> [f32; 22] {
+    let mut out = [0.0; 22];
     for (slot, power) in out.iter_mut().zip(Power::ALL) {
         let first = power.first_ring() as f32;
         let ramp = smoothstep(first, first + RAMP_RINGS, params.depth);
@@ -824,6 +849,29 @@ fn style(g: &mut Genome, power: Power) {
             g.radius = g.radius.max(34.0);
             g.speed = g.speed.min(60.0);
             g.hull = g.hull.max(120.0);
+        }
+        Power::Engulf => {
+            // A crawling blob: slow, soft, unarmed, closing in rather than keeping its distance.
+            g.segments = 1;
+            g.limbs = 0;
+            g.sides = 0;
+            g.aspect = 1.0;
+            g.radius = g.radius.clamp(28.0, 44.0);
+            g.hull = g.hull.max(120.0);
+            g.speed = g.speed.min(50.0);
+            g.cruise = g.cruise.min(18.0);
+            g.weapon = Weapon::None;
+            g.contact_damage = 0.0;
+            g.fling = 0.0;
+            g.standoff = 0.0;
+            g.strafe = 0.0;
+            // It eats rocks through its own power (growth and contents), not the grazers' diet.
+            g.diet = crate::genome::Diet::None;
+            // Patient hunters: they notice the ship from afar and keep crawling after it.
+            g.sight = g.sight.max(450.0);
+            g.lose = g.lose.max(700.0);
+            // It drifts toward rocks (to eat them) rather than giving them a berth.
+            g.mass_affinity = g.mass_affinity.max(0.4);
         }
         Power::Rift => {
             g.segments = 1;
@@ -937,6 +985,23 @@ impl Genome {
         style(&mut g, Power::Rift);
         g
     }
+    /// An Oozer (engulf): a slow translucent blob that swallows rocks and, briefly, the ship.
+    pub fn oozer() -> Self {
+        let mut g = Self {
+            engulf: 0.5,
+            power_period: 5.0,
+            power_reach: 300.0,
+            radius: 36.0,
+            hull: 160.0,
+            mass: 90.0,
+            speed: 45.0,
+            cruise: 16.0,
+            ..Self::default()
+        };
+        style(&mut g, Power::Engulf);
+        g
+    }
+
     /// A spindle-shaped caster. Volley does not multiply power casts.
     pub fn runekeeper() -> Self {
         let mut g = Self {
@@ -1429,7 +1494,7 @@ mod tests {
 
     #[test]
     fn rare_powers_are_rarer_than_mild_ones() {
-        let mut counts = [0u32; 21];
+        let mut counts = [0u32; 22];
         let n = 160_000;
         for i in 0..n {
             let g = Genome::sample(&mut Rng::new(0xCAFE_0000 + i), &far(40.0));

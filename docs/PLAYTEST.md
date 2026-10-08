@@ -66,6 +66,22 @@ Rank-and-file members of a living civilization (not the miners) lay a structure 
 
 Not built yet, so do not judge: gathering rocks as a visible step, repair or raiding, structures surviving a reload.
 
+## Oozer (bestiary design 22, first half)
+
+A slow translucent green blob with a soft wobbling skin and a nucleus, ring 4 and out (about 1 in 260 species). Try `SSC_SPECIMEN=oozer` past the start rings or the dev spawn `oozer`. It crawls after the ship, eats rocks on the way (and grows), and swallows the ship when it gets within lobe reach after a 0.8 s stretch.
+
+| Question | What to check | Knob |
+|---|---|---|
+| Softness | Does the skin read as jelly (lags when it turns, dents near the ship) or as a slightly lumpy circle? | `ooze::REST`, `NEIGHBOUR`, `DAMP`, `INERTIA`, `AMBIENT`, `DENT` |
+| Telegraph | Is the lobe stretch (0.8 s) readable and fair, can a ship always step away? | `ENGULF_TELL`, `ENGULF_LOBE` |
+| Escape | Does thrusting out feel always possible but costly, not a fight against the pull? Does the capped pull feel like being carried? | `ENGULF_PULL` |
+| Digestion | Is 3 hull or shield a second worth fearing, and do your shots from inside feel like a way out? | `ENGULF_DPS`, `ENGULF_DPS_GAIN` |
+| After | Is 3 s of immunity after an escape enough to leave, not enough to farm it? | `ENGULF_FREE` |
+| Contents | Do swallowed rocks read inside and brown away? Does its growth feel earned? | `ENGULF_GROW`, `ENGULF_BULK`, `ENGULF_DIGEST` |
+| Readability | With the ship inside, the shield rings clutter the blob. Is it clear where the skin is? | `powerview::draw_ooze` |
+
+Not built yet, so do not judge: swallowing small creatures, the nucleus as a soft spot, spitting when hit hard.
+
 ## Questions to answer after the first session
 
 1. Which of the above felt wrong first? One line each is enough.

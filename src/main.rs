@@ -950,14 +950,20 @@ fn smoke_run(
             200.0
         } else if name == "hullworm" {
             30.0
+        } else if name == "oozer" {
+            170.0
         } else if name == "remora" {
             100.0
         } else {
             420.0
         };
+        let near = std::env::var("SSC_SPECIMEN_NEAR")
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .unwrap_or(near);
         if matches!(
             name.as_str(),
-            "stormcap" | "dizzard" | "argus" | "dirgewhale" | "hullworm" | "slinger"
+            "stormcap" | "dizzard" | "argus" | "dirgewhale" | "hullworm" | "slinger" | "oozer"
         ) {
             // The jammers only work on a ship that is not in grace.
             session.game.player_invulnerability = 0.0;
@@ -990,7 +996,7 @@ fn smoke_run(
         let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
         let count = if matches!(
             name.as_str(),
-            "weaver" | "slinger" | "runekeeper" | "seamer"
+            "weaver" | "slinger" | "runekeeper" | "seamer" | "oozer"
         ) {
             1
         } else {
@@ -999,6 +1005,33 @@ fn smoke_run(
         for k in 0..count {
             let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (near + 90.0 * k as f32);
             let id = session.game.place_creature(&Species::of(genome), at);
+            if name == "oozer" {
+                // Two free stones beside it, so the skin and the digesting contents show.
+                let rocks: Vec<u64> = session
+                    .game
+                    .bodies
+                    .iter()
+                    .filter(|b| {
+                        b.kind == ssc::simulation::BodyKind::Asteroid
+                            && !b.pinned
+                            && b.rock != ssc::world::RockKind::Planetoid
+                    })
+                    .take(2)
+                    .map(|b| b.id)
+                    .collect();
+                for (i, rock) in session
+                    .game
+                    .bodies
+                    .iter_mut()
+                    .filter(|b| rocks.contains(&b.id))
+                    .enumerate()
+                {
+                    // On its way to the ship, so it eats them as it crawls.
+                    rock.position = ship + (at - ship) * (0.8 - 0.1 * i as f32);
+                    rock.velocity = Vec2::ZERO;
+                    rock.radius = 9.0;
+                }
+            }
             if matches!(name.as_str(), "weaver" | "slinger") {
                 // Stage a stationary web with free stones, so bounded screenshots do not
                 // depend on the sector happening to put rocks beside the specimen.

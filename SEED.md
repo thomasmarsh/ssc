@@ -45,7 +45,7 @@ Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
 Current focus (user decision): complete the creature set so mechanics can be tuned together. Farming, population scaling and economy come after, in the order of WORKSTREAMS phases. The gamepad audit, feeling view-model (a poor name, rename when built), weaver rock care and edge-density measurement are anytime items, not next.
 
 0. Playtest (the user), at any time. Nothing has been played by a human; all balance is a guess. The checklist is `docs/PLAYTEST.md`: add a section per feature when it lands.
-1. [L] NEXT (user order, 2026-10-08; player interaction for builders skipped for now): bestiary fill. In order: (a) the Oozer (design 22 in `docs/BESTIARY.md`; the Foamback, design 21, after it), (b) swarms and flock budgets (8), (c) the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on), weak points per node kind on elder bodies if the playtest asks for them. Builders left open: slice 4 player interaction, visible rock gathering.
+1. [L] NEXT (user order, 2026-10-08; player interaction for builders skipped for now): bestiary fill. In order: (a) the Foamback (design 21 in `docs/BESTIARY.md`; the Oozer, design 22, is built bar its second half: small creatures as prey, the nucleus soft spot, pinch and spit), (b) swarms and flock budgets (8), (c) the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on), weak points per node kind on elder bodies if the playtest asks for them. Builders left open: slice 4 player interaction, visible rock gathering.
    - Design note (user): multi-segmented bodies are effectively compound enemies. In easier areas, consider a whole-creature health pool: segments break apart and float away before disappearing, so a ten-segment creature does not take ten times as long to kill as a single-circle equivalent in early sectors. Investigate and apply (probably as a realm/depth-scaled rule) in the Oozer slice or right after it; record the decision in `docs/BESTIARY.md`.
 2. Then farming (with persistence first, workstream 12), population scaling and rally forces, economy and megastructures, hyperlanes.
 3. Alongside: DEVTOOLS B then C (register new constants at birth); hygiene and `TODO:` lists as files are touched.
@@ -54,6 +54,7 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
+- Oozer, first half (generator version 26): `engulf` power (`simulation/ooze.rs`), a 16-node soft skin simulated headless, lobe telegraph, a swallowed ship carried at a capped pull and digested, rocks eaten and shown inside. Genome fingerprint golden re-baselined (new gene and style).
 - Builder creatures slice 3 (no generation change): civilizations build (`update_civ_builders`: members lay 3 structures per territory in `civ_style`, tinted blocks), and all builders now walk their structure (leash target is the next site).
 - Builder creatures slice 2 (generator version 25): 18 percent of power-free sampled species are calm nest builders (`Genome::nest_builder`, ring 4+), leashed to their site (`build::home_pull`); finished or blocked works free their slot.
 - Builder creatures slice 1: `StructurePlan` (`src/structure.rs`) built from a grammar `Plan`, optional `Genome::builder` section (`src/builder.rs`), and `simulation/build.rs` placing one pinned block per interval in plan order; authored `builder` via dev spawn. No generation change.
@@ -61,4 +62,3 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 - Nested creatures slice 4b (generator version 23): residents seat on an elder body's `Socket` marks (`Root::socket`, `Game::socket_pose`), extras stay on the head.
 - Nested creatures slice 4a (generator version 22): the resident relation is chosen by the host country's biome character (`hosted::niche_weights`).
 - Nested creatures slice 3: symbiote residents heal the host, parasites drain it and feed (`root::tend_hosts`, floored at 40 percent health).
-- Nested creatures slice 2c: a hurt elder sheds brood at health thresholds (`root::shed_brood`), swarming. Slice 2 complete.

@@ -403,7 +403,7 @@ impl Game {
 
     /// Scales a gorger to `bulk` of its made size (radius, mass and hull together; a third of
     /// the growth heals).
-    fn grow_to(&mut self, index: usize, state: &mut PowerState, bulk: f32) {
+    pub(super) fn grow_to(&mut self, index: usize, state: &mut PowerState, bulk: f32) {
         let Some((radius, mass, health)) = state.base else {
             return;
         };

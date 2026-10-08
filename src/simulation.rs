@@ -40,6 +40,7 @@ mod loot;
 pub mod lure;
 mod mimic;
 mod mining;
+mod ooze;
 pub mod organs;
 mod pads;
 mod parasite;
@@ -92,12 +93,13 @@ pub use legacy::{Bequest, Legacy, Wreck};
 pub use loot::{Notice, Pickup};
 pub use mimic::Disguise;
 pub use mining::{Beam, Cargo, Lode, Material, renewable};
+pub use ooze::{Engulf, INSIDE as OOZE_INSIDE, SKIN as OOZE_SKIN, skin_radius};
 pub use pads::{
     HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP, Pad, PadHint, PadKey, PadState, STASH_CAP,
     price_text,
 };
 pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RANGE, RING_SPEED};
-pub use powers::{BlinkTell, JamKind, JamTell, PowerView};
+pub use powers::{BlinkTell, JamKind, JamTell, OozeView, PowerView};
 pub use realms::RealmState;
 pub use regions::RegionState;
 pub use rift::{Rift, RiftTrace};
@@ -439,6 +441,9 @@ pub struct Game {
     pub pickups: Vec<Pickup>,
     pub mines: Vec<Mine>,
     pub rune_fields: Vec<RuneField>,
+    /// The ship swallowed by an Oozer, and seconds of immunity after an escape.
+    engulf: Option<Engulf>,
+    engulf_free: f32,
     pub rifts: Vec<Rift>,
     pub rift_traces: Vec<RiftTrace>,
     /// What is bolted to the ship, and the stats that follow from it.
@@ -597,6 +602,8 @@ impl Game {
             pickups: Vec::new(),
             mines: Vec::new(),
             rune_fields: Vec::new(),
+            engulf: None,
+            engulf_free: 0.0,
             rifts: Vec::new(),
             rift_traces: Vec::new(),
             arm_clock: [0.0; 3],
@@ -879,6 +886,7 @@ impl Game {
         self.update_apexes(dt);
         self.update_adapt(dt);
         self.update_rifts(dt);
+        self.update_engulf_hold(dt);
         self.update_powers(dt);
         // After steering, so a remora's drift to a calm ship wins over its shyness.
         self.update_parasites(dt, input.fire);
@@ -1402,6 +1410,7 @@ impl Game {
         let mut ship_rammed = false;
         // A dashing ship staggers what it touches; a flinger's touch is a graze.
         let dashing = self.dashing();
+        let swallowed = self.engulf.map(|e| e.ooze);
         let mut grazes = Vec::new();
         self.prune_impacts();
         let mut struck = Vec::new();
@@ -1440,6 +1449,13 @@ impl Game {
                     continue;
                 }
                 if clings(a, b) {
+                    continue;
+                }
+                // A swallowed ship is inside its blob, not bumping it.
+                if swallowed.is_some_and(|id| {
+                    (a.kind == BodyKind::Player && b.id == id)
+                        || (b.kind == BodyKind::Player && a.id == id)
+                }) {
                     continue;
                 }
                 let inverse_a = inverse_mass(a);

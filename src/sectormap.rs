@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// Bumped whenever the page or the embedded data layout changes.
-pub const GENERATOR_VERSION: u32 = 25;
+pub const GENERATOR_VERSION: u32 = 26;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
 /// Most sectors one map may hold.

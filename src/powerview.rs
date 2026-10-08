@@ -106,6 +106,66 @@ fn eyes(gizmos: &mut Gizmos, p: Vec2, r: f32, time: f32, open: f32, tint: Color)
     }
 }
 
+/// An Oozer: the soft skin as a closed curve through its nodes (the simulation owns the
+/// shape), a darker nucleus that lags inside, what it has swallowed browning away, and a second
+/// inner membrane while it holds the ship.
+pub fn draw_ooze(gizmos: &mut Gizmos, game: &Game, body: &Body, color: Color) {
+    let Some(view) = game.power_view(body).ooze else {
+        return;
+    };
+    let (p, r) = (body.position, body.radius);
+    let tint = tinted(Power::Engulf);
+    let skin = |scale: f32| {
+        (0..=64).map(move |k| {
+            let a = k as f32 / 64.0 * TAU;
+            p + Vec2::from_angle(a) * (r * ssc::simulation::skin_radius(&view.skin, a) * scale)
+        })
+    };
+    let held = if view.held { 1.0 } else { 0.0 };
+    gizmos.linestrip_2d(skin(1.0), color.mix(&tint, 0.5).with_alpha(0.9));
+    gizmos.linestrip_2d(skin(0.9), tint.with_alpha(0.22 + 0.3 * held));
+    if view.held {
+        gizmos.linestrip_2d(skin(0.78), tint.with_alpha(0.5));
+    }
+    // Swallowed rocks, browning and shrinking as they digest.
+    for &(angle, size, digested) in view.inside.iter().filter(|i| i.1 > 0.0) {
+        let at = p + Vec2::from_angle(angle) * r * 0.45;
+        let brown = Color::srgb(0.62 - 0.3 * digested, 0.5 - 0.1 * digested, 0.38);
+        gizmos
+            .circle_2d(at, r * size * (1.0 - 0.6 * digested), brown.with_alpha(0.7))
+            .resolution(10);
+    }
+    let nucleus = p + view.nucleus;
+    gizmos
+        .circle_2d(
+            nucleus,
+            r * 0.24,
+            Color::srgb(0.15, 0.3, 0.1).with_alpha(0.95),
+        )
+        .resolution(18);
+    gizmos
+        .circle_2d(
+            nucleus,
+            r * 0.14,
+            Color::srgb(0.2, 0.4, 0.12).with_alpha(0.9),
+        )
+        .resolution(14);
+    // The lobe about to close: a bright tip.
+    if let Some((angle, along)) = view.lobe {
+        let tip = p + Vec2::from_angle(angle)
+            * r
+            * ssc::simulation::skin_radius(&view.skin, angle)
+            * 1.02;
+        gizmos
+            .circle_2d(
+                tip,
+                3.0 + 4.0 * along,
+                Color::WHITE.with_alpha(0.4 + 0.5 * along),
+            )
+            .resolution(8);
+    }
+}
+
 /// The tells of one body's power: the halo, the mark, and any warning in progress.
 pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
     let Some(carried) = body.genome.live_power() else {
@@ -123,6 +183,10 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
     let side = Vec2::new(-direction.y, direction.x);
     let view = game.power_view(body);
     let shimmer = 0.5 + 0.5 * (time * 5.0 + body.id as f32 * 1.7).sin();
+    if carried.power == Power::Engulf {
+        // The blob's own soft outline is its tell (see `draw_ooze`), not a round halo.
+        return;
+    }
     // The halo: a thin ring that breathes, in the power's colour.
     gizmos
         .circle_2d(

@@ -271,6 +271,7 @@ impl Game {
 
     /// A dash, a perfect parry: everything aboard is shaken loose.
     pub(super) fn shake_off(&mut self) {
+        self.pop_out();
         if !self.parasites.latches.is_empty() {
             self.release_all(power::LATCH_FLING);
         }

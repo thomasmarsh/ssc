@@ -103,6 +103,11 @@ pub struct PowerState {
     pub(super) sling_clock: f32,
     pub(super) gather_clock: f32,
     pub(super) sling: Option<super::sling::SlingTell>,
+    /// Engulf (Oozer): the soft skin, the lobe being stretched, and rocks digesting inside
+    /// as ((bearing, size share), age).
+    pub(super) skin: super::ooze::Skin,
+    pub(super) lobe: Option<super::ooze::Lobe>,
+    pub(super) inside: Vec<((f32, f32), f32)>,
 }
 
 /// Everything the adapter needs to draw a body's power.
@@ -128,6 +133,21 @@ pub struct PowerView {
     /// A dirge's mouth opening: 0 to 1.
     pub song: f32,
     pub sling: Option<super::sling::SlingTell>,
+    pub ooze: Option<OozeView>,
+}
+
+/// A drawn Oozer: its soft skin and what is in it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OozeView {
+    /// Radial offsets of the skin nodes as a share of the radius.
+    pub skin: [f32; super::ooze::SKIN],
+    /// The nucleus, offset from the centre.
+    pub nucleus: Vec2,
+    /// A lobe stretching: its bearing and how far along (0 to 1).
+    pub lobe: Option<(f32, f32)>,
+    /// Rocks inside: bearing, share of the radius, and how digested (0 fresh, 1 gone).
+    pub inside: [(f32, f32, f32); super::ooze::INSIDE],
+    pub held: bool,
 }
 
 impl Game {
@@ -160,6 +180,7 @@ impl Game {
             } else {
                 0.0
             },
+            ooze: self.ooze_view(body, state),
         }
     }
 
@@ -211,7 +232,8 @@ impl Game {
                     || Power::Rune.active(&g)
                     || Power::Weave.active(&g)
                     || (Power::Sling.active(&g) && Power::Sling.fits(&g))
-                    || Power::Devour.active(&g));
+                    || Power::Devour.active(&g)
+                    || Power::Engulf.active(&g));
             if phase.is_none() && !blinks && !jammer && !fielder {
                 self.bodies[index].phased = false;
                 continue;
@@ -277,6 +299,9 @@ impl Game {
             }
             if fielder && Power::Weave.active(&g) {
                 self.step_weave(index, &mut state, dt, ship, &mut cues);
+            }
+            if fielder && Power::Engulf.active(&g) {
+                eaten.extend(self.step_engulf(index, &mut state, dt, &mut cues));
             }
             if fielder {
                 eaten.extend(self.step_fields(index, &mut state, dt, &warp_owner, &mut cues));

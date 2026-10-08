@@ -28,7 +28,7 @@ pub fn enabled() -> bool {
 
 /// What can be spawned at the ship: the wild classics, then the authored specimens (the names
 /// `SSC_SPECIMEN` takes).
-pub const SPAWNS: [&str; 39] = [
+pub const SPAWNS: [&str; 40] = [
     "bogey",
     "fatso",
     "lunatic",
@@ -55,6 +55,7 @@ pub const SPAWNS: [&str; 39] = [
     "weaver",
     "slinger",
     "runekeeper",
+    "oozer",
     "seamer",
     "squid",
     "octopus",
@@ -99,6 +100,7 @@ pub fn specimen_genome(name: &str) -> Genome {
         "weaver" => Genome::weaver(),
         "slinger" => Genome::slinger(),
         "runekeeper" => Genome::runekeeper(),
+        "oozer" => Genome::oozer(),
         "seamer" => Genome::seamer(),
         "builder" => Genome::builder(),
         _ => crate::bodyplan::specimen_by_name(name).unwrap_or_default(),

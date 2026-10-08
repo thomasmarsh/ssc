@@ -2598,6 +2598,10 @@ pub fn draw(
                     gizmos
                         .circle_2d(p, r * ssc::power::CLOUD_CORE, shown)
                         .resolution(14);
+                } else if ssc::power::Power::Engulf.active(&body.genome)
+                    && game.power_view(body).ooze.is_some()
+                {
+                    crate::powerview::draw_ooze(&mut gizmos, game, body, shown);
                 } else {
                     draw_creature(&mut gizmos, game.time, body, shown);
                 }

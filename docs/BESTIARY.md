@@ -517,7 +517,7 @@ Specimen: `foam` 0.5, `hull` 70, `radius` 26, `weapon` none or a weak spit of bu
 
 **Player takes from it.** Bubble sac: an organ that leaves a short trail of bubbles behind a dash that absorbs the first hostile shot passing through one (TODO: unbuilt).
 
-### 22. Oozer (amoeba, swallows things) (designed, unbuilt)
+### 22. Oozer (amoeba, swallows things) (built, first half)
 
 **Image.** A wobbling, translucent blob with a darker nucleus and a skin that never holds one shape. It extends a pseudopod toward anything interesting, rocks, pickups, small creatures, the ship, and flows around it. What it has swallowed stays visible inside, slowly browning as it digests. When it is hit hard it pinches and spits things out.
 
@@ -536,6 +536,12 @@ Specimen: `engulf` 0.5, `hull` 160, `radius` 36, slow speed, no gun.
 **Simulation effect.** New `simulation/ooze.rs` modelled on `fields.rs` devour (the eat rules and growth caps) and `parasite.rs` latch (a held ship with escape conditions). State: one optional `held: Vec<BodyId>` on `PowerState` with a hard cap of 3 held and the digestion timers; held bodies are non-colliding with the world while inside and carried by an attachment offset (the Hullworm/latch mechanism). Never held in grace, landed or during a dash. Pseudopod animation is presentation only.
 
 **Player takes from it.** Pseudopod gland: a short stretchy grab on a nearby rock or pickup that pulls it in (TODO: unbuilt).
+
+**Built (first half, generator version 26).** `simulation/ooze.rs`, gene `engulf` (`Power::Engulf`, Strange, ring 4, 1 in 260, Danger bias), specimen `SSC_SPECIMEN=oozer` and dev spawn `oozer`. Differences from the design above:
+- **Soft body.** The skin is a ring of 16 radial spring nodes (`ooze::Skin`) simulated headless and deterministic: neighbour coupling (an elastic membrane), a little volume preservation, push from the body's own acceleration (it lags and slops), the lobe being stretched, a nearby ship pressing a dent, and an ambient tremble. The nucleus floats inside and lags. It is exposed as `PowerView::ooze` (`OozeView`) and only drawn by `powerview::draw_ooze`; the hit box stays the plain circle, so no rule depends on the shape.
+- **Engulf.** A ship within lobe reach (`power_reach * ENGULF_LOBE` past the skin) makes the lobe stretch for 0.8 s (it follows the ship slowly), then it closes if the ship is still in reach. Never in grace, landed, in a dash, while another ship hold exists, or within `ENGULF_FREE` (3 s) of an escape. The ship is drawn in over 0.35 s, then carried with a pull capped at `ENGULF_PULL` (0.5, a little under the design's 0.6) of its thrust, digested at `ENGULF_DPS * (0.5 + s)` (3 per second at full gene, shield first, no shield recharge), and keeps its controls and weapons; its shots start inside the body so they hit at full damage (existing swept-shot rule). Out by thrusting clear of the skin (always possible), a dash, a perfect parry (`shake_off`), or killing the blob; death, landing and grace also release.
+- **Rocks.** It eats free rocks it touches (up to 2 a step), growing `ENGULF_GROW` each up to `1 + ENGULF_BULK * s` (hull, radius, mass together, the Tidegorger `grow_to`), and the rocks show inside, browning and shrinking over `ENGULF_DIGEST` s (up to 4 shown). Its diet is none (the grazers' generic rock eating would pre-empt it), rocks do not push it away, and it has sight 450 and lose 700 so it crawls after the ship.
+- `TODO:` small creatures as prey (held, damage over time), the nucleus as the one soft spot (shots at the rest partly absorbed) and the pinch-and-spit when hit hard, the Pseudopod gland organ, a dedicated cue for the swallow (it reuses the devour cue), and the Foamback (design 21).
 
 ### Animal body plans (specimens built, no wild placement yet)
 
