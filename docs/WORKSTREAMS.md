@@ -11,7 +11,7 @@ Shared principles (from `CLAUDE.md` and the brief):
 
 ## Foundation: stochastic L-system infrastructure (feeds 1, 6, 7, 11, 3)
 
-Status: slices (a) and (b) built, and slice (d), the creature `Genome` integration (an optional `grammar` section) with body expression and three authored specimens (`src/bodyplan.rs`); design, the `Plan` type, templates, salting, caps and the shape-grammar recommendation are in [PROCGEN.md](PROCGEN.md). `TODO:` slice (c), wire into plants with workstream 1; juvenile growth stages for grammar bodies.
+Status: slices (a) and (b) built for plants, and slice (d) reworked: creatures use a separate animal body-plan library (`src/anatomy.rs`, archetypes at depth 0 to 3, typed nodes, an optional `anatomy` genome section, `src/bodyplan.rs` expression, 11 specimens, `SSC_BESTIARY` gallery); design, the `Plan` type, templates, salting, caps and the shape-grammar recommendation are in [PROCGEN.md](PROCGEN.md). `TODO:` slice (c), wire into plants with workstream 1; juvenile growth stages for animal bodies (a juvenile is a single bead today).
 
 Goal: one small, deterministic, tested module that grows branching and segmented structure from a seed, used for plants (1), creature bodies including apex elders (6) and hosted or brood bodies (7).
 - Today: creature bodies are jointed chains driven by a flat gene list (`src/genome.rs`, `genome!` macro: real, int, categorical and trait genes). There is no grammar and no branching. Rooted life exists (`src/simulation/root.rs`) and plankton, but plants are not structured.
@@ -69,7 +69,7 @@ Goal: apex elders have varied bodies, produced by the same procgen mechanisms as
 - Design: give apex genomes a body-plan expression using the L-system infrastructure plus the existing chain bodies, scaled up: segmented serpents, branching coral-like colossi, multi-limbed or ring bodies, with hurtbox and weak-point implications, and fairness rules from `BESTIARY.md`. A body type should read from silhouette.
 - Slices: (1) body-plan gene set for apexes feeding the existing chain; (2) L-system bodies for two new archetypes; (3) hit and weak-point rules per body; (4) rebalance.
 - Depends on: L-system foundation.
-- Status: the foundation for slice 2 is built (grammar bodies exist as authored specimens: Ribwyrm, Corallid, Colossus, see [PROCGEN.md](PROCGEN.md)); `TODO:` placing apex elders with grammar bodies in the wild (needs a `GENERATOR_VERSION` bump), weak points per stem kind.
+- Status: the foundation for slice 2 is built (animal body plans exist as authored specimens and elders are the same plan misshapen and scaled by `ELDER_SCALE`, see [PROCGEN.md](PROCGEN.md)); `TODO:` placing apex elders with animal bodies in the wild (needs a `GENERATOR_VERSION` bump), weak points per node role.
 
 ## 7. Creatures inside creatures
 
@@ -78,7 +78,7 @@ Goal: megafauna with symbiotic or parasitic residents, and large broods.
 - Design: a host genome gets hosted-slot genes (count, kind, relationship: symbiote, parasite, brood). Residents spawn attached, ride the host, and are released on death or damage thresholds (a death releases a brood). Relationship affects behavior: symbiotes defend or clean the host, parasites drain it, broods swarm. Use the same attach mechanics as Hullworm so the code is shared. Display: residents visible on the body.
 - Slices: (1) host slots and attached residents on one megafauna; (2) release rules and brood swarm; (3) symbiote and parasite behaviors; (4) ecology (species pairings by niche).
 - Depends on: swarm budgets (8).
-- Status: `Socket` parts of a grammar body are placed in the world each frame (`Game::chain_decorations`, kind Socket); nothing attaches to them yet (`TODO:`).
+- Status: `Socket` marks of an animal body are placed in the world each frame (`Game::chain_decorations`, kind Socket); nothing attaches to them yet (`TODO:`).
 
 ## 8. Swarms and rallied forces
 

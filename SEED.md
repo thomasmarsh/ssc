@@ -44,7 +44,7 @@ Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
 Current focus (user decision): complete the creature set so mechanics can be tuned together. Farming, population scaling and economy come after, in the order of WORKSTREAMS phases. The gamepad audit, feeling view-model (a poor name, rename when built), weaver rock care and edge-density measurement are anytime items, not next.
 
 0. Playtest (the user), at any time. Nothing has been played by a human; all balance is a guess.
-1. [L] Apex body types (workstream 6) using it (grammar bodies and three authored specimens exist: `src/bodyplan.rs`), then place them in the wild (this is a generation change: bump `GENERATOR_VERSION`, re-baseline the golden once, batch with any other generation changes).
+1. [L] Apex body types (workstream 6) using it (animal body plans, typed nodes, elders as misshapen plans and 11 authored specimens exist: `src/anatomy.rs`, `src/bodyplan.rs`), then place them in the wild (this is a generation change: bump `GENERATOR_VERSION`, re-baseline the golden once, batch with any other generation changes).
 2. [L] Bestiary fill: nested creatures and broods (7, extract the shared attach mechanic first), builder creatures (11), swarms and flock budgets (8), then the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on).
 3. Then farming (with persistence first, workstream 12), population scaling and rally forces, economy and megastructures, hyperlanes.
 4. Alongside: DEVTOOLS B then C (register new constants at birth); hygiene and `TODO:` lists as files are touched.
@@ -53,7 +53,7 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
-- Creature genome grammar integration: optional `grammar` section in `Genome` (no draws unless present, pinned by a test), body expression from a `Plan` (`src/bodyplan.rs`, chain spawn, decorations drawn), specimens `ribwyrm`, `corallid`, `colossus`; no wild placement. See `docs/PROCGEN.md`.
+- Animal body plans (rework of the grammar bodies, which read as trees): `src/anatomy.rs` (12 archetypes incl. ribbed spine, depth 0 to 3, typed nodes, variety genes), optional `anatomy` genome section, every legacy species a proven depth-0 plan, `SSC_BESTIARY` gallery, 11 specimens. See `docs/PROCGEN.md`.
 - L-system foundation slices a and b: `src/grammar.rs` (Plan, 8 templates, `GrammarGenome`, caps, growth, 25 tests), `SSC_GRAMMAR` gallery; design in `docs/PROCGEN.md`. Slice c (plants) is farming's first step.
 - Developer toggles (`SSC_DEV=1`, backquote panel, `DevState`), phase A of `docs/DEVTOOLS.md`.
 - Master seed extracted to `src/config.rs`.

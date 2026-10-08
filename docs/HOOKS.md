@@ -52,14 +52,25 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 
 ## Creature galleries
 
-- `SSC_SPECIMEN=<name>`: place authored creatures near the ship (three, or one for weaver, slinger, runekeeper, seamer). Names: bogey, fatso, lunatic, leech, smarty, serpent, skipjack, veilwing, hullpick, stormcap, argus, gloomfeeder, dizzard, pushwhale, tarbloom, lenswyrm, tidegorger, splitter, murmur, dirgewhale, lurefish, hullworm, remora, weaver, slinger, runekeeper, seamer, and the inert grammar-bodied ribwyrm, corallid and colossus (anything else gives the default genome). Weaver and Slinger are pinned beside three staged free rocks. Use with `SSC_TELEPORT` past the start rings.
+- `SSC_SPECIMEN=<name>`: place authored creatures near the ship (three, or one for weaver, slinger, runekeeper, seamer). Names: bogey, fatso, lunatic, leech, smarty, serpent, skipjack, veilwing, hullpick, stormcap, argus, gloomfeeder, dizzard, pushwhale, tarbloom, lenswyrm, tidegorger, splitter, murmur, dirgewhale, lurefish, hullworm, remora, weaver, slinger, runekeeper, seamer, and the inert animal-bodied squid, octopus, snake, crab, jelly, ray, starfish, puffer, plumeworm, treeling and ribwyrm (anything else gives the default genome). Weaver and Slinger are pinned beside three staged free rocks. Use with `SSC_TELEPORT` past the start rings.
 - `SSC_SPECIMEN_TELL=1`: advance (up to 4000 steps) until the specimen's warning is showing, then capture.
 - `SSC_SPECIMEN_THROW=1`: Slinger only, advance to a release and a short visible flight.
 - `SSC_RUNE=arming|activation`: four stationary Runekeepers with the four payloads; capture at 0.6 s of arming, or about 0.23 s after activation. Typically with `SSC_TELEPORT=36000,0`.
 - `SSC_RIFT=warning|active|transit`: one isolated Seamer pair with bullets over the connection; `transit` has the ship mid-crossing. Typically `SSC_TELEPORT=60000,0 SSC_CAMERA=wide`; `SSC_CAMERA=far` shows both transit ends.
 - `SSC_DISCOVERY=warning|active|well|relic|crowded`: stage existing entities near a generated relic sector, send a real ping, advance 0.6 s (warning) or 1.5 s (others), hold. Typically `SSC_CAMERA=wide`. See [DISCOVERY.md](DISCOVERY.md).
 
-## Grammar gallery
+## Bestiary gallery (animal body plans)
+
+- `SSC_BESTIARY=all|<archetype>|variants[:<archetype>]|legacy|elders|specimens`: draw labeled grids of animal bodies at rest instead of the world, marks colored by role. `SSC_BESTIARY_SEED=<n>` offsets the sample keys. Archetypes: bead, chain, ribbed, squid, octopus, crab, jelly, ray, star, puffer, plumeworm, tree. Exact command (swap the mode):
+
+```sh
+SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=60 SSC_SCREENSHOT=/tmp/bestiary.png cargo run --bin ssc
+```
+
+  Or in a window, drop `SSC_OFFSCREEN` and `SSC_SCREENSHOT` and use a large `SSC_SMOKE_FRAMES`. See [PROCGEN.md](PROCGEN.md), "Debug gallery".
+- Live specimens: `SSC_DEV=1 cargo run --bin ssc`, press backquote, move to the spawn row, left and right pick the name, Enter spawns three at the ship. Or `SSC_SPECIMEN=squid SSC_TELEPORT=36000,0 SSC_OFFSCREEN=1 SSC_SMOKE_FRAMES=90 SSC_SCREENSHOT=/tmp/squid.png cargo run --bin ssc`.
+
+## Grammar gallery (plants)
 
 - `SSC_GRAMMAR=all|<template>|strip:<a,b>`: draw grown L-system plans on a grid instead of the world (columns of every template, a grid of one template, or growth strips t = 0.1 to 1.0 per template). Template names: monopodial, sympodial, dichotomous, whorled, fern, coral, vine, spine. `SSC_GRAMMAR_T=<growth>` sets t (default 1), `SSC_GRAMMAR_SEED=<n>` offsets the sample keys. See [PROCGEN.md](PROCGEN.md).
 
