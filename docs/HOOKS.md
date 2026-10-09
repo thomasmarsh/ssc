@@ -47,7 +47,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 ## Pads and bench
 
 - `SSC_PAD=kit|deploy|land|bench`: stage the pad states beside the nearest planetoid (a kit in hand, pad down, landed, landed with the bench open). `SSC_BENCH=0..2` picks the bench tab for `bench`.
-- `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash|research`: land at the HOME pad with existing progress staged, open the real bench on that pose and hold. Extra modes with `SSC_BENCH_RESULT`: `reforge-good|reforge-kept|unlock|repeated`.
+- `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash|research|refinery`: land at the HOME pad with existing progress staged, open the real bench on that pose and hold. Extra modes with `SSC_BENCH_RESULT`: `reforge-good|reforge-kept|unlock|repeated`.
 - `SSC_BENCH_RESULT=1`: confirm the selected bench action 20 frames before capture (receipts). See [BENCH.md](BENCH.md).
 - `SSC_BUY=1`: buy the bench's selected row 20 frames before capture (purchase ring).
 

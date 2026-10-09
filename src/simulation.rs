@@ -51,6 +51,7 @@ mod parry;
 mod ping;
 mod powers;
 mod procurement;
+mod production;
 mod realms;
 mod regions;
 mod regrow;

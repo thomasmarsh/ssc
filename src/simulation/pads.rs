@@ -94,6 +94,8 @@ pub struct Pad {
     pub radius: f32,
     pub hp: f32,
     pub stash: Cargo,
+    #[serde(default)]
+    pub refinery: Option<super::production::Refinery>,
     /// Deployment order: the oldest is dismantled first.
     pub order: u64,
     /// The home-base pad on HOME's planetoid, there from the start: never dismantled for a
@@ -335,6 +337,7 @@ impl Game {
                 order: 0,
                 home: true,
                 reloads: 0,
+                refinery: None,
             },
         );
         self.pad.next_order = 1;
@@ -723,6 +726,7 @@ impl Game {
                 order,
                 home: false,
                 reloads: 0,
+                refinery: None,
             },
         );
         let spot = center + Vec2::from_angle(angle + anchor) * radius;
@@ -883,6 +887,7 @@ impl Game {
         }
         self.observe_pads();
         self.besiege_pads(dt);
+        self.update_production(dt);
     }
 
     fn update_landed(&mut self, dt: f32, input: &Input) {
@@ -1789,6 +1794,7 @@ mod tests {
                     order: u64::from(index),
                     home: false,
                     reloads: 0,
+                    refinery: None,
                 },
             );
         }
@@ -2522,6 +2528,7 @@ mod tests {
                 order: u64::from(key.1),
                 home: false,
                 reloads: 0,
+                refinery: None,
             },
         );
     }
@@ -3150,6 +3157,7 @@ mod tests {
                     order: 10 + u64::from(index),
                     home: false,
                     reloads: 0,
+                    refinery: None,
                 },
             );
         }

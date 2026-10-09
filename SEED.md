@@ -42,10 +42,10 @@ Decide per slice, and say which in one line.
 
 ## Queue (revised 2026-10-09: expand the game loop)
 
-The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C is built; local production and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
+The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and the narrow D fuel refinery are built; remaining local production and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, working home: D paid local modules, refinery -> fuel, water/tank -> irrigation -> biomass; then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
+1. [L] NEXT, working home: remaining D water/tank -> irrigation -> biomass, bought raw-input supply and local power/storage modules (paid saved fuel refinery built); then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
 2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk water delivery, fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 3. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 4. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
@@ -57,6 +57,8 @@ Other backlog: density/feeling view-model and measurements, weaver rock care, hy
 Decided: raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; bulk water via local tanks/tankers; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Narrow local production: paid pad fuel refinery with integral power, Fabrication gate, local stash inputs/output, bounded unloaded simulation, and saved reserved batches. Water/irrigation and bought-input trade remain queued.
 
 - Narrow frontier progression (generator 33): five saved research dependencies, independently salted supplier specialties, capped one-time captures and one-use archive grade claims, continuing source-bound offense/durability grades with preserved handling/pattern bounds and normalized repair costs. Peaceful and conquest paths share the tested frontier ceiling.
 
@@ -71,5 +73,3 @@ Decided: raw wildlife rewards with organs as biological specials; civilizations 
 - Genetic carrier development (generator version 31): appearance/surface and external-organ reach inherit independently of powers; body grammar develops functional organs without replacing carriers. Authored styles preserved; eight-port and soft limbless Slinger hooks. Wild distributions now built in stage 3. See `docs/BESTIARY.md`.
 
 - Independent power modules (generator version 30): power-local cadence/reach/hold, module inheritance, independent jam warnings and digestive growth, all-capability rendering; authored multi-carrier hooks. Ordinary draw golden and HOME preserved. See `docs/BESTIARY.md`.
-
-- Saves and recovery: last ten autosaves plus independent explicit SAVE GAME, latest-valid CONTINUE / NEW GAME title menu; lives revive locally and exhaustion returns to the last landed pad (HOME fallback) with exactly one life, preserving progress. No death-triggered game over or bequest. See `docs/PERSISTENCE.md`.

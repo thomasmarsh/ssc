@@ -34,6 +34,7 @@ pub struct Bench {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BenchAction {
     Repair,
+    Refinery,
     Research(research::Tech),
     Grade,
     Outfit(Slot),
@@ -114,6 +115,7 @@ impl Game {
                 .chain([Material::Fuel, Material::Water].map(BenchAction::Supply))
                 .chain([Slot::Plating, Slot::Engine, Slot::Core].map(BenchAction::Outfit))
                 .chain(self.pad.contact.map(|_| BenchAction::Tithe))
+                .chain(self.pad.landed.map(|_| BenchAction::Refinery))
                 .chain(Material::ALL.map(BenchAction::Stash))
                 .collect(),
             BenchTab::Weapons => Profile::ALL.map(BenchAction::Weapon).to_vec(),
@@ -179,6 +181,7 @@ impl Game {
         let before = super::bench_feedback::Snapshot::capture(self);
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
+            Some(BenchAction::Refinery) => self.buy_refinery(),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
             Some(BenchAction::Grade) => self.buy_grade(),
             Some(BenchAction::Outfit(slot)) => self.buy_outfit(slot),
@@ -534,6 +537,22 @@ impl Game {
                     row.ok = false;
                     row.state = "NOT OWNED".into();
                     row.detail += ". Bond, harvest, or find a sealed relic.";
+                }
+            }
+            BenchAction::Refinery => {
+                row.group = "PAD PRODUCTION";
+                row.text = "BUILD FUEL REFINERY".into();
+                row.detail = "Integral power; stash pays 10V per 25F batch, 10 seconds. Works while away; Q / X takes fuel from stash.".into();
+                if let Some(refinery) = self.landed_pad().and_then(|p| p.refinery.as_ref()) {
+                    row.text = "FUEL REFINERY".into();
+                    row.ok = false;
+                    row.state = refinery.status(&self.landed_pad().unwrap().stash);
+                } else {
+                    row.costs = production::REFINERY_PRICE.to_vec();
+                    if let Some(why) = self.refinery_block() {
+                        row.ok = false;
+                        row.state = why.into();
+                    }
                 }
             }
             BenchAction::Stash(m) => {

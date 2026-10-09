@@ -20,7 +20,7 @@ FLOW section 3 proposes three tabs together with automatic paid repair, automati
 
 PARTS adds reserve services and starter outfits above six stash rows. SKILLS keeps all 19 skills/four organ rows, followed by five research nodes and equipment grade. Research interfaces are alternatives to fitted Rare prerequisites; skills themselves remain separate purchases. Organ grafts spend crystal + fuel, upkeep uses biomass, removal/refitting remain free after integration.
 
-Friendly-seat CONTACT opens with E/B/Select while in range, uses the same three tabs, and includes tithe/trade. The panel closes when its living friendly supplier is lost or out of range. HOME teaches starter interfaces; frontier calibration and continuing grade require a frontier supplier or bounded captured blueprint/one-use HOME commissioning claim. No distant site stock pays purchases. Jobs, agreements and production remain TODO.
+Friendly-seat CONTACT opens with E/B/Select while in range, uses the same three tabs, and includes tithe/trade. The panel closes when its living friendly supplier is lost or out of range. HOME teaches starter interfaces; frontier calibration and continuing grade require a frontier supplier or bounded captured blueprint/one-use HOME commissioning claim. No distant site stock pays purchases. PARTS at a landed pad adds BUILD FUEL REFINERY (40M 10C, Fabrication required), then shows work or missing-input/full-output status. Integral power is included; stash 10V per 10-second batch of 25F and retrieve via Q / X on STORE FUEL. Jobs, agreements and further production remain TODO.
 
 ## Navigation and state
 

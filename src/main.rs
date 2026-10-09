@@ -2062,6 +2062,13 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 .acquire(Profile::Needles, Profile::Needles.max_level());
             game.bench_select(BenchAction::Weapon(Profile::Spread));
         }
+        "refinery" => {
+            game.loadout
+                .research
+                .known
+                .insert(ssc::simulation::research::Tech::Fabrication);
+            game.bench_select(BenchAction::Refinery);
+        }
         "research" => game.bench_select(BenchAction::Research(
             ssc::simulation::research::Tech::Frontier,
         )),

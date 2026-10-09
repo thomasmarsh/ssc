@@ -46,7 +46,7 @@ Headless scenario tests (about 970 `#[test]` functions at the last count) cover 
 - TODO: rebase world coordinates near the player; `f32` positions lose precision many sectors from the origin.
 - TODO: persistence of doctrine, rival civilizations, and flocks that migrate between sectors (falls and regard are saved).
 - TODO: recombination between different lineages, and taming the generated species for fairness.
-- TODO: economy/progression slices from [GAME_LOOP.md](GAME_LOOP.md): expanded research, stock-backed trade, production/jobs, fleets/routes, and player homesteads. FLOW polish includes skill merging, local stash overflow, technology gates with peaceful alternatives, and docking assist.
+- TODO: economy/progression slices from [GAME_LOOP.md](GAME_LOOP.md): expanded research, stock-backed trade, further production/jobs (paid, saved pad refineries are built in `simulation/production.rs`), fleets/routes, and player homesteads. FLOW polish includes skill merging, local stash overflow, technology gates with peaceful alternatives, and docking assist.
 
 ## Current fidelity limits
 

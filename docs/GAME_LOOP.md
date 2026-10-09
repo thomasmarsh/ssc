@@ -32,13 +32,13 @@ The next-lure system continues to offer one immediate goal. A separately pinned 
 
 | System | Evidence in the current code | Gap to the target |
 | --- | --- | --- |
-| Resources | `simulation/mining.rs`: six shared goods, atomic prices/exchanges/transfers; fixed ship fuel/water reserves | Local production, reservations and remote transport |
+| Resources | `simulation/mining.rs`: six shared goods, atomic prices/exchanges/transfers; fixed ship fuel/water reserves | Refinery batch reservations built; further production and remote transport TODO |
 | Farming | `simulation/farm.rs`: plants, seeds, genes, blight; biomass in shared `Cargo`; `farm/tend.rs`: fields, greenhouses, civilization granaries | Ship biomass uses Cargo; civilization granaries remain local stocks. Irrigation/machines remain TODO |
 | HUD | `simulation/hud.rs`: six Cargo counters; `src/hud.rs` draws seed-only conditional text | Six fixed counters built; selected-site production/incoming deliveries remain TODO |
 | Loot | `simulation/loot.rs` and `apexes.rs`: wildlife/carriers/apex pay raw goods and biological specials; civilizations pay equipment | Contract/job prizes and engineered ruin knowledge remain TODO |
 | Progression | `upgrades.rs`: commissioned grade multiplies bounded stat modifiers; profile levels follow trait caps | Narrow grade loop built; broader branches and realm access remain TODO |
 | Civilizations | `diplomacy.rs`, `civ.rs`, `farm/tend.rs`: regard, tithes, chart sharing, repairs/swaps, biomass/seeds | Purchasing unowned equipment and narrow research built; stock-backed offers, agreements, jobs and visiting ships TODO |
-| Infrastructure | `pads.rs`: pads/stashes/raids; `build.rs`: saved creature/civilization structures | Player modules, production, fleets, routes, construction docks, colony operations |
+| Infrastructure | `pads.rs`: pads/stashes/raids; `production.rs`: paid saved refineries; `build.rs`: saved creature/civilization structures | Further modules/production, fleets, routes, construction docks, colony operations |
 | Persistence | `save.rs`, [PERSISTENCE.md](PERSISTENCE.md): ship progress, six-good stores, research/grade/capture, crops, pads, structures, regard | Future obligations, fleet cargo, and settled transactions |
 
 Wild Smarties and wild learning are already excluded by the generation rules. Keep the Smarty as authored material for civilization citizens and development specimens; remove the old FLOW suggestion that it appears in the wild. A wild creature's projectile or construction ability is biological behavior, not evidence that it manufactures ship technology.
@@ -191,6 +191,10 @@ An alliance is never smuggled into a ordinary trade confirmation. Explain who be
 ### Local production first
 
 Build pad modules with connected local storage and power: extractor, refinery, fabricator, irrigation/bioprocessor, warehouse, tanks, repair station, and shipyard. One useful machine chain lands before generic automation: volatile stock -> fuel -> expedition/refueling. Water extraction -> tank -> irrigated crop -> biomass is the next complete chain. Machines reserve inputs, track work, and stop at full output or missing supplies. Their progress uses simulation time and works while unloaded, within the production/transport ledger's capacity and event limits. Closing the app does not grant real-time production in the first implementation.
+
+**Built narrow D: fuel refinery.** At any landed pad, PARTS commissions one refinery for 40 metal + 10 crystal after Fabrication research (available peacefully at HOME). Integral power is included. Store volatiles using the existing stash rows; each batch reserves 10 volatiles and takes 10 simulation seconds to produce 25 fuel into the pad's 100-unit fuel stash. Q / X retrieves it. Every owned pad advances each simulation tick, including unloaded sites; saved work resumes without wall-clock catch-up. Missing input or insufficient room stops new batches; a finished blocked batch keeps its reservation until room returns. Losing/dismantling the pad also loses its machine and reserved batch; stocked goods use the existing stash salvage/refund rules. Generation and save version stay unchanged (additive defaulted pad field).
+
+TODO: remaining D: water extraction/tanks/irrigation, bought raw-input supply, separate local power/storage modules, and more machine jobs. Refinery balance and its integral-power default need playtesting.
 
 ### Mining drones and escorts
 
