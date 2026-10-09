@@ -22,7 +22,7 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 - **Surges (temporary).** Same effects, with a timer, no slot; up to five run; picking up the same one refreshes it.
 - **Drops.** Creatures drop by what they are (`Source::of_creature`: gunners shed cannons, heavies plating, fast things engines, shielded ones cores, cord throwers, flingers and negative mass auxiliaries). Chance follows the bounty gene, shared across a jointed creature's parts and reduced for base-bred creatures. Rocks sometimes give salvage (materials: `Item::Material`, see UNIVERSE.md, Mining and materials). Rocks can also be mined with a beam (hold M) into a three-material cargo hold; materials are ammo (arsenal), field repair, pad kits and the pad bench (reforge, rarity upgrades, weapon levels, stash); see UNIVERSE.md, Field repair, landing pads and the bench. Rocks resist the ship's own weapons (mine them, do not shoot them) and the bench SKILLS tab sells mining upgrades plus the mid-game parry and dash (see UNIVERSE.md, The rig). A fallen base always pays a part and two lucky rolls. Counters drop where their problem is: ballast and gravity boots where distortion is high, shears where tech is high, swarm weapons in swarms, armor in aggressive sectors.
 - **Determinism.** A generated spawn's drop is a pure function of the seed and the spawn (own salted stream), so a route always pays the same; other kills use a separate loot stream. Pickups fade (30 to 90 s) and are not persisted.
-- **Death.** Surges are lost and the best part is left floating where the ship died, to be recovered after the respawn. Game over resets everything.
+- **Death.** Surges are lost and the best part is left floating where the ship died, to be recovered after the respawn. Lives revive locally; exhausting lives returns to the last visited pad (HOME fallback) with one life and keeps progress.
 
 ## Ideas to explore
 
@@ -36,7 +36,7 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 
 **Feedback and feel.** The prototype has no audio. Hit feedback, screen shake, pickup pop, and the C++ game's subtle absurdity (named species already give some of this) will matter more than numbers.
 
-**Run record (built).** Death and game over show run stats and the species the player extirpated from their local range (see UNIVERSE.md). TODO (ideas): a persisted best run, a seed-shareable run code, per-lineage ecology consequences for extirpation (predators starving, niches reopening; offered and NOT picked by the author), and tuning how the wry line responds.
+**Run record (built).** Death shows run stats and the species the player extirpated from their local range (see UNIVERSE.md). TODO (ideas): a persisted best run, a seed-shareable run code, per-lineage ecology consequences for extirpation (predators starving, niches reopening; offered and NOT picked by the author), and tuning how the wry line responds.
 
 ## Constraints from the generator
 
@@ -49,7 +49,7 @@ The loop: depth raises threat, threat raises the grade of drops, and the grade o
 
 - **Sonar upgrades.** The bench's SKILLS tab, SONAR group (`simulation/skills.rs`, numbers in `tuning.rs`) sells reach, ring speed, recharge and targets in four levels each, and four one-time reveal tiers (pad watch, lodes, nests and eggs, predator density) that add echo kinds to `simulation/ping.rs`. All upgrades start locked. Base ping also discovers existing live rifts and dynamic wells; LODE ECHO adds sealed relics. Live discovery follows availability and actual positions; generated landmarks keep their long reach. See [DISCOVERY.md](DISCOVERY.md).
 - **Chart, renewables and beacons.** `simulation/chart.rs` remembers visited sectors and sounded echoes (marks are generated sites, never invented), pins and beacons, and runs the fast-travel charge (`tuning.rs`: cost, charge, cooldowns, exposure). `simulation/regrow.rs` makes a hash-chosen third of planetoids (`mining::renewable`) regrow ore at 0.5 a second, loaded or not (caught up from a timestamp on reload). The star map is a pausing text panel in `presentation.rs`; the state it edits lives in the simulation.
-- **Insurance and legacy.** `simulation/legacy.rs`: the insurance toggle now also sets the legacy terms (share, cap and weapon level in `tuning.rs`), `Game::next_run` builds the next game with the carried hold and weapon, and the lost ship leaves a wreck (hold and best part) that is recovered by flying over it or looted by a rival after a hash-fixed delay. In memory only, like the rest of the game.
+- **Insurance and recovery.** A player-built pad enables 10-metal best-part insurance. Lives revive locally; exhaustion returns to the last landed pad or HOME with one life and the same progress. Disk saves keep ten autosaves plus a separate explicit save; launch offers CONTINUE / NEW GAME. Existing legacy data is retained but no bequest is created on death. See [PERSISTENCE.md](PERSISTENCE.md).
 
 ## Open questions for playtesting
 

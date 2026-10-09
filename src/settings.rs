@@ -22,13 +22,14 @@ pub enum Setting {
     Sound,
     Fullscreen,
     SlowMotion,
+    Save,
     Resume,
     Restart,
     Quit,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 13] = [
+    pub const ALL: [Setting; 14] = [
         Setting::AutoRepair,
         Setting::Boosts,
         Setting::Arrows,
@@ -39,6 +40,7 @@ impl Setting {
         Setting::Sound,
         Setting::Fullscreen,
         Setting::SlowMotion,
+        Setting::Save,
         Setting::Resume,
         Setting::Restart,
         Setting::Quit,
@@ -56,8 +58,9 @@ impl Setting {
             Self::Sound => "SOUND",
             Self::Fullscreen => "FULLSCREEN",
             Self::SlowMotion => "SLOW MOTION (DEBUG)",
+            Self::Save => "SAVE GAME",
             Self::Resume => "RESUME",
-            Self::Restart => "RESTART RUN",
+            Self::Restart => "NEW GAME",
             Self::Quit => "QUIT",
         }
     }
@@ -75,8 +78,9 @@ impl Setting {
             Self::Sound => "",
             Self::Fullscreen => "",
             Self::SlowMotion => "",
+            Self::Save => "keep an explicit save separate from autosaves",
             Self::Resume => "",
-            Self::Restart => "a new run; a lost run's legacy only carries after game over",
+            Self::Restart => "start over (asks before replacing saves)",
             Self::Quit => "",
         }
     }
@@ -118,6 +122,7 @@ pub fn value(setting: Setting, session: &Session, audio: &Audio, window: &Window
         Setting::Sound => if audio.muted { "MUTED" } else { "ON" }.to_string(),
         Setting::Fullscreen => on_off(window.mode != WindowMode::Windowed),
         Setting::SlowMotion => on_off(session.slow),
+        Setting::Save => session.save_feedback.clone(),
         Setting::Resume | Setting::Restart | Setting::Quit => String::new(),
     }
 }
@@ -160,11 +165,32 @@ pub fn change(
             }
         }
         Setting::SlowMotion => session.slow = !session.slow,
+        Setting::Save => {
+            if dir == 0 {
+                save_game(session);
+            }
+        }
         Setting::Resume => return Outcome::Close,
         Setting::Restart => return Outcome::Restart,
         Setting::Quit => return Outcome::Quit,
     }
     Outcome::Stay
+}
+
+/// Shared explicit-save action for the settings row and bounded renderer check.
+pub fn save_game(session: &mut Session) {
+    session.save_feedback = match crate::autosave::manual(&session.game) {
+        Ok(()) => "SAVED".into(),
+        Err(error) => {
+            eprintln!("{error}");
+            if error == "SAVING IS DISABLED" {
+                "DISABLED"
+            } else {
+                "SAVE FAILED"
+            }
+            .into()
+        }
+    };
 }
 
 // ---- the panel --------------------------------------------------------------------------

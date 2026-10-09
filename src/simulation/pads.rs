@@ -15,8 +15,8 @@
 //! - **The bench.** Reforge a part's affixes, raise a part one rarity step, raise an owned
 //!   weapon profile a level, repair at once, and keep a small stash on the pad. Nothing here
 //!   ever makes anything worse.
-//! - **Respawn.** With a pad on the map a death still costs a life but the ship returns to
-//!   the nearest pad; ten metal keeps the best part instead of dropping it.
+//! - **Respawn.** Lives revive locally. Exhausting them returns to the last landed pad (HOME
+//!   if it is gone or none was visited), with one life. Ten metal insures the best part.
 //! - **The counter.** Learners and civilization members that come within sight of a pad
 //!   remember it (per territory for civilizations) and hunt it. Raids go for known pads in
 //!   their territory. A sector that is not loaded simulates nothing, so a pad known to the
@@ -97,7 +97,7 @@ pub struct Pad {
     /// Deployment order: the oldest is dismantled first.
     pub order: u64,
     /// The home-base pad on HOME's planetoid, there from the start: never dismantled for a
-    /// new one, never counted against `MAX_PADS` and never a respawn point.
+    /// new one, never counted against `MAX_PADS`, and the fallback recovery point.
     pub home: bool,
     reloads: u32,
 }
@@ -126,6 +126,9 @@ pub struct PadState {
     pub pads: BTreeMap<PadKey, Pad>,
     /// Crafted kits waiting to be deployed.
     pub kits: u32,
+    /// Last pad actually landed on; survives save/load. A lost pad falls back to HOME.
+    #[serde(default)]
+    pub last_visited: Option<PadKey>,
     #[serde(skip)]
     pub landed: Option<PadKey>,
     /// Field repair is running.
@@ -163,6 +166,7 @@ impl Default for PadState {
         Self {
             pads: BTreeMap::new(),
             kits: 0,
+            last_visited: None,
             landed: None,
             repairing: false,
             auto_run: false,
@@ -795,6 +799,7 @@ impl Game {
             ship.angle = outward;
         }
         self.pad.landed = Some(key);
+        self.pad.last_visited = Some(key);
         self.pad.hidden_for = 0.0;
         self.pad.cover_broken = 0.0;
         self.pad.bench = None;
@@ -1168,25 +1173,26 @@ impl Game {
             && self.cargo.spend(&[(Material::Metal, INSURANCE)])
     }
 
-    /// The pad a ship that died at `from` returns to: the nearest by sector distance, ties
-    /// broken by key order.
-    pub fn respawn_pad(&self, from: Vec2) -> Option<PadKey> {
-        let here = SectorId::containing(from);
+    /// Last landed pad, or HOME when that pad is gone or no pad was visited.
+    pub fn respawn_pad(&self, _from: Vec2) -> Option<PadKey> {
         self.pad
-            .pads
-            .keys()
-            .filter(|key| self.pad.pads.get(*key).is_some_and(|p| !p.home))
-            .min_by_key(|key| (key.0.chebyshev_distance(here), **key))
-            .copied()
+            .last_visited
+            .filter(|key| self.pad.pads.contains_key(key))
+            .or_else(|| {
+                self.pad
+                    .pads
+                    .values()
+                    .find(|pad| pad.home)
+                    .map(|pad| pad.key)
+            })
     }
 
-    /// Whether the player has a pad of their own to come back to (the home pad is not one:
-    /// a lost ship returns near where it fell unless a built pad is nearer).
+    /// Whether a player-built pad exists for part insurance. HOME recovery grants no insurance.
     pub(super) fn has_return_pad(&self) -> bool {
         self.pad.pads.values().any(|p| !p.home)
     }
 
-    /// Brings the ship back at the nearest pad, streaming its sector first. False when
+    /// Brings the ship back at the last visited pad, streaming its sector first. False when
     /// there is none (or it is gone), and the ordinary respawn applies.
     pub(super) fn respawn_at_pad(&mut self, death: Vec2) -> bool {
         self.pad.landed = None;
@@ -1194,6 +1200,13 @@ impl Game {
         self.pad.repairing = false;
         self.pad.cover_broken = 0.0;
         self.pad.hidden_for = 0.0;
+        // A generator change or older save can have no HOME pad recorded while the ship
+        // is far away. Load HOME and plant its pad before selecting the fallback.
+        if self.respawn_pad(death).is_none() {
+            self.focus = Vec2::ZERO;
+            self.stream_sectors();
+            self.seed_home_pad();
+        }
         let Some(key) = self.respawn_pad(death) else {
             return false;
         };
@@ -1202,7 +1215,7 @@ impl Game {
         };
         self.focus = center;
         self.stream_sectors();
-        // Streaming may have raided the pad away; the next nearest then, or the wreck's place.
+        // Streaming may have destroyed the visited pad; retry with HOME.
         let Some(pad) = self.pad.pads.get(&key) else {
             return self.respawn_at_pad(death);
         };
@@ -1216,7 +1229,7 @@ impl Game {
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.angle = heading;
         }
-        self.notify("BACK AT A PAD".into(), Rarity::Rare);
+        self.notify("BACK AT PAD  1 LIFE".into(), Rarity::Rare);
         true
     }
 
@@ -2489,26 +2502,20 @@ mod tests {
     }
 
     #[test]
-    fn the_nearest_pad_by_sector_wins_and_ties_break_by_key() {
-        let mut game = empty_game();
-        let q = |x, y| SectorId { x, y };
-        fake_pad(&mut game, (q(3, 0), 1), q(3, 0).center());
-        fake_pad(&mut game, (q(-2, 0), 5), q(-2, 0).center());
-        fake_pad(&mut game, (q(-2, 0), 2), q(-2, 0).center());
-        let near_origin = Vec2::new(10.0, 10.0);
-        assert_eq!(
-            game.respawn_pad(near_origin),
-            Some((q(-2, 0), 2)),
-            "distance 2, lowest key"
-        );
-        let far_east = q(4, 0).center();
-        assert_eq!(game.respawn_pad(far_east), Some((q(3, 0), 1)));
-        game.pad.pads.clear();
-        assert_eq!(game.respawn_pad(near_origin), None);
+    fn the_last_landed_pad_wins_even_when_another_is_closer() {
+        let mut game = Game::new(42);
+        let home = game.pads().find(|pad| pad.home).unwrap().key;
+        let far = (SectorId { x: 3, y: 0 }, 1);
+        fake_pad(&mut game, far, far.0.center());
+        assert_eq!(game.respawn_pad(Vec2::ZERO), Some(home));
+        game.pad.last_visited = Some(far);
+        assert_eq!(game.respawn_pad(Vec2::ZERO), Some(far));
+        game.pad.pads.remove(&far);
+        assert_eq!(game.respawn_pad(Vec2::ZERO), Some(home));
     }
 
     #[test]
-    fn dying_with_a_pad_respawns_at_it_costs_a_life_and_can_keep_the_best_part() {
+    fn lives_revive_locally_and_exhaustion_returns_to_the_last_pad() {
         let mut game = empty_game();
         world(&mut game, 7);
         let key = deployed(&mut game);
@@ -2517,16 +2524,25 @@ mod tests {
         game.refresh_stats();
         set_player(&mut game, Vec2::new(900.0, -700.0), Vec2::ZERO);
         game.step(DT, quiet());
-        let lives = game.lives;
+        game.pad.last_visited = Some(key);
         kill(&mut game);
-        assert_eq!(game.lives, lives - 1);
-        let at = game.pad_position(&game.pad.pads[&key]);
-        assert!(ship(&game).position.distance(at) < 150.0, "back at the pad");
+        assert_eq!(game.lives, 2);
+        assert!(ship(&game).position.distance(Vec2::new(900.0, -700.0)) < 600.0);
+        assert!(!game.game_over);
         assert_eq!(game.loadout.parts.len(), 1, "the part was insured");
         assert!(
             (game.cargo.metal - 90.0 * 0.75).abs() < 0.5,
             "10 metal paid, then a quarter lost"
         );
+        let score = game.score;
+        game.lives = 1;
+        kill(&mut game);
+        assert_eq!(game.lives, 1);
+        assert_eq!(game.run.deaths, 2);
+        assert_eq!(game.score, score);
+        assert!(game.pending_bequest().is_none());
+        let at = game.pad_position(&game.pad.pads[&key]);
+        assert!(ship(&game).position.distance(at) < 150.0, "back at the pad");
         // Without the cover, the part is dropped as before.
         let mut game = empty_game();
         world(&mut game, 7);
@@ -2600,6 +2616,50 @@ mod tests {
     }
 
     // ---- persistence ----
+
+    #[test]
+    fn landing_a_remote_pad_survives_save_and_recovers_there_on_exhaustion() {
+        use super::super::save::SaveState;
+        let seed = crate::config::MASTER_SEED;
+        let sector = crate::simulation::tests::find_sector(seed, |spawns| {
+            spawns.iter().any(|s| {
+                s.rock == RockKind::Planetoid
+                    && SectorId::containing(s.position) != SectorId::ORIGIN
+            })
+        });
+        let host = world::generate(seed, sector)
+            .into_iter()
+            .find(|s| s.rock == RockKind::Planetoid)
+            .unwrap();
+        let mut game = Game::new(seed);
+        game.teleport(host.position + Vec2::new(0.0, -host.radius.unwrap() - 60.0));
+        game.step(DT, quiet());
+        stock(&mut game, 100.0, 0.0, 50.0);
+        assert!(game.craft_kit());
+        game.pad_action();
+        let key = *game.pad.pads.keys().find(|key| key.0 == sector).unwrap();
+        assert_eq!(game.pad.last_visited, None, "deployment is not a visit");
+        let at = game.pad_position(&game.pad.pads[&key]);
+        set_player(&mut game, at, Vec2::ZERO);
+        game.pad_action();
+        assert_eq!(game.pad.landed, Some(key));
+        assert_eq!(game.pad.last_visited, Some(key));
+        game.teleport(Vec2::new(60_000.0, 60_000.0));
+        game.step(DT, quiet());
+        game.score = 1234;
+        game.lives = 1;
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        assert_eq!(loaded.pad.last_visited, Some(key));
+        kill(&mut loaded);
+        assert_eq!(loaded.lives, 1);
+        assert!(!loaded.game_over);
+        assert_eq!(loaded.score, 1234);
+        assert_eq!(loaded.run.deaths, 1);
+        assert_eq!(loaded.legacy.generation, 0);
+        let at = loaded.pad_position(&loaded.pad.pads[&key]);
+        assert!(ship(&loaded).position.distance(at) < 150.0);
+    }
 
     #[test]
     fn pads_survive_unloading_and_find_their_planetoid_again() {
@@ -3049,7 +3109,7 @@ mod tests {
     }
 
     #[test]
-    fn the_home_pad_is_never_dismantled_or_counted_or_a_respawn_point() {
+    fn the_home_pad_is_not_counted_and_is_the_fallback_recovery_point() {
         let mut game = Game::new(42);
         let home = game.pads().next().unwrap().key;
         for index in 0..MAX_PADS as u32 {
@@ -3070,10 +3130,9 @@ mod tests {
         }
         assert_eq!(game.pad_count(), MAX_PADS, "the home pad is not counted");
         assert!(game.pad.pads.contains_key(&home));
-        // Death far from any built pad does not bring the ship back to HOME's.
-        assert_ne!(game.respawn_pad(Vec2::ZERO), Some(home));
+        assert_eq!(game.respawn_pad(Vec2::ZERO), Some(home));
         game.pad.pads.retain(|_, p| p.home);
-        assert_eq!(game.respawn_pad(Vec2::ZERO), None);
+        assert_eq!(game.respawn_pad(Vec2::ZERO), Some(home));
         assert!(!game.has_return_pad());
     }
 }

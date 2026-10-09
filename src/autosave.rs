@@ -19,40 +19,50 @@ pub fn enabled() -> bool {
 }
 
 /// The saved run, if saving is on and there is a readable one. A save that cannot be read is
-/// reported and left alone on disk (the next autosave moves it to the backup slot).
+/// reported and skipped so earlier valid candidates can still be continued.
 pub fn load() -> Option<Game> {
     // Unit tests never read the player's real save.
     if cfg!(test) || !enabled() {
         return None;
     }
     let dir = savefile::default_dir();
-    let text = match savefile::read(&dir) {
-        Ok(Some(text)) => text,
-        Ok(None) => return None,
+    load_from_dir(&dir)
+}
+
+fn load_from_dir(dir: &std::path::Path) -> Option<Game> {
+    let candidates = match savefile::candidates(dir) {
+        Ok(paths) => paths,
         Err(e) => {
-            eprintln!("save: cannot read {}: {e}", dir.display());
+            eprintln!("save: cannot list {}: {e}", dir.display());
             return None;
         }
     };
-    match SaveState::from_text(&text) {
-        Ok((state, generator)) => {
-            let (game, report) = Game::from_save(state, generator);
-            eprintln!(
-                "save: loaded {} (world deltas {})",
-                dir.display(),
-                if report.world_deltas_kept {
-                    "kept"
-                } else {
-                    "dropped: generator changed"
-                }
-            );
-            Some(game)
-        }
-        Err(e) => {
-            eprintln!("save: {e}");
-            None
+    for path in candidates {
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) => {
+                eprintln!("save: cannot read {}: {e}", path.display());
+                continue;
+            }
+        };
+        match SaveState::from_text(&text) {
+            Ok((state, generator)) => {
+                let (game, report) = Game::from_save(state, generator);
+                eprintln!(
+                    "save: loaded {} (world deltas {})",
+                    path.display(),
+                    if report.world_deltas_kept {
+                        "kept"
+                    } else {
+                        "dropped: generator changed"
+                    }
+                );
+                return Some(game);
+            }
+            Err(e) => eprintln!("save: {}: {e}", path.display()),
         }
     }
+    None
 }
 
 fn write_state(state: &SaveState) {
@@ -62,7 +72,7 @@ fn write_state(state: &SaveState) {
     }
 }
 
-/// Saves a living run. A finished run is never saved as it died (see `settle`).
+/// Saves the current living game.
 fn write(game: &Game) {
     if game.game_over || game.player().is_none() {
         return;
@@ -70,29 +80,32 @@ fn write(game: &Game) {
     write_state(&game.save_state());
 }
 
-/// Called right after the ship is lost. Saving now closes the reload-to-undo hole: a lost life
-/// is kept lost, and a finished run is replaced in the slot by the run that follows it (the
-/// bequest is made here, once, by `next_run`), so no save can bring the dead run back.
+/// Save the recovered ship immediately after any death.
 pub fn settle(game: &Game) {
-    if !enabled() {
-        return;
-    }
-    if game.game_over {
-        write_state(&game.next_run().save_state());
-    } else {
+    if enabled() {
         write(game);
     }
 }
 
-/// Deletes the saved run (the title menu's delete and new run).
-pub fn erase() {
+/// A separate player-controlled save, with a visible success or failure result.
+pub fn manual(game: &Game) -> Result<(), String> {
     if !enabled() {
-        return;
+        return Err("SAVING IS DISABLED".into());
     }
-    let dir = savefile::default_dir();
-    if let Err(e) = savefile::delete(&dir) {
-        eprintln!("save: cannot delete {}: {e}", dir.display());
+    if game.player().is_none() {
+        return Err("NO SHIP TO SAVE".into());
     }
+    savefile::write_manual(&savefile::default_dir(), &game.save_state().to_text())
+        .map_err(|e| format!("SAVE FAILED: {e}"))
+}
+
+/// Clears prior saves before starting a new game. The menu remains open on failure.
+pub fn erase() -> Result<(), String> {
+    if enabled() {
+        savefile::delete(&savefile::default_dir())
+            .map_err(|e| format!("CANNOT START NEW GAME: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Autosaves every `INTERVAL` real seconds and once more as the app exits.
@@ -110,5 +123,30 @@ pub fn autosave(
     if exits.read().next().is_some() || *since >= INTERVAL {
         *since = 0.0;
         write(&session.game);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn continue_uses_the_latest_valid_save_across_manual_and_autosaves() {
+        let dir = std::env::temp_dir().join(format!("ssc-continue-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut game = Game::new(42);
+        game.score = 10;
+        savefile::write_manual(&dir, &game.save_state().to_text()).unwrap();
+        game.score = 20;
+        savefile::write(&dir, &game.save_state().to_text()).unwrap();
+        assert_eq!(load_from_dir(&dir).unwrap().score, 20);
+        savefile::write(&dir, "corrupt").unwrap();
+        assert_eq!(load_from_dir(&dir).unwrap().score, 20);
+        game.score = 30;
+        savefile::write_manual(&dir, &game.save_state().to_text()).unwrap();
+        assert_eq!(load_from_dir(&dir).unwrap().score, 30);
+        // Backing up an old manual save must not make it newer than a later autosave.
+        std::fs::write(dir.join("manual.ron"), "corrupt manual").unwrap();
+        assert_eq!(load_from_dir(&dir).unwrap().score, 20);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

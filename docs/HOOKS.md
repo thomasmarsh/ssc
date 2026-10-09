@@ -31,7 +31,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 
 ## Panels and HUD
 
-- `SSC_DETAILS=1`, `SSC_HELP=1`, `SSC_RADAR=1`, `SSC_SETTINGS=1`: open the details panel, key list, radar, or settings screen.
+- `SSC_DETAILS=1`, `SSC_HELP=1`, `SSC_RADAR=1`, `SSC_SETTINGS=1`: open the details panel, key list, radar, or settings screen. `SSC_SETTINGS=save` selects SAVE GAME and executes the same explicit-save action once (use `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s` for a scratch save); shows SAVED, DISABLED or SAVE FAILED.
 - `SSC_HURT=<fraction>`: set hull and shield to that fraction (checks the rings and low-hull cues).
 - `SSC_HIT=<degrees>`: a hostile shot lands from that direction just before capture (damage direction mark, hit feel).
 - `SSC_ABILITIES=1`: unlock parry and dash and use the dash, so the rings are cooling.
@@ -81,7 +81,7 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 ## Saving (opt-in)
 
 - Saving is on by default: the saved run loads at start (behind the title menu), autosaves every 30 seconds while alive, on every lost ship and on exit. `SSC_NO_SAVE=1` turns it off. A run with `SSC_SMOKE_FRAMES` neither reads nor writes the player's save unless `SSC_SAVE=1` is set (then it continues straight into the save, no menu).
-- `SSC_MENU=save|armed|new`: show the title menu (with a save, with the erase armed, or with none) for screenshots. `SSC_DIE=1`: lose every ship at frame 6. Check no-undo: `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s SSC_SMOKE_FRAMES=30 cargo run --bin ssc`, then again with `SSC_DIE=1`: the slot holds a fresh run with the legacy and a wreck, `generation: 1`. Format and rules: [PERSISTENCE.md](PERSISTENCE.md).
+- `SSC_MENU=save|armed|new`: show the title menu (with a save, with NEW GAME replacement armed, or with none) for screenshots. `SSC_DIE=1`: exhaust lives at frame 6. Check recovery: `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s SSC_TELEPORT=12000,0 SSC_DIE=1 SSC_SMOKE_FRAMES=30 cargo run --bin ssc`: the newest autosave holds the same game, one life, one death, at HOME (or the last landed pad in a continued save). Format and rules: [PERSISTENCE.md](PERSISTENCE.md).
 - `SSC_SAVE_DIR=<dir>`: where the slot lives (default the per-user data folder, macOS `~/Library/Application Support/ssc`). Use a scratch directory for checks. Check a reload: `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s SSC_TELEPORT=12000,0 SSC_SMOKE_FRAMES=60 cargo run --bin ssc` (writes on exit), then the same command without `SSC_TELEPORT` and with `SSC_SCREENSHOT=/tmp/s.png` starts where the first ended; stderr says `save: loaded`.
 
 ## Farming

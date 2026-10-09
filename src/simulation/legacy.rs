@@ -350,14 +350,15 @@ mod tests {
     use super::super::tests::{DT, empty_game};
     use super::*;
 
+    // Exercise the retained legacy API explicitly. Ordinary death no longer seals a bequest.
     fn lose_the_ship(game: &mut Game) {
-        game.lives = 1;
-        game.player_invulnerability = 0.0;
-        if let Some(ship) = game.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
-            ship.health = 0.0;
-        }
-        game.step(DT, Input::default());
-        assert!(game.game_over, "the last ship is lost");
+        let position = game.player().unwrap().position;
+        let best = game
+            .loadout
+            .best_part()
+            .map(|i| game.loadout.parts[i].clone());
+        game.game_over = true;
+        game.seal_bequest(position, best);
     }
 
     fn test_part() -> Part {

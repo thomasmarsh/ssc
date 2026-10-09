@@ -9,8 +9,8 @@
 //!
 //! The format is RON text under a `Save(...)` header carrying `version` (this file's layout) and
 //! `generator` (`GENERATOR_VERSION` when it was written). New fields must be `#[serde(default)]`
-//! so older saves still load; a change that cannot be defaulted bumps `SAVE_VERSION` and adds a
-//! step to `migrate`.
+//! so existing saves still load; incompatible layouts bump `SAVE_VERSION` and are refused
+//! before 1.0. No save migration code or fixtures are introduced.
 
 use super::*;
 use crate::sectormap::GENERATOR_VERSION;
@@ -249,7 +249,7 @@ impl Game {
         let mut game = Game::blank(state.seed);
         game.time = state.time;
         game.score = state.score;
-        game.lives = state.lives;
+        game.lives = state.lives.max(1);
         game.cargo = state.cargo;
         game.loadout = state.loadout;
         game.chart = state.chart;
@@ -510,24 +510,25 @@ mod tests {
         assert!(loaded.player().unwrap().health >= 1.0);
     }
 
-    /// The title menu's death rule: the slot is written with the successor of a lost run, so a
-    /// reload carries the bequest and cannot bring the pre-death state back.
     #[test]
-    fn a_lost_run_saves_as_its_successor_with_the_bequest() {
+    fn exhaustion_saves_the_same_game_at_home_with_one_life() {
         let mut game = Game::new(7);
-        game.cargo.metal = 400.0;
-        game.run.mined = [400.0, 0.0, 0.0];
-        game.lives = 0;
-        game.game_over = true;
-        game.seal_bequest(Vec2::new(5000.0, 0.0), None);
-        let text = game.next_run().save_state().to_text();
-        let (state, generator) = SaveState::from_text(&text).unwrap();
+        game.score = 4500;
+        game.lives = 1;
+        game.bodies
+            .iter_mut()
+            .find(|body| body.kind == BodyKind::Player)
+            .unwrap()
+            .health = 0.0;
+        game.step(1.0 / 60.0, Input::default());
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
         let (loaded, _) = Game::from_save(state, generator);
-        assert!(!loaded.game_over);
-        assert!(loaded.lives > 0);
-        assert!(loaded.cargo.metal > 0.0 && loaded.cargo.metal < 400.0);
+        assert_eq!(loaded.lives, 1);
+        assert_eq!(loaded.score, 4500);
+        assert_eq!(loaded.run.deaths, 1);
+        assert_eq!(loaded.legacy.generation, 0);
         assert!(loaded.pending_bequest().is_none());
-        // Making the successor again from the dead run gives the same save: made once, idempotent.
-        assert_eq!(text, game.next_run().save_state().to_text());
+        let home = loaded.pads().find(|pad| pad.home).unwrap();
+        assert!(loaded.player().unwrap().position.distance(home.center) < home.radius + 150.0);
     }
 }

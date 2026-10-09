@@ -1,4 +1,4 @@
-//! The title menu: continue, new run, delete. Shown at launch only when a save exists. The
+//! The title menu: CONTINUE and NEW GAME. Shown at every normal launch. The
 //! choices are pure state here (`TitleMenu`, tested); the adapter in `main.rs` does the file
 //! and game work for the outcome, and `update` draws the panel in the settings screen's style.
 
@@ -10,15 +10,13 @@ use bevy::prelude::*;
 pub enum Row {
     Continue,
     NewRun,
-    Delete,
 }
 
 impl Row {
     fn label(self) -> &'static str {
         match self {
             Self::Continue => "CONTINUE",
-            Self::NewRun => "NEW RUN",
-            Self::Delete => "DELETE SAVE",
+            Self::NewRun => "NEW GAME",
         }
     }
 }
@@ -29,7 +27,6 @@ pub enum Outcome {
     Stay,
     Continue,
     NewRun,
-    DeleteSave,
 }
 
 #[derive(Clone, Debug)]
@@ -54,10 +51,15 @@ impl TitleMenu {
 
     pub fn rows(&self) -> &'static [Row] {
         if self.has_save {
-            &[Row::Continue, Row::NewRun, Row::Delete]
+            &[Row::Continue, Row::NewRun]
         } else {
             &[Row::NewRun]
         }
+    }
+
+    pub fn error(&mut self, message: String) {
+        self.summary = message;
+        self.armed = None;
     }
 
     pub fn has_save(&self) -> bool {
@@ -70,19 +72,12 @@ impl TitleMenu {
         self.armed = None;
     }
 
-    /// Enter on the selected row. Erasing rows (a new run replaces the saved one, delete
-    /// removes it) need the second press while a save exists.
+    /// Enter on the selected row. NEW GAME needs a second press when replacing saved progress.
     pub fn confirm(&mut self) -> Outcome {
         let row = self.rows()[self.row];
         match row {
             Row::Continue => Outcome::Continue,
             Row::NewRun if !self.has_save || self.armed == Some(row) => Outcome::NewRun,
-            Row::Delete if self.armed == Some(row) => {
-                self.has_save = false;
-                self.row = 0;
-                self.armed = None;
-                Outcome::DeleteSave
-            }
             _ => {
                 self.armed = Some(row);
                 Outcome::Stay
@@ -222,17 +217,6 @@ mod tests {
         menu.step(1);
         menu.step(-1);
         assert_eq!(menu.confirm(), Outcome::Stay);
-    }
-
-    #[test]
-    fn delete_asks_twice_then_leaves_only_a_new_run() {
-        let mut menu = with_save();
-        menu.step(-1);
-        assert_eq!(menu.rows()[menu.row], Row::Delete);
-        assert_eq!(menu.confirm(), Outcome::Stay);
-        assert_eq!(menu.confirm(), Outcome::DeleteSave);
-        assert_eq!(menu.rows(), &[Row::NewRun]);
-        assert_eq!(menu.confirm(), Outcome::NewRun);
     }
 
     #[test]

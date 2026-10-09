@@ -2227,16 +2227,17 @@ impl Game {
             }
             self.bullets.retain(|bullet| bullet.friendly);
             self.tethers.retain(|t| t.kind != TetherKind::Latch);
-            let best = self
-                .loadout
-                .best_part()
-                .map(|i| self.loadout.parts[i].clone());
             let insured = self.insurance_pays();
             self.shed_on_death(position, insured);
             if self.lives == 0 {
-                self.game_over = true;
-                self.seal_bequest(position, best);
-            } else if !self.respawn_at_pad(position) {
+                self.lives = 1;
+                if !self.respawn_at_pad(position) {
+                    self.spawn_player(Vec2::ZERO);
+                }
+            } else {
+                self.pad.landed = None;
+                self.pad.bench = None;
+                self.pad.repairing = false;
                 self.spawn_player(position);
             }
         }
@@ -3281,7 +3282,7 @@ mod tests {
     #[test]
     fn death_consumes_lives_and_restart_restores_seed() {
         let mut game = empty_game();
-        for expected_lives in [2, 1, 0] {
+        for expected_lives in [2, 1, 1, 1] {
             game.bodies
                 .iter_mut()
                 .find(|b| b.kind == BodyKind::Player)
@@ -3289,12 +3290,13 @@ mod tests {
                 .health = 0.0;
             game.step(DT, Input::default());
             assert_eq!(game.lives, expected_lives);
-            assert_eq!(game.game_over, expected_lives == 0);
+            assert!(!game.game_over);
             if expected_lives > 0 {
                 assert!(game.player_invulnerability > 2.0);
             }
         }
-        assert!(game.player().is_none());
+        assert!(game.player().is_some());
+        assert!(game.pending_bequest().is_none());
         game.reset();
         let fresh = Game::new(42);
         assert_eq!(game.lives, 3);

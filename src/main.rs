@@ -179,6 +179,7 @@ pub struct Session {
     /// The settings screen (Esc), with the selected row, and the options it holds that the
     /// game itself keeps: auto repair and the boosts.
     pub settings: Option<usize>,
+    pub save_feedback: String,
     /// The developer panel (SSC_DEV=1) and its selected row; the game waits while it is open.
     pub dev_panel: Option<usize>,
     /// Screen shake, floating scores and rings; see `juice`.
@@ -194,7 +195,7 @@ pub struct Session {
     recorded: bool,
     /// Ship losses already saved, so each loss is written once.
     settled_deaths: u32,
-    /// The title menu, up at launch when a save exists (the game waits).
+    /// The title menu, up at every normal launch (the game waits).
     pub menu: Option<titlemenu::TitleMenu>,
 }
 
@@ -210,15 +211,18 @@ impl Default for Session {
         let saved = autosave::load();
         // A scripted run continues straight into its save (SSC_MENU shows the menu).
         let scripted = std::env::var_os("SSC_SMOKE_FRAMES").is_some();
-        let menu = saved.as_ref().filter(|_| !scripted).map(|game| {
-            let minutes = (game.time / 60.0) as u32;
-            titlemenu::TitleMenu::new(
-                true,
-                format!(
-                    "saved run: score {}, {} ships, {minutes} min",
-                    game.score, game.lives
-                ),
-            )
+        let menu = (!scripted).then(|| {
+            let summary = saved
+                .as_ref()
+                .map(|game| {
+                    let minutes = (game.time / 60.0) as u32;
+                    format!(
+                        "saved game: score {}, {} lives, {minutes} min",
+                        game.score, game.lives
+                    )
+                })
+                .unwrap_or_default();
+            titlemenu::TitleMenu::new(saved.is_some(), summary)
         });
         let game = saved.unwrap_or_else(|| Game::new(ssc::config::MASTER_SEED));
         Self {
@@ -237,6 +241,7 @@ impl Default for Session {
             style: RenderStyle::default(),
             reduce_effects: std::env::var_os("SSC_REDUCE_EFFECTS").is_some(),
             settings: None,
+            save_feedback: String::new(),
             dev_panel: None,
             juice: juice::Juice::default(),
             auto_repair: true,
@@ -352,8 +357,7 @@ fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>, smoke: Res<Smo
     let input = session.input;
     let dt = time.delta_secs() * if session.slow { 0.35 } else { 1.0 };
     session.game.step_scaled(dt, input);
-    // Every lost ship is saved at once (and a lost run is replaced by its successor), so
-    // reloading cannot undo it.
+    // Save the recovered ship immediately after a lost life.
     if session.game.run.deaths != session.settled_deaths {
         session.settled_deaths = session.game.run.deaths;
         autosave::settle(&session.game);
@@ -607,14 +611,17 @@ fn controls(
     }
 }
 
-/// Starts a fresh run (a lost one applies its legacy; restarting mid-run earns none).
+/// Starts a fresh game.
 fn restart(session: &mut Session) {
-    session.game.reset();
+    session.game = Game::new(ssc::config::MASTER_SEED);
     session.settled_deaths = 0;
     session.recorded = false;
     session.new_best = false;
     session.paused = false;
     session.slow = false;
+    session.chart = None;
+    session.dev_panel = None;
+    session.save_feedback.clear();
 }
 
 /// The title menu's keys: up and down choose, enter (south on a pad) confirms. The saved run is
@@ -644,18 +651,17 @@ fn title_controls(
     session.menu = match outcome {
         titlemenu::Outcome::Stay => Some(menu),
         titlemenu::Outcome::Continue => None,
-        titlemenu::Outcome::NewRun => {
-            autosave::erase();
-            session.game = Game::new(ssc::config::MASTER_SEED);
-            session.settled_deaths = 0;
-            None
-        }
-        titlemenu::Outcome::DeleteSave => {
-            autosave::erase();
-            session.game = Game::new(ssc::config::MASTER_SEED);
-            session.settled_deaths = 0;
-            Some(menu)
-        }
+        titlemenu::Outcome::NewRun => match autosave::erase() {
+            Ok(()) => {
+                restart(session);
+                autosave::settle(&session.game);
+                None
+            }
+            Err(error) => {
+                menu.error(error);
+                Some(menu)
+            }
+        },
     };
 }
 
@@ -695,8 +701,12 @@ fn settings_controls(
     match outcome {
         settings::Outcome::Close => session.settings = None,
         settings::Outcome::Restart => {
+            session.menu = Some(titlemenu::TitleMenu::new(
+                true,
+                "Start over? Existing saves will be cleared.".into(),
+            ));
+            session.menu.as_mut().unwrap().step(1);
             session.settings = None;
-            restart(session);
         }
         _ => {}
     }
@@ -989,6 +999,12 @@ fn smoke_run(
         session.radar |= std::env::var_os("SSC_RADAR").is_some();
         if std::env::var_os("SSC_SETTINGS").is_some() {
             session.settings = Some(2);
+            if std::env::var("SSC_SETTINGS").as_deref() == Ok("save") {
+                session.settings = settings::Setting::ALL
+                    .iter()
+                    .position(|row| *row == settings::Setting::Save);
+                settings::save_game(&mut session);
+            }
         }
     }
     // SSC_MENU=save|armed|new: show the title menu with a save, with its erase armed, or none.
@@ -997,7 +1013,7 @@ fn smoke_run(
     {
         let mut menu = titlemenu::TitleMenu::new(
             mode != "new",
-            "saved run: score 4500, 3 ships, 12 min".into(),
+            "saved game: score 4500, 3 lives, 12 min".into(),
         );
         if mode == "armed" {
             menu.step(1);
@@ -1005,7 +1021,7 @@ fn smoke_run(
         }
         session.menu = Some(menu);
     }
-    // SSC_DIE=1: lose every ship at frame 6 (checks the save after a lost run).
+    // SSC_DIE=1: exhaust lives at frame 6 (checks pad recovery and its save).
     if run.frames == 6 && std::env::var_os("SSC_DIE").is_some() {
         session.game.lives = 1;
         if let Some(ship) = session

@@ -822,7 +822,7 @@ mod tests {
     }
 
     #[test]
-    fn stats_follow_the_lives_and_reset_on_game_over() {
+    fn stats_survive_exhausting_lives_and_only_reset_for_a_new_game() {
         let mut game = empty_game();
         seed_ghosts(&mut game, &[(0, 0, 900)]);
         let g = ghost_at(&mut game, Vec2::new(0.0, 2000.0), Some((sector(0, 0), 900)));
@@ -835,7 +835,7 @@ mod tests {
                 .health = 0.0;
             game.step(DT, Input::default());
         }
-        assert!(game.game_over);
+        assert!(!game.game_over);
         assert_eq!(game.run.deaths, 3);
         assert_eq!(game.run.extirpated.len(), 1);
         let report = game.run_report();

@@ -1,6 +1,6 @@
 # Persistence: state inventory and save format
 
-Workstream 12 (see [WORKSTREAMS.md](WORKSTREAMS.md)). Code: `src/simulation/save.rs` (state, format, versioning, load), `src/savefile.rs` (directory, atomic write, backup) and `src/autosave.rs` (the Bevy hook, on by default) and `src/titlemenu.rs` (continue / new / delete).
+Workstream 12 (see [WORKSTREAMS.md](WORKSTREAMS.md)). Code: `src/simulation/save.rs` (state, format, versioning, load), `src/savefile.rs` (directory, atomic writes, bounded history) and `src/autosave.rs` (the Bevy hook, on by default) and `src/titlemenu.rs` (CONTINUE / NEW GAME).
 
 ## Principle
 
@@ -17,10 +17,10 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 | `stats` | derived | `refresh_stats` from the loadout |
 | `loadout` (parts, arsenal, boosts, skills, organs) | delta | incl. boost `running` flags |
 | `cargo` | delta | `dev_free` is a dev toggle and is not saved |
-| `pad` (placed pads and their stash, kits, insured, auto repair, deploy order) | delta | pads are keyed by spawn: dropped on a generator change, the home pad is planted afresh. Landed state, cover timers and which pads the enemy knows are ephemeral |
+| `pad` (placed pads and their stash, kits, insured, auto repair, deploy order) | delta | pads are keyed by spawn: dropped on a generator change, the home pad is planted afresh. The last pad actually landed on is saved (`last_visited`); landed state, cover timers and which pads the enemy knows are ephemeral |
 | `chart` (known marks, visited, pins, beacons, beacon counter) | delta | travel charge, cooldown, last visit are ephemeral |
 | `run` (RunStats) | delta | sets are `BTreeSet` so the text is deterministic |
-| `legacy` (carried, wrecks, generation) | delta | `bequest` is made at the moment a run ends and is not saved |
+| `legacy` (carried, wrecks, generation) | delta | `bequest` is not saved; ordinary death creates none (the legacy API is retained for existing data) |
 | `civ_regard`, `civ_fall` | delta | regard timers are saved with the value |
 | `fallen`, `mined`, `regrow_stamp`, `relics_taken` | delta | all keyed by sector and spawn index; dropped on a generator change |
 | the eight random streams | delta | restored after the world loads, so loading does not spend the player's rolls |
@@ -37,23 +37,28 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 
 RON text, `Save(version: N, generator: G, state: (...))`, human readable and diffable. `version` is this layout (`SAVE_VERSION`), `generator` is `GENERATOR_VERSION` when it was written.
 - Newer than the build: refused (`SaveError::TooNew`), never guessed. Unparseable or truncated: `SaveError::Parse`.
-- Older layout: `migrate` rewrites the text one version at a time. There is none yet (version 1 is the first). New fields get `#[serde(default)]` and need no bump; a change that cannot be defaulted bumps `SAVE_VERSION`. **Until 1.0 there are no migration arms and no fixtures (user decision): an older save is simply refused.**
+- Older layout: refused before 1.0. New fields get `#[serde(default)]` and need no bump; a change that cannot be defaulted bumps `SAVE_VERSION`. **Until 1.0 there are no migration arms and no fixtures (user decision): an older save is simply refused.**
 - Different generator version: spawn indices no longer name the same things, so the ship's progress, chart and run record load but `fallen`, `mined`, `regrow_stamp`, `relics_taken` and placed pads are dropped (`LoadReport::world_deltas_kept` is false). Every generation bump therefore resets the cleared world but never the player.
 - Deterministic bytes: every map and set in the state is ordered, so one state always writes the same text.
-- Disk: one slot, `run.ron`, in `SSC_SAVE_DIR` or the per-user data folder (macOS `~/Library/Application Support/ssc`). Written to a temporary file and renamed over the slot, the previous save kept as `run.bak`; a missing slot falls back to the backup.
+- Disk: the last **10 autosaves**, named `auto-<timestamp>.ron`, and a separate **manual.ron** explicit save (with `manual.bak` recovery copy), in `SSC_SAVE_DIR` or the per-user data folder (macOS `~/Library/Application Support/ssc`). Autosaves never overwrite the explicit save. Each write flushes a temporary file to disk and renames it into place before pruning old autosaves. Temporary files are ignored on load. CONTINUE tries all candidates newest first, skipping unreadable or invalid saves; existing `run.ron` and `run.bak` also remain readable without a format migration.
+
 
 ## What a loaded game promises
 
 Tested in `simulation/save.rs`: the text round trip is a fixed point (apart from a pad's reload counter, which the load itself bumps); what the player earned comes back; destroyed spawns stay destroyed; two loads of one save play out identically over ten seconds of flight; newer or broken saves are refused; a generator change keeps progress and drops spawn-keyed deltas; a dying ship loads alive.
 
-## Open
+## The menu, saving and death
 
-## The menu and the death rule (slice 4)
+- Saving is on by default; `SSC_NO_SAVE=1` turns it off, and a scripted run (`SSC_SMOKE_FRAMES`) never touches the player's saves unless it sets `SSC_SAVE=1` (with `SSC_SAVE_DIR` for a scratch directory). See [HOOKS.md](HOOKS.md).
+- Every normal launch opens the title menu. With a readable save it offers CONTINUE (the latest valid save, already loaded behind it) and NEW GAME. Without one it offers NEW GAME. Nothing advances or saves while the menu is open. Replacing saved progress requires a second Enter; if removing the old saves fails, the menu stays open and reports the failure. NEW GAME clears all saved progress, including legacy and wrecks, and immediately saves the fresh game.
+- Autosaves run every **30 real seconds**, on exit and immediately after a ship is lost. The settings screen (Esc) offers SAVE GAME: Enter writes the separate explicit save and shows SAVED or a failure message.
+- Lives act as local revivals. A lost ship sheds material, surges and the uninsured best part under the existing death rules, and revives a short distance away while lives remain. When the last life is spent, the same game continues just above the last pad actually landed on, with **exactly one life**. If that pad was destroyed or dismantled, or none was visited, return to HOME. The pad's sector is streamed before the ship appears; a raid destroying the pad during streaming also falls back to HOME. Score, chart, equipment and run counters continue, with the usual death losses. No game over, successor, bequest or new wreck is created by death.
+- `last_visited` is an additive saved field (`#[serde(default)]`, no save-version bump). Deployment alone does not mark a visit. A generator change drops the pad identity together with placed pads.
+- Part insurance retains its existing cost and eligibility: a player-built pad must exist, insurance must be on and the hold must pay **10 metal** before the usual material loss. HOME fallback does not grant insurance.
+- Legacy and wreck data already in a loaded save remains readable and saved. The retained legacy API is not part of ordinary death or NEW GAME.
 
-- Saving is on by default; `SSC_NO_SAVE=1` turns it off, and a scripted run (`SSC_SMOKE_FRAMES`) never touches the player's save unless it sets `SSC_SAVE=1` (with `SSC_SAVE_DIR` for a scratch slot). See [HOOKS.md](HOOKS.md).
-- At launch, when a readable save exists, the title menu shows (game waits, nothing is saved while it is up): CONTINUE (the save is already loaded behind it), NEW RUN and DELETE SAVE, the last two needing a second Enter. New run deletes the run file and starts a fresh `Game`; delete removes it and leaves only NEW RUN. With no save the game starts directly.
-- Every lost ship is saved at once (`autosave::settle`). A lost life stays lost. When the last ship goes, the slot is written with `Game::next_run()`, the successor of the dead run: the bequest is made exactly there, once, and the file never holds the dead state, so reloading cannot undo death. Pressing Enter on the game over screen builds the same successor; quitting there leaves it in the slot and the next launch continues from it.
-- Decision (Thomas): wrecks and legacy stay in the run file for now, no separate cross-run file. Revisit when 'new game' is defined: today NEW RUN erases wrecks and legacy along with the run. If new game should keep them, they must move to their own file then.
+## Remaining limits
+
 - Builder structures are saved (see the table). Caveats: a civilization's unfinished structure is not resumed after a reload or unload (its worker is not a stable identity), it stands as it is and the territory's budget (`civ_started`) moves on; creature damage, bred creatures, doctrine and enemy-known pads are still not saved (ephemeral or regenerated).
 - Crops are saved (`Farm`, see the table); machines will add their own delta struct when built.
 - Legacy and wrecks ride in the run file (decided, see above); a separate file depends on what 'new game' erases.
