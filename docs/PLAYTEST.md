@@ -115,6 +115,13 @@ HOME's planetoid has plants from the start. Fly slowly up to it: the key reads P
 - Breeding (slice 3): plant two seeds of one species within about 250 units on a planetoid, let both ripen, cut one: the seeds it pays cross the two plants. Does the seed picker label (for example `FENROOT (YLD +30 HUE -12)`) make a good seed easy to find and keep? Is a mutation (10 percent per gene, 1 to 30 points) too rare or too common to chase a line over a handful of generations? Do the ranges feel worth the effort (yield x0.5 to x1.5, grow time x1.35 to x0.65, grazer bites 1.8 to 0.2, `CropGenes`)? Does hue read on the plant? A casual player should notice nothing. Dev check: `SSC_FARM=plant SSC_FARM_GENES=80,70,0,100`.
 - Blight (slice 4): plant a few crops of one species close together outside HOME's sector and wait. Does a `BLIGHT ON` notice arrive at a fair pace, is it clear that the beam prunes it, and is dying in about two minutes (unhardy) too harsh or too lax? Does spacing plants out feel like a real choice, and does a hardy line feel worth breeding? Knobs: `BLIGHT_OUTBREAK`, `BLIGHT_SPREAD`, `BLIGHT_DRAIN`, `BLIGHT_IMMUNE`. Dev check: `SSC_FARM=plant SSC_FARM_BLIGHT=1`.
 
+## Farming civilizations (workstream 1, slice 5)
+
+- Fly to the early outpost and its planetoids. Do the stakes show which crops are theirs?
+- Befriend a farming civilization (tithe until friendly) and tithe again: 12 to 24 biomass and now and then a bred seed. Is that the right reward next to a repair or a material swap? Knobs: `TRADE_BIOMASS`, `SEED_GIFT`, `TEND_SHARE`, `GRANARY_CAP`, `TEND_EPOCH`.
+- Steal: cut a field crop. Is 4 regard a cut a fair price (they turn wary after a few)? Does a raid on a hostile farm feel worth it? Knobs: `THEFT_REGARD`, `PRUNE_FAVOR`, `PRUNE_CHANCE`.
+- Do about a third of territories farming feel right (`TILLAGE_FARMS`)?
+
 ## Big herds (workstream 8, slice 1)
 
 A herd is one flock of 100 to 300 Bogey-like members (flat array, not bodies), in about one wild sector in 30 from ring 3 out. To find one: `SSC_TELEPORT="-11300,-22459"` (a herd at sector -2,-4 on the default seed). Check by feel:

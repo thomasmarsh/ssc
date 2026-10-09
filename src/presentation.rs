@@ -4641,6 +4641,17 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
                     * PLANT_SCALE
         };
         let [tr, tg, tb] = plant.genes.tinted(flora.tint);
+        // A tended crop carries a small stake in its people's color at the root.
+        if plant.tended != 0 {
+            let [sr, sg, sb] = game.tender_tint(plant.tended).unwrap_or([1.0; 3]);
+            let stake = Color::srgb(sr, sg, sb);
+            let side = Vec2::new(-live.normal.y, live.normal.x);
+            let foot = live.position + side * (PLANT_SCALE * 1.1);
+            gizmos.line_2d(foot, foot + live.normal * (PLANT_SCALE * 1.4), stake);
+            gizmos
+                .circle_2d(foot + live.normal * (PLANT_SCALE * 1.6), 3.0, stake)
+                .resolution(6);
+        }
         // Blight dulls the leaves toward a mottled grey-brown and leaves a few spots drifting.
         let leaf = if plant.blighted {
             Color::srgb(0.38 + 0.1 * tr, 0.3 + 0.08 * tg, 0.3 + 0.05 * tb)

@@ -46,7 +46,15 @@ impl Game {
         let tithe = self.tithe_hint().map(|hint| match hint.material {
             Some(kind) => Prompt {
                 verb: Verb::Tithe,
-                label: format!("TITHE {}", kind.label().to_uppercase()),
+                label: if hint.store >= 1.0 && hint.tier == Tier::Friendly {
+                    format!(
+                        "TITHE {}  (GRANARY {:.0})",
+                        kind.label().to_uppercase(),
+                        hint.store
+                    )
+                } else {
+                    format!("TITHE {}", kind.label().to_uppercase())
+                },
                 blocked: None,
             },
             None => prompt(Verb::Tithe, "TITHE", Some("NEED 20 OF ONE MATERIAL")),

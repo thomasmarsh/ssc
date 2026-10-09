@@ -904,6 +904,7 @@ impl Game {
         self.graze_plankton();
         self.graze_plants(dt);
         self.update_blight(dt);
+        self.update_tending(dt);
         if !frozen {
             self.hunt(dt);
         }

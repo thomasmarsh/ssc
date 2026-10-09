@@ -133,6 +133,8 @@ pub struct TitheHint {
     pub name: String,
     pub tier: Tier,
     pub material: Option<Material>,
+    /// Biomass a farming civilization has stored (what a friend could trade from).
+    pub store: f32,
 }
 
 /// Whether a body is something the ship's weapons can anger a civilization with.
@@ -469,6 +471,7 @@ impl Game {
             name: civ.name(self.seed),
             tier: self.civ_tier(civ.id),
             material: self.tithe_material(),
+            store: self.farm.stored(civ.id),
         })
     }
 
@@ -506,7 +509,7 @@ impl Game {
             r.gift = t::TITHE_COOLDOWN;
         }
         if friendly {
-            let returned = self.trade_back(given);
+            let returned = self.trade_back(&civ, given);
             self.notify(
                 format!("{name}  accepts {given:.0} {} and {returned}", kind.label()),
                 upgrades::Rarity::Rare,
@@ -524,7 +527,7 @@ impl Game {
 
     /// What a friend gives back for a tithe: a field repair if the ship is hurt, else some of
     /// the scarcest material.
-    fn trade_back(&mut self, given: f32) -> String {
+    fn trade_back(&mut self, civ: &Territory, given: f32) -> String {
         if let Some(ship) = self
             .bodies
             .iter_mut()
@@ -535,12 +538,42 @@ impl Game {
             ship.shield = ship.max_shield;
             return "mends the ship".to_string();
         }
+        if let Some(sold) = self.sell_biomass(civ, given) {
+            return sold;
+        }
         let scarce = Material::ALL
             .into_iter()
             .min_by(|a, b| self.cargo.fraction(*a).total_cmp(&self.cargo.fraction(*b)))
             .unwrap_or(Material::Metal);
         let got = self.cargo.add(scarce, given * t::TRADE_RATE);
         format!("trades {got:.0} {}", scarce.label())
+    }
+
+    /// A friendly farming civilization pays a tithe back in biomass from its granary (more the
+    /// warmer it is), and now and then a seed of its bred crops. None when it does not farm,
+    /// has nothing stored or the ship's own store is full.
+    fn sell_biomass(&mut self, civ: &Territory, given: f32) -> Option<String> {
+        if !self.civ_trades_biomass(civ.id) {
+            return None;
+        }
+        let regard = self.civ_regard(civ.id);
+        let room = (farm::BIOMASS_CAP - self.farm.biomass).max(0.0);
+        let offer = farm::biomass_offer(self.farm.stored(civ.id), regard, given).min(room);
+        if offer < 1.0 {
+            return None;
+        }
+        self.farm.biomass += offer;
+        if let Some(store) = self.farm.granary.get_mut(&civ.id) {
+            *store = (*store - offer).max(0.0);
+        }
+        let mut said = format!("trades {offer:.0} BIOMASS");
+        if self.gift_roll(civ, self.run.tithes, regard)
+            && let Some(kind) = self.civ_gift_seed(civ, self.run.tithes)
+        {
+            self.farm.add_seeds(kind, 1);
+            said.push_str(&format!(" and a {} seed", self.farm.seed_label(kind)));
+        }
+        Some(said)
     }
 
     /// How fast a civilization's doctrine table learns from its members, by tier.

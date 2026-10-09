@@ -102,6 +102,19 @@ impl CivShape {
     }
 }
 
+/// The tillage a civilization needs to farm.
+pub const TILLAGE_FARMS: f32 = 0.75;
+
+/// The lineage of a civilization's warriors (the members' is the territory id itself).
+fn warrior_lineage(id: u64) -> u64 {
+    (id ^ 0x5A5A_5A5A_0000_0001) | 1
+}
+
+/// Whether `lineage` is a rank-and-file member or warrior of the civilization `id`.
+pub fn is_people_of(id: u64, lineage: u64) -> bool {
+    lineage == id || lineage == warrior_lineage(id)
+}
+
 /// Which part a spawn or lineage plays in its civilization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CivRole {
@@ -485,10 +498,39 @@ impl Territory {
 
     pub fn lineage_of(&self, role: CivRole) -> u64 {
         match role {
-            CivRole::Warrior => (self.id ^ 0x5A5A_5A5A_0000_0001) | 1,
+            CivRole::Warrior => warrior_lineage(self.id),
             CivRole::Elder => (self.id ^ 0xE1DE_E1DE_0000_0003) | 1,
             _ => self.id,
         }
+    }
+
+    /// How given to tilling the people are, in [0, 1], expressed from the genes of the
+    /// lineage they descend from (not a flag on the territory): a settled, placid grazer
+    /// scores high, a hunter or siphon with a short temper low, and a settlement of
+    /// settlers (the peaceful shape) is pushed toward the plough. Nothing here draws from
+    /// a stream: it is a pure function of the seed and the capital.
+    pub fn tillage(&self, seed: u64) -> f32 {
+        let g = self.source(seed);
+        let diet = match g.diet {
+            Diet::Graze => 0.4,
+            Diet::Rocks | Diet::Dust => 0.2,
+            Diet::None => 0.1,
+            Diet::Siphon | Diet::Hunt => 0.0,
+        };
+        let social = match g.social {
+            Social::Solitary => 0.0,
+            Social::School | Social::Pack => 0.2,
+            Social::Brood | Social::Dweller => 0.3,
+        };
+        let placid = (1.0 - g.rage / 0.8).clamp(0.0, 1.0) * 0.3;
+        let settled = if g.nest == Nest::None { 0.0 } else { 0.1 };
+        let settlers = if self.peaceful() { 0.4 } else { 0.0 };
+        (diet + social + placid + settled + settlers).clamp(0.0, 1.0)
+    }
+
+    /// Whether the civilization farms: `tillage` at or above `TILLAGE_FARMS`.
+    pub fn farms(&self, seed: u64) -> bool {
+        self.tillage(seed) >= TILLAGE_FARMS
     }
 
     /// How close to the heart of the civilization `sector` is, in [0, 1]: 1 at the capital,
@@ -1002,6 +1044,38 @@ mod tests {
             }
         }
         out
+    }
+
+    /// Distinct territories (by id) found within `reach` sectors of HOME.
+    fn distinct(seed: u64, reach: i32) -> Vec<Territory> {
+        let mut seen = std::collections::BTreeMap::new();
+        for (_, t) in all_territories(seed, reach) {
+            seen.insert(t.id, t);
+        }
+        seen.into_values().collect()
+    }
+
+    #[test]
+    fn some_civilizations_farm_and_some_do_not_and_it_is_pure() {
+        for seed in [1_u64, 42, SEED, 99] {
+            let all = distinct(seed, 60);
+            assert!(all.len() >= 8, "seed {seed}: only {}", all.len());
+            let farming = all.iter().filter(|t| t.farms(seed)).count();
+            assert!(farming > 0 && farming < all.len(), "seed {seed}");
+            for t in &all {
+                assert_eq!(t.tillage(seed), t.tillage(seed));
+                assert!((0.0..=1.0).contains(&t.tillage(seed)));
+            }
+        }
+    }
+
+    #[test]
+    fn people_of_names_members_and_warriors_only() {
+        let t = outpost(SEED);
+        assert!(is_people_of(t.id, t.lineage_of(CivRole::Member)));
+        assert!(is_people_of(t.id, t.lineage_of(CivRole::Warrior)));
+        assert!(!is_people_of(t.id, t.lineage_of(CivRole::Elder)));
+        assert!(!is_people_of(t.id, t.id ^ 0x77));
     }
 
     #[test]

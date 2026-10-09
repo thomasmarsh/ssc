@@ -172,6 +172,17 @@ impl CropGenes {
         child
     }
 
+    /// Genes drawn uniformly within `spread` of baseline: what a civilization's tenders have
+    /// bred into the fields.
+    pub fn spread(rng: &mut Rng, spread: i32) -> Self {
+        let mut genes = Self::BASELINE;
+        for slot in genes.slots() {
+            *slot = (rng.int(0, (2 * spread) as u32) as i32 - spread)
+                .clamp(-i32::from(GENE_MAX), i32::from(GENE_MAX)) as i8;
+        }
+        genes
+    }
+
     /// A short label of the genes that differ from baseline, empty for a baseline plant.
     pub fn label(&self) -> String {
         let mut parts = Vec::new();

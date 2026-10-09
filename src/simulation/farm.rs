@@ -13,6 +13,10 @@
 //! eats species its lineage's palate accepts, bites a plant down to a stump but never kills
 //! it, and steers toward plants it likes. Crops only grow on planetoids.
 
+mod tend;
+
+pub use tend::{biomass_offer, seed_gift_chance, warmth};
+
 use super::*;
 use crate::flora::{self, CropGenes, Flora, SHIP_PALATE, SeedKind};
 use crate::world::{Rng, hash2};
@@ -73,6 +77,24 @@ pub const BLIGHT_SPREAD: f32 = 0.06;
 pub const BLIGHT_DRAIN: f32 = 0.008;
 /// Seconds a pruned plant resists blight.
 pub const BLIGHT_IMMUNE: f32 = 150.0;
+/// Salt for the crops a farming civilization tends in the field and under glass.
+const TEND_SALT: u64 = 0xFA12_3000_0000_0005;
+/// Seconds between a civilization's rounds of its crops (harvest the ripe, prune the sick).
+pub const TEND_EPOCH: f32 = 10.0;
+/// The share of a ripe cut's yield that reaches the civilization's granary (the player cuts
+/// the whole yield).
+pub const TEND_SHARE: f32 = 0.8;
+/// Most biomass a civilization stores; ripe crops wait on the stalk once it is full.
+pub const GRANARY_CAP: f32 = 60.0;
+/// Chance per round that tenders prune a sick crop: thriving, then weakened (a fallen
+/// civilization tends nothing).
+pub const PRUNE_CHANCE: [f32; 2] = [0.3, 0.12];
+/// Regard lost for each tended crop the ship cuts, and gained for pruning its blight.
+pub const THEFT_REGARD: f32 = 4.0;
+pub const PRUNE_FAVOR: f32 = 1.5;
+/// Fields: tended crops per planetoid (by radius), and the spread of their bred genes.
+pub const FIELD_CROPS: (u32, u32) = (1, 3);
+pub const TEND_GENE_SPREAD: i32 = 40;
 const FARM_SALT: u64 = 0xFA12_3000_0000_0001;
 /// Own stream for harvest rolls: a pure hash of (game seed, plant id, harvest count).
 const HARVEST_SALT: u64 = 0xFA12_3000_0000_0002;
@@ -154,6 +176,9 @@ pub struct Plant {
     /// Game time until which a pruned plant shrugs blight off.
     #[serde(default)]
     pub immune_until: f32,
+    /// The farming civilization (territory id) that tends it, or 0 for nobody's.
+    #[serde(default)]
+    pub tended: u64,
 }
 
 impl Plant {
@@ -186,6 +211,9 @@ pub struct Farm {
     /// Planetoids already stocked with wild plants.
     pub stocked: BTreeSet<(SectorId, u32)>,
     pub next_id: u32,
+    /// Biomass each farming civilization has stored, by territory id.
+    #[serde(default)]
+    pub granary: BTreeMap<u64, f32>,
     #[serde(skip)]
     table: Vec<Flora>,
     #[serde(skip)]
@@ -443,8 +471,10 @@ impl Game {
                 genes: CropGenes::BASELINE,
                 blighted: false,
                 immune_until: 0.0,
+                tended: 0,
             });
         }
+        self.stock_field(key, center, radius);
     }
 
     // ---- planting -------------------------------------------------------------------------
@@ -574,6 +604,7 @@ impl Game {
             genes: kind.genes,
             blighted: false,
             immune_until: 0.0,
+            tended: 0,
         });
         let name = self
             .farm
@@ -651,16 +682,24 @@ impl Game {
         }
         self.farm.cut = None;
         self.beam = None;
+        let tended = self.farm.plants[live.index].tended;
         if self.farm.plants[live.index].blighted {
             let plant = &mut self.farm.plants[live.index];
             plant.blighted = false;
             plant.immune_until = self.time + BLIGHT_IMMUNE;
+            if tended != 0 && self.civ_standing(tended) != crate::territory::Standing::Fallen {
+                self.shift_regard(tended, PRUNE_FAVOR);
+            }
             self.notify(
                 format!("{name} PRUNED  BLIGHT CUT OUT"),
                 upgrades::Rarity::Common,
             );
             self.update_farm();
             return drained;
+        }
+        if tended != 0 && self.civ_standing(tended) != crate::territory::Standing::Fallen {
+            // Their crop, their granary: the people mind the theft.
+            self.shift_regard(tended, -THEFT_REGARD);
         }
         let ripe = live.growth >= RIPE;
         let gain = self.loadout.skills.yield_mult() * self.realm_effects().mining;
@@ -777,6 +816,11 @@ impl Game {
             let reach = body.radius + PLANT_BODY;
             let Some((_, live)) = farm.nearest_live(body.position, |l| {
                 l.growth > GRAZE_FLOOR
+                    && !(farm.plants[l.index].tended != 0
+                        && crate::territory::is_people_of(
+                            farm.plants[l.index].tended,
+                            body.species,
+                        ))
                     && farm
                         .flora(l.species)
                         .is_some_and(|f| palate.eats(&f.chemistry))
@@ -1070,6 +1114,7 @@ mod tests {
             genes,
             blighted: false,
             immune_until: 0.0,
+            tended: 0,
         });
         game.step(DT, Input::default());
         game.farm.plants.len() - 1
@@ -1792,5 +1837,331 @@ mod tests {
         assert_eq!(loaded.farm.plants, game.farm.plants);
         assert!(loaded.farm.plants[planted].blighted);
         assert_eq!(loaded.farm.plants[planted].immune_until, 77.0);
+    }
+
+    // ---- farming civilizations -------------------------------------------
+
+    use crate::territory::{CivShape, Territory};
+
+    /// A capital sector's territory that farms (or not), peaceful settlers excluded.
+    fn territory_that(farms: bool) -> Territory {
+        for x in -40..=40 {
+            for y in -40..=40 {
+                let id = SectorId { x, y };
+                if let Some(t) = crate::world::territory(crate::config::MASTER_SEED, id)
+                    && t.capital == id
+                    && t.shape != CivShape::Outpost
+                    && t.farms(crate::config::MASTER_SEED) == farms
+                {
+                    return t;
+                }
+            }
+        }
+        panic!("no territory with farms = {farms}");
+    }
+
+    fn tended_rig(t: &Territory, growth: f32) -> (Game, usize) {
+        let mut game = rig();
+        game.register_territory(*t);
+        let crop = species_with(&game, flora::Role::CropOnly);
+        let at = plant(&mut game, crop, growth);
+        game.farm.plants[at].tended = t.id;
+        game.step(DT, Input::default());
+        (game, at)
+    }
+
+    #[test]
+    fn farming_is_a_trait_of_the_people_not_every_civilization() {
+        let seed = crate::config::MASTER_SEED;
+        let (yes, no) = (territory_that(true), territory_that(false));
+        assert!(yes.farms(seed) && !no.farms(seed));
+        assert!(yes.tillage(seed) >= crate::territory::TILLAGE_FARMS);
+        assert!(no.tillage(seed) < crate::territory::TILLAGE_FARMS);
+        // Settlers always farm: the early outpost is the showcase.
+        assert!(crate::territory::outpost(seed).farms(seed));
+    }
+
+    #[test]
+    fn farming_civilizations_stock_deterministic_tended_fields() {
+        let (yes, no) = (territory_that(true), territory_that(false));
+        let key = (yes.capital, 9);
+        let stock = |t: &Territory, key| {
+            let mut game = empty_game();
+            game.seed = crate::config::MASTER_SEED;
+            game.stock_field(key, Vec2::ZERO, 330.0);
+            let _ = t;
+            game.farm.plants.clone()
+        };
+        let a = stock(&yes, key);
+        assert!((FIELD_CROPS.0 as usize..=FIELD_CROPS.1 as usize).contains(&a.len()));
+        assert_eq!(a, stock(&yes, key), "a pure function of seed and place");
+        let game = empty_game();
+        let crops = game.farm.civ_crops(crate::config::MASTER_SEED, &yes);
+        for p in &a {
+            assert_eq!(p.tended, yes.id);
+            assert!(!p.wild);
+            assert!(crops.contains(&p.species));
+            assert!(
+                game.farm.flora(p.species).is_some_and(Flora::is_crop),
+                "tended crops are ones the ship can use"
+            );
+            let spread = TEND_GENE_SPREAD;
+            assert!(
+                [p.genes.yield_, p.genes.vigor, p.genes.hardy, p.genes.hue]
+                    .iter()
+                    .all(|g| i32::from(*g).abs() <= spread)
+            );
+        }
+        // Apart from one another.
+        for (i, x) in a.iter().enumerate() {
+            for y in &a[i + 1..] {
+                assert!(arc(x.anchor, y.anchor, 330.0) >= SPACING);
+            }
+        }
+        // A civilization that does not farm leaves the planetoid to the wild.
+        assert!(stock(&no, (no.capital, 9)).is_empty());
+    }
+
+    #[test]
+    fn tenders_harvest_ripe_crops_into_a_capped_granary_unless_fallen() {
+        let t = territory_that(true);
+        let seed = crate::config::MASTER_SEED;
+        let (mut game, at) = tended_rig(&t, 1.0);
+        let species = game.farm.plants[at].species;
+        let nutrition = game.farm.flora(species).unwrap().ship_nutrition();
+        game.farm.plants[at].genes = CropGenes::BASELINE;
+        run(&mut game, TEND_EPOCH + 1.0);
+        let expect = CROP_YIELD * nutrition * TEND_SHARE;
+        assert!(
+            (game.farm.stored(t.id) - expect).abs() < 1e-3,
+            "{}",
+            game.farm.stored(t.id)
+        );
+        let plant = &game.farm.plants[at];
+        assert_eq!(plant.harvests, 1);
+        assert!(
+            game.farm.growth_of(plant, game.time) < RIPE,
+            "back to a stump"
+        );
+        assert_eq!(game.farm.biomass, 0.0, "the ship got none of it");
+        let _ = seed;
+        // A full granary leaves the crop ripe on the stalk.
+        let (mut game, at) = tended_rig(&t, 1.0);
+        game.farm.granary.insert(t.id, GRANARY_CAP);
+        run(&mut game, TEND_EPOCH * 3.0);
+        assert_eq!(game.farm.plants[at].harvests, 0);
+        assert_eq!(game.farm.stored(t.id), GRANARY_CAP);
+        // A fallen civilization tends nothing.
+        let (mut game, at) = tended_rig(&t, 1.0);
+        game.civ_fall.insert(
+            t.id,
+            crate::territory::Fall {
+                capital: true,
+                elder: true,
+            },
+        );
+        run(&mut game, TEND_EPOCH * 3.0);
+        assert_eq!(game.farm.plants[at].harvests, 0);
+        assert_eq!(game.farm.stored(t.id), 0.0);
+    }
+
+    #[test]
+    fn tenders_prune_blight_while_thriving_and_not_once_fallen() {
+        let t = territory_that(true);
+        let (mut game, at) = tended_rig(&t, 1.0);
+        game.farm.granary.insert(t.id, GRANARY_CAP);
+        game.farm.plants[at].blighted = true;
+        game.farm.plants[at].base = 1.0;
+        let id = game.farm.plants[at].id;
+        let mut pruned = false;
+        for _ in 0..40 {
+            run(&mut game, TEND_EPOCH);
+            let p = game.farm.plants.iter().find(|p| p.id == id).unwrap();
+            if !p.blighted {
+                assert!(p.immune_until > game.time - TEND_EPOCH);
+                pruned = true;
+                break;
+            }
+        }
+        assert!(pruned, "thriving tenders prune it");
+        let (mut game, at) = tended_rig(&t, 1.0);
+        game.civ_fall.insert(
+            t.id,
+            crate::territory::Fall {
+                capital: true,
+                elder: true,
+            },
+        );
+        game.farm.plants[at].blighted = true;
+        run(&mut game, TEND_EPOCH * 6.0);
+        assert!(game.farm.plants.is_empty() || game.farm.plants[0].blighted);
+    }
+
+    #[test]
+    fn a_civilizations_own_people_do_not_graze_its_crops_but_strangers_do() {
+        let t = territory_that(true);
+        let mut grown = [0.0f32; 2];
+        for (n, tended) in [true, false].into_iter().enumerate() {
+            let mut game = rig();
+            game.register_territory(t);
+            // A full granary: the tenders leave the ripe crop on the stalk.
+            game.farm.granary.insert(t.id, GRANARY_CAP);
+            let palate = flora::creature_palate(game.seed, t.id);
+            let liked = game
+                .farm
+                .species_table()
+                .iter()
+                .find(|f| palate.eats(&f.chemistry))
+                .unwrap()
+                .id;
+            let at = plant(&mut game, liked, 1.0);
+            game.farm.plants[at].tended = if tended { t.id } else { 0 };
+            let id = grazer(&mut game, t.id);
+            for _ in 0..(40.0 / DT) as usize {
+                game.step(DT, Input::default());
+                let pos = game.farm.live[0].position;
+                let b = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+                b.position = pos;
+                b.velocity = Vec2::ZERO;
+                b.energy = b.max_energy * 0.3;
+            }
+            grown[n] = game.farm.growth_of(&game.farm.plants[at], game.time);
+        }
+        assert!(grown[0] > 0.99, "their own field is left alone: {grown:?}");
+        assert!(
+            grown[1] < 0.9,
+            "the same plant, untended, is grazed: {grown:?}"
+        );
+    }
+
+    #[test]
+    fn biomass_trade_math_scales_with_warmth_and_never_exceeds_the_store() {
+        use super::{biomass_offer, seed_gift_chance, warmth};
+        let friendly = crate::simulation::tuning::FRIENDLY_AT;
+        let max = crate::simulation::tuning::REGARD_MAX;
+        assert_eq!(warmth(friendly - 10.0), 0.0);
+        assert_eq!(warmth(friendly), 0.0);
+        assert!((warmth((friendly + max) / 2.0) - 0.5).abs() < 1e-6);
+        assert_eq!(warmth(max), 1.0);
+        let given = crate::simulation::tuning::TITHE_AMOUNT;
+        let cool = biomass_offer(100.0, friendly, given);
+        let warm = biomass_offer(100.0, max, given);
+        assert!((cool - given * tend::TRADE_BIOMASS).abs() < 1e-4);
+        assert!((warm - 2.0 * cool).abs() < 1e-4);
+        assert_eq!(biomass_offer(5.0, max, given), 5.0, "capped by the store");
+        assert_eq!(biomass_offer(0.0, max, given), 0.0);
+        assert_eq!(biomass_offer(-3.0, max, given), 0.0);
+        assert!(seed_gift_chance(max) > seed_gift_chance(friendly));
+        assert!(seed_gift_chance(max) <= 1.0);
+    }
+
+    /// Visits `t`'s capital sector and returns the game and its seat's position.
+    fn at_seat(sector: SectorId) -> (Game, Vec2, PadKey) {
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        game.player_invulnerability = 1e9;
+        game.teleport(sector.center());
+        game.step(DT, Input::default());
+        let seat = game
+            .bodies
+            .iter()
+            .find(|b| {
+                b.kind == BodyKind::Base
+                    && b.fort.is_none()
+                    && b.origin
+                        .and_then(|k| game.civ_bases.get(&k))
+                        .is_some_and(|(_, role)| {
+                            matches!(
+                                role,
+                                crate::territory::CivRole::Capital
+                                    | crate::territory::CivRole::Outpost
+                            )
+                        })
+            })
+            .map(|b| (b.position, b.origin.unwrap()))
+            .expect("a seat");
+        (game, seat.0, seat.1)
+    }
+
+    fn hold_at(game: &mut Game, at: Vec2, seconds: f32) {
+        for _ in 0..(seconds / 0.05) as usize {
+            set_player(game, at, Vec2::ZERO);
+            game.step(0.05, Input::default());
+        }
+    }
+
+    #[test]
+    fn a_friendly_farm_pays_a_tithe_back_in_biomass_and_the_granary_drops() {
+        let t = crate::territory::outpost(crate::config::MASTER_SEED);
+        let (mut game, seat, _) = at_seat(t.capital);
+        game.register_territory(t);
+        let near = seat + Vec2::new(200.0, 0.0);
+        game.set_regard(t.id, 50.0);
+        game.farm.granary.insert(t.id, 40.0);
+        game.cargo.metal = 100.0;
+        game.cargo.crystal = 0.0;
+        game.cargo.volatiles = 30.0;
+        game.farm.biomass = 0.0;
+        hold_at(&mut game, near, 0.2);
+        let hint = game.tithe_hint().expect("a seat in reach");
+        assert_eq!(hint.store, 40.0);
+        let regard = game.civ_regard(t.id);
+        let expect = farm::biomass_offer(40.0, regard, 20.0);
+        assert_eq!(game.tithe(), Ok(()));
+        assert!(
+            (game.farm.biomass - expect).abs() < 1e-3,
+            "{}",
+            game.farm.biomass
+        );
+        assert!((game.farm.stored(t.id) - (40.0 - expect)).abs() < 1e-3);
+        assert_eq!(
+            game.cargo.crystal, 0.0,
+            "no material swap when it sold food"
+        );
+        // A tithe from a civilization that is not friendly buys no food.
+        let (mut game, seat, _) = at_seat(t.capital);
+        game.register_territory(t);
+        game.set_regard(t.id, 10.0);
+        game.farm.granary.insert(t.id, 40.0);
+        game.cargo.metal = 100.0;
+        hold_at(&mut game, seat + Vec2::new(200.0, 0.0), 0.2);
+        assert_eq!(game.tithe(), Ok(()));
+        assert_eq!(game.farm.biomass, 0.0);
+        assert_eq!(game.farm.stored(t.id), 40.0);
+    }
+
+    #[test]
+    fn cutting_a_tended_crop_costs_regard_and_pruning_its_blight_earns_it() {
+        let t = territory_that(true);
+        let (mut game, _) = tended_rig(&t, 1.0);
+        game.set_regard(t.id, 10.0);
+        beam(&mut game, HARVEST_TIME + 0.3);
+        assert!(game.farm.biomass > 0.0);
+        assert!((game.civ_regard(t.id) - (10.0 - THEFT_REGARD)).abs() < 0.01);
+        // Wild or planted crops cost nothing.
+        let mut game = rig();
+        let crop = species_with(&game, flora::Role::CropOnly);
+        plant(&mut game, crop, 1.0);
+        beam(&mut game, HARVEST_TIME + 0.3);
+        assert!(game.farm.biomass > 0.0);
+        // Pruning a tended crop's blight is a favor.
+        let (mut game, at) = tended_rig(&t, 1.0);
+        game.set_regard(t.id, 10.0);
+        game.farm.plants[at].blighted = true;
+        beam(&mut game, HARVEST_TIME + 0.3);
+        assert!(game.civ_regard(t.id) > 10.0);
+    }
+
+    #[test]
+    fn tended_state_and_granaries_survive_a_save() {
+        let t = territory_that(true);
+        let (mut game, at) = tended_rig(&t, 0.6);
+        game.farm.granary.insert(t.id, 17.5);
+        let text = game.save_state().to_text();
+        let (state, generator) = save::SaveState::from_text(&text).unwrap();
+        let (loaded, report) = Game::from_save(state, generator);
+        assert!(report.world_deltas_kept);
+        assert_eq!(loaded.farm.plants, game.farm.plants);
+        assert_eq!(loaded.farm.plants[at].tended, t.id);
+        assert_eq!(loaded.farm.stored(t.id), 17.5);
     }
 }
