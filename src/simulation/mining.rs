@@ -387,11 +387,13 @@ impl Game {
         };
         let (origin, shield) = ship;
         if !mining || shield < SHIELD_FLOOR {
+            self.stop_harvest();
             self.stop_beam();
             return 0.0;
         }
         let seed = self.seed;
         let reach = self.loadout.skills.beam_range();
+        let crop = self.harvest_candidate(origin, reach);
         let mut best: Option<(f32, usize)> = None;
         let mut blocked: Option<Material> = None;
         for (index, rock) in self.bodies.iter().enumerate() {
@@ -413,6 +415,15 @@ impl Game {
                 best = Some((gap, index));
             }
         }
+        // A crop in reach is cut before the world under it is mined; another rock nearer
+        // than the crop still wins.
+        if let Some((gap, live)) = crop
+            && best.is_none_or(|(g, i)| gap <= g || self.bodies[i].rock == RockKind::Planetoid)
+        {
+            self.stop_beam();
+            return self.harvest_plant(dt, origin, live);
+        }
+        self.stop_harvest();
         let Some((_, index)) = best else {
             if let Some(kind) = blocked
                 && self.mine_note <= 0.0
@@ -635,6 +646,8 @@ mod tests {
                 let planet = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
                 planet.pinned = true;
                 planet.origin = Some((SectorId { x: 3, y: -2 }, index));
+                // No wild plants: the beam would cut a crop before mining the world.
+                game.farm.stocked.insert((SectorId { x: 3, y: -2 }, index));
                 hold(&mut game, 10.0);
                 assert!((game.cargo.total() - 10.0 * t::RATE_PLANETOID).abs() < 0.2);
                 Material::ALL

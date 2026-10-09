@@ -15,6 +15,7 @@ pub enum Verb {
     Deploy,
     Build,
     Tithe,
+    Plant,
 }
 
 /// An interaction in reach: what the key does, a short label and, if a press would be
@@ -50,15 +51,38 @@ impl Game {
             },
             None => prompt(Verb::Tithe, "TITHE", Some("NEED 20 OF ONE MATERIAL")),
         });
+        // Planting beats deploying a pad and the hints that wait on one; landing, the bench
+        // and a tithe that would work come first.
+        let plant = match self.plant_hint() {
+            farm::PlantHint::Ready(species, ..) => {
+                let name = self.farm.flora(species).map_or("SEED", |f| f.name.as_str());
+                Some(prompt(Verb::Plant, &format!("PLANT {name}"), None))
+            }
+            farm::PlantHint::TooFast => Some(prompt(Verb::Plant, "PLANT", Some("SLOW DOWN"))),
+            farm::PlantHint::Crowded => Some(prompt(
+                Verb::Plant,
+                "PLANT",
+                Some("TOO CLOSE TO ANOTHER PLANT"),
+            )),
+            farm::PlantHint::None => None,
+        };
         match pad {
             PadHint::Landed => Some(prompt(Verb::Bench, "BENCH", None)),
             PadHint::Land => Some(prompt(Verb::Land, "LAND", None)),
-            PadHint::Deploy => Some(prompt(Verb::Deploy, "DEPLOY PAD", None)),
-            PadHint::Build => Some(prompt(Verb::Build, "BUILD PAD", None)),
-            PadHint::TooFast => tithe.or(Some(prompt(Verb::Land, "DOCK", Some("SLOW DOWN")))),
+            PadHint::Deploy => plant.or(Some(prompt(Verb::Deploy, "DEPLOY PAD", None))),
+            PadHint::Build => plant.or(Some(prompt(Verb::Build, "BUILD PAD", None))),
+            PadHint::TooFast => {
+                tithe
+                    .or(plant)
+                    .or(Some(prompt(Verb::Land, "DOCK", Some("SLOW DOWN"))))
+            }
             PadHint::Unsafe => tithe.or(Some(prompt(Verb::Land, "LAND", Some("HOSTILE NEAR")))),
-            PadHint::Closer => tithe.or(Some(prompt(Verb::Land, "LAND", Some("MOVE CLOSER")))),
-            PadHint::None => tithe,
+            PadHint::Closer => {
+                tithe
+                    .or(plant)
+                    .or(Some(prompt(Verb::Land, "LAND", Some("MOVE CLOSER"))))
+            }
+            PadHint::None => tithe.or(plant),
         }
     }
 
@@ -70,6 +94,11 @@ impl Game {
             Verb::Land | Verb::Deploy | Verb::Build => self.pad_action(),
             Verb::Tithe => {
                 let _ = self.tithe();
+            }
+            Verb::Plant => {
+                if prompt.blocked.is_none() {
+                    self.plant_seed();
+                }
             }
         }
         Some(prompt.verb)

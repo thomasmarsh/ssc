@@ -467,7 +467,8 @@ impl Game {
             self.notify("CANNOT REPAIR UNDER FIRE".into(), Rarity::Common);
             return;
         }
-        let hull = ship.health < ship.max_health - 1e-3 && self.cargo.metal > 0.0;
+        let hull = ship.health < ship.max_health - 1e-3
+            && (self.cargo.metal > 0.0 || self.farm.biomass > 0.0);
         let shield = ship.shield < ship.max_shield - 1e-3 && self.cargo.volatiles > 0.0;
         if !hull && !shield {
             let full =
@@ -557,7 +558,10 @@ impl Game {
         let hull_missing = (ship.max_health - ship.health).max(0.0);
         let shield_missing = (ship.max_shield - ship.shield).max(0.0);
         let (mut hull, mut shield) = (0.0, 0.0);
-        if hull_missing > 1e-3 && self.cargo.metal > 1e-4 {
+        if hull_missing > 1e-3 && self.farm.biomass > 1e-4 {
+            // Biomass is the renewable mend: it goes first, metal covers the rest.
+            hull = self.repair_with_biomass(hull_missing, REPAIR_HULL_RATE, dt);
+        } else if hull_missing > 1e-3 && self.cargo.metal > 1e-4 {
             hull = (REPAIR_HULL_RATE * dt)
                 .min(hull_missing)
                 .min(self.cargo.metal / REPAIR_METAL);

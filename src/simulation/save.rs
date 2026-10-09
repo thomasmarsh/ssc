@@ -107,6 +107,9 @@ pub struct SaveState {
     /// Structures each territory has started, so its building budget survives a reload.
     #[serde(default)]
     civ_started: Vec<(u64, u8)>,
+    /// Plants, seeds and biomass (see `farm`).
+    #[serde(default)]
+    farm: farm::Farm,
     streams: Streams,
 }
 
@@ -225,6 +228,7 @@ impl Game {
             relics,
             structures: self.structures_snapshot().into_iter().collect(),
             civ_started: sorted(&self.builds.civ_started),
+            farm: self.farm.clone(),
             streams: Streams {
                 rng: self.rng.clone(),
                 loot: self.loot.clone(),
@@ -271,6 +275,7 @@ impl Game {
             game.pad.kits = state.pad.kits;
             game.pad.insured = state.pad.insured;
         }
+        game.adopt_farm(state.farm, keep);
         game.spawn_player_exact(state.ship.position);
         if let Some(ship) = game.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.velocity = state.ship.velocity;

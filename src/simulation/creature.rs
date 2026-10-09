@@ -154,6 +154,15 @@ impl Game {
         } else {
             Vec::new()
         };
+        let seed = self.seed;
+        let crops: Vec<(Vec2, u16)> = self
+            .farm
+            .live
+            .iter()
+            .filter(|l| l.growth >= farm::GRAZE_FLOOR + 0.05)
+            .map(|l| (l.position, l.species))
+            .collect();
+        let farm = &self.farm;
         let civs = self.civ_snapshot();
         let pulls = self.fauna_pulls();
         let homes = self.builder_homes();
@@ -520,6 +529,25 @@ impl Game {
                     cruise * 1.2
                 };
                 desired += toward.normalize_or_zero() * pull;
+            }
+            // Plants are food too, for a palate that likes them. They stand on a planetoid that
+            // also pushes grazers away, so the pull to a plant is the stronger of the two. A school
+            // keeps its shape (its members still graze whatever they drift past).
+            if body.grazes_plankton()
+                && (!body.alert || desperate)
+                && !schooling
+                && !crops.is_empty()
+                && let Some(toward) = {
+                    let palate = crate::flora::creature_palate(seed, body.species);
+                    crops
+                        .iter()
+                        .filter(|(_, s)| farm.flora(*s).is_some_and(|f| palate.eats(&f.chemistry)))
+                        .map(|(p, _)| *p - body.position)
+                        .filter(|d| d.length_squared() < food::FOOD_SIGHT * food::FOOD_SIGHT)
+                        .min_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))
+                }
+            {
+                desired += toward.normalize_or_zero() * cruise * 2.5;
             }
             // A builder in the middle of a structure stays within reach of it.
             if let (false, Some(home)) = (body.alert, homes.get(&body.id)) {

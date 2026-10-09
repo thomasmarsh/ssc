@@ -26,6 +26,7 @@ pub mod dev;
 mod diplomacy;
 mod discovery;
 mod ecology;
+pub mod farm;
 pub mod feel;
 mod fields;
 mod food;
@@ -480,6 +481,8 @@ pub struct Game {
     gripped: Option<u64>,
     /// Sectors whose relic has been taken this run; see `organs`.
     relics_taken: HashSet<SectorId>,
+    /// Plants, seeds and biomass; see `farm`.
+    pub farm: farm::Farm,
     /// Seconds left of the Veil organ's intangibility after a dash.
     veil: f32,
     /// Worms on the hull, grooming and the shy remora; see `parasite`.
@@ -635,6 +638,7 @@ impl Game {
             impact_gap: HashMap::new(),
             gripped: None,
             relics_taken: HashSet::new(),
+            farm: farm::Farm::new(seed),
             veil: 0.0,
             parasites: parasite::ParasiteState::default(),
             builds: build::BuildState::default(),
@@ -849,6 +853,7 @@ impl Game {
                 body.health = (body.health + dt * DUST_HEAL).min(body.max_health);
             }
         }
+        self.update_farm();
         self.update_pads(dt, &input);
         let shots = (self.bullets.len(), self.mines.len());
         self.control_player(dt, input);
@@ -891,6 +896,7 @@ impl Game {
         self.update_food(dt);
         self.update_metabolism(dt);
         self.graze_plankton();
+        self.graze_plants(dt);
         if !frozen {
             self.hunt(dt);
         }

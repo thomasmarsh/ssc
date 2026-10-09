@@ -7,6 +7,7 @@ pub mod biome;
 pub mod bodyplan;
 pub mod builder;
 pub mod config;
+pub mod flora;
 pub mod fortress;
 pub mod genome;
 pub mod grammar;
