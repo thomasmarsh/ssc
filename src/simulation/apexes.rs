@@ -3,7 +3,7 @@
 //! like any kill, so it does not return in this world instance.
 
 use super::tuning as t;
-use super::upgrades::{self, Item, Rarity, Slot, Source};
+use super::upgrades::{Item, Rarity};
 use super::*;
 use crate::apex::{self, Archetype, Rank};
 
@@ -647,47 +647,26 @@ impl Game {
     }
 
     /// What a slain apex leaves: materials of every kind, an epic part in the slot of an
-    /// ability the ship cannot yet do (plating for parry, engine for dash, else cannon), two
-    /// rare parts and two lucky rolls.
-    pub(super) fn apex_loot(&self, body: &Body, rng: &mut Rng, params: SectorParams) -> Vec<Item> {
+    /// Raw hoard only. Biology never manufactures technological gear.
+    pub(super) fn apex_loot(
+        &self,
+        body: &Body,
+        _rng: &mut Rng,
+        _params: SectorParams,
+    ) -> Vec<Item> {
         let Some(info) = self.apex_of(body) else {
             return Vec::new();
         };
         let share = if info.rank == Rank::Major { 1.0 } else { 0.5 };
-        let mut drops: Vec<Item> = Material::ALL
-            .into_iter()
-            .map(|m| Item::Material(m, (t::APEX_MATERIAL * share).round()))
-            .collect();
-        let wanted = if self.loadout.skills.level(skills::Skill::Parry) == 0 {
-            Slot::Plating
-        } else if self.loadout.skills.level(skills::Skill::Dash) == 0 {
-            Slot::Engine
-        } else {
-            Slot::Cannon
-        };
-        let mut source = Source::of_creature(&body.genome, body.genes.threat * 1.25, params);
-        source.bias = 1.0;
-        source.affinity = [0.05; Slot::ALL.len()];
-        source.affinity[wanted.index()] = 40.0;
-        source.min_rarity = Rarity::Epic;
-        let mut token = upgrades::roll_part(rng, &source);
-        for _ in 0..16 {
-            if token.slot == wanted {
-                break;
-            }
-            token = upgrades::roll_part(rng, &source);
-        }
-        drops.push(Item::Part(token));
-        let mut source = Source::of_creature(&body.genome, body.genes.threat * 1.25, params);
-        source.bias = 1.0;
-        source.min_rarity = Rarity::Rare;
-        for _ in 0..2 {
-            drops.push(Item::Part(upgrades::roll_part(rng, &source)));
-        }
-        for _ in 0..2 {
-            drops.push(upgrades::roll_item(rng, &source));
-        }
-        drops
+        [
+            Material::Metal,
+            Material::Volatiles,
+            Material::Crystal,
+            Material::Biomass,
+        ]
+        .into_iter()
+        .map(|m| Item::Material(m, (t::APEX_MATERIAL * share).round()))
+        .collect()
     }
 }
 
@@ -1073,20 +1052,14 @@ mod tests {
             game.notices.iter().all(|n| !n.text.contains("extirpated")),
             "an apex is no species"
         );
-        let parts: Vec<_> = game
-            .pickups
-            .iter()
-            .filter_map(|p| match &p.item {
-                Item::Part(part) => Some(part),
-                _ => None,
-            })
-            .collect();
-        assert!(parts.len() >= 3);
-        let epic = parts
-            .iter()
-            .find(|p| p.rarity == Rarity::Epic)
-            .expect("an epic token");
-        assert_eq!(epic.slot, Slot::Plating, "parry is still locked");
+        assert!(game.pickups.iter().all(|p| matches!(
+            p.item,
+            Item::Material(
+                Material::Metal | Material::Volatiles | Material::Crystal | Material::Biomass,
+                _
+            ) | Item::Specimen(_)
+                | Item::Seed(_)
+        )));
         let metal: f32 = game
             .pickups
             .iter()
@@ -1117,27 +1090,20 @@ mod tests {
     }
 
     #[test]
-    fn the_token_follows_the_unlock_that_is_still_missing() {
+    fn apex_rewards_are_raw_even_after_the_ability_unlocks() {
         let id = find(SEED, Rank::Major);
         let mut game = visit(id);
         game.loadout.skills.raise(skills::Skill::Parry);
-        game.pickups.clear();
-        let body_id = the_apex(&game).id;
-        game.bodies
-            .iter_mut()
-            .find(|b| b.id == body_id)
-            .unwrap()
-            .health = 0.0;
-        game.step(DT, Input::default());
-        let epic = game
-            .pickups
-            .iter()
-            .find_map(|p| match &p.item {
-                Item::Part(part) if part.rarity == Rarity::Epic => Some(part.slot),
-                _ => None,
-            })
-            .expect("an epic");
-        assert_eq!(epic, Slot::Engine, "parry is owned, dash is next");
+        let body = the_apex(&game).clone();
+        let drops = game.apex_loot(&body, &mut Rng::new(1), game.params());
+        assert_eq!(drops.len(), 4);
+        assert!(drops.iter().all(|d| matches!(
+            d,
+            Item::Material(
+                Material::Metal | Material::Volatiles | Material::Crystal | Material::Biomass,
+                _
+            )
+        )));
     }
 
     #[test]

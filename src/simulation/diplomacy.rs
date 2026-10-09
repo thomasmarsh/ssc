@@ -428,7 +428,7 @@ impl Game {
 
     /// The seat (capital or outpost base) of a living civilization nearest the ship, within
     /// reach of a tithe.
-    fn seat_in_reach(&self) -> Option<Territory> {
+    pub(super) fn seat_in_reach(&self) -> Option<Territory> {
         let ship = self.player()?.position;
         self.bodies
             .iter()
@@ -1037,7 +1037,9 @@ mod tests {
         // The interact key does the same away from a pad.
         hold(&mut game, ship, t::TITHE_COOLDOWN + 0.1);
         let tithes = game.run.tithes;
-        game.interact();
+        assert_eq!(game.interact(), Some(interact::Verb::Contact));
+        game.bench_select(BenchAction::Tithe);
+        game.bench_confirm();
         assert_eq!(game.run.tithes, tithes + 1);
     }
 

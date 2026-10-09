@@ -15,6 +15,7 @@ pub enum Verb {
     Deploy,
     Build,
     Tithe,
+    Contact,
     Plant,
 }
 
@@ -42,6 +43,9 @@ impl Game {
             return Some(prompt(Verb::CloseBench, "CLOSE BENCH", None));
         }
         let pad = self.pad_hint();
+        let contact = self
+            .friendly_supplier()
+            .map(|_| prompt(Verb::Contact, "CONTACT - TRADE / EQUIPMENT", None));
         // A blocked pad verb waits behind a tithe that would work: the seat is the news.
         let tithe = self.tithe_hint().map(|hint| match hint.material {
             Some(kind) => Prompt {
@@ -110,7 +114,7 @@ impl Game {
                     .or(plant)
                     .or(Some(prompt(Verb::Land, "LAND", Some("MOVE CLOSER"))))
             }
-            PadHint::None => tithe.or(plant),
+            PadHint::None => contact.or(tithe).or(plant),
         }
     }
 
@@ -119,6 +123,10 @@ impl Game {
         let prompt = self.interact_prompt()?;
         match prompt.verb {
             Verb::Bench | Verb::CloseBench => self.bench_toggle(),
+            Verb::Contact => {
+                self.pad.contact = self.friendly_supplier().map(|c| c.id);
+                self.bench_toggle();
+            }
             Verb::Land | Verb::Deploy | Verb::Build => self.pad_action(),
             Verb::Tithe => {
                 let _ = self.tithe();

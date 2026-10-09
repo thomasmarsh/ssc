@@ -143,6 +143,8 @@ pub struct PadState {
     pub insured: bool,
     #[serde(skip)]
     pub bench: Option<Bench>,
+    #[serde(skip)]
+    pub contact: Option<u64>,
     /// Seconds landed and unseen (zero while cover is broken).
     #[serde(skip)]
     hidden_for: f32,
@@ -173,6 +175,7 @@ impl Default for PadState {
             auto_repair: true,
             insured: true,
             bench: None,
+            contact: None,
             hidden_for: 0.0,
             cover_broken: 0.0,
             next_order: 0,
@@ -3010,7 +3013,7 @@ mod tests {
         for i in 0..12 {
             game.pad.bench = Some(Bench {
                 tab: BenchTab::Parts,
-                cursor: 3 + game.loadout.parts.len() * 2 + i % 3,
+                cursor: 6 + game.loadout.parts.len() * 2 + i % 3,
             });
             if i % 4 == 3 {
                 game.bench_alt();

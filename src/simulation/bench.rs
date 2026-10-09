@@ -6,7 +6,7 @@ use super::pads::{
     REPAIR_METAL, REPAIR_VOLATILES, STASH_STEP, level_price, reforge_price, upgrade_price,
 };
 use super::skills::{Skill, SkillTab};
-use super::upgrades::Rarity;
+use super::upgrades::{Rarity, Slot};
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +34,8 @@ pub struct Bench {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BenchAction {
     Repair,
+    Outfit(Slot),
+    Tithe,
     Supply(Material),
     Reforge(usize),
     Upgrade(usize),
@@ -62,10 +64,11 @@ pub struct BenchPanel {
 
 impl Game {
     pub fn bench_toggle(&mut self) {
-        if self.pad.landed.is_none() {
+        if self.pad.landed.is_none() && self.pad.contact.is_none() {
             return;
         }
         self.pad.bench = if self.pad.bench.is_some() {
+            self.pad.contact = None;
             None
         } else {
             Some(Bench {
@@ -75,7 +78,12 @@ impl Game {
         };
     }
     pub fn bench_open(&self) -> bool {
-        self.pad.bench.is_some() && self.pad.landed.is_some()
+        self.pad.bench.is_some()
+            && (self.pad.landed.is_some()
+                || self
+                    .pad
+                    .contact
+                    .is_some_and(|id| self.friendly_supplier().is_some_and(|c| c.id == id)))
     }
     pub fn bench_tab(&mut self, n: usize) {
         if let (Some(bench), Some(&tab)) = (self.pad.bench.as_mut(), BenchTab::ALL.get(n))
@@ -102,6 +110,8 @@ impl Game {
                         .flat_map(|i| [BenchAction::Reforge(i), BenchAction::Upgrade(i)]),
                 )
                 .chain([Material::Fuel, Material::Water].map(BenchAction::Supply))
+                .chain([Slot::Plating, Slot::Engine, Slot::Core].map(BenchAction::Outfit))
+                .chain(self.pad.contact.map(|_| BenchAction::Tithe))
                 .chain(Material::ALL.map(BenchAction::Stash))
                 .collect(),
             BenchTab::Weapons => Profile::ALL.map(BenchAction::Weapon).to_vec(),
@@ -162,6 +172,11 @@ impl Game {
         let before = super::bench_feedback::Snapshot::capture(self);
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
+            Some(BenchAction::Outfit(slot)) => self.buy_outfit(slot),
+            Some(BenchAction::Tithe) => match self.tithe() {
+                Ok(()) => self.bench_done("TITHE SETTLED".into(), Rarity::Common),
+                Err(_) => self.bench_failed("TITHE NEEDS STOCK OR COOLDOWN".into()),
+            },
             Some(BenchAction::Supply(m)) => {
                 if self
                     .cargo
@@ -181,11 +196,7 @@ impl Game {
                 if let Some(i) = self.bench_profiles().iter().position(|&owned| owned == p) {
                     self.bench_level(i);
                 } else {
-                    self.bench_failed(if p == Profile::Stock {
-                        "STOCK HAS NO LEVEL PURCHASE".into()
-                    } else {
-                        format!("{} NEEDS A PART OR CHARGE FOUND IN FLIGHT", p.label())
-                    });
+                    self.buy_profile(p);
                 }
             }
             Some(BenchAction::Skill(s)) => {
@@ -252,6 +263,22 @@ impl Game {
                 if !row.ok {
                     row.state = "NEEDS INPUTS OR RESERVE SPACE".into();
                 }
+            }
+            BenchAction::Outfit(slot) => {
+                row.group = "STARTER SUPPLIER";
+                row.text = format!("BUY RARE {}", slot.label().to_uppercase());
+                row.detail = "HOME workshop or a friendly seat supplies the prerequisite. The matching skill is a separate purchase; ship hold pays.".into();
+                row.costs = super::procurement::outfit_price();
+                row.ok = self.procurement_available() && self.outfit_needed(slot);
+                if !row.ok {
+                    row.state = "NEEDS SUPPLIER OR ALREADY FITTED".into();
+                }
+            }
+            BenchAction::Tithe => {
+                row.group = "CONTACT";
+                row.text = "TITHE / FRIENDLY TRADE".into();
+                row.detail =
+                    "Offer 20 goods. Existing relation and granary trade terms apply.".into();
             }
             BenchAction::Repair => {
                 row.group = "REPAIR";
@@ -342,9 +369,16 @@ impl Game {
                     None => "Free stock fire; no ammo or level purchases.".into(),
                 };
                 if level == 0 {
-                    row.ok = false;
-                    row.state = "NOT OWNED".into();
-                    row.detail += " Find its part or charge in flight before buying levels.";
+                    row.costs = super::procurement::outfit_price();
+                    row.ok = self.procurement_available();
+                    row.state = if row.ok {
+                        "BUY PROFILE"
+                    } else {
+                        "NEEDS SUPPLIER"
+                    }
+                    .into();
+                    row.detail +=
+                        " Purchase at HOME workshop or a friendly seat; no combat required.";
                 } else if let Some(price) = level_price(p, level).filter(|_| level < p.max_level())
                 {
                     row.costs = price;
@@ -684,20 +718,21 @@ mod tests {
         assert_eq!(selected(&game).state, "FULL");
     }
     #[test]
-    fn all_weapon_rows_preserve_owned_leveling_and_reject_unowned_stock_and_caps() {
+    fn all_weapon_rows_purchase_unowned_and_preserve_owned_leveling_and_caps() {
         let mut game = setup();
         funds(&mut game);
         for p in Profile::ALL {
             game.bench_select(BenchAction::Weapon(p));
             let before = game.cargo;
             game.bench_confirm();
-            assert_eq!(game.cargo, before);
             if p == Profile::Stock {
+                assert_eq!(game.cargo, before);
                 assert_eq!(selected(&game).state, "MAX LEVEL");
                 continue;
             }
-            assert_eq!(selected(&game).state, "NOT OWNED");
-            game.loadout.arsenal.acquire(p, 1);
+            assert_eq!(game.loadout.arsenal.level(p), 1);
+            assert_eq!(game.cargo.metal, before.metal - 30.0);
+            assert_eq!(game.cargo.crystal, before.crystal - 10.0);
             if p.max_level() == 1 {
                 assert_eq!(selected(&game).state, "MAX LEVEL");
                 continue;

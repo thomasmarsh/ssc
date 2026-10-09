@@ -7,8 +7,8 @@
 use super::upgrades::{self, Install, Slot, Source};
 use super::*;
 use crate::territory::CivRole;
+use crate::world::BaseKind;
 use crate::world::hash2;
-use crate::world::{BaseKind, RockKind};
 
 /// Separates loot from every other stream.
 pub(super) const LOOT_SALT: u64 = 0x100D_5A1D_0000_0007;
@@ -260,6 +260,19 @@ impl Game {
         }
     }
 
+    fn creature_reward(&self, body: &Body, rng: &mut Rng, source: &Source) -> Item {
+        if self.civ_membership(body).is_some() {
+            return upgrades::roll_item(rng, source);
+        }
+        let material = match rng.next_u64() % 4 {
+            0 => Material::Metal,
+            1 => Material::Volatiles,
+            2 => Material::Crystal,
+            _ => Material::Biomass,
+        };
+        Item::Material(material, 3.0 + body.genes.threat.sqrt().min(9.0))
+    }
+
     /// Rolls and scatters whatever a destroyed body leaves behind.
     pub(super) fn drop_loot(&mut self, body: &Body) {
         let mut rng = self.loot_rng(body);
@@ -270,7 +283,7 @@ impl Game {
                 let genome = &body.genome;
                 // Better bounties drop more; a jointed creature shares one drop's worth among
                 // its parts, and creatures bred by bases are poor farming.
-                if self.is_elder(body) {
+                if self.is_elder(body) && self.civ_membership(body).is_some() {
                     // A boss always pays: two parts (the first epic, the second at least
                     // rare) and two lucky rolls, graded a notch above the place, for any
                     // elder that was generated (raised ones are not farmable bosses).
@@ -285,14 +298,14 @@ impl Game {
                         drops.push(Item::Part(upgrades::roll_part(&mut rng, &source)));
                     }
                     for _ in 0..2 {
-                        drops.push(upgrades::roll_item(&mut rng, &source));
+                        drops.push(self.creature_reward(body, &mut rng, &source));
                     }
                 }
                 drops.extend(self.apex_loot(body, &mut rng, params));
                 let bred = if body.origin.is_some() { 1.0 } else { 0.35 };
                 if rng.chance(creature_drop_chance(genome, bred)) {
                     let source = Source::of_creature(genome, body.genes.threat, params);
-                    drops.push(upgrades::roll_item(&mut rng, &source));
+                    drops.push(self.creature_reward(body, &mut rng, &source));
                 }
                 // A carrier of a rare power is worth a little more: one extra, slightly
                 // luckier roll (drawn last, so every other drop of this body is unchanged).
@@ -300,7 +313,7 @@ impl Game {
                 {
                     let mut source = Source::of_creature(genome, body.genes.threat, params);
                     source.bias = crate::power::EXTRA_DROP_LUCK;
-                    drops.push(upgrades::roll_item(&mut rng, &source));
+                    drops.push(self.creature_reward(body, &mut rng, &source));
                 }
                 // A special carrier's first kill may leave a specimen of its organ (drawn after
                 // everything else, so no other drop of this body moves).
@@ -320,46 +333,9 @@ impl Game {
                 // so no other drop of this body moves).
                 drops.extend(self.gut_seed(body, &mut rng));
             }
-            BodyKind::Asteroid if !body.pinned && body.radius >= 30.0 => {
-                let grade = world::threat(params.depth);
-                let mut source = Source::plain(grade, params);
-                match body.rock {
-                    // Wall segments are pinned and never get here; they leave nothing.
-                    RockKind::Wall => {}
-                    RockKind::Plain | RockKind::Husk | RockKind::Planetoid => {
-                        if rng.chance(tuning::SALVAGE_CHANCE) {
-                            drops.push(upgrades::roll_salvage(&mut rng, &source));
-                        }
-                    }
-                    // Ice melts into shield charge.
-                    RockKind::Ice => {
-                        if rng.chance(tuning::ICE_CHANCE) {
-                            drops.push(Item::Recharge(25.0 + 15.0 * grade.sqrt()));
-                            drops.push(Item::Material(Material::Volatiles, tuning::ICE_VOLATILES));
-                        }
-                    }
-                    // Ore is mostly scrap, now and then a salvaged part of heavy gear.
-                    RockKind::Ore => {
-                        if rng.chance(tuning::ORE_CHANCE) {
-                            if rng.chance(0.2) {
-                                source.affinity[Slot::Plating.index()] += 3.0;
-                                source.affinity[Slot::Engine.index()] += 2.0;
-                                drops.push(Item::Part(upgrades::roll_part(&mut rng, &source)));
-                            } else {
-                                let amount =
-                                    ((tuning::ORE_SCRAP * grade) as u32 / 5 * 5).max(5) as f32;
-                                drops.push(Item::Material(Material::Metal, amount));
-                            }
-                        }
-                    }
-                    // Crystal holds charge: a surge is often found in the shards.
-                    RockKind::Crystal => {
-                        if rng.chance(tuning::CRYSTAL_CHANCE) {
-                            drops.push(Item::Surge(upgrades::roll_surge(&mut rng, &source)));
-                        }
-                    }
-                }
-            }
+            // Geological rocks pay only their finite remaining lode through shattering/mining.
+            // They never contain technological charges or bonus material beyond that budget.
+            BodyKind::Asteroid => {}
             BodyKind::Base => {
                 // A civilization's seat pays out by how well it was defended (`seat_loot`),
                 // shaped by what the station was. A wall turret leaves scrap metal and now and
@@ -1030,7 +1006,6 @@ mod tests {
 mod supply_tests {
     use super::*;
     use crate::genome::Genome;
-    use crate::territory::CivRole;
     use crate::world::*;
 
     #[test]
@@ -1080,63 +1055,36 @@ mod supply_tests {
         }
     }
 
-    /// Expected permanent parts per sector if everything in it were killed: wild bases are
-    /// gone (they paid about 1.4 to 1.7 a sector, more than every creature together), so the
-    /// supply is the creatures (the hard ones above all), civilization seats and elders,
-    /// and apex elders. Before the change it was 2.8 at rings 3 to 5, 2.7 at 6 to 9, 2.5 at
-    /// 10 to 14 and 2.3 beyond; now about 2.2, 1.7, 1.3 and 1.1.
     #[test]
-    fn the_part_supply_is_lean_but_reachable_and_comes_from_what_is_hard() {
-        for (lo, hi, min, max) in [(3, 5, 1.6, 3.0), (6, 9, 1.2, 2.4), (10, 14, 0.9, 2.0)] {
-            let (mut sectors, mut total, mut creatures, mut hard) = (0.0, 0.0, 0.0, 0.0);
-            for seed in [1u64, 42, 7, 99] {
-                for x in -hi..=hi {
-                    for y in -hi..=hi {
-                        let id = SectorId { x, y };
-                        let ring = crate::range::ring(id);
-                        if ring < lo as u32 || ring > hi as u32 {
-                            continue;
-                        }
-                        sectors += 1.0;
-                        if crate::apex::rank(seed, id).is_some() {
-                            total += 3.66;
-                        }
-                        let tier = territory(seed, id).map_or(0, |t| t.fort_tier());
-                        for s in generate(seed, id) {
-                            assert!(s.civ.is_some() || s.base_kind.is_none(), "a wild base");
-                            if let Some(sp) = s.species {
-                                if s.civ.is_some_and(|c| c.role == CivRole::Elder) {
-                                    total += 2.66 + f32::from(tier >= tuning::ELDER_BONUS_TIER);
-                                    continue;
-                                }
-                                let g = sp.genome;
-                                // 0.234 of an ordinary roll is a part.
-                                let c = creature_drop_chance(&g, 1.0) * 0.234;
-                                creatures += c;
-                                total += c;
-                                if g.hull + g.shield >= 100.0 {
-                                    hard += c;
-                                }
-                            }
-                            if s.kind == BodyKind::Base && s.fort.is_none() {
-                                let capital = s.civ.is_some_and(|c| c.role == CivRole::Capital);
-                                let (parts, rolls, _) =
-                                    seat_loot(s.base_kind.unwrap(), capital, tier);
-                                total += parts as f32 + rolls as f32 * 0.33;
-                            }
-                        }
-                    }
-                }
+    fn wild_carriers_and_geology_never_supply_technology() {
+        let mut game = Game::new(42);
+        for x in 1..=12 {
+            game.teleport((SectorId { x, y: 4 }).center());
+            game.step(1.0 / 60.0, Input::default());
+            let bodies: Vec<_> = game
+                .bodies
+                .iter()
+                .filter(|b| {
+                    (b.kind == BodyKind::Creature && game.civ_membership(b).is_none())
+                        || b.kind == BodyKind::Asteroid
+                })
+                .cloned()
+                .collect();
+            for body in bodies {
+                game.pickups.clear();
+                game.drop_loot(&body);
+                assert!(game.pickups.iter().all(|p| matches!(
+                    p.item,
+                    Item::Material(
+                        Material::Metal
+                            | Material::Volatiles
+                            | Material::Crystal
+                            | Material::Biomass,
+                        _
+                    ) | Item::Specimen(_)
+                        | Item::Seed(_)
+                )));
             }
-            let per = total / sectors;
-            assert!(
-                (min..=max).contains(&per),
-                "rings {lo}-{hi}: {per} parts a sector"
-            );
-            assert!(
-                hard > 0.35 * creatures,
-                "rings {lo}-{hi}: the hard drop too little"
-            );
         }
     }
 }

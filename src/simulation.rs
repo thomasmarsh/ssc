@@ -50,6 +50,7 @@ mod parasite;
 mod parry;
 mod ping;
 mod powers;
+mod procurement;
 mod realms;
 mod regions;
 mod regrow;

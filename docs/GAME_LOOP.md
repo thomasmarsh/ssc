@@ -2,7 +2,7 @@
 
 Design direction recorded 2026-10-09. This is the target game loop and implementation plan, not a list of built features. A portable [visual overview](GAME_LOOP.html) illustrates the loop and milestones. `TODO:` means unbuilt. Numbers, recipe names, and pacing targets below are proposals to test. [ROADMAP.md](ROADMAP.md) tracks the gap, [FLOW.md](FLOW.md) owns interaction and readability, [WORKSTREAMS.md](WORKSTREAMS.md) maps the work, and [SEED.md](../SEED.md) holds the next slices.
 
-This direction supersedes the older three-resource economy, wildlife technology drops, combat-only trophy gates, universal raw-only bench prices, and a fixed weapon-power ceiling. Slices A resources/services and six HUD counters are built; B/C remain queued. [UNIVERSE.md](UNIVERSE.md), [BENCH.md](BENCH.md), and [PERSISTENCE.md](PERSISTENCE.md) describe built contracts.
+This direction supersedes the older three-resource economy, wildlife technology drops, combat-only trophy gates, universal raw-only bench prices, and a fixed weapon-power ceiling. Slices A resources/services and B procurement/provenance are built; C remains queued. [UNIVERSE.md](UNIVERSE.md), [BENCH.md](BENCH.md), and [PERSISTENCE.md](PERSISTENCE.md) describe built contracts.
 
 ## 1. The intended loop
 
@@ -267,3 +267,5 @@ Use meaningful headless scenario tests for resource conservation, capture limits
 The principal risks are early gear starvation after removing wildlife tech, peaceful play hitting a hidden combat gate, production becoming waiting, logistics turning into invisible teleportation, and deep-space grade getting clamped away again. The slice gates address these before the network and settlement grow.
 
 Resource slice A: ship fuel cap 120 and water cap 30 are independent of cargo upgrades. Pad services buy 30 fuel for 12 volatiles + 3 metal, or 10 water for 5 metal; reject overflow before payment. Powered weapons/boosts and rapid shield repair spend shared fuel; stock fire/flight and ordinary shield recharge stay free. Organ upkeep uses biomass and first grafts use crystal + fuel. All six carried goods lose 25% on death; pad stocks survive. Save format 3 refuses incompatible older formats. Crops still grow without water; biological hull repair remains transitional until support research lands.
+
+Frontier procurement slice B: HOME workshop and friendly-seat CONTACT sell previously unowned profiles and Rare Plating/Engine/Core support for 30 metal + 10 crystal. Support purchase refuses before payment if stronger fitted parts prevent installation. Skill purchases remain separate. Remote player pads do not become starter equipment suppliers. Wild organisms/carriers/apex reward only raw goods, seeds and specimens; geological rocks contain no technological charge and pay only finite lode through mining/shattering. Engineered civilization seats retain equipment salvage. Friendly contact uses the existing E/controller bench route and includes tithe/trade.

@@ -123,7 +123,10 @@ impl Snapshot {
                     )
                 }
             }
-            BenchAction::Stash(_) | BenchAction::Supply(_) => receipt.text.clone(),
+            BenchAction::Stash(_)
+            | BenchAction::Supply(_)
+            | BenchAction::Outfit(_)
+            | BenchAction::Tithe => receipt.text.clone(),
         };
         let spent = Material::ALL
             .into_iter()
@@ -491,7 +494,7 @@ mod tests {
         }
     }
     #[test]
-    fn weapon_receipt_uses_actual_levels_and_ammo_then_unowned_refuses() {
+    fn weapon_receipt_uses_actual_levels_and_ammo_then_unowned_purchase() {
         let mut game = setup();
         game.loadout.arsenal.acquire(arsenal::Profile::Spread, 1);
         game.bench_select(BenchAction::Weapon(arsenal::Profile::Spread));
@@ -501,8 +504,9 @@ mod tests {
         assert!(result(&game).contains("Ammo cost 0.45 -> 0.54 FUEL per volley"));
         game.bench_select(BenchAction::Weapon(arsenal::Profile::Missiles));
         game.bench_confirm();
-        assert!(!game.bench_feedback.as_ref().unwrap().success);
-        assert!(!result(&game).contains("Ammo"));
+        assert!(game.bench_feedback.as_ref().unwrap().success);
+        assert_eq!(game.loadout.arsenal.level(arsenal::Profile::Missiles), 1);
+        assert!(result(&game).contains("LEVEL 0 -> 1"));
     }
     #[test]
     fn replacement_removal_and_free_regraft_keep_ownership_and_report_slots() {
