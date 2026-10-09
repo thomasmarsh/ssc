@@ -15,6 +15,7 @@
 use crate::anatomy::{ANATOMY_SALT, AnimalGenome, AnimalSpecimen};
 use crate::bodyplan;
 use crate::builder::Builder;
+use crate::development::Appearance;
 use crate::hosted::Hosted;
 use crate::power::{self, POWER_GENES, Power, PowerParams};
 use crate::world::{Rng, SectorParams, hash2};
@@ -261,6 +262,7 @@ genome! {
     // Power parameters join the bounded tail in `genes()`. Other structured sections
     // stay outside flat genes and only draw when present.
     nested {
+        appearance: Appearance = Appearance::default();
         power_params: [PowerParams; 22] = [PowerParams::DEFAULT; 22];
         // An optional animal body plan (see `anatomy` and `bodyplan`): the archetype genome
         // and its plan seed. `None` for every creature that exists in the wild today.
@@ -471,6 +473,7 @@ impl Genome {
         if let Some(spec) = &mut self.anatomy {
             spec.genome = spec.genome.limited();
         }
+        self.appearance = self.appearance.limited();
         self.hosted = self.hosted.map(Hosted::limited);
         self.builder = self.builder.map(Builder::limited);
         self
@@ -705,6 +708,7 @@ impl Genome {
             let mut own = Rng::new(rng.next_u64() ^ ANATOMY_SALT);
             spec.genome = spec.genome.mutate(&mut own);
         }
+        g.appearance = g.appearance.mutate(rng);
         let mut g = g.limited();
         g.lose = g.lose.max(g.sight);
         g.limited()
@@ -804,6 +808,7 @@ impl Genome {
         // from the body-plan parent, and recombines with the other parent's only when both
         // have one.
         child.anatomy = body.anatomy;
+        child.appearance = Appearance::crossover(a.appearance, b.appearance, rng);
         // Host slots travel whole with the body (a descendant is as big a host as its body).
         child.hosted = body.hosted;
         // So does a build habit, whole from the body-plan parent.

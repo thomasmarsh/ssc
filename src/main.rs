@@ -1144,13 +1144,18 @@ fn smoke_run(
                 | "hullworm"
                 | "slinger"
                 | "oozer"
+                | "longslinger"
+                | "softslinger"
                 | "multijammer"
                 | "multioozer"
         ) {
             // The jammers only work on a ship that is not in grace.
             session.game.player_invulnerability = 0.0;
         }
-        if matches!(name.as_str(), "multijammer" | "multioozer") {
+        if matches!(
+            name.as_str(),
+            "multijammer" | "multioozer" | "longslinger" | "softslinger"
+        ) {
             // A bounded authored encounter: load first, then remove wild threats so the
             // warning capture cannot lose the observer or relocate on death recovery.
             session.game.player_invulnerability = 1e9;
@@ -1214,7 +1219,15 @@ fn smoke_run(
         let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
         let count = if matches!(
             name.as_str(),
-            "weaver" | "slinger" | "runekeeper" | "seamer" | "oozer" | "multijammer" | "multioozer"
+            "weaver"
+                | "slinger"
+                | "runekeeper"
+                | "seamer"
+                | "oozer"
+                | "multijammer"
+                | "multioozer"
+                | "longslinger"
+                | "softslinger"
         ) {
             1
         } else {
@@ -1223,8 +1236,10 @@ fn smoke_run(
         for k in 0..count {
             let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (near + 90.0 * k as f32);
             let id = session.game.place_creature(&Species::of(genome), at);
-            if matches!(name.as_str(), "multijammer" | "multioozer")
-                && let Some(body) = session.game.bodies.iter_mut().find(|b| b.id == id)
+            if matches!(
+                name.as_str(),
+                "multijammer" | "multioozer" | "longslinger" | "softslinger"
+            ) && let Some(body) = session.game.bodies.iter_mut().find(|b| b.id == id)
             {
                 body.pinned = true;
                 body.alert = true;

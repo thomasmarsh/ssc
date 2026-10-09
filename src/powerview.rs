@@ -138,13 +138,15 @@ pub fn draw_ooze(gizmos: &mut Gizmos, game: &Game, body: &Body, color: Color) {
     // A well-fed one is deeper in colour.
     let rich = tint.mix(&Color::srgb(0.9, 0.95, 0.4), 0.5 * view.fed);
     let held = if view.held { 1.0 } else { 0.0 };
-    gizmos.linestrip_2d(skin(1.0), color.mix(&rich, 0.5).with_alpha(0.9));
-    gizmos.linestrip_2d(
-        skin(0.9),
-        rich.with_alpha(0.22 + 0.3 * held + 0.2 * view.fed),
-    );
-    if view.held {
-        gizmos.linestrip_2d(skin(0.78), rich.with_alpha(0.5));
+    if body.genome.appearance.surface == ssc::development::Surface::Soft {
+        gizmos.linestrip_2d(skin(1.0), color.mix(&rich, 0.5).with_alpha(0.9));
+        gizmos.linestrip_2d(
+            skin(0.9),
+            rich.with_alpha(0.22 + 0.3 * held + 0.2 * view.fed),
+        );
+        if view.held {
+            gizmos.linestrip_2d(skin(0.78), rich.with_alpha(0.5));
+        }
     }
     // Swallowed rocks, browning and shrinking as they digest.
     for &(angle, size, digested) in view.inside.iter().filter(|i| i.1 > 0.0) {
@@ -200,18 +202,19 @@ pub fn draw_ooze(gizmos: &mut Gizmos, game: &Game, body: &Body, color: Color) {
 
 /// The tells of one body's power: the halo, the mark, and any warning in progress.
 pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
-    let Some(carried) = body.genome.live_power() else {
-        return;
-    };
+    let identity = body.genome.appearance.identity;
     let disguised = game.disguise(body).is_some();
     if body.follower {
         return;
     }
     let (p, r, time) = (body.position, body.radius, game.time);
-    let tint = tinted(carried.power);
     let view = game.power_view(body);
     let shimmer = 0.5 + 0.5 * (time * 5.0 + body.id as f32 * 1.7).sin();
-    if !disguised && carried.power != Power::Engulf {
+    if !disguised
+        && body.genome.appearance.surface != ssc::development::Surface::Soft
+        && let Some(power) = identity
+    {
+        let tint = tinted(power);
         // The halo: a thin ring that breathes, in the power's colour.
         gizmos
             .circle_2d(
@@ -273,7 +276,28 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
     if view.glare > 0.0 {
         eyes(gizmos, p, r, time, view.glare, tinted(Power::Glare));
     }
-    for carried in body.genome.live_powers() {
+    if body.genome.appearance.surface == ssc::development::Surface::Motes
+        && !Power::Cloud.active(&body.genome)
+        && identity != Some(Power::Cloud)
+        && !disguised
+    {
+        draw_mark(
+            gizmos,
+            game,
+            body,
+            ssc::power::Carried {
+                power: Power::Cloud,
+                strength: 0.0,
+            },
+        );
+    }
+    let retained = identity
+        .filter(|p| !p.active(&body.genome))
+        .map(|power| ssc::power::Carried {
+            power,
+            strength: 0.0,
+        });
+    for carried in body.genome.live_powers().chain(retained) {
         // A quiet mimic keeps its identity hidden, but a second capability never hides
         // its counterplay warning behind that disguise.
         let warning = match carried.power {
@@ -301,7 +325,13 @@ fn draw_mark(gizmos: &mut Gizmos, game: &Game, body: &Body, carried: ssc::power:
     let view = game.power_view(body);
     let shimmer = 0.5 + 0.5 * (time * 5.0 + body.id as f32 * 1.7).sin();
     let tint = tinted(carried.power);
+    let ports = body.genome.power_ports();
+    let reach = body.genome.appearance.organ_reach;
     match carried.power {
+        Power::Engulf if body.genome.appearance.surface != ssc::development::Surface::Soft => {
+            // A digestive organ and its reaching warning on the selected carrier surface.
+            draw_ooze(gizmos, game, body, tint);
+        }
         Power::Rift => {
             let forward = Vec2::from_angle(body.angle);
             gizmos.line_2d(p - forward * 30.0, p + forward * 40.0, tint);
@@ -316,11 +346,11 @@ fn draw_mark(gizmos: &mut Gizmos, game: &Game, body: &Body, carried: ssc::power:
         }
         Power::Sling => {
             dotted_circle(gizmos, p, r + 18.0, tint.with_alpha(0.45), 16, time * 0.9);
-            for k in 0..4 {
-                let angle = body.angle + k as f32 * TAU / 4.0 + 0.4;
+            for k in 0..ports {
+                let angle = body.angle + k as f32 * TAU / ports as f32 + 0.4;
                 let radial = Vec2::from_angle(angle);
-                let knee = p + radial * (r + 15.0);
-                let tip = knee + Vec2::from_angle(angle + 0.8) * 18.0;
+                let knee = p + radial * (r + 15.0 * reach);
+                let tip = knee + Vec2::from_angle(angle + 0.8) * (18.0 * reach);
                 gizmos.line_2d(p + radial * r, knee, tint);
                 gizmos.line_2d(knee, tip, tint);
             }
@@ -348,13 +378,13 @@ fn draw_mark(gizmos: &mut Gizmos, game: &Game, body: &Body, carried: ssc::power:
         }
         Power::Weave => {
             // Six spinnerets make the builder readable even before it has found a rock.
-            let mut tips = Vec::with_capacity(7);
-            for k in 0..6 {
-                let angle = body.angle + k as f32 * TAU / 6.0;
+            let mut tips = Vec::with_capacity(ports + 1);
+            for k in 0..ports {
+                let angle = body.angle + k as f32 * TAU / ports as f32;
                 let radial = Vec2::from_angle(angle);
                 let bend = Vec2::from_angle(angle + 0.3);
-                let knee = p + radial * (r * 1.5 + 6.0);
-                let tip = p + bend * (r * 2.0 + 12.0);
+                let knee = p + radial * (r * 1.5 + 6.0 * reach);
+                let tip = p + bend * (r * 2.0 + 12.0 * reach);
                 gizmos.line_2d(p + radial * r * 0.7, knee, tint.with_alpha(0.8));
                 gizmos.line_2d(knee, tip, tint.with_alpha(0.8));
                 gizmos.circle_2d(tip, 2.0, tint).resolution(6);

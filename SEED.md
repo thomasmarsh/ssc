@@ -55,6 +55,8 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
+- Genetic carrier development (generator version 31): appearance/surface and external-organ reach inherit independently of powers; body grammar develops functional organs without replacing carriers. Authored styles preserved; eight-port and soft limbless Slinger hooks. Wild diversity/multi-power rates remain stage 3. See `docs/BESTIARY.md`.
+
 - Independent power modules (generator version 30): power-local cadence/reach/hold, module inheritance, independent jam warnings and digestive growth, all-capability rendering; authored multi-carrier hooks. Ordinary draw golden and HOME preserved. See `docs/BESTIARY.md`.
 
 - Saves and recovery: last ten autosaves plus independent explicit SAVE GAME, latest-valid CONTINUE / NEW GAME title menu; lives revive locally and exhaustion returns to the last landed pad (HOME fallback) with exactly one life, preserving progress. No death-triggered game over or bequest. See `docs/PERSISTENCE.md`.

@@ -115,6 +115,8 @@ pub struct Decor {
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct BodyPlan {
+    /// Typed functional organs added by genome development.
+    pub organs: Vec<crate::development::PowerOrgan>,
     pub nodes: Vec<Node>,
     pub decor: Vec<Decor>,
     /// The iteration depth actually used (lowered if the plan did not fit `BODY_PARTS`).
@@ -290,6 +292,7 @@ pub fn express(spec: &AnimalSpecimen, head_radius: f32) -> Option<BodyPlan> {
     let room = MAX_DECOR.saturating_sub(sockets.len() + others.len());
     let dressing = keep(dressing, room);
     let mut body = BodyPlan {
+        organs: Vec::new(),
         nodes,
         decor: Vec::new(),
         depth,

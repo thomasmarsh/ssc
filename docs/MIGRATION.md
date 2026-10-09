@@ -65,7 +65,7 @@ Purchase snapshots and one-time fitted-part guidance live in `simulation/bench_f
 These supplement CLAUDE.md.
 
 - Never reorder RNG draws on an existing stream. New generators use their own salted streams; new genes are appended in the `tail { }` block of the `genome!` macro with one extra final draw in `Genome::sample` (see [BESTIARY.md](BESTIARY.md) section 2). Sampling and awakening of a power only happen when `Power::built` is true. Structured sections that are not flat genes (the optional grammar body, `nested { }` in `genome!`, see [PROCGEN.md](PROCGEN.md)) stay out of `genes()`, are never drawn by `Genome::sample`, and only draw (from a private salted stream, one extra draw) in `mutate` and `crossover` when present; a test pins every existing draw count.
-- `GENERATOR_VERSION` (`src/sectormap.rs`, currently 28) changes only when generated content, spawn indices or RNG draw counts change; the sector map and DISCOVERY docs record it per slice.
+- `GENERATOR_VERSION` (`src/sectormap.rs`, currently 31) changes only when generated content, spawn indices or RNG draw counts change; the sector map and DISCOVERY docs record it per slice.
 - Population caps: `SECTOR_BODY_BUDGET` 220 creatures per sector (`src/world.rs`), `MAX_BODIES` 1500 loaded (`src/simulation.rs`), 12 per lineage within 1300 units and `LINEAGE_WORLD_CAP` 60 (`src/simulation/growth.rs`, see UNIVERSE.md "Growth and reproduction").
 - Enemy kinds are genome expressions, not enum branches. Nothing wild learns. HOME is pinned by a golden test in `src/world.rs`.
 - Hooks and dev tools never change a normal run: `SSC_*` hooks need `SSC_SMOKE_FRAMES`, and `SSC_DEV=1` gates the developer toggles.
@@ -92,3 +92,5 @@ These supplement CLAUDE.md.
 - Veil and Skip node organs are useless until the player owns dash.
 - Lode and egg echoes mark generated positions but free rocks drift. Calm civilizations start at "ignores you", so they no longer raid a quiet ship (intentional); wary civilizations have no visible "watching" behaviour besides a banner and slower learning.
 - Low-hull heartbeat volume and tempo (52 sounds now) need a human ear.
+
+Creature carrier identity and surfaces live in `development::Appearance`, independently of power strength. `Genome::developed_body` adds typed functional organs to the existing body grammar; explicit anatomy spawn consumes it. Legacy chains keep their exact geometry. Appearance uses a nonconsuming salted birth-stream fork, so ordinary RNG draws remain pinned. Generator 31; save version unchanged. Stage 3 wild carrier/multi-power sampling remains open.

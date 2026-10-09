@@ -128,8 +128,8 @@ impl Game {
     pub(super) fn spawn_chain(&mut self, head: Body) -> u64 {
         let genome = head.genome;
         let back = -Vec2::from_angle(head.wander);
-        if let Some(spec) = &genome.anatomy
-            && let Some(plan) = bodyplan::express(spec, head.radius)
+        if genome.anatomy.is_some()
+            && let Some(plan) = genome.developed_body(head.radius)
         {
             return self.spawn_plan_chain(head, &plan);
         }
@@ -1035,7 +1035,13 @@ mod tests {
                     let rb = rest_length(body(&b, py), by, y.rest);
                     assert!((ra - rb).abs() < 1e-3, "{name} part {n} joint");
                 }
-                assert!(!y.mount && y.drive == 1.0);
+                // Development can supply the Hullpick's otherwise implicit gun mount;
+                // topology and wave drive remain identical to its legacy carrier.
+                assert_eq!(
+                    y.mount,
+                    n == 0 && crate::power::Power::Bypass.active(&by.genome)
+                );
+                assert_eq!(y.drive, 1.0);
             }
             // Armed parts follow the same hardpoint rule.
             for (x, y) in pa.parts.iter().zip(&pb.parts) {

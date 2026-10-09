@@ -143,3 +143,7 @@ A herd is one flock of 100 to 300 Bogey-like members (flat array, not bodies), i
 - `SSC_SPECIMEN=multijammer SSC_SPECIMEN_TELL=1 SSC_TELEPORT=36000,0`: check that blue EMP and pink confusion rings are both readable, glare eyes remain visible, and there is one identity halo. The source can charge both rings at once; leaving one local reach avoids that effect.
 - `SSC_SPECIMEN=multioozer SSC_SPECIMEN_NEAR=200 SSC_TELEPORT=36000,0 SSC_STEPS=2`: check that the soft blob retains its identity while its Repel breathing warning and Song mouth marks remain visible.
 - In play, distinguish stacked capabilities without losing the fixed warning windows. Knobs: each module's `PowerParams`; `JAM_RING`, `EMP_CHARGE`, `TELL_JAM`, `GLARE_TELL` remain shared fairness limits. Multiple powers are authored only for now; no wild rarity tuning changed.
+
+## Genetic carrier identity
+
+Check `slinger`, `longslinger`, and `softslinger` smoke/dev specimens: the familiar crab remains recognizable, the long eight-port carrier keeps its body despite a stronger EMP, and the soft limbless carrier still throws without pretending to engulf. Does a one-port Slinger remain legible? Do organ markings on longer bodies look attached rather than a second silhouette? Appearance organ reach is bounded 0.25 to 3; wild distribution tuning is stage 3. No human playtest yet.

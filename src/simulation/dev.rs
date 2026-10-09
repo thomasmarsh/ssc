@@ -28,7 +28,7 @@ pub fn enabled() -> bool {
 
 /// What can be spawned at the ship: the wild classics, then the authored specimens (the names
 /// `SSC_SPECIMEN` takes).
-pub const SPAWNS: [&str; 42] = [
+pub const SPAWNS: [&str; 44] = [
     "bogey",
     "fatso",
     "lunatic",
@@ -39,6 +39,8 @@ pub const SPAWNS: [&str; 42] = [
     "veilwing",
     "hullpick",
     "stormcap",
+    "longslinger",
+    "softslinger",
     "multijammer",
     "multioozer",
     "argus",
@@ -86,6 +88,30 @@ pub fn specimen_genome(name: &str) -> Genome {
         "veilwing" => Genome::veilwing(),
         "hullpick" => Genome::hullpick(),
         "stormcap" => Genome::stormcap(),
+        "longslinger" => {
+            let mut g = Genome::slinger();
+            g.anatomy = Some(crate::anatomy::AnimalSpecimen {
+                genome: crate::anatomy::AnimalGenome {
+                    archetype: crate::anatomy::Archetype::Crab,
+                    segments: 3,
+                    limbs: 8,
+                    limb_len: 1,
+                    ..Default::default()
+                },
+                seed: 2,
+            });
+            g.appearance.organ_reach = 1.6;
+            crate::power::stamp(&mut g, crate::power::Power::Emp, 0.9);
+            g.limited()
+        }
+        "softslinger" => {
+            let mut g = Genome::slinger();
+            g.appearance.surface = crate::development::Surface::Soft;
+            g.limbs = 0;
+            g.sides = 3;
+            g.aspect = 1.6;
+            g
+        }
         "multijammer" => {
             let mut g = Genome::stormcap();
             crate::power::stamp(&mut g, crate::power::Power::Confuse, 0.8);

@@ -132,3 +132,7 @@ Reasons:
 ## Plant debug gallery
 
 `SSC_GRAMMAR=all` (one column per template, three samples each), `SSC_GRAMMAR=<template>` (a 5 by 3 grid), `SSC_GRAMMAR=strip:fern,spine` (one row per template, growth 0.1 to 1.0), with `SSC_GRAMMAR_T=<growth>` and `SSC_GRAMMAR_SEED=<n>`. Only acts in a smoke run; replaces the world drawing with the gallery. See [HOOKS.md](HOOKS.md). Observed: templates are distinct at a glance; spine and fern read as organisms, coral as a fan, vine as a wanderer; growth strips are smooth. `TODO:` per-template tuning by eye once plants are on screen (whorled can come out a bare trunk at low branch rates, vine reads best at depth 7 to 8).
+
+### Genetic carrier development (built)
+
+`src/development.rs` supplies `Appearance` and `Genome::developed_body`. Appearance is a structured inherited section alongside `AnimalSpecimen`, preserving existing flat-gene hashes/draws. Development adds typed functional power organs and their existing grammar marks to the chosen BodyPlan without changing topology. Live explicit-anatomy chains consume developed plans; legacy chains retain exact geometry, with their functional ports drawn from body genes. Negative signed modes share organs, dormant/unbuilt powers develop none, and hard capability constraints remain explicit. Carrier surfaces and attachment reach inherit independently of power strength. See BESTIARY section 2 for limits and stage 3 scope.

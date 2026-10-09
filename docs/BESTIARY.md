@@ -90,7 +90,15 @@ The renderer keeps one identity halo and draws every active module's marks and w
 
 The **telegraph is not a gene.** Fixed minimum warnings remain in code (`TELL_MIN` 0.6 s for disabling attacks, 0.35 s for movement). Genes set cadence, range and effect duration only where the mechanism consumes them. Full gene ranges/files are in section 11.
 
-TODO: express supporting organs, developmental body preferences and appearance genetically; current authored styles remain coupled to species sampling until that next slice. No new wild multi-power probabilities in this slice.
+Carrier identity is now inherited DNA (`development::Appearance`), independently of capability intensity: an identity ornament/halo, Solid/Soft/Motes surface, and bounded external-organ reach (0.25 to 3). Existing outline, color, dimensions, gait, limbs and optional `AnimalSpecimen` remain the body genes. Authored archetypes and species sampling choose familiar presets; adding, strengthening or removing powers never restyles that carrier. Soft skin can exist without Engulf; Cloud can inhabit a solid body. The old strongest-power helpers remain for labels and loot, not silhouette selection.
+
+`Genome::developed_body` expresses the existing animal grammar (or its exact depth-zero legacy counterpart), then assigns typed `PowerOrgan`s on existing nodes: Glare adds an eye, Bypass/Sling/Weave/Rune/Rift add functional mounts/ports, other capabilities add an organ. Bypass supplies a gun mount when none exists. This adds roles and visible marks, never body nodes or altered joints/gait. Sling/Weave use a limb when available and one retractable port on a limbless carrier; external attachment counts follow inherited appendages, not a fixed four/six. Explicit animal plans consume these roles in live chain spawning. Legacy carriers retain their exact spawn geometry and dedicated organ drawings.
+
+Signed negative Warp/Song express the same supporting organ in a different mode. Below-gate or unbuilt genes develop none. Existing hard constraints remain explicit in `Power::fits`: Blink/Mimic cannot act on a jointed body, Sling needs positive mass and radius <=65, Bypass needs a compatible gun. Development retains incompatible DNA and its chosen body; it does not erase genes or conjure a replacement body. Current runtime guards suppress those incompatible capabilities. These are mechanical limits, not preferred carrier styles.
+
+Appearance recombines on its own salted fork of the birth RNG, independent of the inherited power block. Organ reach mutates and surfaces can flip (1 percent); the fork advances no existing stream. Structured appearance stays outside the legacy flat-gene distance/lineage hash, just like structured anatomy. Generator version 31 accounts for this new development/reproduction behavior; the flat scalar/draw golden and HOME stay pinned. Save shape is unchanged.
+
+Dev specimens `longslinger` (three trunk beads, eight appendages, Sling plus stronger EMP) and `softslinger` (soft, limbless Sling carrier) show alternate carriers; ordinary `slinger` and every authored preset retain their look. TODO: stage 3 chooses wild carrier distributions and rare multi-power probabilities; none are added here.
 
 ## 5. The menagerie
 

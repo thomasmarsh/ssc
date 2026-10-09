@@ -2603,15 +2603,25 @@ pub fn draw(
                 } else {
                     shown
                 };
-                if ssc::power::Power::Cloud.active(&body.genome) {
+                if body.genome.appearance.surface == ssc::development::Surface::Motes {
                     // A swarm is its motes (see `powerview`) around a small bright core.
                     gizmos
                         .circle_2d(p, r * ssc::power::CLOUD_CORE, shown)
                         .resolution(14);
-                } else if ssc::power::Power::Engulf.active(&body.genome)
-                    && game.power_view(body).ooze.is_some()
-                {
-                    crate::powerview::draw_ooze(&mut gizmos, game, body, shown);
+                } else if body.genome.appearance.surface == ssc::development::Surface::Soft {
+                    if game.power_view(body).ooze.is_some() {
+                        crate::powerview::draw_ooze(&mut gizmos, game, body, shown);
+                    } else {
+                        gizmos.lineloop_2d(
+                            (0..48).map(|k| {
+                                let a = k as f32 * std::f32::consts::TAU / 48.0;
+                                p + Vec2::from_angle(a)
+                                    * r
+                                    * (1.0 + 0.04 * (a * 5.0 + game.time).sin())
+                            }),
+                            shown,
+                        );
+                    }
                 } else {
                     draw_creature(&mut gizmos, game.time, body, shown);
                 }

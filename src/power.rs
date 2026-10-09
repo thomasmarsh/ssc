@@ -873,6 +873,9 @@ fn express(g: &mut Genome, power: Power, inner: f32, range: (f32, f32)) {
         }
     }
     power.set(g, v);
+    if g.appearance.identity.is_none() {
+        g.appearance = crate::development::Appearance::carrier(power);
+    }
     let (period, reach, hold) = power.spec().typical;
     let wobble = |k: f32| 0.75 + 0.5 * (c * k).fract();
     g.power_params_mut(power).period = (period * wobble(3.0)).clamp(1.5, 14.0);
@@ -903,6 +906,7 @@ pub fn sample(g: &mut Genome, roll: f32, params: &SectorParams) {
 /// and no shield (a glass cannon). Only species are styled; an awakened individual keeps its
 /// own body and shows its power by its tell alone.
 fn style(g: &mut Genome, power: Power) {
+    g.appearance = crate::development::Appearance::carrier(power);
     match power {
         Power::Phase => {
             g.sides = 3;
@@ -1149,6 +1153,7 @@ impl Genome {
     /// The specimens of the bestiary, as ordinary genomes: a Veilwing (phase).
     pub fn veilwing() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Phase),
             power_params: crate::power::params_for(crate::power::Power::Phase, 4.0, 300.0, 1.0),
             phase: 0.8,
             radius: 14.0,
@@ -1167,6 +1172,7 @@ impl Genome {
     /// A Skipjack (blink).
     pub fn skipjack() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Blink),
             power_params: crate::power::params_for(crate::power::Power::Blink, 3.4, 320.0, 1.0),
             blink: 0.6,
             speed: 220.0,
@@ -1184,6 +1190,7 @@ impl Genome {
     /// A Stormcap (emp): a shielded dome that turns systems off from a charging ring.
     pub fn stormcap() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Emp),
             power_params: crate::power::params_for(crate::power::Power::Emp, 6.0, 320.0, 1.4),
             emp: 0.75,
             trigger: crate::genome::Trigger::Sight,
@@ -1201,6 +1208,7 @@ impl Genome {
     /// An Argus Moth (glare): many eyes, a glass cannon of a lamp.
     pub fn argus() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Glare),
             power_params: crate::power::params_for(crate::power::Power::Glare, 5.5, 650.0, 1.6),
             glare: 0.8,
             sight: 1600.0,
@@ -1214,6 +1222,7 @@ impl Genome {
     /// A Gloomfeeder (dim): a quiet eater of light.
     pub fn gloomfeeder() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Dim),
             power_params: crate::power::params_for(crate::power::Power::Dim, 5.0, 450.0, 1.0),
             dim: 0.7,
             diet: crate::genome::Diet::Dust,
@@ -1228,6 +1237,7 @@ impl Genome {
     /// A Dizzard (confuse): a swaying thing that scrambles a pilot's hands.
     pub fn dizzard() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Confuse),
             power_params: crate::power::params_for(crate::power::Power::Confuse, 7.0, 320.0, 1.4),
             confuse: 0.75,
             trigger: crate::genome::Trigger::Sight,
@@ -1245,6 +1255,7 @@ impl Genome {
     /// A Pushwhale (repel): a slow barrel that breathes everything away.
     pub fn pushwhale() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Repel),
             power_params: crate::power::params_for(crate::power::Power::Repel, 7.0, 420.0, 1.0),
             repel: 0.75,
             radius: 38.0,
@@ -1258,6 +1269,7 @@ impl Genome {
     /// A Tarbloom (warp, negative: a slow bubble).
     pub fn tarbloom() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Warp),
             power_params: crate::power::params_for(crate::power::Power::Warp, 5.0, 360.0, 1.0),
             warp: -0.7,
             radius: 28.0,
@@ -1271,6 +1283,7 @@ impl Genome {
     /// A Lenswyrm (lens): its head pulls and bends.
     pub fn lenswyrm() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Lens),
             power_params: crate::power::params_for(crate::power::Power::Lens, 5.0, 520.0, 1.0),
             lens: 0.85,
             radius: 12.0,
@@ -1284,6 +1297,7 @@ impl Genome {
     /// A Tidegorger (devour): a drifting stomach that eats rocks and weak wells.
     pub fn tidegorger() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Devour),
             devour: 0.7,
             diet: crate::genome::Diet::Rocks,
             mass: 120.0,
@@ -1298,6 +1312,7 @@ impl Genome {
     /// A Splitter (split): a fat bag that becomes two.
     pub fn splitter() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Split),
             split: 0.5,
             hull: 90.0,
             radius: 24.0,
@@ -1309,6 +1324,7 @@ impl Genome {
     /// A Murmur (cloud): a sky of motes that is one animal.
     pub fn murmur() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Cloud),
             cloud: 0.8,
             radius: 60.0,
             hull: 120.0,
@@ -1322,6 +1338,7 @@ impl Genome {
     /// A Dirgewhale (song, positive: a dirge).
     pub fn dirgewhale() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Song),
             power_params: crate::power::params_for(crate::power::Power::Song, 4.0, 700.0, 1.0),
             song: 0.7,
             radius: 44.0,
@@ -1335,6 +1352,7 @@ impl Genome {
     /// A Lurefish (mimic, a pickup lure).
     pub fn lurefish() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Mimic),
             power_params: crate::power::params_for(crate::power::Power::Mimic, 5.0, 260.0, 1.0),
             mimic: 0.8,
             diet: crate::genome::Diet::Hunt,
@@ -1351,6 +1369,7 @@ impl Genome {
     /// A Hullworm (latch): a grey thumb that fastens on the hull and feeds on the shield.
     pub fn hullworm() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Latch),
             latch: 0.7,
             diet: crate::genome::Diet::Siphon,
             radius: 7.0,
@@ -1367,6 +1386,7 @@ impl Genome {
     /// A Kindling Remora (symbiote): small, amber, shy; it can be groomed into a bond.
     pub fn remora() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Symbiote),
             symbiote: 0.7,
             fear: crate::genome::Fear::Player,
             trigger: crate::genome::Trigger::Harm,
@@ -1386,6 +1406,7 @@ impl Genome {
     /// A Hullpick (shield bypass).
     pub fn hullpick() -> Self {
         Self {
+            appearance: crate::development::Appearance::carrier(Power::Bypass),
             bypass: 0.7,
             weapon: Weapon::Projectile,
             shot_speed: BYPASS_SHOT_SPEED,

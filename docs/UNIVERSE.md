@@ -127,9 +127,11 @@ There are no creature kinds. Everything below is a point in genome space, and th
 
 - **Bogey**: proximity trigger, passive until approached or hurt, rage below 40% health, projectile weapon, standoff and strafe, schools.
 - **Lunatic**: fling gene 1.0 with full chaos. Anything touching it is thrown at 520 to 1000 units per second (scaled by the gene) along a skewed vector.
-- **Smarty**: prediction lead 0.55, fast. **Fatso**: heavy and slow, 200 mass.
+- **Smarty**: prediction lead 0.55, fast. **Fatso**: heavy and slow, 1800 mass.
 - **Leech**: tether weapon, siphoning diet, bond gene 0.6 (so it often comes in corded pairs).
 - **Serpent**: the old segmented creature is `Genome::serpent()`, a point reached by chain length plus a wave gene. It is not placed by any code; chains and limbs appear wherever a pool carries them.
+
+Carrier appearance is independently inherited (`development::Appearance`): authored halo/ornament identity, solid/soft/mote surface and external-organ reach. The existing animal grammar develops functional power organs onto the chosen carrier; adding a stronger power does not replace its body or appearance. `longslinger` and `softslinger` are authored dev examples, not new wild distributions. Generator 31 preserves HOME and existing scalar draws; wild carrier variation and multi-power probabilities remain stage 3.
 
 Negative mass flips gravity and shot knockback and adds fling strength. Fear (player, bullets, wells), diet (rocks, siphon, dust), brood-tending and dwelling are genes any species can carry.
 
