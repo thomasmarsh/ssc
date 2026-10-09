@@ -111,7 +111,7 @@ HOME's planetoid has plants from the start. Fly slowly up to it: the key reads P
 - Harvest feel: one second of beam, shield drain as mining. Does cutting too early (and losing the plant) feel fair or like a trap? Knobs: `SPROUT`, `RIPE`, `HARVEST_TIME`.
 - Grazers: do solitary grazers visibly walk to the plants they like and bite them down to a stump? Do Bogeys ignore them (they only graze what they drift past)? Knobs: `GRAZE_RATE`, `GRAZE_FLOOR`, the pull in `creature.rs`.
 - Planting: is the key prompt clear (PLANT NAME, SLOW DOWN, TOO CLOSE TO ANOTHER PLANT) and does it get in the way of landing? Knobs: `PLANT_RANGE`, `PLANT_SPEED`, `SPACING`.
-- Look: plants are drawn as raw grammar line art at scale 16; some bushy ones read as scribble. Knob: `PLANT_SCALE`, leaf rules in `draw_plants`.
+- Look: plants lean in the breeze like the grass tufts (the lean grows with height, each plant on its own phase; knob: `lean` in `draw_plants`). Plants are drawn as raw grammar line art at scale 16; some bushy ones read as scribble. Knob: `PLANT_SCALE`, leaf rules in `draw_plants`.
 - Breeding (slice 3): plant two seeds of one species within about 250 units on a planetoid, let both ripen, cut one: the seeds it pays cross the two plants. Does the seed picker label (for example `FENROOT (YLD +30 HUE -12)`) make a good seed easy to find and keep? Is a mutation (10 percent per gene, 1 to 30 points) too rare or too common to chase a line over a handful of generations? Do the ranges feel worth the effort (yield x0.5 to x1.5, grow time x1.35 to x0.65, grazer bites 1.8 to 0.2, `CropGenes`)? Does hue read on the plant? A casual player should notice nothing. Dev check: `SSC_FARM=plant SSC_FARM_GENES=80,70,0,100`.
 
 ## Big herds (workstream 8, slice 1)

@@ -4631,10 +4631,14 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
             .entry((plant.id, step))
             .or_insert_with(|| flora.specimen(plant.seed).plan(f32::from(step) / 40.0));
         let turn = live.normal.to_angle() - std::f32::consts::FRAC_PI_2;
-        let sway = (game.time * 0.9 + plant.id as f32).sin() * 0.04;
+        // A bend like the grass tufts: the lean grows with height, so the root stays put and
+        // the tips move most; each plant keeps its own phase so a field never moves in step.
+        let phase = game.time * 1.3 + plant.id as f32 * 2.4;
+        let lean = 0.1 * (phase.sin() + 0.35 * (phase * 2.3 + 1.0).sin());
         let place = |p: Vec2| {
             live.position
-                + Vec2::from_angle(turn).rotate(Vec2::from_angle(sway).rotate(p)) * PLANT_SCALE
+                + Vec2::from_angle(turn).rotate(Vec2::new(p.x + lean * p.y.max(0.0), p.y))
+                    * PLANT_SCALE
         };
         let [tr, tg, tb] = plant.genes.tinted(flora.tint);
         let leaf = Color::srgb(tr, tg, tb);
