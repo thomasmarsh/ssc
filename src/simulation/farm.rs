@@ -15,7 +15,7 @@
 
 mod tend;
 
-pub use tend::{biomass_offer, seed_gift_chance, warmth};
+pub use tend::{Greenhouse, biomass_offer, plot_angle, seed_gift_chance, warmth};
 
 use super::*;
 use crate::flora::{self, CropGenes, Flora, SHIP_PALATE, SeedKind};
@@ -95,6 +95,15 @@ pub const PRUNE_FAVOR: f32 = 1.5;
 /// Fields: tended crops per planetoid (by radius), and the spread of their bred genes.
 pub const FIELD_CROPS: (u32, u32) = (1, 3);
 pub const TEND_GENE_SPREAD: i32 = 40;
+/// A greenhouse: glass radius around its station, the ring its plots stand on, how many
+/// plots, how far the interact key reaches a plot, and the gap that makes two plots one.
+pub const GREENHOUSE_RADIUS: f32 = 240.0;
+pub const GREENHOUSE_RING: f32 = 190.0;
+pub const GREENHOUSE_PLOTS: u32 = 6;
+pub const GREENHOUSE_REACH: f32 = 220.0;
+const PLOT_GAP: f32 = 60.0;
+/// How near a bare station hull the key still answers (with a refusal).
+pub const BARE_HULL_REACH: f32 = 320.0;
 const FARM_SALT: u64 = 0xFA12_3000_0000_0001;
 /// Own stream for harvest rolls: a pure hash of (game seed, plant id, harvest count).
 const HARVEST_SALT: u64 = 0xFA12_3000_0000_0002;
@@ -179,6 +188,10 @@ pub struct Plant {
     /// The farming civilization (territory id) that tends it, or 0 for nobody's.
     #[serde(default)]
     pub tended: u64,
+    /// Grows under glass: `planet` is a station's key, the plant stands on a ring inside the
+    /// greenhouse facing in, and grazers and blight cannot reach it.
+    #[serde(default)]
+    pub housed: bool,
 }
 
 impl Plant {
@@ -214,6 +227,9 @@ pub struct Farm {
     /// Biomass each farming civilization has stored, by territory id.
     #[serde(default)]
     pub granary: BTreeMap<u64, f32>,
+    /// Which registered civilizations farm (memo of `Territory::farms`, derived).
+    #[serde(skip)]
+    tills: BTreeMap<u64, bool>,
     #[serde(skip)]
     table: Vec<Flora>,
     #[serde(skip)]
@@ -343,7 +359,7 @@ impl Farm {
     pub fn forage_for(&self, palate: &flora::Palate) -> Vec<Vec2> {
         self.live
             .iter()
-            .filter(|l| l.growth >= GRAZE_FLOOR + 0.05)
+            .filter(|l| l.growth >= GRAZE_FLOOR + 0.05 && !self.plants[l.index].housed)
             .filter(|l| {
                 self.flora(l.species)
                     .is_some_and(|f| palate.eats(&f.chemistry))
@@ -360,6 +376,10 @@ pub enum PlantHint {
     None,
     TooFast,
     Crowded,
+    /// Beside a station that has no greenhouse: crops need soil or glass.
+    BareHull,
+    /// Inside the glass of a civilization that is hostile to the ship.
+    Unwelcome,
     /// Plantable: the species and the anchor on the planetoid.
     Ready(SeedKind, (SectorId, u32), f32),
 }
@@ -371,6 +391,15 @@ impl Game {
 
     /// Where a plant stands now, if its planetoid is loaded.
     fn plant_spot(&self, plant: &Plant) -> Option<(Vec2, Vec2)> {
+        if plant.housed {
+            // Under glass: a ring inside the station, world-frame, stems pointing in.
+            let host = self
+                .bodies
+                .iter()
+                .find(|b| b.active && b.kind == BodyKind::Base && b.origin == Some(plant.planet))?;
+            let out = Vec2::from_angle(plant.anchor);
+            return Some((host.position + out * plant.radius, -out));
+        }
         let host = self.bodies.iter().find(|b| {
             b.active && b.rock == RockKind::Planetoid && b.origin == Some(plant.planet)
         })?;
@@ -393,6 +422,7 @@ impl Game {
         for (key, center, radius) in fresh {
             self.stock_planetoid(key, center, radius);
         }
+        self.stock_greenhouses();
         let now = self.time;
         let mut live = Vec::with_capacity(self.farm.live.len());
         for (index, plant) in self.farm.plants.iter().enumerate() {
@@ -472,6 +502,7 @@ impl Game {
                 blighted: false,
                 immune_until: 0.0,
                 tended: 0,
+                housed: false,
             });
         }
         self.stock_field(key, center, radius);
@@ -487,6 +518,18 @@ impl Game {
         let Some(ship) = self.player() else {
             return PlantHint::None;
         };
+        // Inside a greenhouse the glass decides; a planetoid beside a station is not reached
+        // from within it.
+        if let Some(hint) = self.greenhouse_hint(kind, ship) {
+            return hint;
+        }
+        let bare = |game: &Game| {
+            if game.near_bare_hull(ship.position) {
+                PlantHint::BareHull
+            } else {
+                PlantHint::None
+            }
+        };
         let Some(host) = self
             .bodies
             .iter()
@@ -496,11 +539,11 @@ impl Game {
                 gap(a).total_cmp(&gap(b))
             })
         else {
-            return PlantHint::None;
+            return bare(self);
         };
         let (position, radius) = (host.position, host.radius);
         if ship.position.distance(position) - radius > PLANT_RANGE {
-            return PlantHint::None;
+            return bare(self);
         }
         if ship.velocity.length() > PLANT_SPEED {
             return PlantHint::TooFast;
@@ -575,11 +618,19 @@ impl Game {
         let PlantHint::Ready(kind, key, anchor) = self.plant_hint() else {
             return;
         };
-        let Some((center, radius)) = self
+        let Some((center, radius, housed)) = self
             .bodies
             .iter()
-            .find(|b| b.rock == RockKind::Planetoid && b.origin == Some(key))
-            .map(|b| (b.position, b.radius))
+            .find(|b| {
+                b.origin == Some(key) && (b.rock == RockKind::Planetoid || b.kind == BodyKind::Base)
+            })
+            .map(|b| {
+                if b.kind == BodyKind::Base {
+                    (b.position, GREENHOUSE_RING, true)
+                } else {
+                    (b.position, b.radius, false)
+                }
+            })
         else {
             return;
         };
@@ -605,6 +656,7 @@ impl Game {
             blighted: false,
             immune_until: 0.0,
             tended: 0,
+            housed,
         });
         let name = self
             .farm
@@ -816,6 +868,7 @@ impl Game {
             let reach = body.radius + PLANT_BODY;
             let Some((_, live)) = farm.nearest_live(body.position, |l| {
                 l.growth > GRAZE_FLOOR
+                    && !farm.plants[l.index].housed
                     && !(farm.plants[l.index].tended != 0
                         && crate::territory::is_people_of(
                             farm.plants[l.index].tended,
@@ -867,7 +920,7 @@ impl Game {
             .map(|l| l.index)
             .filter(|&i| {
                 let p = &self.farm.plants[i];
-                !p.wild && p.planet.0 != home
+                !p.wild && !p.housed && p.planet.0 != home
             })
             .collect();
         if at_risk.is_empty() {
@@ -1115,6 +1168,7 @@ mod tests {
             blighted: false,
             immune_until: 0.0,
             tended: 0,
+            housed: false,
         });
         game.step(DT, Input::default());
         game.farm.plants.len() - 1
@@ -1839,8 +1893,9 @@ mod tests {
         assert_eq!(loaded.farm.plants[planted].immune_until, 77.0);
     }
 
-    // ---- farming civilizations -------------------------------------------
+    // ---- farming civilizations and greenhouses -------------------------------------------
 
+    use crate::simulation::interact::Verb;
     use crate::territory::{CivShape, Territory};
 
     /// A capital sector's territory that farms (or not), peaceful settlers excluded.
@@ -1899,7 +1954,7 @@ mod tests {
         let crops = game.farm.civ_crops(crate::config::MASTER_SEED, &yes);
         for p in &a {
             assert_eq!(p.tended, yes.id);
-            assert!(!p.wild);
+            assert!(!p.wild && !p.housed);
             assert!(crops.contains(&p.species));
             assert!(
                 game.farm.flora(p.species).is_some_and(Flora::is_crop),
@@ -2155,6 +2210,7 @@ mod tests {
     fn tended_state_and_granaries_survive_a_save() {
         let t = territory_that(true);
         let (mut game, at) = tended_rig(&t, 0.6);
+        game.farm.plants[at].housed = false;
         game.farm.granary.insert(t.id, 17.5);
         let text = game.save_state().to_text();
         let (state, generator) = save::SaveState::from_text(&text).unwrap();
@@ -2163,5 +2219,133 @@ mod tests {
         assert_eq!(loaded.farm.plants, game.farm.plants);
         assert_eq!(loaded.farm.plants[at].tended, t.id);
         assert_eq!(loaded.farm.stored(t.id), 17.5);
+    }
+
+    #[test]
+    fn a_farming_seat_has_a_greenhouse_with_tended_crops_and_a_bare_hull_does_not() {
+        let seed = crate::config::MASTER_SEED;
+        let outpost = crate::territory::outpost(seed);
+        let (mut game, seat, key) = at_seat(outpost.capital);
+        game.step(DT, Input::default());
+        let houses = game.greenhouses();
+        assert!(
+            houses
+                .iter()
+                .any(|g| g.key == key && g.territory == outpost.id)
+        );
+        let housed: Vec<&Plant> = game.farm.plants.iter().filter(|p| p.housed).collect();
+        assert_eq!(housed.len(), (GREENHOUSE_PLOTS / 2) as usize);
+        assert!(
+            housed
+                .iter()
+                .all(|p| p.tended == outpost.id && p.planet == key)
+        );
+        // The same plants a second time (a pure function of the world).
+        let (again, _, _) = at_seat(outpost.capital);
+        let twin: Vec<&Plant> = again.farm.plants.iter().filter(|p| p.housed).collect();
+        assert_eq!(housed, twin);
+        // They stand on the ring, stems pointing in.
+        let live: Vec<_> = game
+            .farm
+            .live
+            .iter()
+            .filter(|l| game.farm.plants[l.index].housed)
+            .collect();
+        assert_eq!(live.len(), housed.len());
+        for l in live {
+            assert!((l.position.distance(seat) - GREENHOUSE_RING).abs() < 1.0);
+            assert!(l.normal.dot((seat - l.position).normalize()) > 0.99);
+        }
+        // A non-farming civilization's seat has no glass.
+        let bare = territory_that(false);
+        let (game, _, key) = at_seat(bare.capital);
+        assert!(game.greenhouses().iter().all(|g| g.key != key));
+        assert!(game.farm.plants.iter().all(|p| !p.housed));
+    }
+
+    #[test]
+    fn planting_works_inside_a_greenhouse_and_a_bare_hull_refuses() {
+        let seed = crate::config::MASTER_SEED;
+        let outpost = crate::territory::outpost(seed);
+        let (mut game, seat, key) = at_seat(outpost.capital);
+        game.register_territory(outpost);
+        game.set_regard(outpost.id, 20.0);
+        let crop = species_with(&game, flora::Role::CropOnly);
+        game.farm.seeds.clear();
+        game.farm.add_seeds(SeedKind::wild(crop), 5);
+        // Inside the glass: free plots take seeds, up to the plots the people left.
+        let free = (GREENHOUSE_PLOTS - GREENHOUSE_PLOTS / 2) as usize;
+        let mut planted = 0;
+        for n in 0..GREENHOUSE_PLOTS {
+            let angle = plot_angle(seed, key, n);
+            let spot = seat + Vec2::from_angle(angle) * (GREENHOUSE_RING - 70.0);
+            hold_at(&mut game, spot, 0.2);
+            let before = game.farm.plants.len();
+            match game.plant_hint() {
+                PlantHint::Ready(kind, k, _) => {
+                    assert_eq!((kind.species, k), (crop, key));
+                    assert_eq!(game.interact(), Some(Verb::Plant));
+                    assert_eq!(game.farm.plants.len(), before + 1);
+                    let p = game.farm.plants.last().unwrap();
+                    assert!(p.housed && p.tended == 0 && !p.wild && p.planet == key);
+                    planted += 1;
+                }
+                PlantHint::Crowded => assert_eq!(game.farm.plants.len(), before),
+                other => panic!("plot {n}: {other:?}"),
+            }
+        }
+        assert_eq!(planted, free, "only the plots the people left are free");
+        // Glass shelters: grazers and blight leave housed plants alone, and they do not draw
+        // grazers' steering.
+        let sealed = game
+            .farm
+            .live
+            .iter()
+            .filter(|l| game.farm.plants[l.index].housed)
+            .count();
+        assert!(sealed >= planted);
+        assert!(
+            game.farm.forage_for(&flora::Palate([1.0; 5])).len() <= game.farm.live.len() - sealed
+        );
+        // A hostile civilization's glass turns the ship away.
+        game.set_regard(outpost.id, -90.0);
+        game.farm.add_seeds(SeedKind::wild(crop), 1);
+        hold_at(
+            &mut game,
+            seat + Vec2::new(GREENHOUSE_RING - 70.0, 0.0),
+            0.2,
+        );
+        assert_eq!(game.plant_hint(), PlantHint::Unwelcome);
+        // Beside a bare hull, with a seed in hand, the key refuses.
+        let bare = territory_that(false);
+        let (mut game, seat, _) = at_seat(bare.capital);
+        game.farm.seeds.clear();
+        game.farm.add_seeds(SeedKind::wild(crop), 2);
+        hold_at(&mut game, seat + Vec2::new(150.0, 0.0), 0.2);
+        let plants = game.farm.plants.len();
+        assert_eq!(game.plant_hint(), PlantHint::BareHull);
+        game.interact();
+        assert_eq!(game.farm.plants.len(), plants, "nothing planted on a hull");
+        assert_eq!(game.farm.seed_count(), 2);
+    }
+
+    #[test]
+    fn sealed_housed_plants_never_fall_ill() {
+        let t = crate::territory::outpost(crate::config::MASTER_SEED);
+        let (mut game, _, _) = at_seat(t.capital);
+        run(&mut game, 5.0);
+        for p in &mut game.farm.plants {
+            p.tended = 0;
+        }
+        let before = game.farm.plants.iter().filter(|p| p.housed).count();
+        assert!(before > 0);
+        run(&mut game, 900.0);
+        assert!(
+            game.farm
+                .plants
+                .iter()
+                .filter(|p| p.housed)
+                .all(|p| !p.blighted)
+        );
     }
 }

@@ -948,6 +948,8 @@ struct SmokeRun {
     requested: bool,
     /// Explicit specimen captures advance through their bounded hook, independent of GPU speed.
     hold: bool,
+    /// `SSC_FARM_CIV` has posed the ship in the greenhouse.
+    civ_staged: bool,
 }
 
 fn smoke_run(
@@ -1075,6 +1077,17 @@ fn smoke_run(
             session.game.blight_all();
         }
         session.game.player_invulnerability = 1e9;
+    }
+    // SSC_FARM_CIV=1: fly to the early outpost (a farming settlement) and stand inside its
+    // greenhouse with seeds, a friendly regard and a full-ish granary. The world loads first,
+    // so it tries each frame until the glass exists.
+    if !run.civ_staged
+        && run.frames < 240
+        && std::env::var_os("SSC_FARM_CIV").is_some()
+        && let Some(at) = session.game.stage_civ_farm()
+    {
+        eprintln!("SSC_FARM_CIV staged at {at:?}");
+        run.civ_staged = true;
     }
     // SSC_TIME=<seconds>: start the game clock there (wells and anything else posed by time).
     if run.frames == 0

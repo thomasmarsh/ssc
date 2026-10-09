@@ -4611,11 +4611,36 @@ pub struct PlantCache(std::collections::HashMap<(u32, u16), ssc::grammar::Plan>)
 /// glance; forage (which the ship cannot use) does not.
 fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
     use ssc::grammar::PartKind;
-    use ssc::simulation::farm::{PLANT_SCALE, RIPE};
+    use ssc::simulation::farm::{GREENHOUSE_RADIUS, PLANT_SCALE, RIPE};
     let farm = game.farm();
     let Some(ship) = game.player() else { return };
     if cache.0.len() > 160 {
         cache.0.clear();
+    }
+    // Greenhouse glass: a pale dome ring with panel struts and a slow shimmer, tinted by
+    // the people who keep it.
+    for house in game.greenhouses() {
+        if house.center.distance(ship.position) > 3000.0 {
+            continue;
+        }
+        let [r, g, b] = house.tint;
+        let glass = Color::srgb(0.55 + 0.15 * r, 0.85 + 0.1 * g, 0.8 + 0.1 * b);
+        let shimmer = 0.5 + 0.15 * (game.time * 0.8 + house.center.x * 0.01).sin();
+        let radius = GREENHOUSE_RADIUS;
+        gizmos
+            .circle_2d(house.center, radius, glass.with_alpha(0.55 * shimmer))
+            .resolution(72);
+        gizmos
+            .circle_2d(house.center, radius - 9.0, glass.with_alpha(0.2))
+            .resolution(72);
+        for k in 0..24 {
+            let dir = Vec2::from_angle(k as f32 / 24.0 * std::f32::consts::TAU);
+            gizmos.line_2d(
+                house.center + dir * (radius - 9.0),
+                house.center + dir * radius,
+                glass.with_alpha(0.5),
+            );
+        }
     }
     for live in &farm.live {
         if live.position.distance(ship.position) > 2400.0 {

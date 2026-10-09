@@ -1,4 +1,4 @@
-//! Farming civilizations (farming slice 5).
+//! Farming civilizations and greenhouses (farming slice 5 and the station rule).
 //!
 //! - **Who farms** is `Territory::farms`: a gene-expressed trait of the lineage, not a flag.
 //! - **Fields.** The first time a planetoid inside a farming territory loads, the people
@@ -8,12 +8,29 @@
 //!   them. Every `TEND_EPOCH` the tenders harvest ripe tended crops into the civilization's
 //!   granary (`Farm::granary`, capped) and prune sick ones, unless the civilization has
 //!   fallen. Only loaded plants are tended.
+//! - **Greenhouses.** A farming civilization's seat (capital or outpost base) carries a
+//!   glass module: `GREENHOUSE_PLOTS` plots on a ring inside `GREENHOUSE_RADIUS` of the
+//!   station. Crops grow in a station only there. A housed plant is sealed (no grazers, no
+//!   blight); the people tend half the plots and the rest are free for the ship to plant by
+//!   the interact key, from inside the glass. A bare hull (any other station) refuses.
 //! - **Trade.** A friendly farming civilization answers a tithe with biomass from its
 //!   granary (and sometimes a seed of its bred crops), more the warmer it is. The ship can
 //!   also simply cut their crops, which costs regard (`THEFT_REGARD`).
 
 use super::*;
-use crate::territory::{Standing, Territory};
+use crate::territory::{CivRole, Standing, Territory};
+
+/// A glass module around a station, loaded now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Greenhouse {
+    /// The station's key (the plants' `planet`).
+    pub key: PadKey,
+    pub center: Vec2,
+    /// The farming civilization the seat belongs to.
+    pub territory: u64,
+    /// The civilization's tint (white until it is registered).
+    pub tint: [f32; 3],
+}
 
 /// Biomass a tithe of `TITHE_AMOUNT` buys from a friendly farm at regard `FRIENDLY_AT`, and
 /// the extra warmth adds (up to this much again at maximum regard).
@@ -40,6 +57,17 @@ pub fn seed_gift_chance(regard: f32) -> f32 {
     SEED_GIFT.0 + SEED_GIFT.1 * warmth(regard)
 }
 
+/// Where plot `n` of the greenhouse of station `key` points: a world-frame angle. Pure.
+pub fn plot_angle(seed: u64, key: PadKey, n: u32) -> f32 {
+    let offset = Rng::new(hash2(
+        seed ^ TEND_SALT ^ 0x6E,
+        key.0.x.wrapping_mul(31).wrapping_add(key.1 as i32),
+        key.0.y,
+    ))
+    .range(0.0, std::f32::consts::TAU);
+    offset + n as f32 * std::f32::consts::TAU / GREENHOUSE_PLOTS as f32
+}
+
 impl Farm {
     /// The crops a civilization grows: the (up to) two species the ship can use that its
     /// own people's palate likes best.
@@ -62,9 +90,140 @@ impl Farm {
 }
 
 impl Game {
+    /// Whether a registered civilization farms (memoized: its source genome is not free).
+    fn civ_farms(&mut self, tid: u64) -> bool {
+        if let Some(known) = self.farm.tills.get(&tid) {
+            return *known;
+        }
+        let Some(t) = self.civ_territories.get(&tid).copied() else {
+            return false;
+        };
+        let farms = t.farms(self.seed);
+        self.farm.tills.insert(tid, farms);
+        farms
+    }
+
+    /// Stations of farming civilizations that are loaded, each with its greenhouse.
+    pub fn greenhouses(&self) -> Vec<Greenhouse> {
+        self.bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Base && b.active && b.fort.is_none())
+            .filter_map(|b| {
+                let key = b.origin?;
+                let (tid, role) = *self.civ_bases.get(&key)?;
+                (matches!(role, CivRole::Capital | CivRole::Outpost)
+                    && self.farm.tills.get(&tid) == Some(&true))
+                .then_some(Greenhouse {
+                    key,
+                    center: b.position,
+                    territory: tid,
+                    tint: self.civ_colors.get(&tid).copied().unwrap_or([1.0; 3]),
+                })
+            })
+            .collect()
+    }
+
     /// The tint of the civilization that tends a plant, for its marker.
     pub fn tender_tint(&self, tid: u64) -> Option<[f32; 3]> {
         self.civ_colors.get(&tid).copied()
+    }
+
+    /// The greenhouse whose glass holds `at`, if any.
+    pub fn greenhouse_around(&self, at: Vec2) -> Option<Greenhouse> {
+        self.greenhouses()
+            .into_iter()
+            .find(|g| g.center.distance(at) <= GREENHOUSE_RADIUS)
+    }
+
+    /// The nearest free plot of a greenhouse within the ship's reach: its angle.
+    fn free_plot(&self, house: &Greenhouse, ship: Vec2) -> Option<f32> {
+        (0..GREENHOUSE_PLOTS)
+            .map(|n| plot_angle(self.seed, house.key, n))
+            .filter(|&angle| {
+                !self.farm.plants.iter().any(|p| {
+                    p.planet == house.key && arc(p.anchor, angle, GREENHOUSE_RING) < PLOT_GAP
+                })
+            })
+            .map(|angle| {
+                let at = house.center + Vec2::from_angle(angle) * GREENHOUSE_RING;
+                (at.distance(ship), angle)
+            })
+            .filter(|(gap, _)| *gap <= GREENHOUSE_REACH)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, angle)| angle)
+    }
+
+    /// What planting would do inside a greenhouse around the ship, if it is in one.
+    pub(super) fn greenhouse_hint(&self, kind: SeedKind, ship: &Body) -> Option<PlantHint> {
+        let house = self.greenhouse_around(ship.position)?;
+        let standing = self.civ_standing(house.territory);
+        if standing != Standing::Fallen && self.civ_hostile(house.territory) {
+            return Some(PlantHint::Unwelcome);
+        }
+        if ship.velocity.length() > PLANT_SPEED {
+            return Some(PlantHint::TooFast);
+        }
+        Some(match self.free_plot(&house, ship.position) {
+            Some(angle) => PlantHint::Ready(kind, house.key, angle),
+            None => PlantHint::Crowded,
+        })
+    }
+
+    /// True when the ship is near a station hull (a base that is not a fortress piece).
+    pub(super) fn near_bare_hull(&self, ship: Vec2) -> bool {
+        self.bodies.iter().any(|b| {
+            b.kind == BodyKind::Base
+                && b.active
+                && b.fort.is_none()
+                && b.position.distance(ship) - b.radius <= BARE_HULL_REACH
+        })
+    }
+
+    /// Stocks the tended crops of farming civilizations: fields on planetoids as they first
+    /// load (called from `stock_planetoid`) and greenhouses as their stations load.
+    pub(super) fn stock_greenhouses(&mut self) {
+        let seats: Vec<(PadKey, Vec2, u64)> = self
+            .bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Base && b.active && b.fort.is_none())
+            .filter_map(|b| {
+                let key = b.origin?;
+                let (tid, role) = *self.civ_bases.get(&key)?;
+                matches!(role, CivRole::Capital | CivRole::Outpost)
+                    .then_some((key, b.position, tid))
+            })
+            .collect();
+        for (key, center, tid) in seats {
+            if !self.civ_farms(tid) || self.farm.stocked.contains(&key) {
+                continue;
+            }
+            self.farm.stocked.insert(key);
+            let Some(t) = self.civ_territories.get(&tid).copied() else {
+                continue;
+            };
+            if self.civ_standing(tid) == Standing::Fallen {
+                continue;
+            }
+            let crops = self.farm.civ_crops(self.seed, &t);
+            if crops.is_empty() {
+                continue;
+            }
+            let mut rng = Rng::new(hash2(self.seed ^ TEND_SALT ^ 0x68, key.0.x, key.0.y));
+            let phase = rng.int(0, 1);
+            for n in (0..GREENHOUSE_PLOTS).filter(|n| n % 2 == phase) {
+                let plant = self.tended_plant(
+                    &mut rng,
+                    crops[n as usize % crops.len()],
+                    key,
+                    plot_angle(self.seed, key, n),
+                    center,
+                    GREENHOUSE_RING,
+                    tid,
+                    true,
+                );
+                self.farm.plants.push(plant);
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -77,6 +236,7 @@ impl Game {
         center: Vec2,
         radius: f32,
         tid: u64,
+        housed: bool,
     ) -> Plant {
         let id = self.farm.next_id;
         self.farm.next_id += 1;
@@ -96,6 +256,7 @@ impl Game {
             blighted: false,
             immune_until: 0.0,
             tended: tid,
+            housed,
         }
     }
 
@@ -109,6 +270,7 @@ impl Game {
             return;
         }
         self.register_territory(t);
+        self.farm.tills.insert(t.id, true);
         let crops = self.farm.civ_crops(self.seed, &t);
         if crops.is_empty() {
             return;
@@ -133,7 +295,8 @@ impl Game {
                 continue;
             }
             let species = crops[n as usize % crops.len()];
-            let plant = self.tended_plant(&mut rng, species, key, anchor, center, radius, t.id);
+            let plant =
+                self.tended_plant(&mut rng, species, key, anchor, center, radius, t.id, false);
             self.farm.plants.push(plant);
         }
     }
@@ -228,6 +391,40 @@ impl Game {
     pub(in crate::simulation) fn gift_roll(&self, t: &Territory, salt: u32, regard: f32) -> bool {
         Rng::new(hash2(self.seed ^ GIFT_SALT ^ 0x6F ^ t.id, salt as i32, 3))
             .chance(seed_gift_chance(regard))
+    }
+
+    /// Smoke hook (`SSC_FARM_CIV`): goes to the early outpost, a farming settlement, and once
+    /// its greenhouse has loaded poses the ship inside the glass beside a free plot with
+    /// seeds, friendly regard and a stocked granary; the clock moves on so the people's
+    /// crops stand grown. Returns the ship's spot when staged, None while the world loads.
+    pub fn stage_civ_farm(&mut self) -> Option<Vec2> {
+        let t = crate::territory::outpost(self.seed);
+        self.player_invulnerability = 1e9;
+        let Some(house) = self.greenhouses().into_iter().find(|g| g.territory == t.id) else {
+            self.teleport(t.capital.center());
+            return None;
+        };
+        self.register_territory(t);
+        let warm = 50.0 - self.civ_regard(t.id);
+        self.shift_regard(t.id, warm);
+        self.farm.granary.insert(t.id, 30.0);
+        self.time += 400.0;
+        if let Some(crop) = self.farm.civ_crops(self.seed, &t).first().copied() {
+            self.farm.seeds.clear();
+            self.farm.add_seeds(SeedKind::wild(crop), 3);
+        }
+        let angle =
+            (0..GREENHOUSE_PLOTS)
+                .map(|n| plot_angle(self.seed, house.key, n))
+                .find(|&a| {
+                    !self.farm.plants.iter().any(|p| {
+                        p.planet == house.key && arc(p.anchor, a, GREENHOUSE_RING) < PLOT_GAP
+                    })
+                })
+                .unwrap_or(0.0);
+        let spot = house.center + Vec2::from_angle(angle) * (GREENHOUSE_RING - 60.0);
+        self.teleport(spot);
+        Some(spot)
     }
 
     /// Whether the civilization farms and so has a granary to trade from.

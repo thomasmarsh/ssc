@@ -75,8 +75,25 @@ impl Game {
                 "PLANT",
                 Some("TOO CLOSE TO ANOTHER PLANT"),
             )),
+            farm::PlantHint::BareHull => Some(prompt(
+                Verb::Plant,
+                "PLANT",
+                Some("BARE HULL - CROPS NEED SOIL OR A GREENHOUSE"),
+            )),
+            farm::PlantHint::Unwelcome => {
+                Some(prompt(Verb::Plant, "PLANT", Some("HOSTILE GREENHOUSE")))
+            }
             farm::PlantHint::None => None,
         };
+        // Inside a greenhouse's glass a seed that can go in the ground comes first: the seat's
+        // tithe is reachable from outside the glass.
+        if let Some(ready) = plant.as_ref().filter(|p| p.blocked.is_none())
+            && self
+                .player()
+                .is_some_and(|ship| self.greenhouse_around(ship.position).is_some())
+        {
+            return Some(ready.clone());
+        }
         match pad {
             PadHint::Landed => Some(prompt(Verb::Bench, "BENCH", None)),
             PadHint::Land => Some(prompt(Verb::Land, "LAND", None)),
