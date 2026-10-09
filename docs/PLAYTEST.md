@@ -172,4 +172,4 @@ Built knobs: starter procurement costs, fixed fuel/water reserves, supplier grad
 
 Built refinery check: learn Fabrication at HOME, build the 40M/10C refinery in PARTS, store volatiles, fly away, then return and take fuel with Q / X. A 10V batch makes 25F after 10 simulation seconds; 100F stops it. Save mid-batch and continue. Does the status explain missing input/full storage, and is the trip useful compared with buying fuel?
 
-Built water tank check: build the 20M tank in PARTS without research, store water past 100, and save/continue. STORE WATER should show a 300 site cap while taking water still respects the 30 ship reserve. Extraction and irrigation remain proposed.
+Built water tank check: build the 20M tank in PARTS without research, store water past 100, and save/continue. STORE WATER should show a 300 site cap while taking water still respects the 30 ship reserve. Extraction remains proposed; planet crops sustain a closed cycle without explicit upkeep.
