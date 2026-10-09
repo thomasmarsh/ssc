@@ -1,14 +1,12 @@
-//! Rare powers: the shared gene block of the bestiary (see `docs/BESTIARY.md`).
+//! Rare powers: bounded, independently heritable modules (see `docs/BESTIARY.md`).
 //!
-//! A power is a gene, never a creature kind. Twenty-one intensity genes and three shared
-//! parameters sit at the end of the genome's tail, all dormant (zero) by default. An intensity
-//! below `GATE` does nothing; above it the effect scales from 0 to 1. A species carries at most
-//! one power, chosen by one extra final draw in `Genome::sample`; an individual of any species
-//! may awaken one by chance from ring 3. Nothing here draws from a stream that places the
-//! original population: the species draw is the last draw of `sample`, and awakening reads a
-//! roll `individual_from` already made.
+//! Twenty-two signed/intensity genes and their own period, reach and hold form the power
+//! tail. Named intensities remain convenient rule inputs; `PowerModule` moves an entire
+//! module in inheritance. Below `GATE` a module is dormant. The existing species sampler
+//! still selects at most one power, with its original final draw; authored creatures can
+//! carry any compatible combination. Awakening retains its existing no-carrier policy.
 
-use crate::genome::{Genome, Weapon};
+use crate::genome::{Gene, Genome, Weapon};
 use crate::world::SectorParams;
 
 /// Weaver webs: short harmless lead-in, one minute solid, and spaced spokes.
@@ -34,8 +32,9 @@ pub const SLING_MIN_SHIP: f32 = 220.0;
 /// An intensity below this is dormant. Drift never reaches it from zero (the block is skipped
 /// by `Genome::drifted`) and a mutation cannot cross it in one step.
 pub const GATE: f32 = 0.3;
-/// Number of genes in the block: three shared parameters and twenty intensities.
-pub const POWER_GENES: usize = 24;
+/// Four bounded scalars per catalog power, including signed intensity/mode.
+pub const POWER_GENES: usize = Power::ALL.len() * 4;
+pub const INHERIT_SALT: u64 = 0x504F_5745_525F_4352;
 /// Individuals awaken from this ring on (a quarter of the 1 percent outlier band: 1 in 400).
 pub const AWAKEN_RING: u32 = 3;
 /// Ring steps over which a power's weight ramps from zero to full past its first ring.
@@ -56,8 +55,8 @@ pub const BIAS_SLOPE: f32 = 1.0;
 pub const TELL_MOVE: f32 = 0.35;
 pub const TELL_JAM: f32 = 0.6;
 /// Blink: it will not blink from, or land within, this of the ship; a hop is at least
-/// `BLINK_MIN_HOP` long; the landing ring around the ship is this share of `power_reach`; the
-/// longest hop is `power_reach` times one plus `BLINK_HOP_GAIN` times the strength; it fires
+/// `BLINK_MIN_HOP` long; the landing ring around the ship is this share of `reach`; the
+/// longest hop is `reach` times one plus `BLINK_HOP_GAIN` times the strength; it fires
 /// a snap shot `BLINK_SNAP` seconds after landing. Rocks and bodies keep `BLINK_CLEAR` clear.
 pub const BLINK_FROM: f32 = 220.0;
 pub const BLINK_LAND: f32 = 180.0;
@@ -91,7 +90,7 @@ pub const GLITCH_GAP: f32 = 3.0;
 pub const JAM_SEEN: f32 = 760.0;
 pub const EMP_CHARGE: f32 = 0.9;
 pub const GLARE_TELL: f32 = 0.7;
-/// The ring radius of a jammer is its `power_reach` clamped to this.
+/// The ring radius of a jammer is its `reach` clamped to this.
 pub const JAM_RING: (f32, f32) = (200.0, 420.0);
 /// Seconds of jam: `JAM_SECONDS.0 + JAM_SECONDS.1 * strength`, capped by `JAM_MAX` and the
 /// gene's hold. A strong emp locks two systems; the HUD is jammed with chance
@@ -107,7 +106,7 @@ pub const CONFUSE_ANGLE: (f32, f32) = (0.3, 0.4);
 pub const CONFUSE_SWAY: f32 = 5.0;
 pub const CONFUSE_FLIP: f32 = 0.3;
 pub const CONFUSE_FLIP_FROM: f32 = 0.7;
-/// Dim: the field reaches `power_reach * DIM_REACH`; light never falls under `DIM_FLOOR`
+/// Dim: the field reaches `reach * DIM_REACH`; light never falls under `DIM_FLOOR`
 /// of normal; a creature in the field notices a quiet ship at `DIM_NOTICE` of its range.
 pub const DIM_REACH: f32 = 1.2;
 pub const DIM_FLOOR: f32 = 0.35;
@@ -127,7 +126,7 @@ pub const REPEL_LIGHT: f32 = 1.5;
 pub const SHOVE_RING: f32 = 0.7;
 pub const ESCAPE: f32 = 0.6;
 pub const FIELD_BEND: f32 = 0.436;
-/// Warp (Tarbloom): inside the bubble (radius `power_reach`) bodies and shots run at
+/// Warp (Tarbloom): inside the bubble (radius `reach`) bodies and shots run at
 /// `1 - WARP_SLOW * s` (never under `WARP_FLOOR`); a haste bubble runs hostile shots and
 /// creatures' fire at `1 + WARP_HASTE * s`. `WARP_RATE` is how fast a body settles to it.
 pub const WARP_SLOW: f32 = 0.45;
@@ -135,7 +134,7 @@ pub const WARP_FLOOR: f32 = 0.55;
 pub const WARP_HASTE: f32 = 0.4;
 pub const WARP_RATE: f32 = 4.0;
 /// Lens (Lenswyrm): a pocket well of `LENS_PULL * s` of a full one out to
-/// `power_reach * LENS_REACH`; its radar blip is drawn up to `LENS_BLIP` units off.
+/// `reach * LENS_REACH`; its radar blip is drawn up to `LENS_BLIP` units off.
 pub const LENS_PULL: f32 = 0.4;
 pub const LENS_REACH: f32 = 0.8;
 pub const LENS_BLIP: f32 = 120.0;
@@ -145,7 +144,7 @@ pub const LENS_BLIP: f32 = 120.0;
 /// of the well per second, gaining a pocket well (at most `POCKET_MAX` of a full one, reach
 /// `POCKET_REACH`). If it dies holding at least `POCKET_RELEASE` the well is released where it
 /// died and fades over `RELEASE_LIFE` seconds.
-/// Engulf (Oozer): a pseudopod up to `power_reach * ENGULF_REACH` (times its size) long
+/// Engulf (Oozer): a pseudopod up to `reach * ENGULF_REACH` (times its size) long
 /// extends at `ENGULF_REACH_SPEED` (retracts at `ENGULF_RETRACT_SPEED`, turns at `ENGULF_TURN`
 /// rad/s) toward the ship in reach, else a rock; touching the ship swallows it, touching a rock
 /// eats it. A swallowed ship is pulled along at no more than `ENGULF_PULL` of its thrust (so a
@@ -326,7 +325,66 @@ pub enum Power {
     Engulf,
 }
 
-/// What a power is: its species rate (one in `n`), tier, first ring, bias and typical shared
+/// Bounded cadence, range and duration belonging to one power.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PowerParams {
+    pub period: f32,
+    pub reach: f32,
+    pub hold: f32,
+}
+impl PowerParams {
+    pub const DEFAULT: Self = Self {
+        period: 5.0,
+        reach: 300.0,
+        hold: 1.0,
+    };
+    pub const fn new(period: f32, reach: f32, hold: f32) -> Self {
+        Self {
+            period,
+            reach,
+            hold,
+        }
+    }
+    pub fn genes(&mut self) -> [Gene<'_>; 3] {
+        [
+            Gene::Real {
+                v: &mut self.period,
+                lo: 1.5,
+                hi: 14.0,
+            },
+            Gene::Real {
+                v: &mut self.reach,
+                lo: 80.0,
+                hi: 900.0,
+            },
+            Gene::Real {
+                v: &mut self.hold,
+                lo: 0.2,
+                hi: 4.0,
+            },
+        ]
+    }
+}
+impl Default for PowerParams {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+/// Parameters for an authored single module; every other module keeps dormant defaults.
+pub const fn params_for(power: Power, period: f32, reach: f32, hold: f32) -> [PowerParams; 22] {
+    let mut params = [PowerParams::DEFAULT; 22];
+    params[power as usize] = PowerParams::new(period, reach, hold);
+    params
+}
+
+/// A heritable module: signed intensity (Warp/Song mode) and its own parameters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PowerModule {
+    pub value: f32,
+    pub params: PowerParams,
+}
+
+/// What a power is: its species rate (one in `n`), tier, first ring, bias and typical local
 /// parameters (period, reach, hold) taken from the bestiary's specimens.
 struct Spec {
     one_in: f32,
@@ -628,7 +686,7 @@ pub struct Carried {
     pub strength: f32,
 }
 
-/// Stamps `power` on a genome (an elder's, by realm): the gene at `strength` and the shared
+/// Stamps `power` on a genome (an elder's, by realm): the gene at `strength` and its local
 /// parameters near the power's typical ones. A power that is not built, or a body plan that
 /// cannot carry it, is left off. Returns whether it was stamped.
 pub fn stamp(g: &mut Genome, power: Power, strength: f32) -> bool {
@@ -637,9 +695,7 @@ pub fn stamp(g: &mut Genome, power: Power, strength: f32) -> bool {
     }
     power.set(g, strength);
     let (period, reach, hold) = power.spec().typical;
-    g.power_period = period;
-    g.power_reach = reach;
-    g.power_hold = hold;
+    *g.power_params_mut(power) = PowerParams::new(period, reach, hold);
     true
 }
 
@@ -649,22 +705,44 @@ pub fn cloud_density(g: &Genome) -> f32 {
 }
 
 impl Genome {
-    /// The strongest power above its gate, if any. A species has at most one from its draw;
-    /// an awakened individual of a carrier species can have a second, and the stronger wins.
-    pub fn power(&self) -> Option<Carried> {
+    pub fn power_params(&self, power: Power) -> &PowerParams {
+        &self.power_params[power as usize]
+    }
+    pub fn power_params_mut(&mut self, power: Power) -> &mut PowerParams {
+        &mut self.power_params[power as usize]
+    }
+    pub fn power_module(&self, power: Power) -> PowerModule {
+        PowerModule {
+            value: power.value(self),
+            params: *self.power_params(power),
+        }
+    }
+    pub fn set_power_module(&mut self, power: Power, module: PowerModule) {
+        power.set(self, module.value);
+        *self.power_params_mut(power) = module.params;
+    }
+    /// All expressed powers, in stable catalog order; no strongest-wins suppression.
+    pub fn powers(&self) -> impl Iterator<Item = Carried> + '_ {
         Power::ALL
-            .iter()
+            .into_iter()
             .filter(|p| p.active(self))
-            .map(|&power| Carried {
+            .map(|power| Carried {
                 power,
                 strength: power.strength(self),
             })
+    }
+    pub fn live_powers(&self) -> impl Iterator<Item = Carried> + '_ {
+        self.powers().filter(|c| c.power.built())
+    }
+    /// Strongest expressed power, for a deliberate display identity only.
+    pub fn power(&self) -> Option<Carried> {
+        self.powers()
             .max_by(|a, b| a.strength.total_cmp(&b.strength))
     }
-
-    /// The strongest power the simulation acts on (see `Power::built`).
+    /// Strongest built power, for display identity only.
     pub fn live_power(&self) -> Option<Carried> {
-        self.power().filter(|c| c.power.built())
+        self.live_powers()
+            .max_by(|a, b| a.strength.total_cmp(&b.strength))
     }
 
     /// The share of a shot's damage that skips the shield (zero for a body without the gene).
@@ -683,7 +761,7 @@ impl Genome {
         if s <= 0.0 {
             return None;
         }
-        let period = self.power_period.max(1.5);
+        let period = self.power_params(Power::Phase).period.max(1.5);
         let phased_len = (period * (PHASE_DUTY.0 + PHASE_DUTY.1 * s))
             .min(period - PHASE_SOLID_MIN)
             .max(PHASE_LEAD + 0.1);
@@ -709,26 +787,21 @@ impl Genome {
         power.strength(self)
     }
 
-    /// Clears every power and restores the shared parameters: a civilization's people are
+    /// Clears every power and restores its local parameters: a civilization's people are
     /// not monsters.
     pub fn clear_powers(&mut self) {
-        let plain = Genome::default();
+        self.power_params = [PowerParams::DEFAULT; 22];
         for power in Power::ALL {
             power.set(self, 0.0);
         }
-        self.power_period = plain.power_period;
-        self.power_reach = plain.power_reach;
-        self.power_hold = plain.power_hold;
     }
 
-    /// Copies the whole block from `from` (a power travels whole in crossover).
+    /// Copies all modules from `from`; crossover can then choose each module independently.
     pub fn take_powers_from(&mut self, from: &Genome) {
         for power in Power::ALL {
             power.set(self, power.value(from));
         }
-        self.power_period = from.power_period;
-        self.power_reach = from.power_reach;
-        self.power_hold = from.power_hold;
+        self.power_params = from.power_params;
     }
 
     /// The nearest ring this genome's power allows (zero without one).
@@ -782,7 +855,7 @@ fn lerp(lo: f32, hi: f32, t: f32) -> f32 {
 }
 
 /// Writes `power` into `g` from a position `inner` in [0, 1) inside its band: intensity in
-/// `range`, shared parameters near the power's typical ones, all from fract chains so nothing
+/// `range`, local parameters near the power's typical ones, all from fract chains so nothing
 /// is drawn.
 fn express(g: &mut Genome, power: Power, inner: f32, range: (f32, f32)) {
     let part = (inner * 61.0).fract();
@@ -802,9 +875,9 @@ fn express(g: &mut Genome, power: Power, inner: f32, range: (f32, f32)) {
     power.set(g, v);
     let (period, reach, hold) = power.spec().typical;
     let wobble = |k: f32| 0.75 + 0.5 * (c * k).fract();
-    g.power_period = (period * wobble(3.0)).clamp(1.5, 14.0);
-    g.power_reach = (reach * wobble(5.0)).clamp(80.0, 900.0);
-    g.power_hold = (hold * wobble(7.0)).clamp(0.2, 4.0);
+    g.power_params_mut(power).period = (period * wobble(3.0)).clamp(1.5, 14.0);
+    g.power_params_mut(power).reach = (reach * wobble(5.0)).clamp(80.0, 900.0);
+    g.power_params_mut(power).hold = (hold * wobble(7.0)).clamp(0.2, 4.0);
 }
 
 /// The one extra final draw of `Genome::sample`: partitions `roll` into one band per power,
@@ -991,10 +1064,13 @@ impl Genome {
     /// A quiet stitch-thing, expressing a twenty-second cadence and 1200-unit separation.
     pub fn seamer() -> Self {
         let mut g = Self {
+            power_params: crate::power::params_for(
+                crate::power::Power::Rift,
+                7.055_556,
+                490.0,
+                1.0,
+            ),
             rift: 0.8,
-            power_period: 7.055_556,
-            power_reach: 490.0,
-            power_hold: 1.0,
             radius: 10.0,
             hull: 40.0,
             mass: 12.0,
@@ -1009,9 +1085,8 @@ impl Genome {
     /// An Oozer (engulf): a slow translucent blob that swallows rocks and, briefly, the ship.
     pub fn oozer() -> Self {
         let mut g = Self {
+            power_params: crate::power::params_for(crate::power::Power::Engulf, 5.0, 300.0, 1.0),
             engulf: 0.5,
-            power_period: 5.0,
-            power_reach: 300.0,
             radius: 36.0,
             hull: 160.0,
             mass: 90.0,
@@ -1026,9 +1101,8 @@ impl Genome {
     /// A spindle-shaped caster. Volley does not multiply power casts.
     pub fn runekeeper() -> Self {
         let mut g = Self {
+            power_params: crate::power::params_for(crate::power::Power::Rune, 5.0, 520.0, 1.0),
             rune: 0.7,
-            power_period: 5.0,
-            power_reach: 520.0,
             radius: 20.0,
             hull: 70.0,
             mass: 40.0,
@@ -1043,9 +1117,8 @@ impl Genome {
     /// A compact crab that orbits small rocks and throws them on a warning.
     pub fn slinger() -> Self {
         let mut g = Self {
+            power_params: crate::power::params_for(crate::power::Power::Sling, 3.5, 750.0, 1.0),
             sling: 0.6,
-            power_period: 3.5,
-            power_reach: 750.0,
             radius: 22.0,
             hull: 80.0,
             mass: 80.0,
@@ -1060,9 +1133,8 @@ impl Genome {
     /// A spoked builder that strings cords to rocks rather than firing at the ship.
     pub fn weaver() -> Self {
         let mut g = Self {
+            power_params: crate::power::params_for(crate::power::Power::Weave, 5.0, 700.0, 1.0),
             weave: 0.6,
-            power_period: 5.0,
-            power_reach: 700.0,
             radius: 20.0,
             hull: 80.0,
             mass: 60.0,
@@ -1077,8 +1149,8 @@ impl Genome {
     /// The specimens of the bestiary, as ordinary genomes: a Veilwing (phase).
     pub fn veilwing() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Phase, 4.0, 300.0, 1.0),
             phase: 0.8,
-            power_period: 4.0,
             radius: 14.0,
             hull: 30.0,
             weapon: Weapon::Projectile,
@@ -1095,9 +1167,8 @@ impl Genome {
     /// A Skipjack (blink).
     pub fn skipjack() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Blink, 3.4, 320.0, 1.0),
             blink: 0.6,
-            power_period: 3.4,
-            power_reach: 320.0,
             speed: 220.0,
             weapon: Weapon::Projectile,
             fire_period: 1.8,
@@ -1113,13 +1184,11 @@ impl Genome {
     /// A Stormcap (emp): a shielded dome that turns systems off from a charging ring.
     pub fn stormcap() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Emp, 6.0, 320.0, 1.4),
             emp: 0.75,
             trigger: crate::genome::Trigger::Sight,
             sight: 1200.0,
             lose: 1500.0,
-            power_period: 6.0,
-            power_reach: 320.0,
-            power_hold: 1.4,
             shield: 40.0,
             hull: 70.0,
             radius: 20.0,
@@ -1132,10 +1201,8 @@ impl Genome {
     /// An Argus Moth (glare): many eyes, a glass cannon of a lamp.
     pub fn argus() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Glare, 5.5, 650.0, 1.6),
             glare: 0.8,
-            power_period: 5.5,
-            power_reach: 650.0,
-            power_hold: 1.6,
             sight: 1600.0,
             hull: 22.0,
             radius: 14.0,
@@ -1147,8 +1214,8 @@ impl Genome {
     /// A Gloomfeeder (dim): a quiet eater of light.
     pub fn gloomfeeder() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Dim, 5.0, 450.0, 1.0),
             dim: 0.7,
-            power_reach: 450.0,
             diet: crate::genome::Diet::Dust,
             radius: 24.0,
             hull: 60.0,
@@ -1161,13 +1228,11 @@ impl Genome {
     /// A Dizzard (confuse): a swaying thing that scrambles a pilot's hands.
     pub fn dizzard() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Confuse, 7.0, 320.0, 1.4),
             confuse: 0.75,
             trigger: crate::genome::Trigger::Sight,
             sight: 1200.0,
             lose: 1500.0,
-            power_period: 7.0,
-            power_reach: 320.0,
-            power_hold: 1.4,
             shield: 30.0,
             hull: 60.0,
             radius: 18.0,
@@ -1180,9 +1245,8 @@ impl Genome {
     /// A Pushwhale (repel): a slow barrel that breathes everything away.
     pub fn pushwhale() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Repel, 7.0, 420.0, 1.0),
             repel: 0.75,
-            power_reach: 420.0,
-            power_period: 7.0,
             radius: 38.0,
             hull: 90.0,
             speed: 50.0,
@@ -1194,8 +1258,8 @@ impl Genome {
     /// A Tarbloom (warp, negative: a slow bubble).
     pub fn tarbloom() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Warp, 5.0, 360.0, 1.0),
             warp: -0.7,
-            power_reach: 360.0,
             radius: 28.0,
             hull: 90.0,
             speed: 40.0,
@@ -1207,8 +1271,8 @@ impl Genome {
     /// A Lenswyrm (lens): its head pulls and bends.
     pub fn lenswyrm() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Lens, 5.0, 520.0, 1.0),
             lens: 0.85,
-            power_reach: 520.0,
             radius: 12.0,
             hull: 55.0,
             speed: 80.0,
@@ -1258,9 +1322,8 @@ impl Genome {
     /// A Dirgewhale (song, positive: a dirge).
     pub fn dirgewhale() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Song, 4.0, 700.0, 1.0),
             song: 0.7,
-            power_period: 4.0,
-            power_reach: 700.0,
             radius: 44.0,
             hull: 200.0,
             mass: 140.0,
@@ -1272,8 +1335,8 @@ impl Genome {
     /// A Lurefish (mimic, a pickup lure).
     pub fn lurefish() -> Self {
         Self {
+            power_params: crate::power::params_for(crate::power::Power::Mimic, 5.0, 260.0, 1.0),
             mimic: 0.8,
-            power_reach: 260.0,
             diet: crate::genome::Diet::Hunt,
             contact_damage: 22.0,
             bounty: 220.0,
@@ -1376,19 +1439,17 @@ pub fn awaken(mut g: Genome, roll: f32, ring: u32) -> Genome {
 /// Only intensities above the gate move, never below `MUTATION_FLOOR`, so a mutation cannot
 /// invent a power or erase one.
 pub fn mutate(g: &mut Genome, mut step: impl FnMut() -> f32) {
-    let mut any = false;
-    for power in Power::ALL {
-        if power.active(g) {
-            any = true;
-            let v = power.value(g);
-            let magnitude = (v.abs() + step()).clamp(MUTATION_FLOOR, 1.0);
-            power.set(g, magnitude.copysign(v));
-        }
+    let active: Vec<_> = g.powers().map(|c| c.power).collect();
+    // Intensities retain their original order; one-carrier mutation uses identical draws.
+    for &power in &active {
+        let v = power.value(g);
+        power.set(g, (v.abs() + step()).clamp(MUTATION_FLOOR, 1.0).copysign(v));
     }
-    if any {
-        g.power_period *= 1.0 + step();
-        g.power_reach *= 1.0 + step();
-        g.power_hold *= 1.0 + step();
+    for power in active {
+        let params = g.power_params_mut(power);
+        params.period *= 1.0 + step();
+        params.reach *= 1.0 + step();
+        params.hold *= 1.0 + step();
     }
 }
 
@@ -1418,6 +1479,79 @@ mod tests {
             }
         }
         carriers as f32 / n as f32
+    }
+
+    #[test]
+    fn modules_stamp_and_awaken_without_overwriting_another_power() {
+        let mut g = Genome::skipjack();
+        *g.power_params_mut(Power::Blink) = PowerParams::new(2.7, 810.0, 0.4);
+        let blink = g.power_module(Power::Blink);
+        let body = (g.segments, g.limbs, g.radius, g.weapon);
+        assert!(stamp(&mut g, Power::Confuse, 0.8));
+        assert_eq!(g.power_module(Power::Blink), blink);
+        assert_eq!(
+            g.power_params(Power::Confuse),
+            &PowerParams::new(7.0, 320.0, 1.4)
+        );
+        assert_eq!((g.segments, g.limbs, g.radius, g.weapon), body);
+        let before = g;
+        assert_eq!(awaken(g, 0.9999, 30), before);
+        express(&mut g, Power::Song, 0.35, SPECIES_INTENSITY);
+        assert_eq!(g.power_module(Power::Blink), blink);
+        assert!(g.song.abs() >= GATE);
+    }
+
+    #[test]
+    fn enumeration_includes_every_live_power_and_signed_mode() {
+        let mut g = Genome::default();
+        for p in Power::ALL {
+            p.set(&mut g, if p.signed() { -0.8 } else { 0.8 });
+        }
+        assert_eq!(g.powers().map(|c| c.power).collect::<Vec<_>>(), Power::ALL);
+        assert_eq!(g.live_powers().count(), Power::ALL.len());
+        assert_eq!(g.power_module(Power::Warp).value, -0.8);
+        assert_eq!(g.power_module(Power::Song).value, -0.8);
+        g.clear_powers();
+        assert_eq!(g.powers().count(), 0);
+        assert_eq!(g.power_params, [PowerParams::DEFAULT; 22]);
+    }
+
+    #[test]
+    fn multiple_modules_cross_whole_and_mutate_independently() {
+        let mut a = Genome::skipjack();
+        *a.power_params_mut(Power::Blink) = PowerParams::new(2.0, 110.0, 0.3);
+        assert!(stamp(&mut a, Power::Warp, -0.8));
+        *a.power_params_mut(Power::Warp) = PowerParams::new(12.0, 840.0, 3.5);
+        let mut b = a;
+        *b.power_params_mut(Power::Blink) = PowerParams::new(11.0, 820.0, 3.2);
+        *b.power_params_mut(Power::Warp) = PowerParams::new(2.2, 120.0, 0.4);
+        let mut combinations = std::collections::BTreeSet::new();
+        for seed in 0..128 {
+            let child = Genome::crossover(a, b, &mut Rng::new(seed));
+            let blink = child.power_params(Power::Blink);
+            let warp = child.power_params(Power::Warp);
+            let from_a_blink = blink.period < 5.0;
+            let from_a_warp = warp.period > 5.0;
+            combinations.insert((from_a_blink, from_a_warp));
+            assert_eq!(blink.reach < 400.0, from_a_blink);
+            assert_eq!(blink.hold < 1.0, from_a_blink);
+            assert_eq!(warp.reach > 400.0, from_a_warp);
+            assert_eq!(warp.hold > 1.0, from_a_warp);
+            assert!(child.warp < -GATE);
+        }
+        assert_eq!(combinations.len(), 4);
+        let mut g = a;
+        let mut calls = 0;
+        mutate(&mut g, || {
+            calls += 1;
+            calls as f32 * 0.001
+        });
+        assert_eq!(calls, 8);
+        assert_ne!(
+            g.power_params(Power::Blink).period / a.power_params(Power::Blink).period,
+            g.power_params(Power::Warp).period / a.power_params(Power::Warp).period
+        );
+        assert_eq!(g.power_params(Power::Glare), a.power_params(Power::Glare));
     }
 
     #[test]
@@ -1457,7 +1591,7 @@ mod tests {
         assert_eq!((g.segments, g.limbs, g.limb_len), (1, 6, 2));
         assert_eq!(g.weapon, Weapon::Tether);
         assert_eq!(g.cord_hardness, 3.0);
-        assert!(g.power_reach >= 500.0);
+        assert!(g.power_params(Power::Weave).reach >= 500.0);
         assert_eq!(Genome::weaver().parts(), 13);
     }
 
@@ -1650,8 +1784,8 @@ mod tests {
     fn a_power_travels_whole_through_crossover() {
         let mut carrier = Genome::bogey();
         carrier.blink = 0.9;
-        carrier.power_period = 3.0;
-        carrier.power_reach = 400.0;
+        carrier.power_params_mut(Power::Blink).period = 3.0;
+        carrier.power_params_mut(Power::Blink).reach = 400.0;
         let plain = Genome::bogey();
         let mut whole = 0;
         let mut none = 0;
@@ -1661,7 +1795,7 @@ mod tests {
             if child.blink >= GATE {
                 whole += 1;
                 assert!((child.blink - 0.9).abs() < 0.2, "{}", child.blink);
-                assert!((child.power_period - 3.0).abs() < 0.6);
+                assert!((child.power_params(Power::Blink).period - 3.0).abs() < 0.6);
             } else {
                 none += 1;
                 assert_eq!(child.blink, 0.0);

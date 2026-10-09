@@ -72,7 +72,7 @@ impl Game {
             }
             return;
         }
-        let reach = g.power_reach;
+        let reach = g.power_params(Power::Mimic).reach;
         let idle_near = ship.is_some_and(|s| {
             at.distance(s) < reach
                 && self
@@ -125,8 +125,8 @@ mod tests {
 
     fn lurefish(mimic: f32) -> Genome {
         Genome {
+            power_params: crate::power::params_for(crate::power::Power::Mimic, 5.0, 260.0, 1.0),
             mimic,
-            power_reach: 260.0,
             diet: crate::genome::Diet::Hunt,
             trigger: Trigger::Proximity,
             contact_damage: 22.0,

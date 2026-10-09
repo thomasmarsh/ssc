@@ -98,7 +98,7 @@ impl Game {
         }
         let body = &self.bodies[index];
         let (owner, at, g) = (body.id, body.position, body.genome);
-        state.rune_clock = g.power_period;
+        state.rune_clock = g.power_params(Power::Rune).period;
         if body.phased
             || body.contact_cooldown > 0.0
             || !body.alert
@@ -126,7 +126,7 @@ impl Game {
         let Some(ship) = self.player().map(|p| p.position) else {
             return;
         };
-        if ship.distance(at) > g.power_reach || !at.is_finite() {
+        if ship.distance(at) > g.power_params(Power::Rune).reach || !at.is_finite() {
             return;
         }
         self.cleanup_runes();
@@ -155,7 +155,7 @@ impl Game {
                 Vec2::from_angle(angle) * (130.0 + k as f32 * 14.0)
             };
             let target = ship + offset;
-            if target.distance(at) > g.power_reach
+            if target.distance(at) > g.power_params(Power::Rune).reach
                 || target.distance(at) < RADIUS + self.bodies[index].radius + 30.0
                 || !self.active.contains(&SectorId::containing(target))
             {
@@ -723,7 +723,7 @@ mod tests {
             assert_eq!(g.mines.len(), 1);
             assert!(
                 g.mines[0].position.distance(g.bodies[index].position)
-                    <= g.bodies[index].genome.power_reach
+                    <= g.bodies[index].genome.power_params(Power::Rune).reach
             );
             assert!(
                 g.drain_cues()
@@ -873,7 +873,7 @@ mod tests {
                 );
                 assert!(
                     mine.position.distance(body(&g, owner).position)
-                        <= body(&g, owner).genome.power_reach
+                        <= body(&g, owner).genome.power_params(Power::Rune).reach
                 );
                 for prior in &g.mines[..i] {
                     assert!(mine.position.distance(prior.position) >= 2.0 * RADIUS + 50.0);
@@ -898,7 +898,7 @@ mod tests {
                     .unwrap();
                 let caster = g.bodies.iter_mut().find(|b| b.id == owner).unwrap();
                 caster.genome.rune = (91.125 + i as f32 * 0.25) / 131.0;
-                caster.genome.power_period = 1.5;
+                caster.genome.power_params_mut(Power::Rune).period = 1.5;
                 caster.genome.speed = 0.0;
                 let mut out = Vec::new();
                 let mut tells = 0;

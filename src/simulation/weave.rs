@@ -37,7 +37,7 @@ impl Game {
         }
         let (id, at, g) = (owner.id, owner.position, owner.genome);
         // Retry on the creature's rhythm even when there are no suitable stones.
-        state.web_clock = g.power_period;
+        state.web_clock = g.power_params(Power::Weave).period;
         let spokes: Vec<Vec2> = self
             .tethers
             .iter()
@@ -70,7 +70,7 @@ impl Game {
                 let offset = rock.position - at;
                 let distance = offset.length();
                 if distance < owner.radius + rock.radius + power::WEB_GAP
-                    || distance > g.power_reach
+                    || distance > g.power_params(Power::Weave).reach
                 {
                     return false;
                 }
@@ -151,7 +151,7 @@ impl Game {
         let distance = offset.length();
         let direction = offset / distance.max(0.001);
         // Mining, a ram or the dash whip may take the stone away. Never chase it forever.
-        if distance > a.genome.power_reach * 1.25 {
+        if distance > a.genome.power_params(Power::Weave).reach * 1.25 {
             return false;
         }
         let floor = a.radius + b.radius + power::WEB_GAP;

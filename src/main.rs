@@ -1120,7 +1120,7 @@ fn smoke_run(
     {
         use ssc::genome::Species;
         let genome = ssc::simulation::dev::specimen_genome(&name);
-        let near = if matches!(name.as_str(), "stormcap" | "dizzard") {
+        let near = if matches!(name.as_str(), "stormcap" | "dizzard" | "multijammer") {
             200.0
         } else if name == "hullworm" {
             30.0
@@ -1137,7 +1137,15 @@ fn smoke_run(
             .unwrap_or(near);
         if matches!(
             name.as_str(),
-            "stormcap" | "dizzard" | "argus" | "dirgewhale" | "hullworm" | "slinger" | "oozer"
+            "stormcap"
+                | "dizzard"
+                | "argus"
+                | "dirgewhale"
+                | "hullworm"
+                | "slinger"
+                | "oozer"
+                | "multijammer"
+                | "multioozer"
         ) {
             // The jammers only work on a ship that is not in grace.
             session.game.player_invulnerability = 0.0;

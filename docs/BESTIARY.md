@@ -72,19 +72,25 @@ The opening is protected exactly as the existing ramp protects it: ring 0 to 2 h
 
 Overall about 7 percent of sampled species carry a power. That sounds like a lot until you remember a sector holds 2 to 4 species and a species is a patch of many sectors; the player should meet a new named power every few minutes of travel past ring 5, not every sector.
 
-## 4. The shared gene block
+## 4. Independent power modules
 
-Twenty intensity genes plus three shared parameters. All real, all in the tail, all default 0 (shared: sensible mid values). An intensity below `GATE = 0.3` is dormant. Effect strength `s = (v - 0.3) / 0.7`, in [0, 1], unless the gene is signed.
+Twenty-two intensity genes and a power-local `PowerParams` (period, reach, hold) per gene form the bounded tail. `PowerModule` reads/writes one complete heritable unit. Intensities default to zero; below `GATE = 0.3` a module is dormant. Effect strength is `(abs(value) - 0.3) / 0.7`, clamped to [0, 1]. Negative Warp and Song select their other mode.
 
-Shared parameters (read by whichever power is on; a creature with one power has one rhythm):
+Each module has its own:
 
-- `power_period` 1.5 to 14.0 s, default 5.0. Seconds between uses (or a cycle length).
-- `power_reach` 80 to 900 units, default 300. A radius or range.
-- `power_hold` 0.2 to 4.0 s, default 1.0. How long a timed effect lasts.
+- `period`: 1.5 to 14.0 s, default 5.0, between uses or cycles.
+- `reach`: 80 to 900 units, default 300, a radius or range.
+- `hold`: 0.2 to 4.0 s, default 1.0, for effects that consume a duration.
 
-The **telegraph is not a gene.** Every power has a fixed minimum telegraph in code (`TELL_MIN` of 0.6 s for anything that disables the ship, 0.35 s for movement), so no mutation can make an attack unfair. The genes set how often, how far and how long.
+`Genome::powers()` and `live_powers()` enumerate every expressed capability in catalog order. `power()` and `live_power()` select a display identity only. Sampling still selects at most one power from its original final draw, and awakening still refuses existing carriers; authored genomes and elder stamps can combine powers. Stamping never changes another module or restyles the body. Multi-module crossover chooses complete individual modules on a salted stream; ordinary single-module inheritance retains its original draws. Mutation changes each carried module's own parameters, and species drift skips the entire power tail.
 
-Full table of genes, ranges and files is in section 11.
+EMP and confusion have independent clocks, warnings and use counts; glare has its own clock/count, and Song has a separate count. The global budget remains one charging source. That source can announce both ring attacks and their simultaneous impacts share one hit's permission, so EMP immunity cannot erase the accompanying confusion. Each ring keeps its own reach and hold. Phase cancels a blink warning and releases an engulfed ship; a completed blink releases a held ship before moving. Devour and Engulf have separate growth factors that multiply, with the Oozer's squeeze preserved. Existing Blink/body and weapon compatibility constraints still apply.
+
+The renderer keeps one identity halo and draws every active module's marks and warnings. Engulf's soft outline no longer prevents another module's warning. A quiet Mimic still hides its identity, but an additional power's active warning remains visible. Loot keeps one carrier bonus and one possible organ: the highest bonus among active modules, and the strongest harvestable module, respectively.
+
+The **telegraph is not a gene.** Fixed minimum warnings remain in code (`TELL_MIN` 0.6 s for disabling attacks, 0.35 s for movement). Genes set cadence, range and effect duration only where the mechanism consumes them. Full gene ranges/files are in section 11.
+
+TODO: express supporting organs, developmental body preferences and appearance genetically; current authored styles remain coupled to species sampling until that next slice. No new wild multi-power probabilities in this slice.
 
 ## 5. The menagerie
 
@@ -96,7 +102,7 @@ Each entry: image, silhouette, abilities, encounter, what the player does, genom
 
 **Silhouette.** Two wide triangular wings, `sides` 3, `aspect` 1.6. Solid phase: a hard bright outline. Phased: the outline is dashed and halves in brightness, with a faint trailing afterimage.
 
-**Abilities.** Cycles solid and phased on `power_period`. While phased it ignores bullets (the swept collision test skips it), ignores rocks and other bodies (no contact, no ram damage given or taken), cannot be tracked by homing missiles and cannot fire. It fires and rams only in the solid window.
+**Abilities.** Cycles solid and phased on `period`. While phased it ignores bullets (the swept collision test skips it), ignores rocks and other bodies (no contact, no ram damage given or taken), cannot be tracked by homing missiles and cannot fire. It fires and rams only in the solid window.
 
 **Encounter.** Strange tier. Strange lands and keen lands, ring 6 and out, 1 in 330 species. Usually alone or as a pair. Appears in front of rocks you were hiding behind, which is its menace: you cannot use cover against it, and it can use yours.
 
@@ -104,7 +110,7 @@ Each entry: image, silhouette, abilities, encounter, what the player does, genom
 
 **Genome.** New: `phase`. Reuse: `fear` (Bullets, so it flickers away from your fire), `trigger` (Proximity), `sides`, `aspect`, `speed`.
 
-Specimen: `phase` 0.8 (duty = 0.2 + 0.4 s = 0.48 phased of every cycle), `power_period` 4.0, `power_hold` is unused, `radius` 14, `hull` 30, `weapon` Projectile, `fire_period` 2.2.
+Specimen: `phase` 0.8 (duty = 0.2 + 0.4 s = 0.48 phased of every cycle), `period` 4.0, `hold` is unused, `radius` 14, `hull` 30, `weapon` Projectile, `fire_period` 2.2.
 
 **Simulation effect.** Cycle clock in `powers.rs` (the new module) with `phase_phased: bool` per body. Bullet sweep, contact solver, tether latch and `kinetic_damage` skip a phased body. `fire_weapons` skips it; `contact_damage` is zero while phased. A phased body still steers and can be seen on the radar. Persistence: none (a phased body is not remembered; kills still persist by spawn).
 
@@ -116,7 +122,7 @@ Specimen: `phase` 0.8 (duty = 0.2 + 0.4 s = 0.48 phased of every cycle), `power_
 
 **Silhouette.** A big round body with 3 to 6 concentric faint rings pulsing outward, ring spacing widening with distance (the field).
 
-**Abilities.** A continuous repulsion field out to `power_reach`: it pushes the ship, creatures, rocks, eggs, plankton and hostile and friendly bullets outward (bullets bend, not stop). Every `power_period` it inhales for 1.0 s (the field reverses to a mild pull, the telegraph) and then exhales a shove ring that knocks everything near it outward at a hard speed. The shove does no damage by itself. It is lethal only near a hazard: knocking you into a well, a wall, or a rock at speed (`kinetic_damage`, which already hurts the ship for half).
+**Abilities.** A continuous repulsion field out to `reach`: it pushes the ship, creatures, rocks, eggs, plankton and hostile and friendly bullets outward (bullets bend, not stop). Every `period` it inhales for 1.0 s (the field reverses to a mild pull, the telegraph) and then exhales a shove ring that knocks everything near it outward at a hard speed. The shove does no damage by itself. It is lethal only near a hazard: knocking you into a well, a wall, or a rock at speed (`kinetic_damage`, which already hurts the ship for half).
 
 **Encounter.** Strange tier. Distortion above 0.5, ring 7 and out, 1 in 250 species. Hardest when it guards a well.
 
@@ -124,9 +130,9 @@ Specimen: `phase` 0.8 (duty = 0.2 + 0.4 s = 0.48 phased of every cycle), `power_
 
 **Genome.** New: `repel`. Reuse: `mass` (negative mass for a body that is itself repelled by wells), `mass_affinity`, `radius` (the bigger the body, the larger the default field), `social` Solitary.
 
-Specimen: `repel` 0.75, `power_reach` 420, `power_period` 7.0, `radius` 38, `mass` -40, `speed` 60, `weapon` None.
+Specimen: `repel` 0.75, `reach` 420, `period` 7.0, `radius` 38, `mass` -40, `speed` 60, `weapon` None.
 
-**Simulation effect.** In `apply_gravity`'s neighbour: for each body with the gene on, for every active body within `power_reach` add `outward * accel(s, d) * dt` where `accel` is `420 * s * (1 - d/reach)^2`, capped so the player's net is at most 0.6 of its thrust, bullets bend by up to 25 degrees per second. The inhale and shove have their own `Move`-style state in `ApexState`'s successor (`PowerState`). The shove sets `ship.velocity += outward * 600 * s` once, clamp 650. Excludes pinned bodies.
+**Simulation effect.** In `apply_gravity`'s neighbour: for each body with the gene on, for every active body within `reach` add `outward * accel(s, d) * dt` where `accel` is `420 * s * (1 - d/reach)^2`, capped so the player's net is at most 0.6 of its thrust, bullets bend by up to 25 degrees per second. The inhale and shove have their own `Move`-style state in `ApexState`'s successor (`PowerState`). The shove sets `ship.velocity += outward * 600 * s` once, clamp 650. Excludes pinned bodies.
 
 **Player takes from it.** Antigrav bladder: a defensive Aux boost, "Repulsor", that pushes rocks and enemy bullets away from the ship within 110 units while a hostile is near (existing boost `Need::Danger`), drains volatiles per second.
 
@@ -144,7 +150,7 @@ Specimen: `repel` 0.75, `power_reach` 420, `power_period` 7.0, `radius` 38, `mas
 
 **Genome.** New: `warp` (signed, -1 to 1). Reuse: `radius`, `shield`, `fear` Wells (blooms hover near wells because lensing is part of their ecology), `social` Dweller (it keeps a home).
 
-Specimen: `warp` -0.7 (slow), `power_reach` 360, `radius` 28, `hull` 90, `speed` 40, `weapon` None.
+Specimen: `warp` -0.7 (slow), `reach` 360, `radius` 28, `hull` 90, `speed` 40, `weapon` None.
 
 **Simulation effect.** Time dilation as a per-body `dt` factor is invasive in a single `step(dt)`, so implement as a **viscous field**: for each body in a slow bubble `velocity *= exp(-k dt)` toward 0.55 of its speed, `fire_cooldown` and `since_hit` tick at 0.55 dt, bullets inside have `velocity *= 0.55` (restored at the rim by scaling back on exit so speed is conserved). Haste mirrors: shots inside get 1.4x velocity, creatures `fire_cooldown` ticks at 1.4 dt. The ship's own regeneration is not scaled (no thumb on the economy). Rim detection uses distance to the bloom, so it needs no extra state beyond `PowerState`.
 
@@ -156,7 +162,7 @@ Specimen: `warp` -0.7 (slow), `power_reach` 360, `radius` 28, `hull` 90, `speed`
 
 **Silhouette.** A chain (`segments` 7 to 11) drawn faint, with an ellipse of refracted starfield around its head (presentation: displace the stars and backdrop samples in a circle by a lens function; cost is a few extra draws).
 
-**Abilities.** Lensing: shots passing within `power_reach` curve toward the head (up to 25 degrees per second) and the head's radar blip is displaced (it appears in a wrong place by up to 120 units, so sonar and radar misread it; the true location is the lens centre). Draw-in: a pocket well of 40 percent of a full well's pull toward the head. A body that gets to its core takes contact damage like a normal ram, not the well's 35 dps.
+**Abilities.** Lensing: shots passing within `reach` curve toward the head (up to 25 degrees per second) and the head's radar blip is displaced (it appears in a wrong place by up to 120 units, so sonar and radar misread it; the true location is the lens centre). Draw-in: a pocket well of 40 percent of a full well's pull toward the head. A body that gets to its core takes contact damage like a normal ram, not the well's 35 dps.
 
 **Encounter.** Mythic leaning. Distortion above 0.6, ring 10 and out, 1 in 700 species, and as a mythic apex stamp on a Maelstrom.
 
@@ -164,9 +170,9 @@ Specimen: `warp` -0.7 (slow), `power_reach` 360, `radius` 28, `hull` 90, `speed`
 
 **Genome.** New: `lens`. Reuse: `segments`, `wave`, `taper` for the eel, `mass` -30 (so the pull and the repulsion can be argued), `mass_affinity`.
 
-Specimen: `lens` 0.85, `power_reach` 520, `segments` 9, `wave` 1.4, `radius` 12, `hull` 55.
+Specimen: `lens` 0.85, `reach` 520, `segments` 9, `wave` 1.4, `radius` 12, `hull` 55.
 
-**Simulation effect.** Reuses `apply_gravity` with a pocket well position (the head body), strength `0.4 * lens_strength`, reach `power_reach * 0.8`. Shot bending in `move_bullets`. Radar displacement is in the radar draw (adapter only, `draw_radar`, not rules). The displaced-blip cue never changes simulation targeting.
+**Simulation effect.** Reuses `apply_gravity` with a pocket well position (the head body), strength `0.4 * lens_strength`, reach `reach * 0.8`. Shot bending in `move_bullets`. Radar displacement is in the radar draw (adapter only, `draw_radar`, not rules). The displaced-blip cue never changes simulation targeting.
 
 **Player takes from it.** Lens organ: ping reach plus 1500 and a wider camera pull (the "wide" camera variant for 20 s after a ping).
 
@@ -176,7 +182,7 @@ Specimen: `lens` 0.85, `power_reach` 520, `segments` 9, `wave` 1.4, `radius` 12,
 
 **Silhouette.** Small, `sides` 4, `aspect` 1.4. Every hop leaves a faint line between the two flashes for 0.4 s.
 
-**Abilities.** Every `power_period` it hops 120 to 520 units, to a point that is at least 180 from the ship and clear of rocks. The destination flashes 0.35 s before arrival (a ring that appears where it will land), and it fires a snap shot within 0.2 s of landing (the phantom's habit). It uses hops to flank, to escape when hurt below its rage line, and to close from range.
+**Abilities.** Every `period` it hops 120 to 520 units, to a point that is at least 180 from the ship and clear of rocks. The destination flashes 0.35 s before arrival (a ring that appears where it will land), and it fires a snap shot within 0.2 s of landing (the phantom's habit). It uses hops to flank, to escape when hurt below its rage line, and to close from range.
 
 **Encounter.** Mild tier, the first power a player meets: ring 3 and out, tech above 0.5, 1 in 125 species, plus awakened individuals. Also the generalised form of the Phantom apex.
 
@@ -184,9 +190,9 @@ Specimen: `lens` 0.85, `power_reach` 520, `segments` 9, `wave` 1.4, `radius` 12,
 
 **Genome.** New: `blink`. Reuse: `speed`, `lead` (hops are chosen along the intercept), `sight`, `fear` Bullets, `weapon` Needles or Projectile.
 
-Specimen: `blink` 0.6, `power_period` 3.4, `power_reach` 320, `speed` 220, `weapon` Projectile, `fire_period` 1.8.
+Specimen: `blink` 0.6, `period` 3.4, `reach` 320, `speed` 220, `weapon` Projectile, `fire_period` 1.8.
 
-**Simulation effect.** In `powers.rs` a `blink` step lifted from `apexes.rs::phantom`: choose the hop target from a `Rng` stream keyed by the creature's id (so no draws move) at `power_period`; cue an `EffectKind::Respawn` pair; teleport after `TELL_MOVE` 0.35 s; `fire_cooldown = 0.2`. No teleport inside `BLINK_FROM` 220 of the ship, no teleport into another body, never across an unloaded sector border.
+**Simulation effect.** In `powers.rs` a `blink` step lifted from `apexes.rs::phantom`: choose the hop target from a `Rng` stream keyed by the creature's id (so no draws move) at `period`; cue an `EffectKind::Respawn` pair; teleport after `TELL_MOVE` 0.35 s; `fire_cooldown = 0.2`. No teleport inside `BLINK_FROM` 220 of the ship, no teleport into another body, never across an unloaded sector border.
 
 **Player takes from it.** Skip node: dash can hop through a single wall or rock thinner than 80 units to a clear landing spot.
 
@@ -216,7 +222,7 @@ Specimen: `bypass` 0.7 (share 0.2 + 0.6 s ~ 0.45), `weapon` Projectile, `shot_sp
 
 **Silhouette.** A dome with `limbs` 4 to 6 of `limb_len` 2, tinted electric blue, a thin charge ring that contracts over 0.9 s.
 
-**Abilities.** Every `power_period` (default 6 s) it charges: a ring at `power_reach` contracts onto it. When it closes, every ship inside the radius loses 1 or 2 systems (see section 7 for the list) for `power_hold` (up to 1.5 s). It is not damage and not a shield stripper; it is a choice taken from you for a heartbeat.
+**Abilities.** Every `period` (default 6 s) it charges: a ring at `reach` contracts onto it. When it closes, every ship inside the radius loses 1 or 2 systems (see section 7 for the list) for `hold` (up to 1.5 s). It is not damage and not a shield stripper; it is a choice taken from you for a heartbeat.
 
 **Encounter.** Severe tier. Tech above 0.6, ring 7 and out, 1 in 330 species. Quiet and solitary; the sound is a rising whine you hear before you see.
 
@@ -224,7 +230,7 @@ Specimen: `bypass` 0.7 (share 0.2 + 0.6 s ~ 0.45), `weapon` Projectile, `shot_sp
 
 **Genome.** New: `emp`. Reuse: `shield` 40 (the charge breaks when the shield does), `social` Solitary, `limbs`.
 
-Specimen: `emp` 0.75, `power_period` 6.0, `power_reach` 320, `power_hold` 1.4, `shield` 40, `hull` 70.
+Specimen: `emp` 0.75, `period` 6.0, `reach` 320, `hold` 1.4, `shield` 40, `hull` 70.
 
 **Simulation effect.** `PowerState` charge, then `Game::jam` set on the ship (section 7). Charge cancels if shield is zero. It consumes the ship's `jam_immunity` of 6 s (no chain stun).
 
@@ -236,7 +242,7 @@ Specimen: `emp` 0.75, `power_period` 6.0, `power_reach` 320, `power_hold` 1.4, `
 
 **Silhouette.** A round body with a ring of 8 to 12 small eyes (small circles) that open in sequence before a pulse.
 
-**Abilities.** Every `power_period` its eyes open in order (0.5 s tell, a bright flash at the end) and then pulse a **glitch** at the ship if it is within `power_reach * 1.5`: for 1.0 to 2.0 s the radar shows 4 to 9 false blips, edge arrows shuffle to wrong targets, the screen gets a slight chromatic smear and scanlines. **The ship itself and enemy bullets are never hidden or displaced**: the game stays fair in the actual play area. It is information that is attacked, not the player's ability to dodge.
+**Abilities.** Every `period` its eyes open in order (0.5 s tell, a bright flash at the end) and then pulse a **glitch** at the ship if it is within `reach * 1.5`: for 1.0 to 2.0 s the radar shows 4 to 9 false blips, edge arrows shuffle to wrong targets, the screen gets a slight chromatic smear and scanlines. **The ship itself and enemy bullets are never hidden or displaced**: the game stays fair in the actual play area. It is information that is attacked, not the player's ability to dodge.
 
 **Encounter.** Mild tier. Keen lands, tech, ring 5 and out, 1 in 250 species. Usually a bonus in a pack of other things.
 
@@ -244,7 +250,7 @@ Specimen: `emp` 0.75, `power_period` 6.0, `power_reach` 320, `power_hold` 1.4, `
 
 **Genome.** New: `glare`. Reuse: `sight` (very long), `social` School (they flock and flash in sequence).
 
-Specimen: `glare` 0.8, `power_period` 5.5, `power_reach` 650, `power_hold` 1.6, `sight` 1600, `hull` 22.
+Specimen: `glare` 0.8, `period` 5.5, `reach` 650, `hold` 1.6, `sight` 1600, `hull` 22.
 
 **Simulation effect.** Sets `Game::glitch: f32` (0 to 1 with fade) and a seed for false blips. Rules never read it. The adapter (`presentation.rs`) uses it to jitter `draw_radar`, `draw_guides` and `draw_echoes`, and to apply a post-colour shift. A ping during a glitch returns false echoes only for the faulty kinds (the real echo set is unchanged, the draw is shifted).
 
@@ -256,7 +262,7 @@ Specimen: `glare` 0.8, `power_period` 5.5, `power_reach` 650, `power_hold` 1.6, 
 
 **Silhouette.** Disguised as a rock (outline of a plain asteroid, no jaws) or as a pickup glyph (rarity-coloured diamond) with a thin faint stalk. Revealed: an open mouth ring with teeth.
 
-**Abilities.** `mimic` below 0.6 imitates a free rock (ambushes by drifting into the ship: ram and bite); at 0.6 and above imitates a pickup (a lure). It reveals when within `power_reach * 0.5`, when damaged, or after the ship has idled near it for 2 s, and gives a 0.3 s tell (a crack and the stalk lights). A lure-type has a real, small payoff: it holds a genuine pickup (scrap) inside that spills on death, so the greed is partly rewarded.
+**Abilities.** `mimic` below 0.6 imitates a free rock (ambushes by drifting into the ship: ram and bite); at 0.6 and above imitates a pickup (a lure). It reveals when within `reach * 0.5`, when damaged, or after the ship has idled near it for 2 s, and gives a 0.3 s tell (a crack and the stalk lights). A lure-type has a real, small payoff: it holds a genuine pickup (scrap) inside that spills on death, so the greed is partly rewarded.
 
 **Encounter.** Strange tier. Predator country and rock belts, ring 5 and out, 1 in 250 species. A lure is only ever one per sector.
 
@@ -264,7 +270,7 @@ Specimen: `glare` 0.8, `power_period` 5.5, `power_reach` 650, `power_hold` 1.6, 
 
 **Genome.** New: `mimic`. Reuse: `diet` Hunt, `trigger` Proximity, `fear` None, `speed` low and `cruise` very low.
 
-Specimen: `mimic` 0.8 (lure), `power_reach` 260, `diet` Hunt, `contact_damage` 22, `bounty` 220.
+Specimen: `mimic` 0.8 (lure), `reach` 260, `diet` Hunt, `contact_damage` 22, `bounty` 220.
 
 **Simulation effect.** A `disguised: bool` on `PowerState`; while disguised the creature draws as the target glyph and is not an alerting creature (sight and trigger off); steering is a gentle drift. It reveals per the rules above and becomes an ordinary hunter. Presentation reads `disguised`. Persistence: disguise state does not persist; the spawn is by index.
 
@@ -356,7 +362,7 @@ Specimen: `devour` 0.7, `diet` Rocks, `mass` 120, `radius` 40, `hull` 160, `spee
 
 **Silhouette.** A spoked body (`limbs` 6, `limb_len` 2) with thin cords drawn out to nearby rocks.
 
-**Abilities.** Every `power_period` it fires a cord to the nearest free rock, then another, forming up to `2 + 4 s` Links between rocks and itself. A crossing ship takes the existing Link damage and shove. Cords last 60 s unless cut. Rocks held in the web hang in a rough lattice and are drawn slowly toward the weaver, so it makes a cage of stone.
+**Abilities.** Every `period` it fires a cord to the nearest free rock, then another, forming up to `2 + 4 s` Links between rocks and itself. A crossing ship takes the existing Link damage and shove. Cords last 60 s unless cut. Rocks held in the web hang in a rough lattice and are drawn slowly toward the weaver, so it makes a cage of stone.
 
 **Encounter.** Strange tier. Rough country and rock belts, ring 6 and out, 1 in 330 species.
 
@@ -364,7 +370,7 @@ Specimen: `devour` 0.7, `diet` Rocks, `mass` 120, `radius` 40, `hull` 160, `spee
 
 **Genome.** New: `weave`. Reuse: `weapon` Tether (cords exist and their strength genes apply), `limbs`, `diet` Rocks, `bond`.
 
-Specimen: `weave` 0.6, `weapon` Tether, `cord_strength` 2.0, `cord_hardness` 3, `limbs` 6, `power_period` 5, `power_reach` 700.
+Specimen: `weave` 0.6, `weapon` Tether, `cord_strength` 2.0, `cord_hardness` 3, `limbs` 6, `period` 5, `reach` 700.
 
 **Simulation effect.** A Link between a creature body and a rock body: `Tether::link(owner, other)` already takes any two bodies; the step uses `closest_on_segment` for crossing, which is already generic. Cap on web links alive per weaver and in the world (`MAX_TETHERS` 64 stays).
 
@@ -378,7 +384,7 @@ Specimen: `weave` 0.6, `weapon` Tether, `cord_strength` 2.0, `cord_hardness` 3, 
 
 **Silhouette.** Large body with a pale mouth ring that opens on each note and a visible trailing ring pattern. A chorus of smaller whales sing a harmony.
 
-**Abilities.** Sign of `song` selects the mode. Positive: a **dirge**, a ring every `power_period` that moves outward at 500 units per second with a safe gap 80 units wide in the ring (the rest is damage, 25 on touch), shattering crystal and wearing at ice. Negative: a **chant**, an aura that raises nearby allies' fire rate by 25 percent and aggression by 20 percent while it sings and gives a 5 percent regard-free attack buff to civilization warriors that are near. Songs are audible, a musical idea in the synth, with a pitch set by the voice genes (`voice0`, `voice1`, `voice2`).
+**Abilities.** Sign of `song` selects the mode. Positive: a **dirge**, a ring every `period` that moves outward at 500 units per second with a safe gap 80 units wide in the ring (the rest is damage, 25 on touch), shattering crystal and wearing at ice. Negative: a **chant**, an aura that raises nearby allies' fire rate by 25 percent and aggression by 20 percent while it sings and gives a 5 percent regard-free attack buff to civilization warriors that are near. Songs are audible, a musical idea in the synth, with a pitch set by the voice genes (`voice0`, `voice1`, `voice2`).
 
 **Encounter.** Strange tier. Swarm with low tech, ring 6 and out, 1 in 330 species. A whale that sings to civilization warriors is a good story.
 
@@ -386,7 +392,7 @@ Specimen: `weave` 0.6, `weapon` Tether, `cord_strength` 2.0, `cord_hardness` 3, 
 
 **Genome.** New: `song` (signed). Reuse: `voice0..2` (the melody), `radius` large, `mass` heavy, `social` Pack, `alarm`.
 
-Specimen: `song` 0.7 (dirge), `power_period` 4.0, `power_reach` 700, `radius` 44, `hull` 200, `mass` 140.
+Specimen: `song` 0.7 (dirge), `period` 4.0, `reach` 700, `radius` 44, `hull` 200, `mass` 140.
 
 **Simulation effect.** The ring is a hostile expanding-circle projectile (like `Nova` bullets in a ring but modelled as a single radius so the cost is one entry). Chant is an aura read in `steer_creatures` as a multiplier on `aggression` and fire rate. `Cue::Song` with pitch from voice genes.
 
@@ -398,7 +404,7 @@ Specimen: `song` 0.7 (dirge), `power_period` 4.0, `power_reach` 700, `radius` 44
 
 **Silhouette.** A black bloom of soft edge with a thin bright rim ring (so it is readable) and two small bright points that are its eyes.
 
-**Abilities.** A dim field of radius `power_reach * 1.2`: the backdrop and plankton glow dim to 35 percent (never darker); plankton and lichen inside do not regrow; sonar echoes that cross it are absorbed (an echo behind it is hidden); creatures inside are harder to see on screen (they draw at 55 percent but always with a faint outline) and notice the ship at 70 percent of their usual range if it is not shooting. **Bullets and hostile telegraphs are always drawn at full brightness.**
+**Abilities.** A dim field of radius `reach * 1.2`: the backdrop and plankton glow dim to 35 percent (never darker); plankton and lichen inside do not regrow; sonar echoes that cross it are absorbed (an echo behind it is hidden); creatures inside are harder to see on screen (they draw at 55 percent but always with a faint outline) and notice the ship at 70 percent of their usual range if it is not shooting. **Bullets and hostile telegraphs are always drawn at full brightness.**
 
 **Encounter.** Strange tier. Distortion, ring 8 and out, 1 in 500 species. Often nests with a Lurefish.
 
@@ -406,7 +412,7 @@ Specimen: `song` 0.7 (dirge), `power_period` 4.0, `power_reach` 700, `radius` 44
 
 **Genome.** New: `dim`. Reuse: `diet` Dust (it eats ambient light, existing Dust diet is "ambient energy"), `fear` Player, `sight` short.
 
-Specimen: `dim` 0.7, `power_reach` 450, `diet` Dust, `radius` 24, `hull` 60.
+Specimen: `dim` 0.7, `reach` 450, `diet` Dust, `radius` 24, `hull` 60.
 
 **Simulation effect.** `Game::dim_at(position)` (a sum over dim bodies, 0 to 1) read by `backdrop`/`nebula` draw (adapter), `regrow_food` (skip inside), `ping.rs` (absorb echoes behind), and `steer_creatures` perception (the ship is seen at a reduced distance while not firing). Not read by bullet drawing.
 
@@ -418,7 +424,7 @@ Specimen: `dim` 0.7, `power_reach` 450, `diet` Dust, `radius` 24, `hull` 60.
 
 **Casting and determinism.** `simulation/rift.rs` places one pair per successful cast, while calm or alert, after one full period. Up to sixteen salted hash candidates use seed, owner id, attempt count, and candidate index. Each pair is centered near its owner, with a perpendicular offset of 180 to 345 units. Both mouth sectors must be active; mouths clear fixed obstacles by mouth radius + obstacle radius + 100, the ship by mouth radius + ship radius + 100, and existing mouths by 250. A failed attempt waits another full period. No existing RNG stream gains draws, no bodies are created, and HOME remains unchanged.
 
-**Shared-gene reconciliation.** Shared ranges stay `power_period` 1.5 to 14, `power_reach` 80 to 900, and `power_hold` 0.2 to 4. Rift maps normalized period to **12 to 30 seconds** and normalized reach to **900 to 1500 units of mouth separation**, rather than treating reach as a targeting radius. The authored specimen's encoded period **7.055556** and reach **490** express **20 seconds** and **1200 units**. Hold is unused; every pair has a fixed **eight-second active lifetime**, after its warning. This preserves the requested specimen behavior without widening genes or changing other powers. The specimen has rift 0.8, radius 10, hull 40, mass 12, speed 45, cruise 15, three sides, aspect 1.8, solitary social behavior, fear Player, trigger Harm, and no weapon.
+**Shared-gene reconciliation.** Shared ranges stay `period` 1.5 to 14, `reach` 80 to 900, and `hold` 0.2 to 4. Rift maps normalized period to **12 to 30 seconds** and normalized reach to **900 to 1500 units of mouth separation**, rather than treating reach as a targeting radius. The authored specimen's encoded period **7.055556** and reach **490** express **20 seconds** and **1200 units**. Hold is unused; every pair has a fixed **eight-second active lifetime**, after its warning. This preserves the requested specimen behavior without widening genes or changing other powers. The specimen has rift 0.8, radius 10, hull 40, mass 12, speed 45, cruise 15, three sides, aspect 1.8, solitary social behavior, fear Player, trigger Harm, and no weapon.
 
 **One pair per cast and bounds.** One owner can have **one pending or active pair**. An attempted cast while it survives refuses without replacing or refreshing it, and waits another period. Two eligible heads per owner sector, selected by body id; **two pairs touching any mouth sector**, counted once when both mouths share a sector; **eight pairs globally**. Warnings count toward every budget. Existing pairs remain on temporary phase or stagger; new casts wait during either. Sanctuary suppresses casts. Rift is Mythic, ring 10 with the existing three-ring ramp and 1-in-1000 species weight. Generator version **19** enables `Power::Rift.built()`.
 
@@ -440,13 +446,13 @@ Specimen: `dim` 0.7, `power_reach` 450, `diet` Dust, `radius` 24, `hull` 60.
 
 **Image and silhouette.** A compact amber crab, four limbs, with two to four small stones on faint cords. It gathers while calm, then lights one stone before throwing it at the ship.
 
-**Abilities.** `simulation/sling.rs` uses the same creature-to-rock endpoint support as Weaver, with a separate `TetherKind::Sling`. These cords are harmless: they do not inherit web crossing damage, reeling, expiry, or warning rules. Every 0.7 s it gathers the nearest suitable free plain, ice, or ore rock of radius 12 to 30 within the lesser of `power_reach` and 600. No husks, crystal, pinned stones, walls, planetoids, rooted hosts, mined rocks, recently released or shoved rocks, or rocks already claimed by any tether. Distance ties use body id. Its cap is `floor(2 + 2 x strength)` stones, with two builders per sector, sixteen orbit cords globally, and the shared 64-tether cap. No bodies or RNG draws are added.
+**Abilities.** `simulation/sling.rs` uses the same creature-to-rock endpoint support as Weaver, with a separate `TetherKind::Sling`. These cords are harmless: they do not inherit web crossing damage, reeling, expiry, or warning rules. Every 0.7 s it gathers the nearest suitable free plain, ice, or ore rock of radius 12 to 30 within the lesser of `reach` and 600. No husks, crystal, pinned stones, walls, planetoids, rooted hosts, mined rocks, recently released or shoved rocks, or rocks already claimed by any tether. Distance ties use body id. Its cap is `floor(2 + 2 x strength)` stones, with two builders per sector, sixteen orbit cords globally, and the shared 64-tether cap. No bodies or RNG draws are added.
 
 **Orbit.** A damped spring follows a rotating target at 90 to 130 units, with angular speed 0.9 radians/s, acceleration capped at 600 and stone speed capped at 180. Targets start at least 0.9 radians apart. The owner must have positive mass and radius at most 65 so even awakened bodies leave clearance. Stones remain ordinary minable bodies with ordinary free-rock armour. The builder does not graze its own held stones.
 
-**Warning and throw.** An alert owner waits on `power_period`, with the ship at least 220 away, within reach, outside HOME sanctuary, not landed or in grace. A settled stone lights up and sounds a rising winding tone for 0.8 s, or 1.2 s with the owner beyond 760 units. The orbit target pauses and an amber dotted arrow shows its fixed aim. Aim locks toward the ship's position at warning onset, with no tracking or lead. Cutting, mining, staggering the owner, or leaving range cancels the attack. Release removes the cord and applies the shared mass-scaled bounded shove impulse to reach 600 to 800 speed, with a separate release sound and amber flight streak. Subsequent contact uses the existing kinetic-impact formula, ship half share, PLATING, pair cooldown, and rock shattering. There is no flat 45-damage hit or special damage multiplier. Hostile thrown-rock kills award no ship score, kill count, loot, siphon, or regard. The hostile tag lasts 5 s; a deliberate ship ram or dash whip takes the stone back to ordinary shove rules.
+**Warning and throw.** An alert owner waits on `period`, with the ship at least 220 away, within reach, outside HOME sanctuary, not landed or in grace. A settled stone lights up and sounds a rising winding tone for 0.8 s, or 1.2 s with the owner beyond 760 units. The orbit target pauses and an amber dotted arrow shows its fixed aim. Aim locks toward the ship's position at warning onset, with no tracking or lead. Cutting, mining, staggering the owner, or leaving range cancels the attack. Release removes the cord and applies the shared mass-scaled bounded shove impulse to reach 600 to 800 speed, with a separate release sound and amber flight streak. Subsequent contact uses the existing kinetic-impact formula, ship half share, PLATING, pair cooldown, and rock shattering. There is no flat 45-damage hit or special damage multiplier. Hostile thrown-rock kills award no ship score, kill count, loot, siphon, or regard. The hostile tag lasts 5 s; a deliberate ship ram or dash whip takes the stone back to ordinary shove rules.
 
-**Encounter.** Strange tier, ring 6 and out with the existing three-ring ramp and 1-in-330 species weight. Authored specimen: `sling` 0.6, four one-part limbs, `power_period` 3.5, `power_reach` 750, radius 22, mass 80, hull 80, gunless, rock-eating, slow, standoff 400. `SSC_SPECIMEN=slinger` stages a stationary specimen and three nearby stones. Use `SSC_TELEPORT=36000,0` outside HOME, `SSC_SPECIMEN_TELL=1` for the warning, or `SSC_SPECIMEN_THROW=1` for a short flight after release.
+**Encounter.** Strange tier, ring 6 and out with the existing three-ring ramp and 1-in-330 species weight. Authored specimen: `sling` 0.6, four one-part limbs, `period` 3.5, `reach` 750, radius 22, mass 80, hull 80, gunless, rock-eating, slow, standoff 400. `SSC_SPECIMEN=slinger` stages a stationary specimen and three nearby stones. Use `SSC_TELEPORT=36000,0` outside HOME, `SSC_SPECIMEN_TELL=1` for the warning, or `SSC_SPECIMEN_THROW=1` for a short flight after release.
 
 **Counterplay.** Move sideways off the fixed arrow with ordinary thrust, dash sideways during the swing or flight, shoot a cord three times, touch it with shears, start mining its rock, or kill the owner. Dash cuts any orbit cord its swept path crosses and keeps its existing invulnerability and stop-short rules for rocks. Released stones cannot be gathered again for 5 s. Mining continues normally and can remove ammunition entirely. Owner or endpoint death, consumption, unloading, freezing, loss of the power, invalid coordinates, an occupied host, or excessive separation releases the cord and cancels the warning.
 
@@ -458,9 +464,9 @@ Specimen: `dim` 0.7, `power_reach` 450, `diet` Dust, `radius` 24, `hull` 60.
 
 **Image and silhouette.** A tall five-sided spindle with a ring of four eyes and a bright staff. Its staff and sigils share the payload colour. Three concentric circles mark the exact danger area; a segmented outer ring fills during arming. Red starburst means blast, blue pause bars mean slow, white outward arrows mean push, and violet lightning means jam. Activation sends a separate expanding ring and radial ticks. The glyphs remain readable without colour or animated flashing, including under reduce effects.
 
-**Casting and determinism.** `simulation/rune.rs` reuses `Mine`, its swept shot interception, and the shared 90-mine budget through optional `Sigil` metadata. An alert, active head lays **one sigil per `power_period`**, beginning after one full period. It waits during phase, stagger, sanctuary, landing, or ship invulnerability and only casts with the ship within `power_reach`. First it tries the ship's current position, with no tracking or prediction. Up to eleven salted hash offsets provide deterministic fallback positions. Every accepted center lies within reach, in an active sector, at least 90 + caster radius + 30 from the caster, at least 90 + solid radius + 24 from fixed obstacles, and at least 230 from another mine. This leaves gaps and a bare ship can thrust clear from the center at 60 percent input during the warning. Failed attempts wait another period, never retry in a tight loop. There are no new draws on generation or placement RNG streams.
+**Casting and determinism.** `simulation/rune.rs` reuses `Mine`, its swept shot interception, and the shared 90-mine budget through optional `Sigil` metadata. An alert, active head lays **one sigil per `period`**, beginning after one full period. It waits during phase, stagger, sanctuary, landing, or ship invulnerability and only casts with the ship within `reach`. First it tries the ship's current position, with no tracking or prediction. Up to eleven salted hash offsets provide deterministic fallback positions. Every accepted center lies within reach, in an active sector, at least 90 + caster radius + 30 from the caster, at least 90 + solid radius + 24 from fixed obstacles, and at least 230 from another mine. This leaves gaps and a bare ship can thrust clear from the center at 60 percent input during the warning. Failed attempts wait another period, never retry in a tight loop. There are no new draws on generation or placement RNG streams.
 
-**Payload selection.** A carrier keeps one payload: quarter bands of `(rune * 131).fract()` select Blast, Slow, Push, or Jam in that order. Changing the intensity by mutation can change the payload between relatives, but one caster's circles never cycle colours during a fight. The authored specimen uses `rune` 0.7, `power_period` 5, `power_reach` 520, radius 20, hull 70, mass 40, speed 65, standoff 350, and Mine with volley **1**. The prose promise of one per cast takes precedence over the earlier specimen's volley 2. Rune suppresses ordinary Mine discharges, including on awakened carriers with a Mine weapon; other inherited weapon patterns remain ordinary weapons.
+**Payload selection.** A carrier keeps one payload: quarter bands of `(rune * 131).fract()` select Blast, Slow, Push, or Jam in that order. Changing the intensity by mutation can change the payload between relatives, but one caster's circles never cycle colours during a fight. The authored specimen uses `rune` 0.7, `period` 5, `reach` 520, radius 20, hull 70, mass 40, speed 65, standoff 350, and Mine with volley **1**. The prose promise of one per cast takes precedence over the earlier specimen's volley 2. Rune suppresses ordinary Mine discharges, including on awakened carriers with a Mine weapon; other inherited weapon patterns remain ordinary weapons.
 
 **Arming and activation.** Arming begins at placement, with a full **1.2 s** visible countdown and a rising two-tone cue, even off screen. After arming the stationary sigil waits until a tangible ship or creature overlaps the 90-unit circle, including its own caster and allied creatures. Rocks and structures do not trip it passively. It then applies its payload once, consumes itself, and sounds a distinct resolving chime. Its **20 s** lifetime includes arming. Phased creatures do not trip it or take the payload.
 
@@ -523,7 +529,7 @@ Specimen: `foam` 0.5, `hull` 70, `radius` 26, `weapon` none or a weak spit of bu
 
 **Silhouette.** A soft irregular outline: a circle perturbed by a few moving lobes (the pseudopods), drawn as a filled blob with an inner nucleus and a small inventory of dim shapes (swallowed rocks and pickups) floating in it.
 
-**Abilities.** `engulf` is a gene (0 to 1). It crawls rather than flies (low speed, high drag, strong lateral wobble). Within `power_reach` of a target it extends a pseudopod (a 0.8 s telegraph: a lobe stretches toward the target), then closes. Things it can swallow: free rocks and pickups (it eats them, digests them for 20 s, gains a little hull and size, the Tidegorger precedent), small creatures below a mass limit (a swallowed creature is held and dealt damage over time), and the ship. A swallowed ship is carried inside the blob: it keeps its controls and weapons but is dragged along at the blob's velocity (a pull capped like the other gravity powers, never above 60 percent of thrust, so a strong thrust always escapes), takes slow digestion damage (3 hull per second, shield first, scaled by `engulf`) and its shots hit the blob from inside at full damage. The ship escapes by thrusting out, a dash, a perfect parry (which makes the blob flinch and spit), or by killing the nucleus. The blob cannot swallow while the ship is in grace or landed, or within 3 s of the last escape.
+**Abilities.** `engulf` is a gene (0 to 1). It crawls rather than flies (low speed, high drag, strong lateral wobble). Within `reach` of a target it extends a pseudopod (a 0.8 s telegraph: a lobe stretches toward the target), then closes. Things it can swallow: free rocks and pickups (it eats them, digests them for 20 s, gains a little hull and size, the Tidegorger precedent), small creatures below a mass limit (a swallowed creature is held and dealt damage over time), and the ship. A swallowed ship is carried inside the blob: it keeps its controls and weapons but is dragged along at the blob's velocity (a pull capped like the other gravity powers, never above 60 percent of thrust, so a strong thrust always escapes), takes slow digestion damage (3 hull per second, shield first, scaled by `engulf`) and its shots hit the blob from inside at full damage. The ship escapes by thrusting out, a dash, a perfect parry (which makes the blob flinch and spit), or by killing the nucleus. The blob cannot swallow while the ship is in grace or landed, or within 3 s of the last escape.
 
 **Encounter.** Strange tier. Slow and hunting, ring 4 and out, 1 in 260 species. A patient threat: easy to avoid at range, nasty in a crowd or while distracted.
 
@@ -539,7 +545,7 @@ Specimen: `engulf` 0.5, `hull` 160, `radius` 36, slow speed, no gun.
 
 **Built (first half, generator version 26).** `simulation/ooze.rs`, gene `engulf` (`Power::Engulf`, Strange, ring 4, 1 in 260, Danger bias), specimen `SSC_SPECIMEN=oozer` and dev spawn `oozer`. Differences from the design above:
 - **Soft body.** The skin is a ring of 16 radial spring nodes (`ooze::Skin`) simulated headless and deterministic: neighbour coupling (an elastic membrane), a little volume preservation, push from the body's own acceleration (it lags and slops), the lobe being stretched, a nearby ship pressing a dent, and an ambient tremble. The nucleus floats inside and lags. It is exposed as `PowerView::ooze` (`OozeView`) and only drawn by `powerview::draw_ooze`; the hit box is the plain circle (its radius follows the size and the squeeze, never the wobble), so no rule depends on the skin shape.
-- **Reach (white blood cell).** The short lobe is gone. A ship within `power_reach * ENGULF_REACH * size` past the skin (240 units at the made size, so about 700 once it has tripled) makes a tapering pseudopod extend toward it (`ooze::Reach`, `ENGULF_REACH_SPEED` 300 u/s out, 450 back, turning at `ENGULF_TURN` 1.5 rad/s so a ship can circle it), drawn with a sway and a bright tip; with no ship in reach it reaches for the nearest free rock instead. Touching the ship with the tip swallows it (never in grace, landed, in a dash, while another hold exists, or within `ENGULF_FREE` (3 s) of an escape); touching a rock eats it. The reach is the telegraph and it is long, so there is time to leave; it retracts as soon as the target is out of reach. Once swallowed the ship is drawn in over 0.35 s, then carried with a pull capped at `ENGULF_PULL` (0.5) of its thrust, digested at `ENGULF_DPS * (0.5 + s)` (3 per second at full gene, shield first, no shield recharge), and keeps its controls and weapons (shots start inside the body, so they hit at full damage). Out by thrusting clear of the skin (always possible, at any size), a dash, a perfect parry (`shake_off`), or killing the blob; death, landing and grace also release.
+- **Reach (white blood cell).** The short lobe is gone. A ship within `reach * ENGULF_REACH * size` past the skin (240 units at the made size, so about 700 once it has tripled) makes a tapering pseudopod extend toward it (`ooze::Reach`, `ENGULF_REACH_SPEED` 300 u/s out, 450 back, turning at `ENGULF_TURN` 1.5 rad/s so a ship can circle it), drawn with a sway and a bright tip; with no ship in reach it reaches for the nearest free rock instead. Touching the ship with the tip swallows it (never in grace, landed, in a dash, while another hold exists, or within `ENGULF_FREE` (3 s) of an escape); touching a rock eats it. The reach is the telegraph and it is long, so there is time to leave; it retracts as soon as the target is out of reach. Once swallowed the ship is drawn in over 0.35 s, then carried with a pull capped at `ENGULF_PULL` (0.5) of its thrust, digested at `ENGULF_DPS * (0.5 + s)` (3 per second at full gene, shield first, no shield recharge), and keeps its controls and weapons (shots start inside the body, so they hit at full damage). Out by thrusting clear of the skin (always possible, at any size), a dash, a perfect parry (`shake_off`), or killing the blob; death, landing and grace also release.
 - **Digest and grow.** A fed reserve (0 to 1, `PowerState::fed`) sets the size. A rock adds `size * ENGULF_FEED_BITE` when eaten and `size * ENGULF_FEED_ROCK` more over the `ENGULF_DIGEST` (20 s) it browns inside (`size` is the rock's radius over `ENGULF_FOOD_RADIUS`, so a big blob grazes on gravel and a planetoid-sized stone is a meal); the ship's hull and shield it digests add `ENGULF_SHIP_FEED` a point; hunger takes `ENGULF_HUNGER` (0.005 a second, 200 s from full to empty). Bulk is 1 empty and `ENGULF_BULK_BASE + ENGULF_BULK_GENE * s` full (2.9 times at the specimen, 5 at the strongest gene, so radius 36 reaches about 105 and up to 180), eased at `ENGULF_GROW_RATE` (0.05 a second, about 40 s to triple) and back at `ENGULF_SHRINK_RATE` (0.02, about 95 s), with the made size as the floor. Radius, mass and hull scale together (`grow_to`, so a fat one is a hull sponge too), the skin is drawn at the real radius and tinted richer as it fills.
 - **Playtest feedback, open (standalone Oozer study, user 2026-10-08).** (1) The pseudopod reads as a second shape attached to the body; it must be one continuous soft perimeter, the reach being the skin itself bulging out under the same spring physics, not a separate drawn tapering shape. (2) The reach is far too fast (300 out, 450 back, turning 1.5 rad/s): the point of the Oozer is that all its parts ooze at about the same speed, so reach and body motion should share one slow, viscous time scale. Revisit as a dedicated study (skin model, speeds, telegraph) before tuning numbers.
 - **Squeeze.** It passes between fixed solids (pinned rocks, wall and structure blocks, rooted bodies) with a gap down to `ENGULF_SQUEEZE` (0.35) of its width. `ooze::squeeze_for` measures, from the two solids either side of the nearest gap, the radius that fits (half the gap minus 1), and the hit circle eases to it (`ENGULF_SQUEEZE_IN` 3 a second in, `ENGULF_SQUEEZE_OUT` 1.5 out) while the drawn body keeps its area, stretched along the passage (up to 1.7 times) and shrunk across it. A seam between touching stones is a wall, not a gap; open space is never squeezed. Creature steering also no longer pushes an Oozer away from solid rock (`creature.rs`, the `rock_eater` exemption now covers every heavy body), or it would stop short of any gap. It does not path-find: it squeezes through a gap that lies in its way, and slides along a wall otherwise. Ancient megastructures are unbuilt (`WORKSTREAMS.md` 3), so the gaps that exist today are rock belts, fortress gates, civilization and builder structures; a megastructure should leave gaps of at least 40 percent of an Oozer's width for it to count as one.
@@ -616,7 +622,7 @@ These are the verbs a creature or apex can use against the ship. Each has a fixe
 
 | Attack | Source | Telegraph | Effect and duration | Counterplay | Cap and budget |
 |---|---|---|---|---|---|
-| **EMP** | `emp` gene, apex Maelstrom stamp | Charge ring contracts onto the body over 0.9 s, whine rises; ring shown at `power_reach` | Jams 1 or 2 of weapons, dash, parry, boost for 0.8 to 1.5 s (never all; never parry and dash together); HUD jammed only if `hud` rolled | Leave the ring, dash out, kill during charge (shield break cancels), Faraday organ | Severe; one active per ship; 6 s immunity after; at most 1 emitter alive per sector outside apexes |
+| **EMP** | `emp` gene, apex Maelstrom stamp | Charge ring contracts onto the body over 0.9 s, whine rises; ring shown at `reach` | Jams 1 or 2 of weapons, dash, parry, boost for 0.8 to 1.5 s (never all; never parry and dash together); HUD jammed only if `hud` rolled | Leave the ring, dash out, kill during charge (shield break cancels), Faraday organ | Severe; one active per ship; 6 s immunity after; at most 1 emitter alive per sector outside apexes |
 | **Vision glitch** | `glare` gene | Eyes open in sequence 0.5 s, flash at the end | Radar false blips, arrows shuffled, colour smear for 1.0 to 2.0 s. The ship, shots, rocks and telegraphs are never altered | Read the ship and the nearest shots, kill the moth, Argus eye | Mild; stacks not allowed; never during the respawn grace; presentation only |
 | **Shield bypass** | `bypass` gene, apex spear | Violet bolt, slow (260), distinctive launch cue, no flash on shield | A share (up to 0.8) of damage goes to hull; the apex spear 1.0 once per phase | Parry (reflect), dash, kill the glass wasp | Mild to strange; one apex spear per 10 s; never fired in sanctuary |
 | **Tether lock** | cord genes (built) plus apex Lasher | Cord tip flies at 650 u/s (built); cord colours by strength (built); `GRIPPED` flag (built) | Cord with drag and slack; existing counters | Shoot the cord, shears, dash snaps weak ones | Built. New: Lasher may latch twice (two cords) only at enrage |
@@ -691,7 +697,7 @@ A level 2 or 3 organ raises magnitude (about 1.5 times, 2 times) and may add a s
 
 The smallest set that gives the most diversity first. Each step ships with tests and does not move any earlier draw.
 
-1. **The block and the module (no creatures yet).** The three shared genes and the 20 intensity genes in the tail, the specials draw in `Genome::sample`, crossover and mutate rules, the zeroing in `territory.rs`, a new `src/simulation/powers.rs` with `PowerState` per body and the `TELL_MIN` constants, `Cue` and `EffectKind` additions, and the tests from section 2. Ships with zero visible change.
+1. **The block and the module (no creatures yet).** The independent parameters and 22 intensity genes in the tail, the specials draw in `Genome::sample`, crossover and mutate rules, the zeroing in `territory.rs`, a new `src/simulation/powers.rs` with `PowerState` per body and the `TELL_MIN` constants, `Cue` and `EffectKind` additions, and the tests from section 2. Ships with zero visible change.
 2. **Dynamic wells (section 6).** Pure, small, high diversity, no balance risk: Static with parameters, Drift, Pulse first. Hop, Reverse, Binary, Maw after. Sectormap and presentation update.
 3. **Blink and the apex refactor.** Skipjack (`blink`), then Phantom's move reads the genes and `apexes.rs` loses its archetype branch for it. Proves the apex-as-genes idea. Add `phase` here (Veilwing): both are movement and touch the same sites.
 4. **The `Jam` status with EMP and glare.** One status struct, five hooks, the HUD effect in the adapter. Stormcap and Argus Moth. Ship the Faraday and Argus organs with them.
@@ -710,11 +716,11 @@ All in the `tail` of `genome!` in `src/genome.rs`, appended after `cord_drag`, i
 
 | Gene | Range | Default | Rate | Simulation effect |
 |---|---|---|---|---|
-| `power_period` | 1.5 to 14.0 | 5.0 | n/a | Seconds between uses or cycle length |
-| `power_reach` | 80 to 900 | 300.0 | n/a | Radius or range |
-| `power_hold` | 0.2 to 4.0 | 1.0 | n/a | Duration of a timed effect |
+| `period` | 1.5 to 14.0 | 5.0 | n/a | Seconds between uses or cycle length |
+| `reach` | 80 to 900 | 300.0 | n/a | Radius or range |
+| `hold` | 0.2 to 4.0 | 1.0 | n/a | Duration of a timed effect |
 | `phase` | 0 to 1 | 0.0 | 1 in 330 | Phased duty 0.2 + 0.4 s; intangible and harmless while phased |
-| `repel` | 0 to 1 | 0.0 | 1 in 250 | Outward field to `power_reach`, capped; inhale then shove each period |
+| `repel` | 0 to 1 | 0.0 | 1 in 250 | Outward field to `reach`, capped; inhale then shove each period |
 | `warp` | -1 to 1 | 0.0 | 1 in 330 | Negative slow bubble (0.55), positive haste bubble (1.4) |
 | `lens` | 0 to 1 | 0.0 | 1 in 500 | Shot bending, displaced radar blip, pocket pull at 0.4 of a well |
 | `blink` | 0 to 1 | 0.0 | 1 in 125 | Short hop every period, landing ring tell |
@@ -765,7 +771,7 @@ Steps 1 to 6, 8 (symbiote, latch, four organs) and the cheap half of 7 and 10 ar
 
 - **Step 1, the block.** All 23 tail genes exist (names, ranges and defaults as in section 11; `lens` and `dim` rates 1 in 500, `rift` 1 in 1000). `Genome::sample` takes one extra final draw (`power::sample`); weights are the rate times a smoothstep over three rings past the power's first ring (Mild 3, Strange 5 to 8, Severe 7, Mythic 10) times a sector lean of 0.75 + 1.0 * above(parameter). A far species carries a power about 7.1 percent of the time. Awakening is `Genome::individual_in`: ring 3 and out, a quarter of the 1 percent outlier band (1 in 400), Mild or Strange only, intensity 0.35 to 0.6, no carriers among civilization people. The block never drifts (`drifted` skips it) and `mutate` keeps a carried intensity at 0.32 or more. A power that the body cannot carry is not given (a chain cannot blink). The sector map names carrier species ("not awake yet" for the seventeen without simulation) and has a powers layer; `GENERATOR_VERSION` was 7 at this step (19 now). Every power is live now; the later steps below record their behaviour.
 - **Step 2, wells.** As in section 6, with these choices: Drift, Pulse start at ring 5 (rings 3 and 4 stay Static, as the fairness rules say, over the table's ring 4 for Drift); a mode whose room (distance to the nearest keep-clear circle or the border) is under 150 stays Static; Hop destinations are hashed points within the swing of the anchor, so a hop is up to twice the swing; a hop that cannot land (ship within 800, a body in the way) holds collapsed and retries every step rather than waiting 3 s; a Binary pair orbits the first well's anchor and the second well's own generated position is unused; Static wells now vary (pull 0.8 to 1.4, reach 450 to 700, core 24 to 40, dps 35 to 50) while bodies placed without a genome keep the original constants. Presentation: ring pulses along the pull, red hazard edge, violet ghost ring and flash for Hop, white for a pushing Reverse, bold orange ring and dotted lane for a Maw, arc between a Binary pair; the radar rings every non-static well and shows a hop's ghost.
-- **Step 3, blink and phase.** Skipjack (blink) and the lifted Phantom share one move; the telegraph is 0.35 s (so the Phantom, which used to land at once, is now announced); hop reach is `power_reach * (1 + 2.2 * strength)`, landing on a ring of 0.65 to 1.0 of `power_reach` around the ship, never within 180 of it. Veilwing (phase): duty 0.2 + 0.4 strength, never under a 1 s solid window, 0.4 s lead-in.
+- **Step 3, blink and phase.** Skipjack (blink) and the lifted Phantom share one move; the telegraph is 0.35 s (so the Phantom, which used to land at once, is now announced); hop reach is `reach * (1 + 2.2 * strength)`, landing on a ring of 0.65 to 1.0 of `reach` around the ship, never within 180 of it. Veilwing (phase): duty 0.2 + 0.4 strength, never under a 1 s solid window, 0.4 s lead-in.
 - **Step 6, bypass.** Hullpick as in section 5 (share 0.2 + 0.6 strength, cap 0.8; shots capped at 260 and violet). The sampler gives a carrier species the silhouette and kit of its specimen (Veilwing a triangle, Skipjack a stretched diamond, Hullpick a needle with a gun, no shield and little hull) so the player can tell them; an awakened individual shows only its halo.
 - **Sampling gate.** Only built powers are sampled or awakened (`Power::built`), so there are no dud carriers; the sector map lists only live carriers. The weights are unchanged for the built ones, so a far species carries a power about 5 to 6 percent of the time now and the rate rises as powers are built.
 - **Step 4, the Jam status.** `simulation/jam.rs`: weapons, dash, parry, boost and HUD timers, at most 1.5 s (glitch 2.0 s), 6 s immunity counted from the end, never stacked, never in grace or landed, never dash with parry, one or two of the four systems. Emp (Stormcap), glare (Argus Moth), dim (Gloomfeeder) and a new gene, `confuse` (Dizzard, appended last in the block: Severe, ring 7, 1 in 400). Charge rings 0.9 s (floor 0.6), glare eyes 0.7 s, one charge in the world at a time, charge cancelled by shield break. HUD: greyed rings with static and seconds left, static HUD, a screen glitch (`src/glitchview.rs`, off under reduce effects) that only adds faint lines, radar false blips and shuffled arrows; confusion has a pink halo and a swaying reticle. Elder stamps from ring 7: Maelstrom emp, Warden glare, Phantom confuse. The Faraday organ is built (step 8). TODO: the Argus organ and the echo absorption of dim.

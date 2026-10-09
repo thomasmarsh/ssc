@@ -8,7 +8,7 @@
 //! the plain circle (its radius follows size and squeeze, never the wobble), so the rules never
 //! depend on the shape.
 //!
-//! **Reach.** A ship within `power_reach * ENGULF_REACH` (times its size) past the skin makes
+//! **Reach.** A ship within `reach * ENGULF_REACH` (times its size) past the skin makes
 //! the blob extend a long pseudopod toward it (else toward the nearest free rock), at a limited
 //! speed and turn rate, retracting when the target is out of reach. The tip touching the ship
 //! swallows it. A swallowed ship keeps its controls and weapons (its shots start inside the
@@ -147,7 +147,7 @@ pub fn bulk_cap(s: f32) -> f32 {
 
 /// How far a pseudopod may reach past the skin at size `bulk`.
 pub fn reach_max(g: &Genome, bulk: f32) -> f32 {
-    g.power_reach * power::ENGULF_REACH * bulk
+    g.power_params(Power::Engulf).reach * power::ENGULF_REACH * bulk
 }
 
 /// The squeeze factor (smallest 0.35, 1 is free) a blob of radius `full` at `at` needs to pass
@@ -213,7 +213,8 @@ impl Game {
             state.fed = fed.clamp(0.0, 1.0);
             let s = Power::Engulf.strength(&body.genome);
             let bulk = 1.0 + (bulk_cap(s) - 1.0) * state.fed;
-            self.grow_to(index, &mut state, bulk);
+            state.ooze_bulk = bulk;
+            self.apply_power_growth(index, &state);
             self.power_state.insert(id, state);
         }
         let (Some(gap), Some(ship)) = (gate, self.player().map(|p| p.position)) else {
@@ -261,7 +262,7 @@ impl Game {
             return;
         };
         let alive = self.body(held.ooze).is_some_and(|b| {
-            b.active && !b.consumed && b.health > 0.0 && b.kind == BodyKind::Creature
+            b.active && !b.consumed && !b.phased && b.health > 0.0 && b.kind == BodyKind::Creature
         });
         if !alive
             || self.player().is_none()
@@ -283,6 +284,13 @@ impl Game {
     ) -> Vec<u64> {
         let body = &self.bodies[index];
         let (id, at, g) = (body.id, body.position, body.genome);
+        if body.phased {
+            state.reach = None;
+            if self.engulf.is_some_and(|held| held.ooze == id) {
+                self.release_engulfed(true);
+            }
+            return Vec::new();
+        }
         let s = Power::Engulf.strength(&g);
         if state.base.is_none() {
             state.base = Some((body.radius, body.mass, body.max_health));
@@ -301,17 +309,19 @@ impl Game {
         }
         state.inside.retain(|(_, age)| *age < power::ENGULF_DIGEST);
         state.fed = (state.fed + gain - power::ENGULF_HUNGER * dt).clamp(0.0, 1.0);
+        state.ooze_bulk = state.ooze_bulk.max(1.0);
         let target = 1.0 + (bulk_cap(s) - 1.0) * state.fed;
-        let step = if target > state.bulk {
+        let step = if target > state.ooze_bulk {
             power::ENGULF_GROW_RATE
         } else {
             power::ENGULF_SHRINK_RATE
         } * dt;
-        let bulk = state.bulk + (target - state.bulk).clamp(-step, step);
-        if (bulk - state.bulk).abs() > 1e-5 {
-            self.grow_to(index, state, bulk);
+        let bulk = state.ooze_bulk + (target - state.ooze_bulk).clamp(-step, step);
+        if (bulk - state.ooze_bulk).abs() > 1e-5 {
+            state.ooze_bulk = bulk;
+            self.apply_power_growth(index, state);
         }
-        let full = base_radius * state.bulk;
+        let full = base_radius * state.ooze_bulk * state.bulk.max(1.0);
 
         // Squeezing through gaps: the hit circle shrinks to what the gap allows.
         let solids: Vec<(Vec2, f32)> = self
@@ -341,7 +351,7 @@ impl Game {
 
         // Reaching: a long pseudopod toward the ship, else toward a rock.
         let radius = self.bodies[index].radius;
-        let lmax = reach_max(&g, state.bulk);
+        let lmax = reach_max(&g, state.ooze_bulk * state.bulk.max(1.0));
         let mut dent = None;
         let mut taken: Vec<(u64, f32, Vec2)> = Vec::new();
         let mut aim: Option<(f32, f32, Option<u64>, f32)> = None;

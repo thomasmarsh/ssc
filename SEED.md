@@ -55,6 +55,8 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
+- Independent power modules (generator version 30): power-local cadence/reach/hold, module inheritance, independent jam warnings and digestive growth, all-capability rendering; authored multi-carrier hooks. Ordinary draw golden and HOME preserved. See `docs/BESTIARY.md`.
+
 - Saves and recovery: last ten autosaves plus independent explicit SAVE GAME, latest-valid CONTINUE / NEW GAME title menu; lives revive locally and exhaustion returns to the last landed pad (HOME fallback) with exactly one life, preserving progress. No death-triggered game over or bequest. See `docs/PERSISTENCE.md`.
 - Greenhouses (no generation change): a farming civilization's seat carries a glass dome with six plots (`Plant::housed`, sealed from grazers and blight); the ship plants in the free ones from inside the glass, and any bare hull refuses (`PlantHint::BareHull`). Hook `SSC_FARM_CIV`.
 - Farming civilizations (workstream 1 slice 5, generator version 29): `Territory::tillage` from the lineage's genes decides who farms (about a third, settlers always); tended fields, a granary, tending rounds, biomass and seed trade at a friendly seat, theft costs regard (`simulation/farm/tend.rs`).

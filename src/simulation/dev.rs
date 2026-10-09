@@ -28,7 +28,7 @@ pub fn enabled() -> bool {
 
 /// What can be spawned at the ship: the wild classics, then the authored specimens (the names
 /// `SSC_SPECIMEN` takes).
-pub const SPAWNS: [&str; 40] = [
+pub const SPAWNS: [&str; 42] = [
     "bogey",
     "fatso",
     "lunatic",
@@ -39,6 +39,8 @@ pub const SPAWNS: [&str; 40] = [
     "veilwing",
     "hullpick",
     "stormcap",
+    "multijammer",
+    "multioozer",
     "argus",
     "gloomfeeder",
     "dizzard",
@@ -84,6 +86,18 @@ pub fn specimen_genome(name: &str) -> Genome {
         "veilwing" => Genome::veilwing(),
         "hullpick" => Genome::hullpick(),
         "stormcap" => Genome::stormcap(),
+        "multijammer" => {
+            let mut g = Genome::stormcap();
+            crate::power::stamp(&mut g, crate::power::Power::Confuse, 0.8);
+            crate::power::stamp(&mut g, crate::power::Power::Glare, 0.7);
+            g
+        }
+        "multioozer" => {
+            let mut g = Genome::oozer();
+            crate::power::stamp(&mut g, crate::power::Power::Repel, 0.7);
+            crate::power::stamp(&mut g, crate::power::Power::Song, 0.7);
+            g
+        }
         "argus" => Genome::argus(),
         "gloomfeeder" => Genome::gloomfeeder(),
         "dizzard" => Genome::dizzard(),

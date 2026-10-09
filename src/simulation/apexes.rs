@@ -452,7 +452,7 @@ impl Game {
         g.fire_period *= ENRAGE_FIRE;
         g.contact_damage *= ENRAGE_STING;
         if crate::power::Power::Blink.active(g) {
-            g.power_period *= ENRAGE_BLINK;
+            g.power_params_mut(crate::power::Power::Blink).period *= ENRAGE_BLINK;
         }
         self.effect(at, radius * 3.0, 0.8, EffectKind::Explosion);
         self.notify(format!("APEX: {name} enrages"), Rarity::Epic);

@@ -306,8 +306,12 @@ impl Game {
                 // everything else, so no other drop of this body moves).
                 if body.origin.is_some()
                     && let Some(organ) = genome
-                        .live_power()
-                        .and_then(|c| organs::Organ::from_power(c.power))
+                        .live_powers()
+                        .filter_map(|c| {
+                            organs::Organ::from_power(c.power).map(|organ| (c.strength, organ))
+                        })
+                        .max_by(|a, b| a.0.total_cmp(&b.0))
+                        .map(|(_, organ)| organ)
                     && rng.chance(tuning::HARVEST_CHANCE)
                 {
                     drops.push(Item::Specimen(organs::Strain::from_donor(organ, genome)));

@@ -16,7 +16,7 @@ use crate::anatomy::{ANATOMY_SALT, AnimalGenome, AnimalSpecimen};
 use crate::bodyplan;
 use crate::builder::Builder;
 use crate::hosted::Hosted;
-use crate::power::{self, POWER_GENES};
+use crate::power::{self, POWER_GENES, Power, PowerParams};
 use crate::world::{Rng, SectorParams, hash2};
 
 /// No creature has more bodies than this, however its genes combine.
@@ -129,12 +129,16 @@ macro_rules! genome {
         impl Genome {
             /// Every gene with its bounds, in a fixed order.
             pub fn genes(&mut self) -> Vec<Gene<'_>> {
-                vec![
+                let mut genes = vec![
                     $(Gene::Real { v: &mut self.$rf, lo: $lo, hi: $hi },)*
                     $(Gene::Int { v: &mut self.$if_, lo: $ilo, hi: $ihi },)*
                     $(Gene::Cat { v: &mut self.$cf },)*
                     $(Gene::Real { v: &mut self.$tf, lo: $tlo, hi: $thi },)*
-                ]
+                ];
+                for params in &mut self.power_params {
+                    genes.extend(params.genes());
+                }
+                genes
             }
         }
     };
@@ -229,11 +233,8 @@ genome! {
         cord_slack: 200.0, 3000.0, 200.0;
         cord_hardness: 1.0, 10.0, 2.0;
         cord_drag: 0.0, 1.0, 0.0;
-        // The rare-power block (see `power`): three shared parameters, then twenty-two
-        // intensities, all dormant at zero (below `power::GATE` nothing happens).
-        power_period: 1.5, 14.0, 5.0;
-        power_reach: 80.0, 900.0, 300.0;
-        power_hold: 0.2, 4.0, 1.0;
+        // Power-local intensities and signed modes. Parameters are bounded alongside
+        // these in `genes()`; see `power::PowerModule` for whole-module operations.
         phase: 0.0, 1.0, 0.0;
         repel: 0.0, 1.0, 0.0;
         warp: -1.0, 1.0, 0.0;
@@ -257,10 +258,10 @@ genome! {
         confuse: 0.0, 1.0, 0.0;
         engulf: 0.0, 1.0, 0.0;
     }
-    // Structured sections that are not flat genes: not in `genes()`, never drawn by
-    // `sample`, and only crossed or mutated when present, so a genome without one keeps
-    // every existing draw.
+    // Power parameters join the bounded tail in `genes()`. Other structured sections
+    // stay outside flat genes and only draw when present.
     nested {
+        power_params: [PowerParams; 22] = [PowerParams::DEFAULT; 22];
         // An optional animal body plan (see `anatomy` and `bodyplan`): the archetype genome
         // and its plan seed. `None` for every creature that exists in the wild today.
         anatomy: Option<AnimalSpecimen> = None;
@@ -742,6 +743,9 @@ impl Genome {
                 }
             }
         }
+        // Retain the old shared-period blend channel. It was overwritten by the
+        // inherited block, but consuming it keeps every subsequent ordinary draw stable.
+        let _ = rng.f32();
         let pick = |rng: &mut Rng| if rng.chance(0.5) { a } else { b };
         let body = pick(rng);
         child.segments = body.segments;
@@ -776,6 +780,26 @@ impl Genome {
         child.detach_crowd = body.detach_crowd;
         // So does a power: whole from the body-plan parent, never a feeble half.
         child.take_powers_from(&body);
+        // A single carrier retains the original body-parent draw. Additional modules
+        // recombine independently on a private stream without moving ordinary draws.
+        if a.powers().count() > 1
+            || b.powers().count() > 1
+            || a.powers().map(|c| c.power).ne(b.powers().map(|c| c.power))
+                && a.power().is_some()
+                && b.power().is_some()
+        {
+            let mut own = Rng::new(rng.next_u64() ^ power::INHERIT_SALT);
+            for power in Power::ALL {
+                child.set_power_module(
+                    power,
+                    if own.chance(0.5) {
+                        a.power_module(power)
+                    } else {
+                        b.power_module(power)
+                    },
+                );
+            }
+        }
         // An animal body plan is part of the body plan: it comes whole (plan seed included)
         // from the body-plan parent, and recombines with the other parent's only when both
         // have one.
@@ -1683,12 +1707,27 @@ mod tests {
     /// A fingerprint of every gene (as bits) of a genome.
     fn fingerprint(g: &Genome, h: &mut u64) {
         let mut copy = *g;
-        for gene in copy.genes() {
-            let bits = match gene {
+        // Pin the original scalar draw channels independently of the table's storage
+        // layout: ordinary single carriers still express the same three parameters.
+        let n = copy.genes().len() - POWER_GENES;
+        let bits: Vec<u64> = copy
+            .genes()
+            .into_iter()
+            .take(n)
+            .map(|gene| match gene {
                 Gene::Real { v, .. } => u64::from(v.to_bits()),
                 Gene::Int { v, .. } => u64::from(*v),
                 Gene::Cat { v } => u64::from(v.get()),
-            };
+            })
+            .collect();
+        let params = g
+            .power()
+            .map_or(PowerParams::DEFAULT, |c| *g.power_params(c.power));
+        for bits in bits
+            .into_iter()
+            .chain([params.period, params.reach, params.hold].map(|v| u64::from(v.to_bits())))
+            .chain(Power::ALL.map(|p| u64::from(p.value(g).to_bits())))
+        {
             *h = hash2(*h, (bits & 0xFFFF_FFFF) as i32, (bits >> 32) as i32);
         }
     }

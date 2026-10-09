@@ -12,10 +12,10 @@ pub const GLOBAL_CAP: usize = 8;
 
 /// Shared genes retain their ranges; Rift expresses them in its own units.
 pub fn period(g: &Genome) -> f32 {
-    12.0 + 18.0 * ((g.power_period - 1.5) / 12.5).clamp(0.0, 1.0)
+    12.0 + 18.0 * ((g.power_params(Power::Rift).period - 1.5) / 12.5).clamp(0.0, 1.0)
 }
 pub fn separation(g: &Genome) -> f32 {
-    900.0 + 600.0 * ((g.power_reach - 80.0) / 820.0).clamp(0.0, 1.0)
+    900.0 + 600.0 * ((g.power_params(Power::Rift).reach - 80.0) / 820.0).clamp(0.0, 1.0)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -413,8 +413,7 @@ mod tests {
         assert_eq!(Power::Rift.first_ring(), 10);
         for (p, r, want_p, want_r) in [(1.5, 80.0, 12.0, 900.0), (14.0, 900.0, 30.0, 1500.0)] {
             let g = Genome {
-                power_period: p,
-                power_reach: r,
+                power_params: crate::power::params_for(crate::power::Power::Rift, p, r, 1.0),
                 ..g
             };
             assert_eq!(period(&g), want_p);

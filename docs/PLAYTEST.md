@@ -137,3 +137,9 @@ A herd is one flock of 100 to 300 Bogey-like members (flat array, not bodies), i
 1. Which of the above felt wrong first? One line each is enough.
 2. Did any elder fight become unwinnable or trivial because of riders?
 3. Anything that looked off on screen (overlaps, flicker, riders floating off the rim)?
+
+## Multiple powers on one creature
+
+- `SSC_SPECIMEN=multijammer SSC_SPECIMEN_TELL=1 SSC_TELEPORT=36000,0`: check that blue EMP and pink confusion rings are both readable, glare eyes remain visible, and there is one identity halo. The source can charge both rings at once; leaving one local reach avoids that effect.
+- `SSC_SPECIMEN=multioozer SSC_TELEPORT=36000,0 SSC_STEPS=2`: check that the soft blob retains its identity while its Repel breathing warning and Song mouth marks remain visible.
+- In play, distinguish stacked capabilities without losing the fixed warning windows. Knobs: each module's `PowerParams`; `JAM_RING`, `EMP_CHARGE`, `TELL_JAM`, `GLARE_TELL` remain shared fairness limits. Multiple powers are authored only for now; no wild rarity tuning changed.

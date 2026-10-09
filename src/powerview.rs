@@ -203,33 +203,27 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
     let Some(carried) = body.genome.live_power() else {
         return;
     };
-    if game.disguise(body).is_some() {
-        return;
-    }
+    let disguised = game.disguise(body).is_some();
     if body.follower {
         return;
     }
     let (p, r, time) = (body.position, body.radius, game.time);
     let tint = tinted(carried.power);
-    let direction = Vec2::from_angle(body.angle);
-    let side = Vec2::new(-direction.y, direction.x);
     let view = game.power_view(body);
     let shimmer = 0.5 + 0.5 * (time * 5.0 + body.id as f32 * 1.7).sin();
-    if carried.power == Power::Engulf {
-        // The blob's own soft outline is its tell (see `draw_ooze`), not a round halo.
-        return;
+    if !disguised && carried.power != Power::Engulf {
+        // The halo: a thin ring that breathes, in the power's colour.
+        gizmos
+            .circle_2d(
+                p,
+                r * 1.45 + 4.0 + 2.0 * shimmer,
+                tint.with_alpha(0.22 + 0.2 * shimmer),
+            )
+            .resolution(20);
     }
-    // The halo: a thin ring that breathes, in the power's colour.
-    gizmos
-        .circle_2d(
-            p,
-            r * 1.45 + 4.0 + 2.0 * shimmer,
-            tint.with_alpha(0.22 + 0.2 * shimmer),
-        )
-        .resolution(20);
     // A jam announced: the zone it will hit stays faintly drawn and a bright ring closes on the
     // source. Drawn whatever the strongest power is, so a stamped elder shows it too.
-    if let Some(t) = view.jam {
+    for t in view.jams.into_iter().flatten() {
         let jam_tint = tinted(if t.kind == ssc::simulation::JamKind::Emp {
             Power::Emp
         } else {
@@ -258,8 +252,36 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
         }
     }
     if view.glare > 0.0 {
-        eyes(gizmos, p, r, time, view.glare, tint);
+        eyes(gizmos, p, r, time, view.glare, tinted(Power::Glare));
     }
+    for carried in body.genome.live_powers() {
+        // A quiet mimic keeps its identity hidden, but a second capability never hides
+        // its counterplay warning behind that disguise.
+        let warning = match carried.power {
+            Power::Emp => view.jams[0].is_some(),
+            Power::Confuse => view.jams[1].is_some(),
+            Power::Glare => view.glare > 0.0,
+            Power::Blink => view.blink.is_some() || view.trail.is_some(),
+            Power::Phase => view.phase.is_some_and(|phase| phase.lead > 0.0),
+            Power::Sling => view.sling.is_some(),
+            Power::Song => view.song > 0.0,
+            Power::Repel => view.inhale > 0.0 || view.shove_age < ssc::power::SHOVE_RING,
+            _ => false,
+        };
+        if disguised && !warning {
+            continue;
+        }
+        draw_mark(gizmos, game, body, carried);
+    }
+}
+
+fn draw_mark(gizmos: &mut Gizmos, game: &Game, body: &Body, carried: ssc::power::Carried) {
+    let (p, r, time) = (body.position, body.radius, game.time);
+    let direction = Vec2::from_angle(body.angle);
+    let side = Vec2::new(-direction.y, direction.x);
+    let view = game.power_view(body);
+    let shimmer = 0.5 + 0.5 * (time * 5.0 + body.id as f32 * 1.7).sin();
+    let tint = tinted(carried.power);
     match carried.power {
         Power::Rift => {
             let forward = Vec2::from_angle(body.angle);
@@ -335,7 +357,7 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
             }
         }
         Power::Repel => {
-            let reach = body.genome.power_reach;
+            let reach = body.genome.power_params(carried.power).reach;
             // Faint field rings drifting outward, spaced wider with distance.
             for k in 0..4 {
                 let u = (time * 0.35 + k as f32 / 4.0).fract();
@@ -372,7 +394,7 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
         Power::Warp => {
             // A shimmering bubble: orange rim for haste, blue for slow, drifting dashes and a
             // slow swirl inside.
-            let reach = body.genome.power_reach;
+            let reach = body.genome.power_params(carried.power).reach;
             let rim = if body.genome.warp < 0.0 {
                 Color::srgb(0.35, 0.65, 1.0)
             } else {
@@ -411,7 +433,7 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
         }
         Power::Lens => {
             // A ring of stretched stars around the head, and the edge of the pull.
-            let reach = body.genome.power_reach * ssc::power::LENS_REACH;
+            let reach = body.genome.power_params(carried.power).reach * ssc::power::LENS_REACH;
             dotted_circle(gizmos, p, reach, tint.with_alpha(0.2), 40, time * 0.1);
             for k in 0..10 {
                 let a = time * 0.4 + k as f32 * TAU / 10.0;
@@ -504,7 +526,7 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
                 dotted_circle(
                     gizmos,
                     p,
-                    body.genome.power_reach,
+                    body.genome.power_params(carried.power).reach,
                     tint.with_alpha(0.18),
                     40,
                     time * 0.1,
@@ -540,7 +562,7 @@ pub fn draw(gizmos: &mut Gizmos, game: &Game, body: &Body) {
             dotted_circle(
                 gizmos,
                 p,
-                body.genome.power_reach * ssc::power::DIM_REACH,
+                body.genome.power_params(carried.power).reach * ssc::power::DIM_REACH,
                 tint.with_alpha(0.28),
                 48,
                 time * 0.05,

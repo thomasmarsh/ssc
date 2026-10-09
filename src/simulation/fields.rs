@@ -3,9 +3,9 @@
 //! step. Every force on the ship is capped so that thrust at `ESCAPE` of full can always leave
 //! it, and none does damage by itself (a shove is dangerous only beside a hazard).
 //!
-//! - **Repel** (Pushwhale): an outward field out to `power_reach`; every `power_period` it
+//! - **Repel** (Pushwhale): an outward field out to `reach`; every `period` it
 //!   inhales for `REPEL_INHALE` s (the field reverses mildly: the telegraph) and shoves.
-//! - **Warp** (Tarbloom): a bubble of radius `power_reach`. Slow (negative gene) settles bodies
+//! - **Warp** (Tarbloom): a bubble of radius `reach`. Slow (negative gene) settles bodies
 //!   and shots inside to `1 - WARP_SLOW * s` of their speed, never under `WARP_FLOOR`, and
 //!   stretches creatures' fire cooldowns; haste (positive) runs hostile shots and creatures'
 //!   fire faster. One bubble acts per sector (the lowest id).
@@ -42,7 +42,10 @@ impl Game {
         if !Power::Repel.active(g) {
             return 0.0;
         }
-        let period = g.power_period.max(power::REPEL_INHALE + 1.0);
+        let period = g
+            .power_params(Power::Repel)
+            .period
+            .max(power::REPEL_INHALE + 1.0);
         let left = period - state.repel_u;
         if left <= power::REPEL_INHALE {
             (1.0 - left / power::REPEL_INHALE).clamp(0.0, 1.0)
@@ -105,8 +108,11 @@ impl Game {
         let body = &self.bodies[index];
         let (id, at, g) = (body.id, body.position, body.genome);
         let (chain, s) = (body.chain, Power::Repel.strength(&g));
-        let reach = g.power_reach;
-        let period = g.power_period.max(power::REPEL_INHALE + 1.0);
+        let reach = g.power_params(Power::Repel).reach;
+        let period = g
+            .power_params(Power::Repel)
+            .period
+            .max(power::REPEL_INHALE + 1.0);
         // Each whale keeps its own beat.
         let offset = (id.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 / 16_777_216.0 * period;
         let u = (self.time + offset).rem_euclid(period);
@@ -209,7 +215,7 @@ impl Game {
         let body = &self.bodies[index];
         let (id, at, g) = (body.id, body.position, body.genome);
         let s = Power::Warp.strength(&g);
-        let reach = g.power_reach;
+        let reach = g.power_params(Power::Warp).reach;
         let chain = body.chain;
         let rate = 1.0 - (-power::WARP_RATE * dt).exp();
         if g.warp < 0.0 {
@@ -273,7 +279,7 @@ impl Game {
         let body = &self.bodies[index];
         let (id, at, g, chain) = (body.id, body.position, body.genome, body.chain);
         let s = Power::Lens.strength(&g);
-        let reach = g.power_reach * power::LENS_REACH;
+        let reach = g.power_params(Power::Lens).reach * power::LENS_REACH;
         let strength = power::LENS_PULL * s;
         let cap = self.field_cap();
         for body in self.bodies.iter_mut().filter(|b| b.active && b.id != id) {
@@ -319,6 +325,9 @@ impl Game {
     ) -> Vec<u64> {
         let body = &self.bodies[index];
         let (id, at, g) = (body.id, body.position, body.genome);
+        if body.phased {
+            return Vec::new();
+        }
         let s = Power::Devour.strength(&g);
         if state.base.is_none() {
             state.base = Some((body.radius, body.mass, body.max_health));
@@ -404,16 +413,23 @@ impl Game {
     /// Scales a gorger to `bulk` of its made size (radius, mass and hull together; a third of
     /// the growth heals).
     pub(super) fn grow_to(&mut self, index: usize, state: &mut PowerState, bulk: f32) {
+        state.bulk = bulk;
+        self.apply_power_growth(index, state);
+    }
+
+    /// Physical growth combines independent digestive modules; a squeezed Oozer keeps
+    /// its reduced collision circle even when Devour grows it during the same step.
+    pub(super) fn apply_power_growth(&mut self, index: usize, state: &PowerState) {
+        let bulk = state.bulk.max(1.0) * state.ooze_bulk.max(1.0);
         let Some((radius, mass, health)) = state.base else {
             return;
         };
         let body = &mut self.bodies[index];
         let ratio = (health * bulk) / body.max_health.max(1.0);
-        body.radius = radius * bulk;
+        body.radius = radius * bulk * (1.0 - state.pinch);
         body.mass = mass * bulk;
         body.max_health = health * bulk;
         body.health = (body.health * ratio).min(body.max_health);
-        state.bulk = bulk;
     }
 
     /// A gorger that dies holding a pocket well leaves it where it fell: a hazard that fades.
@@ -514,8 +530,8 @@ mod tests {
     fn the_ship_can_always_fly_into_a_repel_field_at_sixty_percent_thrust_budget() {
         let mut game = empty_game();
         let g = Genome {
+            power_params: crate::power::params_for(crate::power::Power::Repel, 14.0, 420.0, 1.0),
             repel: 1.0,
-            power_period: 14.0,
             ..still(Genome::pushwhale())
         };
         let whale = spawn(&mut game, &Species::of(g), Vec2::new(0.0, 1200.0));

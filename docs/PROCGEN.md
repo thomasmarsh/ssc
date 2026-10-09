@@ -62,6 +62,12 @@ Creatures get the same `Plan` type from their own library. Creature genomes are 
 - Elders: `AnimalSpecimen::misshapen` is the same plan with proportion jitter on every bead and unequal sides; the caller scales the head radius by `ELDER_SCALE` (1.6). Elders get no new grammars. Built (generator version 20): wild apex elders use this, see `apex::body` and "Apex elders" in [UNIVERSE.md](UNIVERSE.md). The plan seed is derived from the source species lineage, mounts are dropped (the archetype's weapon fires from the head), and reach is capped at 14 head radii. `TODO:` weak points per node kind (eye, organ, actuator); today the trailing parts are untouchable armour.
 - Legacy artifact: `anatomy::from_legacy(&Genome)` derives a depth-0 plan from a legacy genome: limbs make a crab (the paired-legs layout is the legacy one), a spine with a wave and no limbs a chain, a few beads a bead. `every_legacy_species_is_a_depth_zero_animal_plan` (`src/simulation/chain.rs`) spawns each legacy species both ways and checks body count, radii, mass, rank, side, parent, position (0.05) and joint rest lengths agree, for every legacy name in the dev spawn list (all 27 are representable). Nothing in the wild uses it; generation is untouched.
 
+## Power genome section
+
+`Genome` keeps 22 named intensity/mode genes plus a fixed power-local parameter table; `PowerModule` is the complete inherited unit. All 88 bounded scalars participate in `genes()`, normalization and limiting. Species drift skips this whole tail. Species sampling retains its single final power roll; authored carriers can combine modules without changing body style or other modules. Multi-module crossover seeds a private stream with `INHERIT_SALT`; plain and ordinary single-module crossover retain their old draw channels. See [BESTIARY.md](BESTIARY.md#4-independent-power-modules).
+
+Generator version 30 corrects the old tail boundary (which inadvertently allowed period drift) and isolates modules on elder stamps. HOME and the ordinary scalar/RNG golden are preserved. No new power sampling probabilities. Genomes are regenerated, not stored in saves, so no save-format bump is needed.
+
 ## Animal creature genome section
 
 `Genome` has `anatomy: Option<AnimalSpecimen>`, declared in the `nested { }` section of the `genome!` macro. Decisions, all conservative:

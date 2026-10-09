@@ -194,7 +194,16 @@ impl Game {
     /// with parry (the dash is dropped), the HUD besides if listed; at most `JAM_MAX`. False if
     /// the ship cannot be jammed now or nothing is left to jam.
     pub fn apply_jam(&mut self, systems: &[System], seconds: f32) -> bool {
-        if !self.jammable() {
+        self.apply_charged_jam(systems, seconds, false)
+    }
+
+    pub(super) fn apply_charged_jam(
+        &mut self,
+        systems: &[System],
+        seconds: f32,
+        joined: bool,
+    ) -> bool {
+        if !joined && !self.jammable() {
             return false;
         }
         let scale = self.jam_scale();
@@ -232,7 +241,18 @@ impl Game {
     /// Confuses the controls for `seconds` with a sway of `amp` radians and, if `flip`, a
     /// turn inversion for the first `CONFUSE_FLIP` seconds.
     pub fn apply_confuse(&mut self, amp: f32, flip: bool, seconds: f32, phase: f32) -> bool {
-        if !self.jammable() {
+        self.apply_charged_confuse(amp, flip, seconds, phase, false)
+    }
+
+    pub(super) fn apply_charged_confuse(
+        &mut self,
+        amp: f32,
+        flip: bool,
+        seconds: f32,
+        phase: f32,
+        joined: bool,
+    ) -> bool {
+        if !joined && !self.jammable() {
             return false;
         }
         let scale = self.jam_scale();
@@ -354,7 +374,11 @@ impl Game {
             .filter(|b| b.kind == BodyKind::Creature && b.active && !b.follower)
             .filter_map(|b| {
                 let s = power::Power::Dim.strength(&b.genome);
-                (s > 0.0).then_some((b.position, b.genome.power_reach * power::DIM_REACH, s))
+                (s > 0.0).then_some((
+                    b.position,
+                    b.genome.power_params(power::Power::Dim).reach * power::DIM_REACH,
+                    s,
+                ))
             })
             .collect()
     }
@@ -410,10 +434,8 @@ mod tests {
 
     fn stormcap() -> Genome {
         Genome {
+            power_params: crate::power::params_for(crate::power::Power::Emp, 2.0, 300.0, 1.4),
             emp: 0.9,
-            power_period: 2.0,
-            power_reach: 300.0,
-            power_hold: 1.4,
             shield: 40.0,
             hull: 70.0,
             weapon: crate::genome::Weapon::None,
@@ -433,6 +455,71 @@ mod tests {
             game.step(DT, Input::default());
             each(game);
         }
+    }
+
+    #[test]
+    fn one_creature_announces_and_lands_emp_and_confusion_with_local_parameters() {
+        let mut game = ready();
+        let mut genome = stormcap();
+        crate::power::stamp(&mut genome, Power::Confuse, 0.85);
+        *genome.power_params_mut(Power::Confuse) = power::PowerParams::new(7.0, 400.0, 0.5);
+        let id = spawn(&mut game, &Species::of(genome), Vec2::new(0.0, 200.0));
+        let mut both_warned = false;
+        let mut both_hit = false;
+        run(&mut game, &[id], 4.0, |g| {
+            let view = g.power_view(g.body(id).unwrap());
+            if let [Some(emp), Some(confuse)] = view.jams {
+                both_warned = true;
+                assert_eq!(emp.kind, super::super::JamKind::Emp);
+                assert_eq!(confuse.kind, super::super::JamKind::Confuse);
+                assert_eq!((emp.reach, confuse.reach), (300.0, 400.0));
+            }
+            if g.jam.confuse > 0.0
+                && g.jam
+                    .weapons
+                    .max(g.jam.dash)
+                    .max(g.jam.parry)
+                    .max(g.jam.boost)
+                    > 0.0
+            {
+                both_hit = true;
+                assert!(g.jam.confuse <= 0.5);
+                assert!(
+                    g.jam
+                        .weapons
+                        .max(g.jam.dash)
+                        .max(g.jam.parry)
+                        .max(g.jam.boost)
+                        > g.jam.confuse
+                );
+            }
+        });
+        assert!(both_warned && both_hit);
+        let state = game.power_state.get(&id).unwrap();
+        assert!(state.jam_clock[1] > state.jam_clock[0] + 3.0);
+    }
+
+    #[test]
+    fn glare_and_confusion_each_get_a_warning_and_use_count() {
+        let mut game = ready();
+        let mut genome = stormcap();
+        genome.emp = 0.0;
+        crate::power::stamp(&mut genome, Power::Glare, 0.8);
+        crate::power::stamp(&mut genome, Power::Confuse, 0.8);
+        let id = spawn(&mut game, &Species::of(genome), Vec2::new(0.0, 200.0));
+        let mut glare = false;
+        let mut confuse = false;
+        let mut glitch = false;
+        let mut confusion = false;
+        run(&mut game, &[id], 5.0, |g| {
+            let view = g.power_view(g.body(id).unwrap());
+            glare |= view.glare > 0.0;
+            confuse |= view.jams[1].is_some();
+            glitch |= g.jam.glitch > 0.5;
+            confusion |= g.jam.confuse > 0.0;
+        });
+        assert!(glare && confuse && glitch && confusion);
+        assert_eq!(game.power_state.get(&id).unwrap().jams, [0, 1, 1]);
     }
 
     #[test]
@@ -671,9 +758,8 @@ mod tests {
     #[test]
     fn glare_opens_its_eyes_then_glitches_once_with_a_gap() {
         let g = Genome {
+            power_params: crate::power::params_for(crate::power::Power::Glare, 1.5, 650.0, 1.0),
             glare: 0.9,
-            power_period: 1.5,
-            power_reach: 650.0,
             weapon: crate::genome::Weapon::None,
             speed: 0.0,
             cruise: 0.0,
@@ -701,8 +787,8 @@ mod tests {
     #[test]
     fn a_light_eater_darkens_but_never_below_the_floor_and_quiet_ships_are_noticed_less() {
         let g = Genome {
+            power_params: crate::power::params_for(crate::power::Power::Dim, 5.0, 450.0, 1.0),
             dim: 0.9,
-            power_reach: 450.0,
             speed: 0.0,
             cruise: 0.0,
             ..Genome::default()

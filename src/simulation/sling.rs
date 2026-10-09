@@ -52,7 +52,8 @@ impl Game {
             && Power::Sling.active(&owner.genome)
             && Power::Sling.fits(&owner.genome)
             && suitable(rock)
-            && owner.position.distance(rock.position) <= owner.genome.power_reach.min(600.0) * 1.25
+            && owner.position.distance(rock.position)
+                <= owner.genome.power_params(Power::Sling).reach.min(600.0) * 1.25
             && !self.beam.is_some_and(|b| b.target == rock.id)
             && !self
                 .bodies
@@ -165,8 +166,10 @@ impl Game {
                 && ship.is_some_and(|p| SectorId::containing(p) == SectorId::ORIGIN))
             && !self.is_landed()
             && self.player_invulnerability <= 0.0
-            && ship
-                .is_some_and(|p| (power::SLING_MIN_SHIP..=g.power_reach).contains(&p.distance(at)));
+            && ship.is_some_and(|p| {
+                (power::SLING_MIN_SHIP..=g.power_params(Power::Sling).reach)
+                    .contains(&p.distance(at))
+            });
         if let Some(mut tell) = state.sling.take() {
             let cord = self.tethers.iter().position(|t| {
                 t.kind == TetherKind::Sling
@@ -226,7 +229,7 @@ impl Game {
                 left: total,
                 total,
             });
-            state.sling_clock = g.power_period + total;
+            state.sling_clock = g.power_params(Power::Sling).period + total;
             cues.push(Cue::SlingTell { at: rock.position });
         }
     }
@@ -273,7 +276,7 @@ impl Game {
                 let offset = rock.position - at;
                 let distance = offset.length();
                 distance >= owner.radius + rock.radius + 35.0
-                    && distance <= g.power_reach.min(600.0)
+                    && distance <= g.power_params(Power::Sling).reach.min(600.0)
                     && held.iter().all(|t| {
                         Vec2::from_angle(t.orbit_angle).dot(offset.normalize_or_zero())
                             < 0.9_f32.cos()
@@ -390,7 +393,8 @@ mod tests {
             .find(|b| b.id == owner)
             .unwrap()
             .genome
-            .power_reach = 900.0;
+            .power_params_mut(Power::Sling)
+            .reach = 900.0;
         set_player(&mut game, Vec2::X * 850.0, Vec2::ZERO);
         assert_eq!(warn(&mut game, owner).total, power::SLING_OFFSCREEN_TELL);
         for case in 0..5 {

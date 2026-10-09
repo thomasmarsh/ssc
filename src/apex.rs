@@ -254,8 +254,8 @@ impl Archetype {
                 g.strafe = 1.0;
                 // It blinks beside the ship: the move is a gene, shared with the wild Skipjack.
                 g.blink = 1.0;
-                g.power_period = 3.4;
-                g.power_reach = 520.0;
+                g.power_params_mut(crate::power::Power::Blink).period = 3.4;
+                g.power_params_mut(crate::power::Power::Blink).reach = 520.0;
             }
             Self::Bulwark => {
                 g.contact_damage = 24.0;
@@ -464,15 +464,15 @@ fn stamp_special(g: &mut Genome, rank: Rank, archetype: Archetype, ring: u32) {
     match archetype {
         Archetype::Maelstrom => {
             Power::Emp.set(g, 0.7);
-            (g.power_period, g.power_reach, g.power_hold) = (7.0, 340.0, 1.2);
+            *g.power_params_mut(Power::Emp) = crate::power::PowerParams::new(7.0, 340.0, 1.2);
         }
         Archetype::Warden => {
             Power::Glare.set(g, 0.8);
-            (g.power_period, g.power_reach, g.power_hold) = (6.0, 700.0, 1.6);
+            *g.power_params_mut(Power::Glare) = crate::power::PowerParams::new(6.0, 700.0, 1.6);
         }
         Archetype::Phantom => {
             Power::Confuse.set(g, 0.6);
-            (g.power_period, g.power_reach, g.power_hold) = (3.4, 340.0, 1.2);
+            *g.power_params_mut(Power::Confuse) = crate::power::PowerParams::new(3.4, 340.0, 1.2);
         }
         _ => {}
     }

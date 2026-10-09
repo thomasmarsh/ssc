@@ -1,6 +1,6 @@
-//! Dirgewhale (the `song` gene, signed). A positive song is a dirge: every `power_period` the
+//! Dirgewhale (the `song` gene, signed). A positive song is a dirge: every `period` the
 //! mouth opens for `TELL_JAM` seconds (a swell), then a ring leaves at `SONG_SPEED` out to
-//! `power_reach`, with a safe gap `SONG_GAP` units wide that is never straight at the ship (it
+//! `reach`, with a safe gap `SONG_GAP` units wide that is never straight at the ship (it
 //! must be walked to). A ship the ring crosses outside the gap is shoved outward, takes
 //! `SONG_DAMAGE` and, from strong songs, has its weapons jammed `SONG_JAM` seconds (under the
 //! jam rules: immunity, no stacking). A dash through the ring is the usual graze. A negative
@@ -53,8 +53,12 @@ impl Game {
     ) {
         let body = &self.bodies[index];
         let (id, at, g) = (body.id, body.position, body.genome);
+        if body.phased && g.song >= 0.0 {
+            state.song_tell = None;
+            return;
+        }
         let s = Power::Song.strength(&g);
-        let reach = g.power_reach;
+        let reach = g.power_params(Power::Song).reach;
         if g.song < 0.0 {
             // A chant: the singer's neighbours shoot faster while it sings.
             for other in self
@@ -78,13 +82,13 @@ impl Game {
                 return;
             }
             state.song_tell = None;
-            state.song_clock = g.power_period;
+            state.song_clock = g.power_params(Power::Song).period;
             let mut rng = Rng::new(hash2(
                 self.seed ^ SONG_SALT,
                 (id & 0x7FFF_FFFF) as i32,
-                state.jams as i32,
+                state.song_uses as i32,
             ));
-            state.jams += 1;
+            state.song_uses += 1;
             // The gap sits well off the line to the ship: it has to be walked to.
             let toward = (ship - at).to_angle();
             let off = rng.range(0.7, 1.4) * if rng.chance(0.5) { 1.0 } else { -1.0 };
@@ -173,9 +177,8 @@ mod tests {
 
     fn whale(song: f32) -> Genome {
         Genome {
+            power_params: crate::power::params_for(crate::power::Power::Song, 3.0, 600.0, 1.0),
             song,
-            power_period: 3.0,
-            power_reach: 600.0,
             radius: 30.0,
             hull: 400.0,
             speed: 0.0,
