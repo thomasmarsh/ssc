@@ -141,5 +141,5 @@ A herd is one flock of 100 to 300 Bogey-like members (flat array, not bodies), i
 ## Multiple powers on one creature
 
 - `SSC_SPECIMEN=multijammer SSC_SPECIMEN_TELL=1 SSC_TELEPORT=36000,0`: check that blue EMP and pink confusion rings are both readable, glare eyes remain visible, and there is one identity halo. The source can charge both rings at once; leaving one local reach avoids that effect.
-- `SSC_SPECIMEN=multioozer SSC_TELEPORT=36000,0 SSC_STEPS=2`: check that the soft blob retains its identity while its Repel breathing warning and Song mouth marks remain visible.
+- `SSC_SPECIMEN=multioozer SSC_SPECIMEN_NEAR=200 SSC_TELEPORT=36000,0 SSC_STEPS=2`: check that the soft blob retains its identity while its Repel breathing warning and Song mouth marks remain visible.
 - In play, distinguish stacked capabilities without losing the fixed warning windows. Knobs: each module's `PowerParams`; `JAM_RING`, `EMP_CHARGE`, `TELL_JAM`, `GLARE_TELL` remain shared fairness limits. Multiple powers are authored only for now; no wild rarity tuning changed.

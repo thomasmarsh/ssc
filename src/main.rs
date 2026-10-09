@@ -1150,6 +1150,19 @@ fn smoke_run(
             // The jammers only work on a ship that is not in grace.
             session.game.player_invulnerability = 0.0;
         }
+        if matches!(name.as_str(), "multijammer" | "multioozer") {
+            // A bounded authored encounter: load first, then remove wild threats so the
+            // warning capture cannot lose the observer or relocate on death recovery.
+            session.game.player_invulnerability = 1e9;
+            session.game.step(0.02, ssc::simulation::Input::default());
+            session.game.player_invulnerability = 0.0;
+            session
+                .game
+                .bodies
+                .retain(|b| b.kind == ssc::simulation::BodyKind::Player);
+            session.game.tethers.clear();
+            run.hold = true;
+        }
         if name == "slinger" {
             // Load the destination, then isolate a readable authored encounter from wild threats.
             session.game.player_invulnerability = 1e9;
@@ -1201,7 +1214,7 @@ fn smoke_run(
         let ship = session.game.player().map_or(Vec2::ZERO, |p| p.position);
         let count = if matches!(
             name.as_str(),
-            "weaver" | "slinger" | "runekeeper" | "seamer" | "oozer"
+            "weaver" | "slinger" | "runekeeper" | "seamer" | "oozer" | "multijammer" | "multioozer"
         ) {
             1
         } else {
@@ -1210,6 +1223,12 @@ fn smoke_run(
         for k in 0..count {
             let at = ship + Vec2::from_angle(0.6 + k as f32 * 2.1) * (near + 90.0 * k as f32);
             let id = session.game.place_creature(&Species::of(genome), at);
+            if matches!(name.as_str(), "multijammer" | "multioozer")
+                && let Some(body) = session.game.bodies.iter_mut().find(|b| b.id == id)
+            {
+                body.pinned = true;
+                body.alert = true;
+            }
             if name == "oozer" {
                 // SSC_OOZER_FED=<0..1> starts it grown; SSC_OOZER_GATE=<gap> walls the way.
                 let env = |k: &str| {
@@ -1558,8 +1577,10 @@ fn smoke_run(
                             || session
                                 .game
                                 .power_view(b)
-                                .jam
-                                .is_some_and(|t| t.progress() > 0.5)
+                                .jams
+                                .into_iter()
+                                .flatten()
+                                .any(|t| t.progress() > 0.5)
                     })
             };
             if told {

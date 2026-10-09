@@ -708,6 +708,7 @@ mod tests {
         );
         assert!(state.blink.is_none());
         assert_eq!(creature(&game, id).position, at);
+        game.player_invulnerability = 0.0;
         game.engulf = Some(super::super::ooze::Engulf { ooze: id, age: 0.0 });
         game.update_engulf_hold(STEP);
         assert!(game.engulf.is_none());
