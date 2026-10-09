@@ -21,7 +21,8 @@ pub fn enabled() -> bool {
 /// The saved run, if saving is on and there is a readable one. A save that cannot be read is
 /// reported and left alone on disk (the next autosave moves it to the backup slot).
 pub fn load() -> Option<Game> {
-    if !enabled() {
+    // Unit tests never read the player's real save.
+    if cfg!(test) || !enabled() {
         return None;
     }
     let dir = savefile::default_dir();
