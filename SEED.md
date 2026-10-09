@@ -42,14 +42,13 @@ Decide per slice, and say which in one line.
 
 ## Queue (revised 2026-10-09: expand the game loop)
 
-The user asked for a fuller plan and reconciled docs. That docs pass is complete; implementation is TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
+The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C is built; local production and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, first frontier milestone: (A) resources/storage/transactions and six HUD counters landed. (B) HOME/friendly-seat basic procurement and raw-only wildlife/geological rewards landed. Next narrow (C) tech graph, bounded capture, supplier grade, and one continued-grade frontier step. Test both peaceful and warlike access and preservation of handling/projectile bounds.
-2. [L] Working home: D paid local modules, refinery -> fuel, water/tank -> irrigation -> biomass; then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
-3. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk water delivery, fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
-4. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
-5. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
+1. [L] NEXT, working home: D paid local modules, refinery -> fuel, water/tank -> irrigation -> biomass; then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
+2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk water delivery, fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
+3. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
+4. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
 Creature backlog remains open: Foamback; Oozer small prey/nucleus/pinch/spit/gap/path and continuous perimeter/reach tuning; remaining organs and realm-discovery follow-ups; swarms/rally dispatch and herd map/sonar; elder weak points if needed. Builders still need visible gathering and player interaction. See BESTIARY/WORKSTREAMS for their built status. These do not block the first economy milestone.
 
@@ -58,6 +57,8 @@ Other backlog: density/feeling view-model and measurements, weaver rock care, hy
 Decided: raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; bulk water via local tanks/tankers; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Narrow frontier progression (generator 33): five saved research dependencies, independently salted supplier specialties, capped one-time captures and one-use archive grade claims, continuing source-bound offense/durability grades with preserved handling/pattern bounds and normalized repair costs. Peaceful and conquest paths share the tested frontier ceiling.
 
 - Frontier procurement: HOME/friendly-seat peaceful basic equipment, support prerequisites and profile purchases; wild bodies/apex biological/raw rewards only, finite geological lodes without technological charges. CONTACT reuses bench/controller navigation.
 
@@ -72,7 +73,3 @@ Decided: raw wildlife rewards with organs as biological specials; civilizations 
 - Independent power modules (generator version 30): power-local cadence/reach/hold, module inheritance, independent jam warnings and digestive growth, all-capability rendering; authored multi-carrier hooks. Ordinary draw golden and HOME preserved. See `docs/BESTIARY.md`.
 
 - Saves and recovery: last ten autosaves plus independent explicit SAVE GAME, latest-valid CONTINUE / NEW GAME title menu; lives revive locally and exhaustion returns to the last landed pad (HOME fallback) with exactly one life, preserving progress. No death-triggered game over or bequest. See `docs/PERSISTENCE.md`.
-- Greenhouses (no generation change): a farming civilization's seat carries a glass dome with six plots (`Plant::housed`, sealed from grazers and blight); the ship plants in the free ones from inside the glass, and any bare hull refuses (`PlantHint::BareHull`). Hook `SSC_FARM_CIV`.
-- Farming civilizations (workstream 1 slice 5, generator version 29): `Territory::tillage` from the lineage's genes decides who farms (about a third, settlers always); tended fields, a granary, tending rounds, biomass and seed trade at a friendly seat, theft costs regard (`simulation/farm/tend.rs`).
-- Farming slice 4, blight (no generation change, no save version bump): planted crops outside HOME fall ill, it spreads between same-species neighbors, drains growth, is pruned by the beam and resisted by the hardy gene (`Game::update_blight`, hook `SSC_FARM_BLIGHT`). Plants also sway like the grass.
-- Farming slice 3, crop breeding (no generation change, SAVE_VERSION 2): `CropGenes` (yield, vigor, hardy, hue) on plants and seeds (`SeedKind` stacks); each seed from a ripe cut crosses the plant with its nearest mature same-species neighbor (within 260, 10 percent mutation). Gene tag shown in the seed label; hook `SSC_FARM_GENES`. Additive genes, no trade-offs yet (playtest question).

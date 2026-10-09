@@ -1648,6 +1648,9 @@ fn smoke_run(
         );
     }
 
+    if run.frames == 0 && std::env::var_os("SSC_FRONTIER_CONTACT").is_some() {
+        session.game.pose_frontier_contact();
+    }
     // SSC_OUTPOST=1: start at the early outpost's capital (standing meter, tithe seat).
     if run.frames == 0 && std::env::var_os("SSC_OUTPOST").is_some() {
         let capital = ssc::territory::outpost(session.game.seed()).capital;
@@ -2026,6 +2029,9 @@ fn smoke_bench(game: &mut Game, mode: &str) {
         metal: 80.0,
         volatiles: 55.0,
         crystal: 25.0,
+        fuel: 80.0,
+        biomass: 30.0,
+        water: 10.0,
         ..default()
     };
     match mode {
@@ -2056,6 +2062,9 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 .acquire(Profile::Needles, Profile::Needles.max_level());
             game.bench_select(BenchAction::Weapon(Profile::Spread));
         }
+        "research" => game.bench_select(BenchAction::Research(
+            ssc::simulation::research::Tech::Frontier,
+        )),
         "skills" => game.bench_select(BenchAction::Skill(Skill::EchoLodes)),
         "gate" => game.bench_select(BenchAction::Skill(Skill::Parry)),
         "organs" => {
@@ -2192,7 +2201,7 @@ mod bench_input_tests {
         bench_controls(&keys, &|_| false, &mut session);
         keys.clear();
         let mut groups = vec![];
-        for _ in 0..23 {
+        for _ in 0..29 {
             let panel = session.game.bench_panel().unwrap();
             let row = panel.rows.iter().find(|r| r.selected).unwrap();
             if groups.last() != Some(&row.group) {
@@ -2200,7 +2209,10 @@ mod bench_input_tests {
             }
             bench_controls(&keys, &|b| b == GamepadButton::RightTrigger, &mut session);
         }
-        assert_eq!(groups, ["MINING", "FLIGHT / UTILITY", "SONAR", "ORGANS"]);
+        assert_eq!(
+            groups,
+            ["MINING", "FLIGHT / UTILITY", "SONAR", "ORGANS", "RESEARCH"]
+        );
         assert_eq!(
             session
                 .game
@@ -2222,7 +2234,7 @@ mod bench_input_tests {
                 .iter()
                 .position(|r| r.selected)
                 .unwrap(),
-            22
+            28
         );
     }
     #[test]

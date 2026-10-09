@@ -61,12 +61,12 @@ pub const COVER_BREAK: f32 = 10.0;
 pub const STASH_CAP: f32 = 100.0;
 /// How much one bench press moves in or out of the stash.
 pub const STASH_STEP: f32 = 25.0;
-/// Field repair: hull per second and metal per hull point; shield per second and volatiles
-/// per shield point (2 metal per 10 hull, 2 volatiles per 15 shield).
+/// Field repair: hull per second and metal per hull point; shield per second and fuel
+/// per shield point (2 metal per 10 hull, 2 fuel per 15 shield).
 pub const REPAIR_HULL_RATE: f32 = 5.0;
 pub const REPAIR_METAL: f32 = 0.2;
 pub const REPAIR_SHIELD_RATE: f32 = 6.0;
-pub const REPAIR_VOLATILES: f32 = 2.0 / 15.0;
+pub const REPAIR_FUEL: f32 = 2.0 / 15.0;
 /// Metal that buys back the best part on a death, with a pad on the map.
 pub const INSURANCE: f32 = 10.0;
 /// Hostile creatures that know a pad come for it from this far, and gnaw at it from this near.
@@ -537,9 +537,10 @@ impl Game {
         if ship.since_hit < t::AUTO_REPAIR_DELAY {
             return;
         }
-        let hull = ship.health < ship.max_health - 1e-3 && self.cargo.metal > 0.0;
+        let hull = ship.health < ship.max_health - 1e-3
+            && (self.cargo.metal > 0.0 || self.cargo.biomass > 0.0);
         let shield = ship.shield < ship.max_shield * t::AUTO_SHIELD_BELOW
-            && self.cargo.fuel > t::AUTO_VOLATILE_RESERVE;
+            && self.cargo.fuel > t::AUTO_FUEL_RESERVE;
         if hull || shield {
             self.pad.repairing = true;
             self.pad.auto_run = true;
@@ -554,6 +555,7 @@ impl Game {
             self.pad.repairing = false;
             return;
         };
+        let grade = self.equipment_grade();
         let auto = self.pad.auto_run;
         if ship.since_hit <= dt * 1.5 + 1e-3 {
             self.pad.repairing = false;
@@ -570,17 +572,19 @@ impl Game {
             // Biomass is the renewable mend: it goes first, metal covers the rest.
             hull = self.repair_with_biomass(hull_missing, REPAIR_HULL_RATE, dt);
         } else if hull_missing > 1e-3 && self.cargo.metal > 1e-4 {
-            hull = (REPAIR_HULL_RATE * dt)
+            hull = (REPAIR_HULL_RATE * grade * dt)
                 .min(hull_missing)
-                .min(self.cargo.metal / REPAIR_METAL);
-            self.cargo.take(Material::Metal, hull * REPAIR_METAL);
+                .min(self.cargo.metal * grade / REPAIR_METAL);
+            self.cargo
+                .take(Material::Metal, hull * REPAIR_METAL / grade);
         } else if shield_missing > 1e-3
-            && self.cargo.fuel > if auto { t::AUTO_VOLATILE_RESERVE } else { 1e-4 }
+            && self.cargo.fuel > if auto { t::AUTO_FUEL_RESERVE } else { 1e-4 }
         {
-            shield = (REPAIR_SHIELD_RATE * dt)
+            shield = (REPAIR_SHIELD_RATE * grade * dt)
                 .min(shield_missing)
-                .min(self.cargo.fuel / REPAIR_VOLATILES);
-            self.cargo.take(Material::Fuel, shield * REPAIR_VOLATILES);
+                .min(self.cargo.fuel * grade / REPAIR_FUEL);
+            self.cargo
+                .take(Material::Fuel, shield * REPAIR_FUEL / grade);
         }
         if hull > 0.0 || shield > 0.0 {
             if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
@@ -921,9 +925,10 @@ impl Game {
             return;
         }
         self.pad.hidden_for += dt;
+        let grade = self.equipment_grade();
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
-            ship.health = (ship.health + LANDED_HULL * dt).min(ship.max_health);
-            ship.shield = (ship.shield + LANDED_SHIELD * dt).min(ship.max_shield);
+            ship.health = (ship.health + LANDED_HULL * grade * dt).min(ship.max_health);
+            ship.shield = (ship.shield + LANDED_SHIELD * grade * dt).min(ship.max_shield);
         }
     }
 
@@ -1259,6 +1264,7 @@ impl Game {
 
     /// Repairs hull and shield at once, as far as the hold pays for it.
     pub(super) fn bench_repair(&mut self) {
+        let grade = self.equipment_grade();
         let Some(ship) = self.player() else { return };
         let hull_missing = (ship.max_health - ship.health).max(0.0);
         let shield_missing = (ship.max_shield - ship.shield).max(0.0);
@@ -1266,14 +1272,16 @@ impl Game {
             self.bench_failed("NOTHING TO REPAIR".into());
             return;
         }
-        let hull = hull_missing.min(self.cargo.metal / REPAIR_METAL);
-        let shield = shield_missing.min(self.cargo.fuel / REPAIR_VOLATILES);
+        let hull = hull_missing.min(self.cargo.metal * grade / REPAIR_METAL);
+        let shield = shield_missing.min(self.cargo.fuel * grade / REPAIR_FUEL);
         if hull < 1e-3 && shield < 1e-3 {
             self.bench_failed("REPAIR NEEDS METAL (HULL) OR FUEL (SHIELD)".into());
             return;
         }
-        self.cargo.take(Material::Metal, hull * REPAIR_METAL);
-        self.cargo.take(Material::Fuel, shield * REPAIR_VOLATILES);
+        self.cargo
+            .take(Material::Metal, hull * REPAIR_METAL / grade);
+        self.cargo
+            .take(Material::Fuel, shield * REPAIR_FUEL / grade);
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.health = (ship.health + hull).min(ship.max_health);
             ship.shield = (ship.shield + shield).min(ship.max_shield);
@@ -1376,6 +1384,15 @@ impl Game {
             && self.loadout.skills.level(pre) == 0
         {
             return Some(format!("{} LEVEL 1", pre.label()));
+        }
+        let researched = match skill {
+            Skill::Parry => Some(super::research::Tech::Protection),
+            Skill::Dash => Some(super::research::Tech::Propulsion),
+            Skill::Symbiosis => Some(super::research::Tech::OrganSupport),
+            _ => None,
+        };
+        if researched.is_some_and(|tech| self.loadout.research.active(tech)) {
+            return None;
         }
         let (slot, rarity) = skill.requirement()?;
         let met = self
@@ -1624,10 +1641,10 @@ mod tests {
             .unwrap()
             .since_hit = 99.0;
         game.stats.recharge = 0.0;
-        stock(&mut game, 0.0, t::AUTO_VOLATILE_RESERVE + 3.0, 0.0);
+        stock(&mut game, 0.0, t::AUTO_FUEL_RESERVE + 3.0, 0.0);
         run(&mut game, 30.0);
-        assert!(game.cargo.fuel >= t::AUTO_VOLATILE_RESERVE - 0.5);
-        assert!(game.cargo.fuel < t::AUTO_VOLATILE_RESERVE + 3.0);
+        assert!(game.cargo.fuel >= t::AUTO_FUEL_RESERVE - 0.5);
+        assert!(game.cargo.fuel < t::AUTO_FUEL_RESERVE + 3.0);
     }
 
     #[test]
@@ -1663,7 +1680,7 @@ mod tests {
         hurt(&mut game, 0.0, 60.0);
         game.toggle_repair();
         run(&mut game, 3.0);
-        // 6 shield a second at 2 volatiles per 15 shield: 18 shield for 2.4 volatiles.
+        // 6 shield a second at 2 fuel per 15 shield: 18 shield for 2.4 volatiles.
         let spent = 30.0 - game.cargo.fuel;
         assert!((spent - 2.4).abs() < 0.15, "{spent}");
     }
@@ -2270,7 +2287,10 @@ mod tests {
         bench(&mut game, 6);
         let panel = game.bench_panel().unwrap();
         assert_eq!(panel.tab, BenchTab::Skills);
-        assert_eq!(panel.rows.len(), Skill::ALL.len() + Organ::ALL.len());
+        assert_eq!(
+            panel.rows.len(),
+            Skill::ALL.len() + Organ::ALL.len() + super::research::Tech::ALL.len() + 1
+        );
         assert!(panel.rows.iter().any(|r| r.state == "UNLOCK"));
         for skill in Skill::of_tab(SkillTab::Sonar) {
             assert_eq!(game.loadout.skills.level(skill), 0, "nothing starts owned");
@@ -2333,7 +2353,7 @@ mod tests {
         assert_eq!(panel.tab, BenchTab::Skills);
         assert_eq!(
             panel.rows.len(),
-            Skill::ALL.len() + Organ::ALL.len(),
+            Skill::ALL.len() + Organ::ALL.len() + super::research::Tech::ALL.len() + 1,
             "the skills and then the organ rows"
         );
         // Short of the price: nothing bought, nothing spent.

@@ -126,7 +126,9 @@ impl Snapshot {
             BenchAction::Stash(_)
             | BenchAction::Supply(_)
             | BenchAction::Outfit(_)
-            | BenchAction::Tithe => receipt.text.clone(),
+            | BenchAction::Tithe
+            | BenchAction::Research(_)
+            | BenchAction::Grade => receipt.text.clone(),
         };
         let spent = Material::ALL
             .into_iter()

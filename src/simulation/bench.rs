@@ -3,7 +3,7 @@ use super::arsenal::Profile;
 use super::organs::Organ;
 use super::organs::graft_price;
 use super::pads::{
-    REPAIR_METAL, REPAIR_VOLATILES, STASH_STEP, level_price, reforge_price, upgrade_price,
+    REPAIR_FUEL, REPAIR_METAL, STASH_STEP, level_price, reforge_price, upgrade_price,
 };
 use super::skills::{Skill, SkillTab};
 use super::upgrades::{Rarity, Slot};
@@ -34,6 +34,8 @@ pub struct Bench {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BenchAction {
     Repair,
+    Research(research::Tech),
+    Grade,
     Outfit(Slot),
     Tithe,
     Supply(Material),
@@ -139,6 +141,8 @@ impl Game {
             .into_iter()
             .map(BenchAction::Skill)
             .chain(Organ::ALL.map(BenchAction::Organ))
+            .chain(research::Tech::ALL.map(BenchAction::Research))
+            .chain(std::iter::once(BenchAction::Grade))
             .collect(),
         }
     }
@@ -146,7 +150,10 @@ impl Game {
     pub fn bench_select(&mut self, action: BenchAction) {
         let tab = match action {
             BenchAction::Weapon(_) => BenchTab::Weapons,
-            BenchAction::Skill(_) | BenchAction::Organ(_) => BenchTab::Skills,
+            BenchAction::Skill(_)
+            | BenchAction::Organ(_)
+            | BenchAction::Research(_)
+            | BenchAction::Grade => BenchTab::Skills,
             _ => BenchTab::Parts,
         };
         let cursor = self.bench_actions(tab).iter().position(|&a| a == action);
@@ -172,6 +179,8 @@ impl Game {
         let before = super::bench_feedback::Snapshot::capture(self);
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
+            Some(BenchAction::Research(tech)) => self.buy_research(tech),
+            Some(BenchAction::Grade) => self.buy_grade(),
             Some(BenchAction::Outfit(slot)) => self.buy_outfit(slot),
             Some(BenchAction::Tithe) => match self.tithe() {
                 Ok(()) => self.bench_done("TITHE SETTLED".into(), Rarity::Common),
@@ -280,16 +289,65 @@ impl Game {
                 row.detail =
                     "Offer 20 goods. Existing relation and granary trade terms apply.".into();
             }
+            BenchAction::Research(tech) => {
+                row.group = "RESEARCH";
+                row.text = format!("LEARN {}", tech.label());
+                row.detail = match tech { research::Tech::Fabrication => "Dependency for organ interfaces and frontier calibration.", research::Tech::Protection => "Alternative to Rare Plating prerequisite for PARRY.", research::Tech::Propulsion => "Alternative to Rare Engine prerequisite for DASH.", research::Tech::OrganSupport => "Alternative to Rare Core prerequisite for SYMBIOSIS; permanent organ hosting support.", research::Tech::Frontier => "Continuing offense and durability grades at a better live supplier. Captured archives grant one grade commissioning claim at HOME." }.into();
+                row.costs = self.research_price(tech);
+                if let Some(why) = self.research_block(tech) {
+                    row.ok = false;
+                    row.state = why;
+                }
+                row.detail += &format!(
+                    " Ship pays; research credit {:.0}%.",
+                    100.0
+                        * self
+                            .loadout
+                            .research
+                            .fragments
+                            .get(&tech)
+                            .copied()
+                            .unwrap_or(0.0)
+                );
+            }
+            BenchAction::Grade => {
+                row.group = "RESEARCH";
+                row.text = format!("EQUIPMENT GRADE {:.2}", self.equipment_grade());
+                row.detail = "Raises damage/hull/shield/recharge; handling, cadence and patterns stay bounded.".into();
+                if let Some((grade, archive)) = self.next_grade() {
+                    row.costs = self.grade_price();
+                    let ceiling = if archive.is_some() {
+                        grade
+                    } else {
+                        self.friendly_supplier()
+                            .map_or(grade, |civ| self.supplier_grade(&civ))
+                    };
+                    row.detail = format!(
+                        "Next {:.2}; source ceiling {:.2}; {}. {}",
+                        grade,
+                        ceiling,
+                        if archive.is_some() {
+                            "one archive claim at HOME"
+                        } else {
+                            "live friendly seat"
+                        },
+                        row.detail
+                    );
+                } else {
+                    row.ok = false;
+                    row.state = "NEEDS RESEARCH AND BETTER SUPPLIER / ARCHIVE".into();
+                }
+            }
             BenchAction::Repair => {
                 row.group = "REPAIR";
                 row.text = "REPAIR HULL + SHIELD".into();
                 if let Some(ship) = self.player() {
                     let hull = (ship.max_health - ship.health)
                         .max(0.0)
-                        .min(self.cargo.metal / REPAIR_METAL);
+                        .min(self.cargo.metal * self.equipment_grade() / REPAIR_METAL);
                     let shield = (ship.max_shield - ship.shield)
                         .max(0.0)
-                        .min(self.cargo.fuel / REPAIR_VOLATILES);
+                        .min(self.cargo.fuel * self.equipment_grade() / REPAIR_FUEL);
                     row.detail = format!(
                         "Hull {:.0} -> {:.0}   Shield {:.0} -> {:.0}. Repairs only what you can pay.",
                         ship.health,
@@ -298,8 +356,14 @@ impl Game {
                         ship.shield + shield
                     );
                     row.costs = vec![
-                        (Material::Metal, hull * REPAIR_METAL),
-                        (Material::Fuel, shield * REPAIR_VOLATILES),
+                        (
+                            Material::Metal,
+                            hull * REPAIR_METAL / self.equipment_grade(),
+                        ),
+                        (
+                            Material::Fuel,
+                            shield * REPAIR_FUEL / self.equipment_grade(),
+                        ),
                     ];
                     row.ok = hull >= 1e-3 || shield >= 1e-3;
                     if !row.ok {
@@ -450,7 +514,7 @@ impl Game {
                             row.costs = graft_price(&strain).to_vec();
                         }
                         row.detail += &format!(
-                            ". Slots {}/{}; upkeep {:.1} volatiles/min.",
+                            ". Slots {}/{}; upkeep {:.1} biomass/min.",
                             organs.fitted().len(),
                             slots,
                             tuning::ORGAN_UPKEEP
@@ -606,7 +670,10 @@ mod tests {
             assert_eq!(skills.iter().filter(|&&x| x == s).count(), 1);
         }
         assert_eq!(organs, Organ::ALL);
-        assert_eq!(game.pad.bench.unwrap().cursor, 0);
+        assert_eq!(
+            selected(&game).action,
+            BenchAction::Research(research::Tech::Fabrication)
+        );
         game.bench_move(-1);
         assert_eq!(selected(&game).action, BenchAction::Organ(Organ::Skipjack));
     }

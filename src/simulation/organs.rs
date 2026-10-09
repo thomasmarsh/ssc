@@ -1,14 +1,14 @@
 //! Organs: parts of other creatures the ship can grow. An organ is an owned strain (a kind, a
 //! level 1 to 3 and a magnitude taken from the donor's genes), kept for the run through death,
 //! cleared on restart and never lowered: the same promise as the arsenal and the skills. A
-//! lesser find (one that cannot raise what is owned) pays volatiles instead.
+//! lesser find (one that cannot raise what is owned) pays biomass instead.
 //!
 //! Strains come from three places: **bond** (a Kindling Remora groomed calmly, see `parasite`),
 //! **harvest** (a special carrier's first kill leaves a specimen one time in four, rolled from
 //! the loot stream so a route always pays the same) and **relic** (a sealed specimen lying in
 //! some sectors). A strain does nothing until it is fitted: the SYMBIOSIS skill opens slots
-//! (one a level), a graft costs crystal and volatiles the first time, each fitted organ draws a
-//! little volatiles a minute and sleeps at an empty hold. A fresh bond works at once for a few
+//! (one a level), a graft costs crystal and fuel the first time, each fitted organ draws a
+//! little biomass a minute and sleeps at an empty hold. A fresh bond works at once for a few
 //! minutes without a slot.
 //!
 //! Four organs, each from a built power: the Remora (hull regeneration, from the symbiote), the
@@ -192,7 +192,7 @@ impl Organs {
                 have.magnitude = found.magnitude;
                 Found::Improved
             }
-            Some(have) => Found::Lesser(t::LESSER_VOLATILES * f32::from(have.level)),
+            Some(have) => Found::Lesser(t::LESSER_BIOMASS * f32::from(have.level)),
         }
     }
 
@@ -243,7 +243,7 @@ pub fn graft_price(strain: &Strain) -> [(Material, f32); 2] {
     let k = f32::from(strain.level);
     [
         (Material::Crystal, t::GRAFT_CRYSTAL * k),
-        (Material::Fuel, t::GRAFT_VOLATILES * k),
+        (Material::Fuel, t::GRAFT_FUEL * k),
     ]
 }
 
@@ -298,7 +298,7 @@ impl Game {
             Found::Lesser(volatiles) => {
                 let taken = self.cargo.add(Material::Biomass, volatiles);
                 self.notify(
-                    format!("{name} ORGAN AT MAX  VOLATILES +{taken:.0}"),
+                    format!("{name} ORGAN AT MAX  BIOMASS +{taken:.0}"),
                     upgrades::Rarity::Common,
                 );
             }
@@ -342,12 +342,13 @@ impl Game {
         } else {
             self.loadout.organs.dormant = false;
         }
+        let grade = self.equipment_grade();
         if let Some(rate) = self.loadout.organs.perk(Organ::Remora)
             && let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
             && ship.health > 0.0
             && ship.since_hit >= t::REMORA_QUIET
         {
-            ship.health = (ship.health + t::REMORA_REGEN * rate * dt).min(ship.max_health);
+            ship.health = (ship.health + t::REMORA_REGEN * rate * grade * dt).min(ship.max_health);
         }
     }
 
@@ -382,7 +383,7 @@ impl Game {
             let price = graft_price(&strain);
             if !self.cargo.spend(&price) {
                 return Err(format!(
-                    "{name} GRAFT NEEDS {:.0} CRYSTAL {:.0} VOLATILES",
+                    "{name} GRAFT NEEDS {:.0} CRYSTAL {:.0} FUEL",
                     price[0].1, price[1].1
                 ));
             }
@@ -471,12 +472,12 @@ mod tests {
         );
         // Raised levels keep the better genes.
         assert_eq!(organs.strain(Organ::Veil).unwrap().magnitude, 1.0);
-        // At the top: a weaker sample pays volatiles and changes nothing; a stronger one improves.
+        // At the top: a weaker sample pays biomass and changes nothing; a stronger one improves.
         let before = organs.strain(Organ::Veil);
         let Found::Lesser(v) = organs.acquire(strain(Organ::Veil, 1, 0.6)) else {
             panic!("expected a lesser find");
         };
-        assert_eq!(v, t::LESSER_VOLATILES * 3.0);
+        assert_eq!(v, t::LESSER_BIOMASS * 3.0);
         assert_eq!(organs.strain(Organ::Veil), before);
         assert_eq!(organs.acquire(strain(Organ::Veil, 1, 1.4)), Found::Improved);
         assert_eq!(organs.strain(Organ::Veil).unwrap().level, 3);
@@ -521,7 +522,7 @@ mod tests {
         // A level 2 graft: 2 x (8 crystal, 20 volatiles).
         assert!(game.bench_organ(Organ::Veil).is_ok());
         assert_eq!(game.cargo.crystal, 100.0 - t::GRAFT_CRYSTAL * 2.0);
-        assert_eq!(game.cargo.fuel, 100.0 - t::GRAFT_VOLATILES * 2.0);
+        assert_eq!(game.cargo.fuel, 100.0 - t::GRAFT_FUEL * 2.0);
         assert!(game.loadout.organs.is_fitted(Organ::Veil));
         // One slot: a second organ bumps the first, never destroying it.
         assert!(game.bench_organ(Organ::Faraday).is_ok());
@@ -818,7 +819,7 @@ mod tests {
             game.loadout.organs.strain(Organ::Skipjack).unwrap().level,
             3
         );
-        assert_eq!(game.cargo.biomass, v + t::LESSER_VOLATILES * 3.0);
+        assert_eq!(game.cargo.biomass, v + t::LESSER_BIOMASS * 3.0);
     }
 
     #[test]

@@ -127,7 +127,7 @@ Orange rear flames = main engines; blue front / side jets = RCS (turn / brake).
 Rings on the ship: outer cyan arc = shield, ten green segments = hull.
 Bottom: weapon (arc = fuel, dots = level, ticks = owned), parry / dash / ping
 rings (arc fills as they recover, lock = not bought yet, dashed red = no shield),
-three bars = metal, volatiles, crystal.  Top left: threat pips.  Top right: score,
+six counters = metal, volatiles, crystal, biomass, fuel, water.  Top left: threat pips.  Top right: score,
 chain bar, lives.  Gold diamond = the next lure (every new sector gets a free ping).
 Gold crown = apex.  Red edge arrow = hunting, blue = calm.  A red arc on the ring
 shows where a hit came from; a red frame means the hull is low.";
@@ -1115,7 +1115,7 @@ fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
     lines.push(("Hold: ".into(), MUTED));
     for kind in Material::ALL {
         lines.push((
-            format!("{:.0} {}  ", game.cargo.amount(kind), kind.label()),
+            format!("{} {:.0}  ", kind.letter(), game.cargo.amount(kind)),
             material_color(kind),
         ));
     }
@@ -5030,10 +5030,8 @@ mod bench_layout_tests {
                     && *tint == material_color(Material::Crystal))
         );
         assert!(
-            spans
-                .iter()
-                .any(|(text, tint)| text.contains("60.0 VOLATILES")
-                    && *tint == material_color(Material::Volatiles))
+            spans.iter().any(|(text, tint)| text.contains("60.0 FUEL")
+                && *tint == material_color(Material::Fuel))
         );
         let text: String = spans.into_iter().map(|(text, _)| text).collect();
         assert!(text.contains("needs DASH"));

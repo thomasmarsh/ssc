@@ -189,7 +189,7 @@ impl Skill {
                 t::PLATING_ALL_FROM
             ),
             Self::Symbiosis => format!(
-                "one organ slot a level; grafts cost crystal and volatiles, upkeep {:.1} volatiles a minute",
+                "one organ slot a level; grafts cost crystal and fuel, upkeep {:.1} biomass a minute",
                 t::ORGAN_UPKEEP
             ),
             Self::Beacon => format!(

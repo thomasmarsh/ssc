@@ -809,6 +809,11 @@ pub enum Charged {
 /// Everything attached to the ship.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Loadout {
+    #[serde(default)]
+    pub research: super::research::Research,
+    /// Supplier-commissioned baseline; bounded patterns and handling remain independent.
+    #[serde(default)]
+    pub equipment_grade: f32,
     pub parts: Vec<Part>,
     pub arsenal: Arsenal,
     /// Rig upgrades bought at the bench (mining, later parry and dash).
@@ -824,7 +829,9 @@ impl Loadout {
 
     /// Stats from the bolted-on parts alone (no weapon profile, no boosts).
     pub fn gear_stats(&self) -> Stats {
-        Stats::compute(self.parts.iter().flat_map(|p| p.effects.iter().copied()))
+        self.apply_grade(Stats::compute(
+            self.parts.iter().flat_map(|p| p.effects.iter().copied()),
+        ))
     }
 
     /// Bolts a part on. A part that would lower the ship's firepower is scrapped instead,
@@ -932,7 +939,22 @@ impl Loadout {
 
     /// The ship as it is flying now: parts, the active profile and the running boosts.
     pub fn stats(&self) -> Stats {
-        Stats::compute(self.effects().copied().chain(self.arsenal.active_effect()))
+        self.apply_grade(Stats::compute(
+            self.effects().copied().chain(self.arsenal.active_effect()),
+        ))
+    }
+
+    fn apply_grade(&self, mut stats: Stats) -> Stats {
+        let grade = if self.equipment_grade.is_finite() {
+            self.equipment_grade.max(1.0)
+        } else {
+            1.0
+        };
+        stats.damage *= grade;
+        stats.max_hull *= grade;
+        stats.max_shield *= grade;
+        stats.recharge *= grade;
+        stats
     }
 
     /// Ship power for the HUD verdict: the stats' rating with the whole arsenal counted

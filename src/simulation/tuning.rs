@@ -184,17 +184,17 @@ pub const PRICE_SHOVE_PLATING: [(Material, f32); 2] =
 
 /// An organ is an owned strain, level 1 to `ORGAN_LEVELS`; a level multiplies the perk by
 /// `ORGAN_LEVEL_GAIN`. SYMBIOSIS (a skill, one slot a level, needs a Rare core) opens slots;
-/// the first graft of a strain costs `GRAFT_CRYSTAL` crystal and `GRAFT_VOLATILES` volatiles
+/// the first graft of a strain costs `GRAFT_CRYSTAL` crystal and `GRAFT_FUEL` volatiles
 /// times its level (swapping an owned, paid strain is free), and each fitted organ draws
 /// `ORGAN_UPKEEP` volatiles a minute: at an empty hold it sleeps (dormant, never lost). A lesser
-/// find (a sample that cannot raise a strain) pays `LESSER_VOLATILES` per level instead.
+/// find (a sample that cannot raise a strain) pays `LESSER_BIOMASS` per level instead.
 pub const ORGAN_LEVELS: u8 = 3;
 pub const ORGAN_LEVEL_GAIN: [f32; 3] = [1.0, 1.5, 2.0];
 pub const SYMBIOSIS_SLOTS: usize = 3;
 pub const GRAFT_CRYSTAL: f32 = 8.0;
-pub const GRAFT_VOLATILES: f32 = 20.0;
+pub const GRAFT_FUEL: f32 = 20.0;
 pub const ORGAN_UPKEEP: f32 = 0.4;
-pub const LESSER_VOLATILES: f32 = 12.0;
+pub const LESSER_BIOMASS: f32 = 12.0;
 /// A bond works at once for `BOND_LOAN` seconds without a slot (and settles into a free slot
 /// without a graft cost). A special carrier's first kill leaves a specimen with chance
 /// `HARVEST_CHANCE`; one sector in `RELIC_ONE_IN` (from depth `RELIC_FROM`) holds a sealed relic.
@@ -455,7 +455,7 @@ pub const REGION_HOLD: f32 = 3.0;
 /// given, and never takes the last of the volatiles (they are fuel).
 pub const AUTO_REPAIR_DELAY: f32 = 3.0;
 pub const AUTO_SHIELD_BELOW: f32 = 0.5;
-pub const AUTO_VOLATILE_RESERVE: f32 = 25.0;
+pub const AUTO_FUEL_RESERVE: f32 = 25.0;
 pub const REGION_COOLDOWN: f32 = 12.0;
 
 // ---- diplomacy -----------------------------------------------------------------------------

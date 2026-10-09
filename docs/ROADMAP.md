@@ -5,9 +5,10 @@ Direction updated 2026-10-09: grow from a solo ship into a defended homestead, t
 ## Today
 
 - **Combat and exploration are built.** A bare ship, parts, arsenal profiles, skills, organs, parry/dash, threat by depth, realm modifiers, apex elders, sonar, discovery, charting, and beacons. Patterns and feedback have hard simulation budgets.
-- **Progression is built but capped.** Parts gain source grade, rarity, and affixes, but computed damage, hull, and shield cap at 8x base; profile levels follow finite trait caps. Wildlife and wild apexes still drop technological parts and charges. This is the main mismatch with the intended loop.
-- **Gathering and farming are built.** Metal, volatiles, and crystal occupy Cargo. Crops, seeds, breeding, blight, grazing, fields, and greenhouses exist. Biomass is saved separately in Farm and currently repairs hull; it is not a full cargo/HUD resource.
-- **Civilization contact is built in a limited form.** Regard, tithes, shared charts, repairs/swaps, and friendly farm exchanges exist. There are no explicit trade agreements, general equipment purchases, jobs, research partnerships, or visiting merchants.
+- **First frontier milestone is built.** Six shared Cargo goods, atomic transactions/transfers, fixed fuel/water tanks and six HUD counters. HOME/friendly-seat equipment purchases supply peaceful essential skills. Wildlife/apex give raw goods and biological specials; geological rocks pay finite lodes only.
+- **Narrow research and continuing grades are built.** Five dependency nodes, salted supplier specialties, one capped archive per civilization, and supplier-bound commissioning. Grade multiplies offense, hull, shield and recharge after bounded stat modifiers; patterns, cadence and movement remain capped. Both cooperation and capture reach the same source grade. The full technology graph remains TODO.
+- **Gathering and farming are built.** Biomass shares Cargo; plants/seeds/civilization granaries remain farming state. Fuel/water are purchased pad services. Irrigation, production and logistics remain TODO.
+- **Civilization contact is built in a limited form.** Friendly CONTACT reuses E/controller bench navigation for equipment, research, grade and tithe/trade. Jobs, agreements, negotiated research partnerships and visiting merchants remain TODO.
 - **Pads and saved structures are built.** Pads provide return points, bench access, local stash, and defense pressure. Creature/civilization construction persists. Player factories, fleets, tankers, districts, and citizens are unbuilt.
 - **Disk saves and continuing recovery are built.** Lives revive locally; exhaustion returns to the last visited pad or HOME with one life and retained progress. NEW GAME resets it. See [PERSISTENCE.md](PERSISTENCE.md).
 
@@ -32,7 +33,7 @@ The older proposals for three permanent materials, universal raw-only advanced p
 
 | Milestone | Slices in GAME_LOOP | Player outcome | Required proof |
 | --- | --- | --- | --- |
-| First frontier | A resources, B procurement/loot, narrow C knowledge/grade | See six goods, buy basic tech peacefully, earn honest wildlife rewards, reach a harder frontier | Shared balances/costs/saves; wildlife provenance; both routes reach test depth; scaling bypasses the old cap |
+| First frontier (built, playtest pending) | A resources, B procurement/loot, narrow C knowledge/grade | See six goods, buy basic tech peacefully, earn honest wildlife rewards, reach a harder frontier | Shared balances/costs/saves; wildlife provenance; both routes reach test depth; scaling bypasses the old cap |
 | Working home | D production, narrow E jobs/relations | Produce fuel, irrigate crops, finish a delivery, learn from a supplier | Local inventory/power limits; unloaded work stops at exhaustion; one-time job settlement |
 | Remote industry | F drones, G tanker route | Build/upgrade mining drones; supply a dry pad with bulk water | Persisted ore depletion; finite losses/wreck salvage; required endpoints; no cargo duplication |
 | Living trade and defense | H visiting trade/defense | See friendly arrivals, protect assets, recover from bounded raids | Payment/arrival exactly once; readable warnings; saved incident outcomes |

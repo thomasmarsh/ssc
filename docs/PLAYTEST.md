@@ -154,9 +154,9 @@ Check `slinger`, `longslinger`, and `softslinger` smoke/dev specimens: the famil
 - Do extra-power warnings remain readable and escapable alongside the original capability? Knobs: `MULTI_POWER_CHANCE` (0.02), `EXTRA_POWER_CONTINUE_CHANCE` (0.10), `MAX_SAMPLED_POWERS` (3). The telegraph minima and existing source budgets remain fixed.
 - Does a varied body feel too large or too busy? Knob: `MAX_SAMPLED_CARRIER_BODIES` (16), depth-zero weighted anatomy grammar. Founder percentages do not predict local encounter density.
 
-## Proposed game-loop checkpoints (TODO, not current playable checks)
+## Game-loop checkpoints (A/B/narrow C built; later slices TODO)
 
-[GAME_LOOP.md](GAME_LOOP.md) section 13 defines the slices. Run these as their milestones land; do not infer the planned features exist from this table.
+[GAME_LOOP.md](GAME_LOOP.md) section 13 defines the slices. A, B and narrow C are built and ready for these player checks. D onward remain planned; do not infer those features exist from this table.
 
 | Checkpoint | What to try | What would fail the design |
 | --- | --- | --- |
@@ -168,4 +168,4 @@ Check `slinger`, `longslinger`, and `softslinger` smoke/dev specimens: the famil
 | F/G: remote industry | Lose drones, salvage a shared wreck, ship water to a dry established pad, block a dock | Losses require constant babysitting; ore or cargo duplicates; ship bulk hauling is easier than tankers; transport ignores endpoints/fuel |
 | H/I: home payoff | Observe a trade arrival, receive a raid warning, upgrade escorts/turrets, follow a shortage across hubs | The network feels invisible, reload changes a settled loss, one incident erases the economy, next useful project is unclear |
 
-Balance knobs to introduce with those slices: starter procurement costs, processing work/throughput, water reserve/tank size, grade/threat relation, capture allowance/cooperation depth, job rewards and repetition limits, fleet fuel/capacity, recovery/replacement costs, route/event budgets, and warning/loss limits. Register them when implemented; no such tuning registry or human verification is claimed here.
+Built knobs: starter procurement costs, fixed fuel/water reserves, supplier grade/threat relation, and capped capture allowance. Later slices introduce processing throughput, job rewards and repetition limits, fleet fuel/capacity, recovery/replacement costs, route/event budgets, and warning/loss limits. Automated progression checks and bounded HUD/bench renders cover the first milestone; a full human playthrough remains useful.

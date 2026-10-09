@@ -15,7 +15,7 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 | `seed`, `time`, `score`, `lives` | delta | |
 | player body (position, velocity, angle, hull, shield) | delta | health is clamped to at least 1 on load, shield time is re-granted |
 | `stats` | derived | `refresh_stats` from the loadout |
-| `loadout` (parts, arsenal, boosts, skills, organs) | delta | incl. boost `running` flags |
+| `loadout` (parts, arsenal, boosts, skills, organs, research, equipment grade) | delta | incl. boost `running` flags |
 | `cargo` | delta | `dev_free` is a dev toggle and is not saved |
 | `pad` (placed pads and their stash, kits, insured, auto repair, deploy order) | delta | pads are keyed by spawn: dropped on a generator change, the home pad is planted afresh. The last pad actually landed on is saved (`last_visited`); landed state, cover timers and which pads the enemy knows are ephemeral |
 | `chart` (known marks, visited, pins, beacons, beacon counter) | delta | travel charge, cooldown, last visit are ephemeral |
@@ -27,7 +27,7 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 | `bodies`, `bullets`, `effects`, `food`, `eggs`, `pickups`, `mines`, `tethers`, `chains`, `pools`, `rune_fields`, `rifts`, `splits`, `song_rings` | ephemeral | regenerated from the seed, or lost with the sector exactly as when sectors unload today |
 | `builds.kept`, `builds.civ_started` (creature-built structures) | delta | per structure (`StructureKey`: wild builder spawn, or territory and ordinal): material, origin, cursor, done and the surviving blocks (place, radius, health). A destroyed block is simply absent. Synced from the live works and tagged blocks (`Body::structure`) before a sector unloads or a builder is lost, and restored block by block when a sector loads, so they survive unload as well as save. A reloaded wild builder resumes its structure (or leaves a finished one). Dropped on a generator change. Live `Work` state, the plan and clocks are ephemeral and regrown from the genome |
 | slain apex elders and their residents | delta (no new state) | a slain elder is in `fallen` and its rooted residents are skipped with it; a resident slain alone is in `fallen` by its own spawn. Pinned by `slain_residents_and_elders_stay_slain_through_a_save`. Residents released alive when their elder died do not survive a reload (the host is gone with the sector's spawn) |
-| `farm` (biomass, seeds, plants, which planetoids are stocked) | delta | Seeds are saved as stacks of (species, crop genes) and plants carry `genes`, `blighted` and `immune_until` (all `#[serde(default)]`); the seed layout change bumped `SAVE_VERSION` to 2 (older saves are refused, no migration). Plants are keyed by planetoid spawn like pads, so a generator change drops plants and the stocked set (they restock) and keeps biomass and seeds. Growth is a function of the saved game clock. Farming civilizations add `Farm::granary` (biomass by territory id) and plants carry `tended` and `housed`, all `#[serde(default)]`, no version bump; the tillage memo is derived. The species table and live positions are derived on load |
+| `farm` (seeds, plants, civilization granaries, which planetoids are stocked) | delta | Seeds are saved as stacks of (species, crop genes) and plants carry `genes`, `blighted` and `immune_until` (all `#[serde(default)]`); the seed layout change bumped `SAVE_VERSION` to 2 (older saves are refused, no migration). Plants are keyed by planetoid spawn like pads, so a generator change drops plants and the stocked set (they restock) and keeps ship Cargo and seeds. Growth is a function of the saved game clock. Farming civilizations add `Farm::granary` (biomass by territory id) and plants carry `tended` and `housed`, all `#[serde(default)]`, no version bump; the tillage memo is derived. The species table and live positions are derived on load |
 | `civ_*` caches (lineages, bases, works, colors, territories, brains, mining), `fauna`, `apex_state`, `power_state`, `adapt` | derived or ephemeral | rebuilt as territories are met; brains and adaptation relearn |
 | `jam`, `parry`, `dash`, `veil`, `parasites`, `engulf`, `gripped`, `beam`, `mine_*`, `arm_clock`, `switch_clock`, `impact_gap` | ephemeral | short timers |
 | `ping`, `lure`, `feel`, `streak`, `notices`, `bench_feedback`, `unlock_*`, `cues`, `region`, `realms` | ephemeral | presentation and announcement state; announcements replay on load |
@@ -66,13 +66,13 @@ Tested in `simulation/save.rs`: the text round trip is a fixed point (apart from
 
 ## Planned economy and fleet state (TODO)
 
-[GAME_LOOP.md](GAME_LOOP.md) section 12 is the target; no new state below is currently serialized. Extend the existing save in each implementation slice, not after the economy exists.
+[GAME_LOOP.md](GAME_LOOP.md) section 12 is the target. Six-good inventories and Loadout research/grade/capture ledgers are serialized; the remaining state below is TODO. Extend the existing save in each implementation slice, not after the economy exists.
 
 | Planned authoritative state | Required save behavior |
 | --- | --- |
-| Unified ship/site goods, fuel/water tanks, reservations | One amount per owner; biomass stops being a separate Farm balance; caps and reservations survive loading |
+| Reservations, machine/local tank profiles | Six-good Cargo and fixed ship reserves are built; future reservations must survive loading |
 | Machine jobs, paid construction/modules, local power/storage | Save consumed inputs, progress, blocked output, and ownership; clock-based bounded catch-up cannot produce past exhaustion |
-| Tech/research/grade access and captured archives | Knowledge survives death; one-time capture ceiling survives reload; supplier access remains distinct from ownership |
+| Expanded research and supplier contracts | Narrow saved research/capture/grade is built; future contracts must distinguish access from ownership |
 | Jobs, offers, agreements, boons, experience if added | Stable IDs and settlement state; no duplicated payment, reward, experience, or obligation |
 | Fleet templates/units, cargo, routes, wrecks, incidents | Same identity across body materialization; delivery/loss/salvage settles once; remote risk is saved, not rerolled on load |
 | Player megastructure districts and later colony ledger | Paid progress, surviving blocks, stocks, population, and bounded worker state |
@@ -82,3 +82,5 @@ Closing the app grants no wall-clock production in the first model. Unloaded sys
 Before fleets and factories ship, define generator-change handling for invalid pad/deposit/supplier anchors: suspend routes/jobs, resolve or refund reservations under visible terms, and explicitly relocate/salvage stranded cargo/assets. Existing load behavior drops generated-anchor deltas; new systems must not silently orphan still-consuming machines. Keep knowledge and player inventory where valid. This is a compatibility policy to design, not permission to add old-version migrations: before 1.0 use defaults or a SAVE_VERSION bump with refusal, with no migration fixtures/code.
 
 Shared resources (save format 3): ship and pad Cargo store metal, volatiles, crystal, biomass, fuel and water. Farm owns seeds/plants and civilization granaries, with no second ship biomass balance. Incompatible older saves are refused without migration.
+
+Narrow frontier progress: `Loadout::research` saves known nodes, up-to-25% fragments, one-time captured civilization IDs and unused source-grade claims. `equipment_grade` is retained on death/reload/generator changes. Generator 33 adds privately salted supplier specialties without changing HOME geography or existing RNG draws. The claim is earned knowledge/commissioning credit, not a remote inventory.

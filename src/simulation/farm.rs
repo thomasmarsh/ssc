@@ -1001,10 +1001,11 @@ impl Game {
         if self.cargo.biomass <= 1e-4 {
             return 0.0;
         }
-        let hull = (rate * dt)
+        let grade = self.equipment_grade();
+        let hull = (rate * grade * dt)
             .min(want)
-            .min(self.cargo.biomass / BIOMASS_PER_HULL);
-        self.cargo.biomass -= hull * BIOMASS_PER_HULL;
+            .min(self.cargo.biomass * grade / BIOMASS_PER_HULL);
+        self.cargo.biomass -= hull * BIOMASS_PER_HULL / grade;
         hull
     }
 

@@ -54,6 +54,7 @@ mod procurement;
 mod realms;
 mod regions;
 mod regrow;
+pub mod research;
 mod rift;
 mod root;
 pub mod run;

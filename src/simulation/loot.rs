@@ -154,6 +154,10 @@ impl Game {
     /// Runs the boosts on their fuel and ages notices.
     pub(super) fn update_loadout(&mut self, dt: f32, input: &Input) {
         self.age_bench_feedback(dt);
+        if self.pad.contact.is_some() && !self.bench_open() {
+            self.pad.bench = None;
+            self.pad.contact = None;
+        }
         self.update_boosts(dt, input);
         for notice in &mut self.notices {
             notice.remaining -= dt;

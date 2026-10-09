@@ -47,7 +47,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 ## Pads and bench
 
 - `SSC_PAD=kit|deploy|land|bench`: stage the pad states beside the nearest planetoid (a kit in hand, pad down, landed, landed with the bench open). `SSC_BENCH=0..2` picks the bench tab for `bench`.
-- `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash`: land at the HOME pad with existing progress staged, open the real bench on that pose and hold. Extra modes with `SSC_BENCH_RESULT`: `reforge-good|reforge-kept|unlock|repeated`.
+- `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash|research`: land at the HOME pad with existing progress staged, open the real bench on that pose and hold. Extra modes with `SSC_BENCH_RESULT`: `reforge-good|reforge-kept|unlock|repeated`.
 - `SSC_BENCH_RESULT=1`: confirm the selected bench action 20 frames before capture (receipts). See [BENCH.md](BENCH.md).
 - `SSC_BUY=1`: buy the bench's selected row 20 frames before capture (purchase ring).
 
@@ -100,3 +100,5 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 - `SSC_DEV=1`: enable the developer toggles and panel (backquote). See [DEVTOOLS.md](DEVTOOLS.md).
 - `SSC_DEV_PANEL=<row>`: in a smoke run, open the panel on that row.
 - `SSC_DEV_ON=1`: with `SSC_DEV_PANEL`, first switch on the first six toggles and double the time scale (checks the panel and DEV tag).
+
+- `SSC_FRONTIER_CONTACT=1`: bounded smoke pose at the peaceful outpost, friendly CONTACT open on the real grade purchase with prerequisite knowledge and ship goods. `SSC_BENCH_VIEW=research` shows the real HOME frontier-research requirement row. Use `SSC_OFFSCREEN_SIZE=640x480` to verify compact layouts; both require `SSC_SMOKE_FRAMES`.

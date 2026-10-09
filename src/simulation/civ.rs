@@ -576,6 +576,9 @@ impl Game {
         let Some(t) = self.civ_territories.get(&tid).copied() else {
             return;
         };
+        if !body.hostile_rock_kill && self.civ_struck.contains_key(&body.id) {
+            self.capture_knowledge(&t);
+        }
         let before = t.standing(self.civ_fall(tid));
         let fall = self.civ_fall.entry(tid).or_default();
         if elder {
