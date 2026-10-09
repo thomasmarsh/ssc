@@ -3452,7 +3452,8 @@ mod tests {
     fn home_is_a_sanctuary_nothing_hunts_an_idle_ship_for_ten_minutes() {
         for seed in [42, 7] {
             let mut game = Game::new(seed);
-            game.player_invulnerability = 0.0;
+            // Sanctuary prevents hunting; a wandering heavy can still cause a collision.
+            game.player_invulnerability = 1e9;
             // Idle at HOME's edge facing the most Fatsos next door.
             let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)]
                 .into_iter()
@@ -3463,9 +3464,7 @@ mod tests {
                         .count()
                 })
                 .unwrap();
-            // Near the edge, but far enough in that a Fatso drifting over the border from
-            // the now fuller ring one does not bump the idle ship (that is a collision, not a
-            // hunt).
+            // Watch for hunting near the border, independently of incidental bumps.
             let spot = Vec2::new(edge.0 as f32, edge.1 as f32) * (world::SECTOR_SIZE / 2.0 - 900.0);
             set_player(&mut game, spot, Vec2::ZERO);
             game.step(DT, Input::default());
@@ -3899,7 +3898,7 @@ mod tests {
     }
 
     #[test]
-    fn home_species_keep_their_original_stats() {
+    fn home_species_spawn_with_their_authored_stats() {
         let mut game = empty_game();
         let mut stats = |species: Species| {
             let b = game.make_creature(&species, Vec2::ZERO);
@@ -3908,9 +3907,9 @@ mod tests {
         assert_eq!(stats(Species::bogey()), (15.0, 35.0, 18.0, 8.0));
         assert_eq!(stats(Species::lunatic()), (18.0, 45.0, 0.0, 6.0));
         assert_eq!(stats(Species::smarty()), (18.0, 70.0, 0.0, 12.0));
-        assert_eq!(stats(Species::fatso()), (48.0, 180.0, 0.0, 200.0));
+        assert_eq!(stats(Species::fatso()), (144.0, 360.0, 0.0, 1800.0));
         assert_eq!(stats(Species::leech()), (16.0, 40.0, 20.0, 7.0));
-        // And they hunt at the original paces: smarties outrun fatsos.
+        // Smarties easily outrun the ponderous fatsos.
         let pace = |species: Species| {
             let mut game = empty_game();
             game.player_invulnerability = 1e9;
@@ -3921,6 +3920,17 @@ mod tests {
             body(&game, id).velocity.length()
         };
         assert!(pace(Species::smarty()) > pace(Species::fatso()) * 2.0);
+    }
+
+    #[test]
+    fn ramming_a_fatso_rebounds_the_ship_and_barely_moves_the_fatso() {
+        let mut game = empty_game();
+        game.player_invulnerability = 1e9;
+        set_player(&mut game, Vec2::ZERO, Vec2::X * 200.0);
+        let id = spawn(&mut game, &Species::fatso(), Vec2::X * 150.0);
+        game.resolve_contacts();
+        assert!(game.player().unwrap().velocity.x < -130.0);
+        assert!(body(&game, id).velocity.length() < 2.0);
     }
 
     #[test]

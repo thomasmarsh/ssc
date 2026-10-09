@@ -1425,6 +1425,9 @@ mod tests {
     #[test]
     fn a_maelstrom_drags_the_ship_toward_it() {
         let (mut game, _, id) = arena(Archetype::Maelstrom, 1200.0);
+        // Measure the apex's pull without unrelated wildlife collisions.
+        game.bodies
+            .retain(|b| b.kind != BodyKind::Creature || b.id == id);
         let mut pulled = false;
         let (mut inward, mut closest) = (0.0_f32, f32::MAX);
         for _ in 0..(40.0 / 0.05) as usize {

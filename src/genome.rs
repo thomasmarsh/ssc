@@ -154,8 +154,8 @@ genome! {
         taper: 0.4, 1.2, 1.0;
         aspect: 0.6, 1.8, 1.0;
         // Size and mass. Mass may be negative.
-        radius: 6.0, 70.0, 14.0;
-        mass: -60.0, 300.0, 8.0;
+        radius: 6.0, 180.0, 14.0;
+        mass: -60.0, 2400.0, 8.0;
         hull: 10.0, 400.0, 30.0;
         shield: 0.0, 60.0, 0.0;
         // Locomotion and sensing.
@@ -1210,13 +1210,14 @@ impl Genome {
 
     pub fn fatso() -> Self {
         Self {
-            radius: 48.0,
-            hull: 180.0,
-            mass: 200.0,
-            speed: 60.0,
-            cruise: 25.0,
+            // Triple the radius and scale mass with body area: a slow, stubborn wall.
+            radius: 144.0,
+            hull: 360.0,
+            mass: 1800.0,
+            speed: 35.0,
+            cruise: 12.0,
             alarm: 380.0,
-            contact_damage: 20.0,
+            contact_damage: 40.0,
             bounty: 250.0,
             sides: 0,
             hue: 0.096,
@@ -1567,7 +1568,8 @@ mod tests {
     use super::*;
     use crate::world::SectorId;
 
-    const GOLDEN_NO_GRAMMAR: u64 = 0xd400c2ba6f6d10b3;
+    // Expanded size and mass bounds allow larger outliers and heavier sampled bodies.
+    const GOLDEN_NO_GRAMMAR: u64 = 0x9c9d79833c8f214b;
 
     #[test]
     fn home_species_are_named_and_colored_from_their_genes() {

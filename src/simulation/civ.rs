@@ -1119,6 +1119,10 @@ mod tests {
         assert!(game.notices.iter().any(|n| n.text.contains("OUTPOST")));
         let settlers = members(&game, o.id).len();
         assert!(settlers >= 3, "settlers live here: {settlers}");
+        // Wildlife collisions can provoke settlers; isolate their response to the ship.
+        let settler_ids: Vec<_> = members(&game, o.id).iter().map(|b| b.id).collect();
+        game.bodies
+            .retain(|b| b.kind != BodyKind::Creature || settler_ids.contains(&b.id));
         // Five minutes on top of the seat: nobody hunts, nobody raids, the ship is untouched.
         for _ in 0..300 {
             hold(&mut game, heart, 1.0);
