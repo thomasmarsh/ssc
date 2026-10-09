@@ -38,6 +38,16 @@ pub const PLANT_SCALE: f32 = 16.0;
 pub const HARVEST_TIME: f32 = 1.0;
 /// Biomass from a ripe harvest of a perfect (nutrition 1) crop.
 pub const CROP_YIELD: f32 = 6.0;
+/// Harvest luck (Minecraft style: sometimes food, sometimes seeds). A ripe cut pays its biomass
+/// with this chance, and seeds by the cumulative table below.
+pub const RIPE_FOOD_CHANCE: f32 = 0.85;
+/// A ripe cut yields 0 seeds below the first, 1 below the second, else 2. Expected seeds
+/// 0.25*0 + 0.45*1 + 0.30*2 = 1.05 a ripe harvest, so replanting is sustainable on average.
+pub const RIPE_SEED_CUM: [f32; 2] = [0.25, 0.70];
+/// An unripe cut (the plant dies) pays its small biomass with this chance, and one seed with
+/// `UNRIPE_SEED_CHANCE`, never a guaranteed pair. Expected seeds 0.35.
+pub const UNRIPE_FOOD_CHANCE: f32 = 0.5;
+pub const UNRIPE_SEED_CHANCE: f32 = 0.35;
 /// Most biomass the hold keeps.
 pub const BIOMASS_CAP: f32 = 60.0;
 /// Biomass spent per hull point in the field repair (metal costs more, see `pads`).
@@ -49,6 +59,29 @@ const GRAZE_ENERGY: f32 = 120.0;
 /// How far a plant's reach is for the beam and for mouths.
 const PLANT_BODY: f32 = 40.0;
 const FARM_SALT: u64 = 0xFA12_3000_0000_0001;
+/// Own stream for harvest rolls: a pure hash of (game seed, plant id, harvest count).
+const HARVEST_SALT: u64 = 0xFA12_3000_0000_0002;
+
+/// What one cut yields: whether the biomass pays, and how many seeds. Deterministic in the
+/// plant's id and how many times it was harvested, so replays and reloads roll the same.
+pub fn harvest_roll(seed: u64, plant: u32, harvests: u32, ripe: bool) -> (bool, u32) {
+    let mut rng = Rng::new(hash2(seed ^ HARVEST_SALT, plant as i32, harvests as i32));
+    if ripe {
+        let food = rng.chance(RIPE_FOOD_CHANCE);
+        let r = rng.f32();
+        let seeds = if r < RIPE_SEED_CUM[0] {
+            0
+        } else if r < RIPE_SEED_CUM[1] {
+            1
+        } else {
+            2
+        };
+        (food, seeds)
+    } else {
+        let food = rng.chance(UNRIPE_FOOD_CHANCE);
+        (food, u32::from(rng.chance(UNRIPE_SEED_CHANCE)))
+    }
+}
 
 /// One plant.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -67,6 +100,9 @@ pub struct Plant {
     /// Varies the shape within the species.
     pub seed: u64,
     pub wild: bool,
+    /// Times this plant has been cut ripe (feeds the harvest roll).
+    #[serde(default)]
+    pub harvests: u32,
 }
 
 impl Plant {
@@ -297,6 +333,7 @@ impl Game {
                 since: self.time,
                 seed,
                 wild: true,
+                harvests: 0,
             });
         }
     }
@@ -379,6 +416,7 @@ impl Game {
             since: self.time,
             seed,
             wild: false,
+            harvests: 0,
         });
         let name = self
             .farm
@@ -404,7 +442,7 @@ impl Game {
     }
 
     /// The beam on a plant: draws shield like mining, and after `HARVEST_TIME` cuts it. A ripe
-    /// plant pays its full yield, a seed, and regrows from a stump; an unripe one pays a
+    /// plant rolls its full yield and 0 to 2 seeds (`harvest_roll`) and regrows from a stump; an unripe one pays a
     /// little and dies (over-harvesting kills).
     pub(super) fn harvest_plant(&mut self, dt: f32, ship: Vec2, live: Live) -> f32 {
         let Some(plant) = self.farm.plants.get(live.index) else {
@@ -461,25 +499,40 @@ impl Game {
         } else {
             CROP_YIELD * nutrition * live.growth * live.growth * 0.5
         } * gain;
+        let harvests = self.farm.plants[live.index].harvests;
+        let (food, seeds) = harvest_roll(self.seed, id, harvests, ripe);
         let room = (BIOMASS_CAP - self.farm.biomass).max(0.0);
-        self.farm.biomass += amount.min(room);
+        let got = if food { amount.min(room) } else { 0.0 };
+        self.farm.biomass += got;
+        if seeds > 0 {
+            *self.farm.seeds.entry(live.species).or_insert(0) += seeds;
+        }
         let now = self.time;
+        let mut parts = Vec::new();
+        if got > 0.0 {
+            parts.push(format!("+{got:.0} BIOMASS"));
+        }
+        if seeds > 0 {
+            parts.push(format!("+{seeds} SEED"));
+        }
+        let loot = if parts.is_empty() {
+            "NOTHING USABLE".to_string()
+        } else {
+            parts.join("  ")
+        };
         if ripe {
-            *self.farm.seeds.entry(live.species).or_insert(0) += 1;
             let plant = &mut self.farm.plants[live.index];
             plant.base = STUMP;
             plant.since = now;
+            plant.harvests += 1;
             self.notify(
-                format!(
-                    "HARVESTED {name}  +{:.0} BIOMASS  +1 SEED",
-                    amount.min(room)
-                ),
+                format!("HARVESTED {name}  {loot}"),
                 upgrades::Rarity::Common,
             );
         } else {
             self.farm.plants.remove(live.index);
             self.notify(
-                format!("{name} CUT TOO EARLY  PLANT LOST"),
+                format!("{name} CUT TOO EARLY  PLANT LOST  {loot}"),
                 upgrades::Rarity::Uncommon,
             );
         }
@@ -676,6 +729,7 @@ mod tests {
             since: game.time,
             seed: 9,
             wild: false,
+            harvests: 0,
         });
         game.step(DT, Input::default());
         game.farm.plants.len() - 1
@@ -724,12 +778,63 @@ mod tests {
 
         game.farm.plants.clear();
         let crop = species_with(&game, flora::Role::CropOnly);
-        plant(&mut game, crop, 1.0);
+        let at = plant(&mut game, crop, 1.0);
+        let (food, seeds) = harvest_roll(game.seed, game.farm.plants[at].id, 0, true);
         beam(&mut game, 2.5);
-        assert!(game.farm.biomass > 1.0, "{}", game.farm.biomass);
-        assert_eq!(game.farm.seeds.get(&crop), Some(&1));
+        if food {
+            assert!(game.farm.biomass > 1.0, "{}", game.farm.biomass);
+        } else {
+            assert_eq!(game.farm.biomass, 0.0);
+        }
+        assert_eq!(
+            game.farm.seeds.get(&crop).copied().unwrap_or(0),
+            seeds,
+            "the roll decides the seeds"
+        );
+        assert_eq!(game.farm.plants[0].harvests, 1);
         let stump = game.farm.growth_of(&game.farm.plants[0], game.time);
         assert!(stump < 0.7, "regrows from a stump, was {stump}");
+    }
+
+    #[test]
+    fn harvest_rolls_are_deterministic_and_replanting_is_sustainable() {
+        assert_eq!(harvest_roll(7, 3, 2, true), harvest_roll(7, 3, 2, true));
+        let n = 20_000u32;
+        let (mut seeds, mut food, mut pairs, mut useq) = (0u32, 0u32, 0u32, 0u32);
+        let mut zero_runs = 0;
+        let mut run = 0;
+        for i in 0..n {
+            let (f, s) = harvest_roll(42, i % 97, i / 97, true);
+            seeds += s;
+            food += u32::from(f);
+            pairs += u32::from(s == 2);
+            run = if s == 0 { run + 1 } else { 0 };
+            zero_runs = zero_runs.max(run);
+            let (_, u) = harvest_roll(42, i % 97, i / 97, false);
+            assert!(u <= 1);
+            useq += u;
+        }
+        let mean = seeds as f32 / n as f32;
+        assert!((1.0..1.12).contains(&mean), "ripe seeds per harvest {mean}");
+        let f = food as f32 / n as f32;
+        assert!((f - RIPE_FOOD_CHANCE).abs() < 0.02, "food rate {f}");
+        assert!(pairs > 0 && zero_runs < 20, "luck varies but never starves");
+        let u = useq as f32 / n as f32;
+        assert!((u - UNRIPE_SEED_CHANCE).abs() < 0.02, "unripe seeds {u}");
+    }
+
+    #[test]
+    fn home_always_offers_a_first_seed() {
+        // HOME's tasting menu regrows from stumps, so repeated harvests of one crop eventually
+        // pay a seed whatever the luck: the dry spell is bounded.
+        let seed = crate::config::MASTER_SEED;
+        for id in 0..40 {
+            let first = (0..30).find(|h| harvest_roll(seed, id, *h, true).1 > 0);
+            assert!(
+                first.is_some_and(|h| h < 30),
+                "plant {id} never paid a seed"
+            );
+        }
     }
 
     #[test]
@@ -741,10 +846,13 @@ mod tests {
         assert_eq!(game.farm.plants.len(), 1, "a sprout is ignored");
         game.farm.plants[0].base = 0.7;
         game.farm.plants[0].since = game.time;
+        let (food, seeds) = harvest_roll(game.seed, game.farm.plants[0].id, 0, false);
         beam(&mut game, 2.5);
         assert!(game.farm.plants.is_empty(), "over-harvest kills");
-        assert!(game.farm.seeds.is_empty(), "no seed from an unripe cut");
-        assert!(game.farm.biomass > 0.0 && game.farm.biomass < 3.0);
+        assert!(seeds <= 1, "never a pair from an unripe cut");
+        assert_eq!(game.farm.seeds.get(&crop).copied().unwrap_or(0), seeds);
+        assert!(game.farm.biomass < 3.0);
+        assert_eq!(game.farm.biomass > 0.0, food);
     }
 
     #[test]
