@@ -83,6 +83,7 @@ impl Appearance {
 const CARRIER_SALT: u64 = 0xCA22_1E25_0000_0003;
 const MODULE_SALT: u64 = 0xADDE_D902_0000_0003;
 pub const CARRIER_VARIANT_CHANCE: f32 = 0.30;
+// Share of all powered founders, included within the 30-percent variation attempts.
 pub const UNUSUAL_CARRIER_CHANCE: f32 = 0.05;
 pub const MULTI_POWER_CHANCE: f32 = 0.02;
 pub const EXTRA_POWER_CONTINUE_CHANCE: f32 = 0.10;
