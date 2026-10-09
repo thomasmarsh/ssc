@@ -99,6 +99,8 @@ pub struct Pad {
     pub refinery: Option<super::production::Refinery>,
     #[serde(default)]
     pub water_tank: bool,
+    #[serde(default)]
+    pub water_extractor: bool,
     /// Deployment order: the oldest is dismantled first.
     pub order: u64,
     /// The home-base pad on HOME's planetoid, there from the start: never dismantled for a
@@ -352,6 +354,7 @@ impl Game {
                 reloads: 0,
                 refinery: None,
                 water_tank: false,
+                water_extractor: false,
             },
         );
         self.pad.next_order = 1;
@@ -742,6 +745,7 @@ impl Game {
                 reloads: 0,
                 refinery: None,
                 water_tank: false,
+                water_extractor: false,
             },
         );
         let spot = center + Vec2::from_angle(angle + anchor) * radius;
@@ -1812,6 +1816,7 @@ mod tests {
                     reloads: 0,
                     refinery: None,
                     water_tank: false,
+                    water_extractor: false,
                 },
             );
         }
@@ -2547,6 +2552,7 @@ mod tests {
                 reloads: 0,
                 refinery: None,
                 water_tank: false,
+                water_extractor: false,
             },
         );
     }
@@ -3174,6 +3180,7 @@ mod tests {
                     reloads: 0,
                     refinery: None,
                     water_tank: false,
+                    water_extractor: false,
                 },
             );
         }

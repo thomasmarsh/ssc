@@ -2062,6 +2062,15 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 .acquire(Profile::Needles, Profile::Needles.max_level());
             game.bench_select(BenchAction::Weapon(Profile::Spread));
         }
+        "water-extractor" => {
+            game.loadout
+                .research
+                .known
+                .insert(ssc::simulation::research::Tech::Fabrication);
+            game.bench_select(BenchAction::WaterTank);
+            game.bench_confirm();
+            game.bench_select(BenchAction::WaterExtractor);
+        }
         "water-tank" => game.bench_select(BenchAction::WaterTank),
         "refinery" => {
             game.loadout

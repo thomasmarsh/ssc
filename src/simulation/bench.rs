@@ -36,6 +36,7 @@ pub enum BenchAction {
     Repair,
     Refinery,
     WaterTank,
+    WaterExtractor,
     Research(research::Tech),
     Grade,
     Outfit(Slot),
@@ -116,12 +117,13 @@ impl Game {
                 .chain([Material::Fuel, Material::Water].map(BenchAction::Supply))
                 .chain([Slot::Plating, Slot::Engine, Slot::Core].map(BenchAction::Outfit))
                 .chain(self.pad.contact.map(|_| BenchAction::Tithe))
-                .chain(
-                    self.pad
-                        .landed
-                        .into_iter()
-                        .flat_map(|_| [BenchAction::Refinery, BenchAction::WaterTank]),
-                )
+                .chain(self.pad.landed.into_iter().flat_map(|_| {
+                    [
+                        BenchAction::Refinery,
+                        BenchAction::WaterTank,
+                        BenchAction::WaterExtractor,
+                    ]
+                }))
                 .chain(Material::ALL.map(BenchAction::Stash))
                 .collect(),
             BenchTab::Weapons => Profile::ALL.map(BenchAction::Weapon).to_vec(),
@@ -189,6 +191,7 @@ impl Game {
             Some(BenchAction::Repair) => self.bench_repair(),
             Some(BenchAction::Refinery) => self.buy_refinery(),
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
+            Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
             Some(BenchAction::Grade) => self.buy_grade(),
             Some(BenchAction::Outfit(slot)) => self.buy_outfit(slot),
@@ -557,6 +560,27 @@ impl Game {
                 } else {
                     row.costs = production::REFINERY_PRICE.to_vec();
                     if let Some(why) = self.refinery_block() {
+                        row.ok = false;
+                        row.state = why.into();
+                    }
+                }
+            }
+            BenchAction::WaterExtractor => {
+                row.group = "PAD PRODUCTION";
+                row.text = "BUILD WATER EXTRACTOR".into();
+                row.detail = "Surveyed renewable aquifer; integral power, 1W per simulation second into this pad's tank. Works while away; Q / X takes water from stash.".into();
+                if let Some(pad) = self.landed_pad().filter(|p| p.water_extractor) {
+                    row.text = "WATER EXTRACTOR".into();
+                    row.ok = false;
+                    row.state = if pad.stash.water >= pad.stash_cap(Material::Water) {
+                        "WATER TANK FULL"
+                    } else {
+                        "EXTRACTING 1W/s"
+                    }
+                    .into();
+                } else {
+                    row.costs = production::WATER_EXTRACTOR_PRICE.to_vec();
+                    if let Some(why) = self.water_extractor_block() {
                         row.ok = false;
                         row.state = why.into();
                     }

@@ -4,6 +4,22 @@ use super::*;
 pub const REFINERY_PRICE: [(Material, f32); 2] =
     [(Material::Metal, 40.0), (Material::Crystal, 10.0)];
 pub const WATER_TANK_PRICE: [(Material, f32); 1] = [(Material::Metal, 20.0)];
+pub const WATER_EXTRACTOR_PRICE: [(Material, f32); 2] =
+    [(Material::Metal, 30.0), (Material::Crystal, 10.0)];
+const WATER_PER_SECOND: f32 = 1.0;
+
+/// Renewable aquifers are independent of ore composition and existing generation draws.
+/// HOME guarantees a useful first homestead; half of other planetoids are dry.
+fn has_aquifer(seed: u64, key: pads::PadKey) -> bool {
+    key.0 == SectorId::ORIGIN
+        || world::hash2(
+            seed ^ 0xA901_0000_0000_0001 ^ u64::from(key.1),
+            key.0.x,
+            key.0.y,
+        ) & 1
+            == 0
+}
+
 const INPUT: f32 = 10.0;
 const OUTPUT: f32 = 25.0;
 const SECONDS: f32 = 10.0;
@@ -97,8 +113,48 @@ impl Game {
         self.bench_done("WATER TANK BUILT".into(), upgrades::Rarity::Common);
     }
 
+    pub(super) fn water_extractor_block(&self) -> Option<&'static str> {
+        let Some(pad) = self.landed_pad() else {
+            return Some("LAND AT A PAD");
+        };
+        if pad.water_extractor {
+            Some("ALREADY BUILT")
+        } else if !has_aquifer(self.seed, pad.key) {
+            Some("DRY SITE - NO AQUIFER")
+        } else if !pad.water_tank {
+            Some("NEEDS WATER TANK")
+        } else if !self.loadout.research.active(research::Tech::Fabrication) {
+            Some("NEEDS FABRICATION RESEARCH")
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn buy_water_extractor(&mut self) {
+        if self.landed_pad().is_none() {
+            self.bench_failed("LAND AT A PAD".into());
+            return;
+        }
+        if let Some(why) = self.water_extractor_block() {
+            self.bench_failed(why.into());
+            return;
+        }
+        if !self.cargo.spend(&WATER_EXTRACTOR_PRICE) {
+            self.bench_failed("NEEDS 30M 10C".into());
+            return;
+        }
+        let key = self.pad.landed.unwrap();
+        self.pad.pads.get_mut(&key).unwrap().water_extractor = true;
+        self.bench_done("WATER EXTRACTOR BUILT".into(), upgrades::Rarity::Common);
+    }
+
     pub(super) fn update_production(&mut self, dt: f32) {
         for pad in self.pad.pads.values_mut() {
+            if pad.water_extractor {
+                let cap = pad.stash_cap(Material::Water);
+                pad.stash
+                    .add_capped(Material::Water, WATER_PER_SECOND * dt, cap);
+            }
             if let Some(refinery) = &mut pad.refinery {
                 refinery.tick(&mut pad.stash, dt);
             }
@@ -125,6 +181,82 @@ mod tests {
         game.cargo.fuel = 0.0;
         game.bench_select(BenchAction::Refinery);
         game
+    }
+
+    #[test]
+    fn extractor_purchase_enforces_source_tank_research_and_payment() {
+        let mut game = setup();
+        let key = game.pad.landed.unwrap();
+        game.bench_select(BenchAction::WaterExtractor);
+        game.bench_confirm();
+        assert_eq!(game.water_extractor_block(), Some("NEEDS WATER TANK"));
+        game.pad.pads.get_mut(&key).unwrap().water_tank = true;
+        game.loadout.research.known.clear();
+        game.bench_confirm();
+        assert_eq!(
+            game.water_extractor_block(),
+            Some("NEEDS FABRICATION RESEARCH")
+        );
+        game.loadout
+            .research
+            .known
+            .insert(research::Tech::Fabrication);
+        game.cargo.crystal = 9.0;
+        game.bench_confirm();
+        assert!(!game.pad.pads[&key].water_extractor);
+        assert_eq!(game.cargo.metal, 40.0);
+        game.cargo.crystal = 10.0;
+        let dry = (1..100)
+            .map(|x| (SectorId { x, y: 0 }, key.1))
+            .find(|k| !has_aquifer(game.seed, *k))
+            .unwrap();
+        game.pad.pads.get_mut(&key).unwrap().key = dry;
+        game.bench_confirm();
+        assert_eq!(game.water_extractor_block(), Some("DRY SITE - NO AQUIFER"));
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (40.0, 10.0));
+        game.pad.pads.get_mut(&key).unwrap().key = key;
+        game.bench_confirm();
+        assert!(game.pad.pads[&key].water_extractor);
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (10.0, 0.0));
+        game.bench_confirm();
+        assert_eq!(game.cargo.metal, 10.0);
+        game.pad.landed = None;
+        game.buy_water_extractor();
+        assert_eq!(game.cargo.metal, 10.0);
+    }
+
+    #[test]
+    fn extractor_unloaded_saved_capped_and_retrievable() {
+        let mut game = setup();
+        let key = game.pad.landed.unwrap();
+        game.pad.pads.get_mut(&key).unwrap().water_tank = true;
+        game.bench_select(BenchAction::WaterExtractor);
+        game.bench_confirm();
+        game.teleport(Vec2::new(60000.0, 0.0));
+        game.player_invulnerability = 1e9;
+        for _ in 0..60 {
+            game.step(0.05, Input::default());
+        }
+        assert!(!game.bodies.iter().any(|b| b.origin == Some(key)));
+        let before = game.pad.pads[&key].stash.water;
+        assert!((before - 3.0).abs() < 0.001);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        assert!(loaded.pad.pads[&key].water_extractor);
+        assert_eq!(loaded.pad.pads[&key].stash.water, before);
+        loaded.update_production(400.0);
+        assert_eq!(loaded.pad.pads[&key].stash.water, 300.0);
+        loaded.update_production(400.0);
+        assert_eq!(loaded.pad.pads[&key].stash.water, 300.0);
+        loaded.pad.landed = Some(key);
+        loaded.bench_toggle();
+        loaded.cargo.water = 20.0;
+        loaded.bench_select(BenchAction::Stash(Material::Water));
+        loaded.bench_alt();
+        assert_eq!(loaded.cargo.water, 30.0);
+        assert_eq!(loaded.pad.pads[&key].stash.water, 290.0);
+        loaded.update_production(5.0);
+        assert_eq!(loaded.pad.pads[&key].stash.water, 295.0);
     }
 
     #[test]

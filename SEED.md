@@ -45,7 +45,7 @@ Decide per slice, and say which in one line.
 The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and the narrow D fuel refinery are built; remaining local production and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, working home: remaining D water extraction for industry (paid saved tanks built), bought raw-input supply and local power/storage modules (paid saved fuel refinery built); then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
+1. [L] NEXT, working home: remaining D bought raw-input supply and local power/storage modules (paid saved refinery, water tank and aquifer extractor built); then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
 2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk water delivery, fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 3. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 4. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
@@ -58,9 +58,11 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 
 ## Recently done
 
-- Narrow water storage: paid saved pad tank, 20M for 300 local water capacity; stash previews/transfers respect the tank and fixed 30 ship reserve. Extraction remains queued.
+- Narrow water extraction (generator 34): paid saved aquifer extractor, tank/Fabrication gates, 30M 10C for capped 1W/s local water while unloaded; dry sites refuse, HOME guaranteed.
 
-- Narrow local production: paid pad fuel refinery with integral power, Fabrication gate, local stash inputs/output, bounded unloaded simulation, and saved reserved batches. Water extraction and bought-input trade remain queued.
+- Narrow water storage: paid saved pad tank, 20M for 300 local water capacity; stash previews/transfers respect the tank and fixed 30 ship reserve. Aquifer extraction is now built.
+
+- Narrow local production: paid pad fuel refinery with integral power, Fabrication gate, local stash inputs/output, bounded unloaded simulation, and saved reserved batches. Bought-input trade remains queued.
 
 - Narrow frontier progression (generator 33): five saved research dependencies, independently salted supplier specialties, capped one-time captures and one-use archive grade claims, continuing source-bound offense/durability grades with preserved handling/pattern bounds and normalized repair costs. Peaceful and conquest paths share the tested frontier ceiling.
 
@@ -71,5 +73,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Game-loop design and doc reconciliation (2026-10-09): target production, jobs, fleets/tankers and homestead milestones are recorded in `docs/GAME_LOOP.md`; first frontier implementation is complete.
 
 - Wild genetic carrier diversity (generator version 32): independently salted body/appearance variation and a rare compatible two/three-module tail; familiar primary identity retained, HOME and caller draws pinned. See `docs/BESTIARY.md`.
-
-- Genetic carrier development (generator version 31): appearance/surface and external-organ reach inherit independently of powers; body grammar develops functional organs without replacing carriers. Authored styles preserved; eight-port and soft limbless Slinger hooks. Wild distributions now built in stage 3. See `docs/BESTIARY.md`.
