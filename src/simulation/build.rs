@@ -769,10 +769,15 @@ mod tests {
             })
             .expect("a sector with a nest builder");
         let mut game = Game::new(seed);
+        // Observe the ecosystem without exhausting lives and returning to HOME, which
+        // would unload the builders this scenario is meant to watch.
+        game.dev_change(crate::simulation::dev::DevRow::Invulnerable, 0);
         game.teleport(id.center());
         for _ in 0..(120.0 / DT) as usize {
             game.step(DT, Input::default());
         }
+        assert_eq!(game.sector(), id, "the observer stayed with the builders");
+        assert_eq!(game.run.deaths, 0);
         let builders = game
             .bodies
             .iter()
