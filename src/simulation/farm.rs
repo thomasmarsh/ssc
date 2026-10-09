@@ -61,6 +61,18 @@ const GRAZE_RATE: f32 = 0.03;
 const GRAZE_ENERGY: f32 = 120.0;
 /// How far a plant's reach is for the beam and for mouths.
 const PLANT_BODY: f32 = 40.0;
+/// Own stream for blight rolls: a pure hash of (game seed, plant id, epoch).
+const BLIGHT_SALT: u64 = 0xFA12_3000_0000_0004;
+/// Blight is rolled once per epoch (seconds) so a roll is a pure function of the clock.
+pub const BLIGHT_EPOCH: f32 = 5.0;
+/// Chance per epoch that a planted crop falls ill with no sick neighbor (about one in 30
+/// minutes of loaded time), and that one sick same-species neighbor in range infects it.
+pub const BLIGHT_OUTBREAK: f32 = 0.0028;
+pub const BLIGHT_SPREAD: f32 = 0.06;
+/// Growth a sick plant loses per second (on top of its own growth); the hardy gene scales it.
+pub const BLIGHT_DRAIN: f32 = 0.008;
+/// Seconds a pruned plant resists blight.
+pub const BLIGHT_IMMUNE: f32 = 150.0;
 const FARM_SALT: u64 = 0xFA12_3000_0000_0001;
 /// Own stream for harvest rolls: a pure hash of (game seed, plant id, harvest count).
 const HARVEST_SALT: u64 = 0xFA12_3000_0000_0002;
@@ -136,6 +148,12 @@ pub struct Plant {
     /// Crop genes (baseline for wild plants and wild seeds).
     #[serde(default)]
     pub genes: CropGenes,
+    /// Down with blight: it drains growth, spreads to neighbors, and a cut prunes it.
+    #[serde(default)]
+    pub blighted: bool,
+    /// Game time until which a pruned plant shrugs blight off.
+    #[serde(default)]
+    pub immune_until: f32,
 }
 
 impl Plant {
@@ -423,6 +441,8 @@ impl Game {
                 wild: true,
                 harvests: 0,
                 genes: CropGenes::BASELINE,
+                blighted: false,
+                immune_until: 0.0,
             });
         }
     }
@@ -552,6 +572,8 @@ impl Game {
             wild: false,
             harvests: 0,
             genes: kind.genes,
+            blighted: false,
+            immune_until: 0.0,
         });
         let name = self
             .farm
@@ -563,15 +585,17 @@ impl Game {
 
     // ---- harvest --------------------------------------------------------------------------
 
-    /// The plant the beam would take: the nearest crop in reach that is big enough to cut.
+    /// The plant the beam would take: the nearest crop in reach that is big enough to cut, or
+    /// any sick plant (a cut prunes it, whatever its size or use).
     pub(super) fn harvest_candidate(&self, origin: Vec2, reach: f32) -> Option<(f32, Live)> {
         self.farm
             .nearest_live(origin, |l| {
-                l.growth >= SPROUT
-                    && self
-                        .farm
-                        .flora(l.species)
-                        .is_some_and(|f| SHIP_PALATE.eats(&f.chemistry))
+                self.farm.plants[l.index].blighted
+                    || (l.growth >= SPROUT
+                        && self
+                            .farm
+                            .flora(l.species)
+                            .is_some_and(|f| SHIP_PALATE.eats(&f.chemistry)))
             })
             .filter(|(gap, _)| *gap <= reach)
     }
@@ -627,6 +651,17 @@ impl Game {
         }
         self.farm.cut = None;
         self.beam = None;
+        if self.farm.plants[live.index].blighted {
+            let plant = &mut self.farm.plants[live.index];
+            plant.blighted = false;
+            plant.immune_until = self.time + BLIGHT_IMMUNE;
+            self.notify(
+                format!("{name} PRUNED  BLIGHT CUT OUT"),
+                upgrades::Rarity::Common,
+            );
+            self.update_farm();
+            return drained;
+        }
         let ripe = live.growth >= RIPE;
         let gain = self.loadout.skills.yield_mult() * self.realm_effects().mining;
         let genes = self.farm.plants[live.index].genes;
@@ -768,6 +803,103 @@ impl Game {
         }
     }
 
+    // ---- blight ---------------------------------------------------------------------------
+
+    /// Blight, the pest beyond the grazer: only crops the player planted (wild plants are
+    /// hardy strains) outside HOME's sector fall ill. Each epoch a healthy plant rolls (a pure
+    /// hash of seed, plant id and epoch) against a small outbreak chance plus a chance per sick
+    /// same-species neighbor within `POLLEN_RANGE` along the surface, both scaled by the
+    /// hardy gene (`bite_mult`). A sick plant loses `BLIGHT_DRAIN` growth a second (also
+    /// scaled) and dies at zero, so a field spreads it until pruned: the beam cuts blight out
+    /// and the plant shrugs it off for `BLIGHT_IMMUNE` seconds. Only loaded plants are
+    /// stepped; nothing happens with no planted crops.
+    pub(super) fn update_blight(&mut self, dt: f32) {
+        let now = self.time;
+        let home = SectorId { x: 0, y: 0 };
+        let mut at_risk: Vec<usize> = self
+            .farm
+            .live
+            .iter()
+            .map(|l| l.index)
+            .filter(|&i| {
+                let p = &self.farm.plants[i];
+                !p.wild && p.planet.0 != home
+            })
+            .collect();
+        if at_risk.is_empty() {
+            return;
+        }
+        at_risk.sort_unstable();
+        let mut dead: Vec<usize> = Vec::new();
+        for &i in &at_risk {
+            let plant = &self.farm.plants[i];
+            if !plant.blighted {
+                continue;
+            }
+            let grow =
+                self.farm.growth_of(plant, now) - BLIGHT_DRAIN * dt * plant.genes.bite_mult();
+            if grow <= 0.0 {
+                dead.push(i);
+            } else {
+                let plant = &mut self.farm.plants[i];
+                plant.base = grow;
+                plant.since = now;
+            }
+        }
+        let epoch = (now / BLIGHT_EPOCH).floor();
+        let mut ill: Vec<usize> = Vec::new();
+        if epoch != ((now - dt) / BLIGHT_EPOCH).floor() {
+            for &i in &at_risk {
+                let plant = &self.farm.plants[i];
+                if plant.blighted || now < plant.immune_until {
+                    continue;
+                }
+                let sick = at_risk
+                    .iter()
+                    .filter(|&&j| {
+                        let other = &self.farm.plants[j];
+                        other.blighted
+                            && other.species == plant.species
+                            && other.planet == plant.planet
+                            && arc(plant.anchor, other.anchor, plant.radius) <= POLLEN_RANGE
+                    })
+                    .count();
+                let chance =
+                    (BLIGHT_OUTBREAK + BLIGHT_SPREAD * sick as f32) * plant.genes.bite_mult();
+                let mut rng = Rng::new(hash2(
+                    self.seed ^ BLIGHT_SALT,
+                    plant.id as i32,
+                    epoch as i32,
+                ));
+                if rng.chance(chance) {
+                    ill.push(i);
+                }
+            }
+        }
+        let name = |game: &Game, i: usize| {
+            game.farm
+                .flora(game.farm.plants[i].species)
+                .map_or("CROP".into(), |f| f.name.clone())
+        };
+        if let Some(&i) = ill.first() {
+            let label = format!("BLIGHT ON {}  PRUNE IT WITH THE BEAM", name(self, i));
+            self.notify(label, upgrades::Rarity::Uncommon);
+        }
+        for i in ill {
+            self.farm.plants[i].blighted = true;
+        }
+        if let Some(&i) = dead.first() {
+            let label = format!("BLIGHT KILLED {}", name(self, i));
+            self.notify(label, upgrades::Rarity::Uncommon);
+        }
+        if !dead.is_empty() {
+            for &i in dead.iter().rev() {
+                self.farm.plants.remove(i);
+            }
+            self.update_farm();
+        }
+    }
+
     /// Hull mended from biomass in a field repair; returns the hull restored.
     pub(super) fn repair_with_biomass(&mut self, want: f32, rate: f32, dt: f32) -> f32 {
         if self.farm.biomass <= 1e-4 {
@@ -821,6 +953,13 @@ impl Game {
             self.update_farm();
         }
         Some(spot)
+    }
+
+    /// Smoke hook (`SSC_FARM_BLIGHT`): every plant falls sick, for a screenshot.
+    pub fn blight_all(&mut self) {
+        for plant in &mut self.farm.plants {
+            plant.blighted = true;
+        }
     }
 
     /// Developer and test hook: drops the plants and seeds of a game (a fresh farm).
@@ -929,6 +1068,8 @@ mod tests {
             wild: false,
             harvests: 0,
             genes,
+            blighted: false,
+            immune_until: 0.0,
         });
         game.step(DT, Input::default());
         game.farm.plants.len() - 1
@@ -1312,6 +1453,13 @@ mod tests {
         hardy: 80,
         hue: 60,
     };
+    /// Only the hardy gene, at its best.
+    const HARDY: CropGenes = CropGenes {
+        yield_: 0,
+        vigor: 0,
+        hardy: 100,
+        hue: 0,
+    };
     const POOR: CropGenes = CropGenes {
         yield_: -90,
         vigor: -70,
@@ -1522,5 +1670,127 @@ mod tests {
         assert_eq!(loaded.farm.seeds, game.farm.seeds);
         assert_eq!(loaded.farm.seeds.get(&bred), Some(&2));
         assert_eq!(loaded.farm.plants[0].genes, POOR);
+    }
+
+    // ---- blight -------------------------------------------------------------------------
+
+    /// A row of planted crops of one species 100 units apart along the top of the planetoid;
+    /// the first is sick. Returns their indices.
+    fn blight_row(game: &mut Game, species: u16, genes: CropGenes, n: usize) -> Vec<usize> {
+        let at: Vec<usize> = (0..n)
+            .map(|k| {
+                let anchor = std::f32::consts::FRAC_PI_2 + k as f32 * 100.0 / 300.0;
+                plant_with(game, species, 0.5, anchor, genes)
+            })
+            .collect();
+        game.farm.plants[at[0]].blighted = true;
+        at
+    }
+
+    fn run(game: &mut Game, seconds: f32) {
+        for _ in 0..(seconds / DT).round() as usize {
+            game.step(DT, Input::default());
+        }
+    }
+
+    fn sick(game: &Game) -> Vec<bool> {
+        game.farm.plants.iter().map(|p| p.blighted).collect()
+    }
+
+    #[test]
+    fn blight_spreads_between_neighbors_and_is_deterministic() {
+        let outcome = || {
+            let mut game = rig();
+            let crop = species_with(&game, flora::Role::CropOnly);
+            blight_row(&mut game, crop, CropGenes::BASELINE, 4);
+            run(&mut game, 60.0);
+            (
+                sick(&game),
+                game.farm.plants.iter().map(|p| p.base).collect::<Vec<_>>(),
+            )
+        };
+        let (a, growth) = outcome();
+        assert_eq!((a.clone(), growth), outcome(), "same seed, same blight");
+        assert!(a.iter().filter(|&&b| b).count() > 1, "it spread: {a:?}");
+    }
+
+    #[test]
+    fn blight_kills_a_baseline_crop_but_a_hardy_one_resists() {
+        let mut left = [0usize; 2];
+        let mut ill = [0usize; 2];
+        for (n, genes) in [CropGenes::BASELINE, HARDY].into_iter().enumerate() {
+            let mut game = rig();
+            let crop = species_with(&game, flora::Role::CropOnly);
+            blight_row(&mut game, crop, genes, 4);
+            run(&mut game, 240.0);
+            left[n] = game.farm.plants.len();
+            ill[n] = sick(&game).iter().filter(|&&b| b).count();
+        }
+        assert!(left[0] < 4, "blight kills an unhardy crop: {left:?}");
+        assert!(left[1] > left[0], "hardy keeps more plants: {left:?}");
+        assert!(ill[1] <= ill[0] + left[1] - left[0], "{ill:?} {left:?}");
+        // The hardy sick plant itself holds on: its drain is under its growth.
+        let mut game = rig();
+        let crop = species_with(&game, flora::Role::CropOnly);
+        let at = blight_row(&mut game, crop, HARDY, 1)[0];
+        run(&mut game, 240.0);
+        assert!(game.farm.plants.len() == 1 && game.farm.plants[at].blighted);
+    }
+
+    #[test]
+    fn pruning_with_the_beam_saves_the_plant_and_grants_a_spell_of_immunity() {
+        let mut game = rig();
+        let crop = species_with(&game, flora::Role::CropOnly);
+        let at = blight_row(&mut game, crop, CropGenes::BASELINE, 3);
+        // Sick neighbors on both sides of the pruned plant keep trying to reinfect it.
+        game.farm.plants[at[2]].blighted = true;
+        let pruned = game.farm.plants[at[0]].id;
+        beam(&mut game, HARVEST_TIME + 0.3);
+        let plant = game.farm.plants.iter().find(|p| p.id == pruned).unwrap();
+        assert!(!plant.blighted, "the cut took the blight out");
+        assert!(plant.immune_until > game.time);
+        assert!(plant.harvests == 0 && game.farm.biomass == 0.0, "no pay");
+        let id = plant.id;
+        run(&mut game, BLIGHT_IMMUNE - 20.0);
+        let plant = game.farm.plants.iter().find(|p| p.id == id).unwrap();
+        assert!(!plant.blighted, "immune while the spell lasts");
+    }
+
+    #[test]
+    fn a_normal_run_has_no_blight_and_home_is_exempt() {
+        let mut game = Game::new(42);
+        run(&mut game, 5.0);
+        let before = game.farm.plants.clone();
+        run(&mut game, 400.0);
+        assert!(game.farm.plants.iter().all(|p| !p.blighted && p.wild));
+        assert_eq!(game.farm.plants.len(), before.len());
+        // A crop planted at HOME never falls ill, even beside a sick one.
+        let mut game = Game::new(42);
+        game.stage_farm(true, 0.0, CropGenes::BASELINE).unwrap();
+        let planted = game.farm.plants.iter().position(|p| !p.wild).unwrap();
+        game.farm.plants[planted].blighted = true;
+        let grown = game.farm.growth_of(&game.farm.plants[planted], game.time);
+        run(&mut game, 60.0);
+        let plant = &game.farm.plants[planted];
+        assert!(
+            game.farm.growth_of(plant, game.time) > grown,
+            "no drain at HOME"
+        );
+    }
+
+    #[test]
+    fn blight_state_survives_a_save() {
+        let mut game = Game::new(42);
+        game.stage_farm(true, 0.0, CropGenes::BASELINE).unwrap();
+        let planted = game.farm.plants.iter().position(|p| !p.wild).unwrap();
+        game.farm.plants[planted].blighted = true;
+        game.farm.plants[planted].immune_until = 77.0;
+        let text = game.save_state().to_text();
+        let (state, generator) = save::SaveState::from_text(&text).unwrap();
+        let (loaded, report) = Game::from_save(state, generator);
+        assert!(report.world_deltas_kept);
+        assert_eq!(loaded.farm.plants, game.farm.plants);
+        assert!(loaded.farm.plants[planted].blighted);
+        assert_eq!(loaded.farm.plants[planted].immune_until, 77.0);
     }
 }

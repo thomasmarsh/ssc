@@ -4641,7 +4641,12 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
                     * PLANT_SCALE
         };
         let [tr, tg, tb] = plant.genes.tinted(flora.tint);
-        let leaf = Color::srgb(tr, tg, tb);
+        // Blight dulls the leaves toward a mottled grey-brown and leaves a few spots drifting.
+        let leaf = if plant.blighted {
+            Color::srgb(0.38 + 0.1 * tr, 0.3 + 0.08 * tg, 0.3 + 0.05 * tb)
+        } else {
+            Color::srgb(tr, tg, tb)
+        };
         for part in &plan.parts {
             let (a, b) = (place(part.start), place(part.end()));
             match part.kind {
@@ -4662,14 +4667,30 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
                         .circle_2d(
                             a,
                             (part.radius * PLANT_SCALE).max(2.0),
-                            Color::srgb(0.95, 0.75 - 0.4 * tb, 0.25),
+                            if plant.blighted {
+                                Color::srgb(0.5, 0.38, 0.35)
+                            } else {
+                                Color::srgb(0.95, 0.75 - 0.4 * tb, 0.25)
+                            },
                         )
                         .resolution(8);
                 }
                 _ => {}
             }
         }
-        if live.growth >= RIPE && flora.is_crop() {
+        if plant.blighted {
+            let tip = live.position + live.normal * (PLANT_SCALE * 2.0);
+            for k in 0..5 {
+                let t = game.time * 0.7 + k as f32 * 1.9 + plant.id as f32;
+                let spot = tip
+                    + Vec2::new(t.sin() * 1.5, (t * 1.3).cos())
+                        * PLANT_SCALE
+                        * (0.6 + 0.15 * k as f32);
+                gizmos
+                    .circle_2d(spot, 2.5, Color::srgba(0.75, 0.45, 0.85, 0.7))
+                    .resolution(6);
+            }
+        } else if live.growth >= RIPE && flora.is_crop() {
             let tip = live.position + live.normal * (PLANT_SCALE * 4.5);
             let pulse = 0.6 + 0.4 * (game.time * 3.0 + plant.id as f32).sin();
             gizmos

@@ -903,6 +903,7 @@ impl Game {
         self.update_metabolism(dt);
         self.graze_plankton();
         self.graze_plants(dt);
+        self.update_blight(dt);
         if !frozen {
             self.hunt(dt);
         }

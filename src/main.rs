@@ -1070,6 +1070,10 @@ fn smoke_run(
             .unwrap_or_default();
         let at = session.game.stage_farm(mode == "plant", age, genes);
         eprintln!("SSC_FARM staged at {at:?}");
+        // SSC_FARM_BLIGHT=1: every plant is sick (drawn dull and mottled; HOME never drains).
+        if std::env::var_os("SSC_FARM_BLIGHT").is_some() {
+            session.game.blight_all();
+        }
         session.game.player_invulnerability = 1e9;
     }
     // SSC_TIME=<seconds>: start the game clock there (wells and anything else posed by time).

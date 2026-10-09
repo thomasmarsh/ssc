@@ -88,6 +88,7 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 
 - `SSC_FARM=stage|plant`: pose the ship beside HOME's crop-only plant with 3 seeds and 14 biomass; `plant` also plants one seed (the interact key) beside it. `SSC_FARM_AGE=<seconds>` then ages the game clock, so a seedling grows. Prints where the ship was put. Combine with `SSC_SAVE=1 SSC_SAVE_DIR=<scratch>` to save, then relaunch with `SSC_TELEPORT` near the plant to check it came back.
 - `SSC_FARM_GENES=yield,vigor,hardy,hue`: with `SSC_FARM`, the staged seeds carry these crop genes (each -100 to 100), so a planted one shows its color and growth rate.
+- `SSC_FARM_BLIGHT=1`: with `SSC_FARM`, every plant falls sick (drawn dull with violet spots; HOME plants never drain).
 - `SSC_FARM_BEAM=1`: hold the mining beam each frame (use with `SSC_FARM=stage`); a ring fills at the plant as it is cut.
 
 ## Developer panel (not smoke-gated)
