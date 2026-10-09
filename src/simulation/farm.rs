@@ -14,7 +14,7 @@
 //! it, and steers toward plants it likes. Crops only grow on planetoids.
 
 use super::*;
-use crate::flora::{self, Flora, SHIP_PALATE};
+use crate::flora::{self, CropGenes, Flora, SHIP_PALATE, SeedKind};
 use crate::world::{Rng, hash2};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -64,6 +64,12 @@ const PLANT_BODY: f32 = 40.0;
 const FARM_SALT: u64 = 0xFA12_3000_0000_0001;
 /// Own stream for harvest rolls: a pure hash of (game seed, plant id, harvest count).
 const HARVEST_SALT: u64 = 0xFA12_3000_0000_0002;
+/// Own stream for the genes of the seeds a cut pays: a pure hash of (game seed, plant id,
+/// harvest count, seed number).
+const BREED_SALT: u64 = 0xFA12_3000_0000_0003;
+/// Along the surface, how near a mature plant of the same species must stand to cross with
+/// the one being cut (a little under three plantings apart).
+pub const POLLEN_RANGE: f32 = 260.0;
 
 /// What one cut yields: whether the biomass pays, and how many seeds. Deterministic in the
 /// plant's id and how many times it was harvested, so replays and reloads roll the same.
@@ -83,6 +89,27 @@ pub fn harvest_roll(seed: u64, plant: u32, harvests: u32, ripe: bool) -> (bool, 
     } else {
         let food = rng.chance(UNRIPE_FOOD_CHANCE);
         (food, u32::from(rng.chance(UNRIPE_SEED_CHANCE)))
+    }
+}
+
+/// A map keyed by a struct cannot be a JSON object, so seeds save as a list of stacks.
+mod seed_stacks {
+    use super::{BTreeMap, SeedKind};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        seeds: &BTreeMap<SeedKind, u32>,
+        out: S,
+    ) -> Result<S::Ok, S::Error> {
+        seeds.iter().collect::<Vec<_>>().serialize(out)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        input: D,
+    ) -> Result<BTreeMap<SeedKind, u32>, D::Error> {
+        Ok(Vec::<(SeedKind, u32)>::deserialize(input)?
+            .into_iter()
+            .collect())
     }
 }
 
@@ -106,6 +133,9 @@ pub struct Plant {
     /// Times this plant has been cut ripe (feeds the harvest roll).
     #[serde(default)]
     pub harvests: u32,
+    /// Crop genes (baseline for wild plants and wild seeds).
+    #[serde(default)]
+    pub genes: CropGenes,
 }
 
 impl Plant {
@@ -131,7 +161,9 @@ pub struct Live {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Farm {
     pub biomass: f32,
-    pub seeds: BTreeMap<u16, u32>,
+    /// Seeds in hand by kind (species and genes).
+    #[serde(with = "seed_stacks")]
+    pub seeds: BTreeMap<SeedKind, u32>,
     pub plants: Vec<Plant>,
     /// Planetoids already stocked with wild plants.
     pub stocked: BTreeSet<(SectorId, u32)>,
@@ -146,7 +178,7 @@ pub struct Farm {
     /// The seed species the player picked to plant (none, or one no longer held, means the
     /// lowest id in hand).
     #[serde(skip)]
-    chosen: Option<u16>,
+    chosen: Option<SeedKind>,
 }
 
 impl Farm {
@@ -179,41 +211,56 @@ impl Farm {
         self.seeds.values().sum()
     }
 
-    /// The species that planting would use now: the one picked if still in hand, else the
-    /// lowest id with a seed in hand.
-    pub fn selected_seed(&self) -> Option<u16> {
-        self.chosen
-            .filter(|id| self.seeds.get(id).is_some_and(|n| *n > 0))
-            .or_else(|| self.seeds.iter().find(|(_, n)| **n > 0).map(|(id, _)| *id))
+    /// Seeds held of one species, whatever their genes.
+    pub fn seeds_of(&self, species: u16) -> u32 {
+        self.seeds
+            .iter()
+            .filter(|(k, _)| k.species == species)
+            .map(|(_, n)| *n)
+            .sum()
     }
 
-    /// Species held, how many kinds of seed.
+    pub fn add_seeds(&mut self, kind: SeedKind, count: u32) {
+        if count > 0 {
+            *self.seeds.entry(kind).or_insert(0) += count;
+        }
+    }
+
+    /// The seed that planting would use now: the one picked if still in hand, else the first
+    /// in order (lowest species, then genes).
+    pub fn selected_seed(&self) -> Option<SeedKind> {
+        self.chosen
+            .filter(|kind| self.seeds.get(kind).is_some_and(|n| *n > 0))
+            .or_else(|| self.seeds.iter().find(|(_, n)| **n > 0).map(|(k, _)| *k))
+    }
+
+    /// Kinds held, how many stacks of seed.
     pub fn seed_kinds(&self) -> usize {
         self.seeds.values().filter(|n| **n > 0).count()
     }
 
-    /// The seed picker: the next species in hand after the selected one, wrapping. Returns the
+    /// The seed picker: the next kind in hand after the selected one, wrapping. Returns the
     /// new selection (none when nothing is held).
-    pub fn cycle_seed(&mut self) -> Option<u16> {
+    pub fn cycle_seed(&mut self) -> Option<SeedKind> {
         let current = self.selected_seed()?;
-        let held: Vec<u16> = self
+        let held: Vec<SeedKind> = self
             .seeds
             .iter()
             .filter(|(_, n)| **n > 0)
-            .map(|(id, _)| *id)
+            .map(|(k, _)| *k)
             .collect();
-        let at = held.iter().position(|id| *id == current).unwrap_or(0);
+        let at = held.iter().position(|k| *k == current).unwrap_or(0);
         let next = held[(at + 1) % held.len()];
         self.chosen = Some(next);
         Some(next)
     }
 
-    fn take_seed(&mut self, id: u16) -> bool {
-        match self.seeds.get_mut(&id) {
+    fn take_seed(&mut self, kind: SeedKind) -> bool {
+        match self.seeds.get_mut(&kind) {
             Some(n) if *n > 0 => {
                 *n -= 1;
                 if *n == 0 {
-                    self.seeds.remove(&id);
+                    self.seeds.remove(&kind);
                 }
                 true
             }
@@ -221,9 +268,19 @@ impl Farm {
         }
     }
 
+    /// A seed's name for the HUD: the species, then the genes that are not baseline.
+    pub fn seed_label(&self, kind: SeedKind) -> String {
+        let name = self.flora(kind.species).map_or("SEED", |f| f.name.as_str());
+        match kind.genes.label() {
+            genes if genes.is_empty() => name.to_string(),
+            genes => format!("{name} ({genes})"),
+        }
+    }
+
     pub fn growth_of(&self, plant: &Plant, now: f32) -> f32 {
-        self.flora(plant.species)
-            .map_or(0.0, |f| plant.growth(now, f.grow_secs))
+        self.flora(plant.species).map_or(0.0, |f| {
+            plant.growth(now, f.grow_secs * plant.genes.grow_mult())
+        })
     }
 
     /// Plants loaded and standing, nearest first to `to`, with the gap from `to` to their
@@ -258,7 +315,7 @@ pub enum PlantHint {
     TooFast,
     Crowded,
     /// Plantable: the species and the anchor on the planetoid.
-    Ready(u16, (SectorId, u32), f32),
+    Ready(SeedKind, (SectorId, u32), f32),
 }
 
 impl Game {
@@ -365,6 +422,7 @@ impl Game {
                 seed,
                 wild: true,
                 harvests: 0,
+                genes: CropGenes::BASELINE,
             });
         }
     }
@@ -373,7 +431,7 @@ impl Game {
 
     /// What the interact key would do about planting, for the prompt.
     pub fn plant_hint(&self) -> PlantHint {
-        let Some(species) = self.farm.selected_seed() else {
+        let Some(kind) = self.farm.selected_seed() else {
             return PlantHint::None;
         };
         let Some(ship) = self.player() else {
@@ -414,7 +472,7 @@ impl Game {
         if crowded {
             return PlantHint::Crowded;
         }
-        PlantHint::Ready(species, key, anchor)
+        PlantHint::Ready(kind, key, anchor)
     }
 
     /// A seed from a dead creature's gut: some chance, of a species its lineage eats. Bred
@@ -440,7 +498,7 @@ impl Game {
             return None;
         }
         let pick = (rng.next_u64() % eaten.len() as u64) as usize;
-        Some(Item::Seed(eaten[pick]))
+        Some(Item::Seed(SeedKind::wild(eaten[pick])))
     }
 
     /// The seed picker key: cycles the species planted next, and says which.
@@ -448,29 +506,23 @@ impl Game {
         if self.farm.seed_kinds() < 2 {
             return;
         }
-        if let Some(species) = self.farm.cycle_seed() {
-            let held = self.farm.seeds.get(&species).copied().unwrap_or(0);
-            let name = self
-                .farm
-                .flora(species)
-                .map_or("SEED".into(), |f| f.name.clone());
-            self.notify(format!("SEED {name} x{held}"), upgrades::Rarity::Common);
+        if let Some(kind) = self.farm.cycle_seed() {
+            let held = self.farm.seeds.get(&kind).copied().unwrap_or(0);
+            let label = self.farm.seed_label(kind);
+            self.notify(format!("SEED {label} x{held}"), upgrades::Rarity::Common);
         }
     }
 
     /// A seed picked up: into the hold of seeds.
-    pub(super) fn gain_seed(&mut self, species: u16) {
-        *self.farm.seeds.entry(species).or_insert(0) += 1;
-        let name = self
-            .farm
-            .flora(species)
-            .map_or("SEED".into(), |f| f.name.clone());
-        self.notify(format!("SEED +1 {name}"), upgrades::Rarity::Common);
+    pub(super) fn gain_seed(&mut self, kind: SeedKind) {
+        self.farm.add_seeds(kind, 1);
+        let label = self.farm.seed_label(kind);
+        self.notify(format!("SEED +1 {label}"), upgrades::Rarity::Common);
     }
 
     /// The interact key, planting: spends a seed and puts a seedling on the planetoid.
     pub(super) fn plant_seed(&mut self) {
-        let PlantHint::Ready(species, key, anchor) = self.plant_hint() else {
+        let PlantHint::Ready(kind, key, anchor) = self.plant_hint() else {
             return;
         };
         let Some((center, radius)) = self
@@ -481,7 +533,7 @@ impl Game {
         else {
             return;
         };
-        if !self.farm.take_seed(species) {
+        if !self.farm.take_seed(kind) {
             return;
         }
         let id = self.farm.next_id;
@@ -489,7 +541,7 @@ impl Game {
         let seed = hash2(self.seed ^ FARM_SALT, id as i32, key.1 as i32);
         self.farm.plants.push(Plant {
             id,
-            species,
+            species: kind.species,
             planet: key,
             anchor,
             center,
@@ -499,10 +551,11 @@ impl Game {
             seed,
             wild: false,
             harvests: 0,
+            genes: kind.genes,
         });
         let name = self
             .farm
-            .flora(species)
+            .flora(kind.species)
             .map_or("SEED".into(), |f| f.name.clone());
         self.notify(format!("PLANTED {name}"), upgrades::Rarity::Common);
         self.update_farm();
@@ -576,18 +629,24 @@ impl Game {
         self.beam = None;
         let ripe = live.growth >= RIPE;
         let gain = self.loadout.skills.yield_mult() * self.realm_effects().mining;
+        let genes = self.farm.plants[live.index].genes;
         let amount = if ripe {
             CROP_YIELD * nutrition
         } else {
             CROP_YIELD * nutrition * live.growth * live.growth * 0.5
-        } * gain;
+        } * gain
+            * genes.yield_mult();
         let harvests = self.farm.plants[live.index].harvests;
         let (food, seeds) = harvest_roll(self.seed, id, harvests, ripe);
         let room = (BIOMASS_CAP - self.farm.biomass).max(0.0);
         let got = if food { amount.min(room) } else { 0.0 };
         self.farm.biomass += got;
-        if seeds > 0 {
-            *self.farm.seeds.entry(live.species).or_insert(0) += seeds;
+        for n in 0..seeds {
+            let kind = SeedKind {
+                species: live.species,
+                genes: self.seed_genes(live.index, n),
+            };
+            self.farm.add_seeds(kind, 1);
         }
         let now = self.time;
         let mut parts = Vec::new();
@@ -620,6 +679,38 @@ impl Game {
         }
         self.update_farm();
         drained
+    }
+
+    /// The genes of the `n`th seed from the plant at `index` at its current harvest: crossed
+    /// with the nearest mature plant of the same species within `POLLEN_RANGE` along the
+    /// planetoid (or with itself when it stands alone), then mutated. A pure function of the
+    /// game seed, the plant's id and its harvest count, so replays and reloads agree.
+    fn seed_genes(&self, index: usize, n: u32) -> CropGenes {
+        let plant = &self.farm.plants[index];
+        let now = self.time;
+        let mate = self
+            .farm
+            .plants
+            .iter()
+            .enumerate()
+            .filter(|(i, other)| {
+                *i != index
+                    && other.species == plant.species
+                    && other.planet == plant.planet
+                    && arc(plant.anchor, other.anchor, plant.radius) <= POLLEN_RANGE
+                    && self.farm.growth_of(other, now) >= SPROUT
+            })
+            .min_by(|a, b| {
+                let gap = |p: &Plant| arc(plant.anchor, p.anchor, plant.radius);
+                gap(a.1).total_cmp(&gap(b.1)).then(a.1.id.cmp(&b.1.id))
+            })
+            .map_or(plant.genes, |(_, other)| other.genes);
+        let mut rng = Rng::new(hash2(
+            self.seed ^ BREED_SALT,
+            plant.id as i32,
+            (plant.harvests.wrapping_mul(4).wrapping_add(n)) as i32,
+        ));
+        CropGenes::breed(plant.genes, mate, &mut rng)
     }
 
     /// Stops a cut in progress (the beam moved on or went off).
@@ -664,7 +755,8 @@ impl Game {
             let nutrition = farm
                 .flora(live.species)
                 .map_or(0.0, |f| palate.nutrition(&f.chemistry));
-            let eaten = (GRAZE_RATE * dt).min(live.growth - GRAZE_FLOOR);
+            let hardy = farm.plants[live.index].genes.bite_mult();
+            let eaten = (GRAZE_RATE * dt * hardy).min(live.growth - GRAZE_FLOOR);
             body.feed(eaten * GRAZE_ENERGY * nutrition);
             bites.push((live.index, eaten));
         }
@@ -690,8 +782,8 @@ impl Game {
 
     /// Smoke hook (`SSC_FARM`): poses the ship just above HOME's crop-only plant with seeds and
     /// biomass in hand; with `plant` it also presses the interact key beside it, and `age`
-    /// seconds pass on the game clock afterwards. Returns where the ship was put.
-    pub fn stage_farm(&mut self, plant: bool, age: f32) -> Option<Vec2> {
+    /// seconds pass on the game clock afterwards. The staged seeds carry `genes`. Returns where the ship was put.
+    pub fn stage_farm(&mut self, plant: bool, age: f32, genes: CropGenes) -> Option<Vec2> {
         self.update_farm();
         let crowd = flora::sample_palates(self.seed, 64);
         let crop = self
@@ -710,7 +802,14 @@ impl Game {
             .copied()?;
         let spot = live.position + live.normal * 130.0;
         self.teleport(spot);
-        self.farm.seeds.insert(crop, 3);
+        self.farm.seeds.clear();
+        self.farm.add_seeds(
+            SeedKind {
+                species: crop,
+                genes,
+            },
+            3,
+        );
         self.farm.biomass = 14.0;
         if plant {
             // Step aside along the surface so the new seedling has room.
@@ -798,13 +897,30 @@ mod tests {
 
     /// Puts a plant at the top of the planetoid (anchor pi/2, under the ship).
     fn plant(game: &mut Game, species: u16, growth: f32) -> usize {
+        plant_with(
+            game,
+            species,
+            growth,
+            std::f32::consts::FRAC_PI_2,
+            CropGenes::BASELINE,
+        )
+    }
+
+    /// A plant at an anchor angle with genes.
+    fn plant_with(
+        game: &mut Game,
+        species: u16,
+        growth: f32,
+        anchor: f32,
+        genes: CropGenes,
+    ) -> usize {
         let id = game.farm.next_id;
         game.farm.next_id += 1;
         game.farm.plants.push(Plant {
             id,
             species,
             planet: KEY,
-            anchor: std::f32::consts::FRAC_PI_2,
+            anchor,
             center: Vec2::ZERO,
             radius: 300.0,
             base: growth,
@@ -812,6 +928,7 @@ mod tests {
             seed: 9,
             wild: false,
             harvests: 0,
+            genes,
         });
         game.step(DT, Input::default());
         game.farm.plants.len() - 1
@@ -869,7 +986,7 @@ mod tests {
             assert_eq!(game.farm.biomass, 0.0);
         }
         assert_eq!(
-            game.farm.seeds.get(&crop).copied().unwrap_or(0),
+            game.farm.seeds_of(crop),
             seeds,
             "the roll decides the seeds"
         );
@@ -932,7 +1049,7 @@ mod tests {
         beam(&mut game, 2.5);
         assert!(game.farm.plants.is_empty(), "over-harvest kills");
         assert!(seeds <= 1, "never a pair from an unripe cut");
-        assert_eq!(game.farm.seeds.get(&crop).copied().unwrap_or(0), seeds);
+        assert_eq!(game.farm.seeds_of(crop), seeds);
         assert!(game.farm.biomass < 3.0);
         assert_eq!(game.farm.biomass > 0.0, food);
     }
@@ -946,21 +1063,21 @@ mod tests {
             None,
             "nothing held, nothing picked"
         );
-        game.farm.seeds.insert(2, 1);
-        game.farm.seeds.insert(5, 1);
-        game.farm.seeds.insert(9, 0);
+        game.farm.add_seeds(SeedKind::wild(2), 1);
+        game.farm.add_seeds(SeedKind::wild(5), 1);
+        game.farm.seeds.insert(SeedKind::wild(9), 0);
         assert_eq!(
             game.farm.selected_seed(),
-            Some(2),
+            Some(SeedKind::wild(2)),
             "default is the lowest id"
         );
         game.cycle_seed();
-        assert_eq!(game.farm.selected_seed(), Some(5));
+        assert_eq!(game.farm.selected_seed(), Some(SeedKind::wild(5)));
         assert!(game.notices.iter().any(|n| n.text.starts_with("SEED ")));
         game.cycle_seed();
         assert_eq!(
             game.farm.selected_seed(),
-            Some(2),
+            Some(SeedKind::wild(2)),
             "wraps, skipping empty stacks"
         );
         game.cycle_seed();
@@ -968,7 +1085,7 @@ mod tests {
         assert_eq!(game.farm.plants[0].species, 5, "plants the picked species");
         assert_eq!(
             game.farm.selected_seed(),
-            Some(2),
+            Some(SeedKind::wild(2)),
             "a spent stack falls back"
         );
     }
@@ -976,9 +1093,9 @@ mod tests {
     #[test]
     fn a_collected_seed_joins_the_stock_and_creatures_drop_what_they_eat() {
         let mut game = rig();
-        game.collect(Item::Seed(3));
-        game.collect(Item::Seed(3));
-        assert_eq!(game.farm.seeds.get(&3), Some(&2));
+        game.collect(Item::Seed(SeedKind::wild(3)));
+        game.collect(Item::Seed(SeedKind::wild(3)));
+        assert_eq!(game.farm.seeds_of(3), 2);
         let body = game
             .bodies
             .iter()
@@ -991,7 +1108,9 @@ mod tests {
         let (mut drops, n) = (0u32, 4000u32);
         let mut rng = Rng::new(77);
         for _ in 0..n {
-            if let Some(Item::Seed(id)) = game.gut_seed(&body, &mut rng) {
+            if let Some(Item::Seed(kind)) = game.gut_seed(&body, &mut rng) {
+                assert!(kind.genes.is_baseline(), "wild seeds are baseline");
+                let id = kind.species;
                 drops += 1;
                 let f = game.farm.flora(id).unwrap();
                 assert!(palate.eats(&f.chemistry), "only what its lineage eats");
@@ -1009,13 +1128,13 @@ mod tests {
         let mut game = rig();
         let crop = species_with(&game, flora::Role::CropOnly);
         assert_eq!(game.interact_prompt(), None, "no seed, no prompt");
-        game.farm.seeds.insert(crop, 2);
+        game.farm.add_seeds(SeedKind::wild(crop), 2);
         let prompt = game.interact_prompt().unwrap();
         assert_eq!(prompt.verb, interact::Verb::Plant);
         assert!(prompt.blocked.is_none());
         assert_eq!(game.interact(), Some(interact::Verb::Plant));
         assert_eq!(game.farm.plants.len(), 1);
-        assert_eq!(game.farm.seeds.get(&crop), Some(&1));
+        assert_eq!(game.farm.seeds_of(crop), 1);
         assert!(game.farm.live[0].growth < 0.1);
         // The same spot again is crowded.
         let prompt = game.interact_prompt().unwrap();
@@ -1144,7 +1263,7 @@ mod tests {
         let mut game = Game::new(42);
         game.step(DT, Input::default());
         game.farm.biomass = 12.0;
-        game.farm.seeds.insert(3, 2);
+        game.farm.add_seeds(SeedKind::wild(3), 2);
         let wild = game.farm.plants.len();
         assert!(wild > 0);
         // Plant by hand beside the ship on HOME's planetoid.
@@ -1155,7 +1274,7 @@ mod tests {
         assert_eq!(loaded.farm.plants, game.farm.plants);
         assert_eq!(loaded.farm.stocked, game.farm.stocked);
         assert_eq!(loaded.farm.biomass, 12.0);
-        assert_eq!(loaded.farm.seeds.get(&3), Some(&2));
+        assert_eq!(loaded.farm.seeds_of(3), 2);
         assert!(loaded.farm.flora(0).is_some(), "the table is rederived");
         let (state, _) = save::SaveState::from_text(&text).unwrap();
         let (moved, report) = Game::from_save(state, GENERATOR_VERSION + 1);
@@ -1185,5 +1304,223 @@ mod tests {
             game.cargo.metal, 10.0,
             "metal untouched while biomass lasts"
         );
+    }
+
+    const RICH: CropGenes = CropGenes {
+        yield_: 90,
+        vigor: 70,
+        hardy: 80,
+        hue: 60,
+    };
+    const POOR: CropGenes = CropGenes {
+        yield_: -90,
+        vigor: -70,
+        hardy: -80,
+        hue: -60,
+    };
+
+    /// Anchor angle that stands `gap` units along the surface from the top of the planetoid.
+    fn beside(gap: f32) -> f32 {
+        std::f32::consts::FRAC_PI_2 + gap / 300.0
+    }
+
+    #[test]
+    fn baseline_plants_grow_exactly_as_before_genes() {
+        let mut game = rig();
+        let crop = species_with(&game, flora::Role::CropOnly);
+        let at = plant(&mut game, crop, 0.2);
+        let grow = game.farm.flora(crop).unwrap().grow_secs;
+        game.time += grow * 0.3;
+        let expected = (0.2 + 0.3f32).clamp(0.0, 1.0);
+        let g = game.farm.growth_of(&game.farm.plants[at], game.time);
+        assert!((g - expected).abs() < 1e-4, "{g} vs {expected}");
+        // Wild stock and gut seeds are baseline, so an untended farm is as it was.
+        let fresh = Game::new(42);
+        let mut fresh = fresh;
+        fresh.step(DT, Input::default());
+        assert!(fresh.farm.plants.iter().all(|p| p.genes.is_baseline()));
+    }
+
+    #[test]
+    fn vigor_changes_growth_time() {
+        let mut game = rig();
+        let crop = species_with(&game, flora::Role::CropOnly);
+        let slow = plant_with(&mut game, crop, 0.0, beside(-600.0), POOR);
+        let norm = plant_with(&mut game, crop, 0.0, beside(0.0), CropGenes::BASELINE);
+        let fast = plant_with(&mut game, crop, 0.0, beside(600.0), RICH);
+        let grow = game.farm.flora(crop).unwrap().grow_secs;
+        game.time += grow * 0.7;
+        let g = |i: usize| game.farm.growth_of(&game.farm.plants[i], game.time);
+        assert!(
+            g(slow) < g(norm) && g(norm) < g(fast),
+            "{} {} {}",
+            g(slow),
+            g(norm),
+            g(fast)
+        );
+        assert!(
+            g(fast) >= RIPE,
+            "a vigorous plant is ripe at 70 percent of the time"
+        );
+    }
+
+    #[test]
+    fn yield_gene_scales_the_harvest() {
+        let mut paid = [0.0f32; 3];
+        for (n, genes) in [POOR, CropGenes::BASELINE, RICH].into_iter().enumerate() {
+            let mut game = rig();
+            let crop = species_with(&game, flora::Role::CropOnly);
+            let at = plant_with(&mut game, crop, 1.0, std::f32::consts::FRAC_PI_2, genes);
+            // A cut whose roll pays food, whatever the luck of this plant's id.
+            let id = game.farm.plants[at].id;
+            let h = (0..50)
+                .find(|h| harvest_roll(game.seed, id, *h, true).0)
+                .unwrap();
+            game.farm.plants[at].harvests = h;
+            beam(&mut game, 2.5);
+            paid[n] = game.farm.biomass;
+        }
+        assert!(
+            paid[0] > 0.0 && paid[0] < paid[1] && paid[1] < paid[2],
+            "{paid:?}"
+        );
+        assert!(
+            (paid[2] / paid[1] - RICH.yield_mult()).abs() < 0.02,
+            "{paid:?}"
+        );
+        assert!(
+            (paid[0] / paid[1] - POOR.yield_mult()).abs() < 0.02,
+            "{paid:?}"
+        );
+    }
+
+    #[test]
+    fn hardy_plants_lose_less_to_grazers() {
+        let forage = species_with(&rig(), flora::Role::Forage);
+        let mut left = [0.0f32; 2];
+        for (n, genes) in [CropGenes::BASELINE, RICH].into_iter().enumerate() {
+            let mut game = rig();
+            let at = plant_with(&mut game, forage, 1.0, std::f32::consts::FRAC_PI_2, genes);
+            let lineage = lineage_that(&game, forage, true);
+            let id = grazer(&mut game, lineage);
+            for _ in 0..(8.0 / DT) as usize {
+                game.step(DT, Input::default());
+                let pos = game.farm.live[0].position;
+                let b = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+                b.position = pos;
+                b.velocity = Vec2::ZERO;
+            }
+            left[n] = game.farm.growth_of(&game.farm.plants[at], game.time);
+        }
+        assert!(left[0] < left[1], "hardy plant keeps more: {left:?}");
+    }
+
+    #[test]
+    fn seeds_cross_with_an_adjacent_mature_plant_of_the_same_species() {
+        let mut game = rig();
+        let crop = species_with(&game, flora::Role::CropOnly);
+        let other_species = (0..flora::SPECIES).find(|s| *s != crop).unwrap();
+        let a = plant_with(&mut game, crop, 1.0, beside(0.0), RICH);
+        let near = plant_with(&mut game, crop, 1.0, beside(150.0), POOR);
+        let seeds_from = |game: &mut Game, at: usize| -> Vec<CropGenes> {
+            (0..300)
+                .map(|h| {
+                    game.farm.plants[a].harvests = h;
+                    game.seed_genes(at, 0)
+                })
+                .collect()
+        };
+        // Deterministic: the same plant, count and seed number give the same genes.
+        assert_eq!(game.seed_genes(a, 1), game.seed_genes(a, 1));
+        let crossed = seeds_from(&mut game, a);
+        assert!(
+            crossed.iter().any(|g| g.yield_ == RICH.yield_),
+            "own genes pass on"
+        );
+        assert!(
+            crossed.iter().any(|g| g.yield_ == POOR.yield_),
+            "the neighbour's pass on"
+        );
+        assert!(
+            crossed
+                .iter()
+                .any(|g| g.yield_ > POOR.yield_ + 20 && g.yield_ < RICH.yield_ - 20),
+            "blends and mutants appear"
+        );
+        // A mate too far away, too young, or of another species changes nothing.
+        let lone = |game: &mut Game| seeds_from(game, a);
+        game.farm.plants[near].anchor = beside(900.0);
+        let far = lone(&mut game);
+        assert!(
+            far.iter().all(|g| g.yield_ > 20),
+            "{:?}",
+            far.iter().map(|g| g.yield_).min()
+        );
+        game.farm.plants[near].anchor = beside(150.0);
+        game.farm.plants[near].base = 0.1;
+        game.farm.plants[near].since = game.time;
+        assert!(
+            lone(&mut game).iter().all(|g| g.yield_ > 20),
+            "seedlings do not pollinate"
+        );
+        game.farm.plants[near].base = 1.0;
+        game.farm.plants[near].species = other_species;
+        assert!(
+            lone(&mut game).iter().all(|g| g.yield_ > 20),
+            "other species do not cross"
+        );
+    }
+
+    #[test]
+    fn a_ripe_cut_pays_seeds_carrying_the_bred_genes() {
+        let mut game = rig();
+        let crop = species_with(&game, flora::Role::CropOnly);
+        let a = plant_with(&mut game, crop, 1.0, beside(0.0), RICH);
+        let _mate = plant_with(&mut game, crop, 1.0, beside(150.0), RICH);
+        let id = game.farm.plants[a].id;
+        let h = (0..60)
+            .find(|h| harvest_roll(game.seed, id, *h, true).1 > 0)
+            .unwrap();
+        game.farm.plants[a].harvests = h;
+        let (_, n) = harvest_roll(game.seed, id, h, true);
+        let want: Vec<CropGenes> = (0..n).map(|k| game.seed_genes(a, k)).collect();
+        beam(&mut game, 2.5);
+        assert_eq!(game.farm.seed_count(), n);
+        for g in want {
+            assert!(
+                game.farm.seeds.contains_key(&SeedKind {
+                    species: crop,
+                    genes: g
+                }),
+                "{g:?}"
+            );
+        }
+        // Planting a bred seed gives a plant with its genes.
+        let kind = game.farm.selected_seed().unwrap();
+        game.farm.plants.clear();
+        set_player(&mut game, Vec2::new(0.0, 380.0), Vec2::ZERO);
+        game.interact();
+        assert_eq!(game.farm.plants[0].genes, kind.genes);
+        assert_eq!(game.farm.plants[0].species, crop);
+    }
+
+    #[test]
+    fn bred_seeds_and_plants_survive_a_save() {
+        let mut game = Game::new(42);
+        game.step(DT, Input::default());
+        let bred = SeedKind {
+            species: 3,
+            genes: RICH,
+        };
+        game.farm.add_seeds(bred, 2);
+        game.farm.add_seeds(SeedKind::wild(3), 1);
+        game.farm.plants[0].genes = POOR;
+        let text = game.save_state().to_text();
+        let (state, generator) = save::SaveState::from_text(&text).unwrap();
+        let (loaded, report) = Game::from_save(state, generator);
+        assert!(report.world_deltas_kept);
+        assert_eq!(loaded.farm.seeds, game.farm.seeds);
+        assert_eq!(loaded.farm.seeds.get(&bred), Some(&2));
+        assert_eq!(loaded.farm.plants[0].genes, POOR);
     }
 }

@@ -64,6 +64,151 @@ impl Chemistry {
     }
 }
 
+/// Most a gene may deviate from the species baseline, either way.
+pub const GENE_MAX: i8 = 100;
+
+/// The crop genome: four genes a plant or seed carries on top of its species, each a signed
+/// deviation in [-100, 100] from the species baseline (0). Every wild plant and every seed
+/// from a creature's gut is baseline (`CropGenes::default()`), so an untended farm plays
+/// exactly as it did before genes existed; only breeding moves them. Genes are integers so a
+/// seed kind is exact (stackable, orderable, saved without float noise).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub struct CropGenes {
+    /// Biomass per ripe cut: x1.5 at +100, x0.5 at -100.
+    pub yield_: i8,
+    /// Speed of growth: grow time x0.65 at +100, x1.35 at -100.
+    pub vigor: i8,
+    /// Resistance to grazers: bites take 20 percent as much at +100, 1.8 times as much at -100.
+    pub hardy: i8,
+    /// Leaf and fruit color, shifted warm at +100 and cool at -100 (no other effect).
+    pub hue: i8,
+}
+
+/// Chance each gene of a new seed mutates, and the most a mutation moves it.
+pub const MUTATION_CHANCE: f32 = 0.10;
+pub const MUTATION_STEP: i32 = 30;
+
+impl CropGenes {
+    pub const BASELINE: Self = Self {
+        yield_: 0,
+        vigor: 0,
+        hardy: 0,
+        hue: 0,
+    };
+
+    fn unit(v: i8) -> f32 {
+        f32::from(v) / f32::from(GENE_MAX)
+    }
+
+    pub fn is_baseline(&self) -> bool {
+        *self == Self::BASELINE
+    }
+
+    pub fn yield_mult(&self) -> f32 {
+        1.0 + 0.5 * Self::unit(self.yield_)
+    }
+
+    pub fn grow_mult(&self) -> f32 {
+        1.0 - 0.35 * Self::unit(self.vigor)
+    }
+
+    /// How much of a grazer's bite lands.
+    pub fn bite_mult(&self) -> f32 {
+        1.0 - 0.8 * Self::unit(self.hardy)
+    }
+
+    /// A leaf or fruit color shifted by the hue gene.
+    pub fn tinted(&self, [r, g, b]: [f32; 3]) -> [f32; 3] {
+        let h = Self::unit(self.hue);
+        [
+            (r + 0.35 * h).clamp(0.0, 1.0),
+            (g + 0.05 * h).clamp(0.0, 1.0),
+            (b - 0.35 * h).clamp(0.0, 1.0),
+        ]
+    }
+
+    fn slots(&mut self) -> [&mut i8; 4] {
+        [
+            &mut self.yield_,
+            &mut self.vigor,
+            &mut self.hardy,
+            &mut self.hue,
+        ]
+    }
+
+    /// The seed of two plants (or of one, crossed with itself): per gene, a parent's value
+    /// (40 percent each) or the mean of the two (20), then a point mutation per gene.
+    pub fn breed(a: Self, b: Self, rng: &mut Rng) -> Self {
+        let mut child = a;
+        let mut other = b;
+        for (slot, theirs) in child.slots().into_iter().zip(other.slots()) {
+            let (mine, theirs) = (i32::from(*slot), i32::from(*theirs));
+            let r = rng.f32();
+            let mut v = if r < 0.4 {
+                mine
+            } else if r < 0.8 {
+                theirs
+            } else {
+                (mine + theirs) / 2
+            };
+            if rng.chance(MUTATION_CHANCE) {
+                let step = rng.int(1, MUTATION_STEP as u32) as i32;
+                v += if rng.chance(0.5) { step } else { -step };
+            }
+            *slot = v.clamp(-i32::from(GENE_MAX), i32::from(GENE_MAX)) as i8;
+        }
+        child
+    }
+
+    /// A short label of the genes that differ from baseline, empty for a baseline plant.
+    pub fn label(&self) -> String {
+        let mut parts = Vec::new();
+        for (name, v) in [
+            ("YLD", self.yield_),
+            ("GRO", self.vigor),
+            ("HRD", self.hardy),
+            ("HUE", self.hue),
+        ] {
+            if v != 0 {
+                parts.push(format!("{name} {v:+}"));
+            }
+        }
+        parts.join(" ")
+    }
+}
+
+/// A kind of seed: a species and the genes it carries. Seeds of one kind stack.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub struct SeedKind {
+    pub species: u16,
+    #[serde(default)]
+    pub genes: CropGenes,
+}
+
+impl SeedKind {
+    /// A baseline seed of a species: what the wild and creatures' guts hold.
+    pub fn wild(species: u16) -> Self {
+        Self {
+            species,
+            genes: CropGenes::BASELINE,
+        }
+    }
+}
+
 /// What a consumer values, each axis in [-2, 1]. A negative weight is a poison or a dislike.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palate(pub [f32; AXES]);
@@ -340,5 +485,67 @@ mod tests {
             .filter(|r| matches!(r, Role::Shared | Role::CropOnly))
             .count();
         assert!((2..=9).contains(&crops), "{crops} crops of {SPECIES}");
+    }
+
+    #[test]
+    fn baseline_genes_change_nothing() {
+        let g = CropGenes::default();
+        assert!(g.is_baseline());
+        assert_eq!(
+            (g.yield_mult(), g.grow_mult(), g.bite_mult()),
+            (1.0, 1.0, 1.0)
+        );
+        assert_eq!(g.tinted([0.3, 0.6, 0.4]), [0.3, 0.6, 0.4]);
+        assert_eq!(g.label(), "");
+    }
+
+    #[test]
+    fn genes_scale_traits_in_the_documented_ranges() {
+        let hi = CropGenes {
+            yield_: 100,
+            vigor: 100,
+            hardy: 100,
+            hue: 100,
+        };
+        let lo = CropGenes {
+            yield_: -100,
+            vigor: -100,
+            hardy: -100,
+            hue: -100,
+        };
+        assert!((hi.yield_mult() - 1.5).abs() < 1e-6 && (lo.yield_mult() - 0.5).abs() < 1e-6);
+        assert!((hi.grow_mult() - 0.65).abs() < 1e-6 && (lo.grow_mult() - 1.35).abs() < 1e-6);
+        assert!((hi.bite_mult() - 0.2).abs() < 1e-6 && (lo.bite_mult() - 1.8).abs() < 1e-6);
+        assert!(hi.tinted([0.5; 3])[0] > lo.tinted([0.5; 3])[0]);
+    }
+
+    #[test]
+    fn breeding_is_deterministic_bounded_and_mixes_parents() {
+        let a = CropGenes {
+            yield_: 80,
+            vigor: -60,
+            hardy: 0,
+            hue: 100,
+        };
+        let b = CropGenes {
+            yield_: -40,
+            vigor: 60,
+            hardy: 100,
+            hue: -100,
+        };
+        let go = |s| CropGenes::breed(a, b, &mut Rng::new(s));
+        assert_eq!(go(5), go(5));
+        let kids: Vec<CropGenes> = (0..400).map(go).collect();
+        assert!(kids.iter().any(|k| *k != kids[0]), "seeds differ");
+        assert!(kids.iter().any(|k| k.yield_ == a.yield_));
+        assert!(kids.iter().any(|k| k.yield_ == b.yield_));
+        assert!(kids.iter().any(|k| k.yield_ == 20), "blends exist");
+        // Two baseline parents mostly breed baseline, sometimes a mutant.
+        let base: Vec<CropGenes> = (0..2000)
+            .map(|s| CropGenes::breed(CropGenes::BASELINE, CropGenes::BASELINE, &mut Rng::new(s)))
+            .collect();
+        let plain = base.iter().filter(|k| k.is_baseline()).count() as f32 / 2000.0;
+        let expect = (1.0 - MUTATION_CHANCE).powi(4);
+        assert!((plain - expect).abs() < 0.05, "{plain} vs {expect}");
     }
 }

@@ -752,8 +752,8 @@ pub enum Item {
     Surge(Surge),
     /// A specimen of another creature's organ (see `organs`).
     Specimen(super::organs::Strain),
-    /// A plant seed (the flora species id), carried by creatures that eat that plant.
-    Seed(u16),
+    /// A plant seed (species and crop genes), carried by creatures that eat that plant.
+    Seed(crate::flora::SeedKind),
 }
 
 impl Item {

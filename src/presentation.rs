@@ -4636,7 +4636,7 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
             live.position
                 + Vec2::from_angle(turn).rotate(Vec2::from_angle(sway).rotate(p)) * PLANT_SCALE
         };
-        let [tr, tg, tb] = flora.tint;
+        let [tr, tg, tb] = plant.genes.tinted(flora.tint);
         let leaf = Color::srgb(tr, tg, tb);
         for part in &plan.parts {
             let (a, b) = (place(part.start), place(part.end()));

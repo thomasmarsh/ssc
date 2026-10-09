@@ -1636,9 +1636,9 @@ fn describe(
                 return None;
             }
             let mut text = format!("BIOMASS {:.0}", farm.biomass);
-            if let Some(species) = farm.selected_seed() {
-                let name = farm.flora(species).map_or("", |f| f.name.as_str());
-                text.push_str(&format!("   SEEDS {} {name}", farm.seed_count()));
+            if let Some(kind) = farm.selected_seed() {
+                let label = farm.seed_label(kind);
+                text.push_str(&format!("   SEEDS {} {label}", farm.seed_count()));
             }
             (
                 text,

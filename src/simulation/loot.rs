@@ -244,7 +244,7 @@ impl Game {
             Item::Specimen(strain) => {
                 self.take_strain(strain, "SPECIMEN");
             }
-            Item::Seed(species) => self.gain_seed(species),
+            Item::Seed(kind) => self.gain_seed(kind),
         }
     }
 

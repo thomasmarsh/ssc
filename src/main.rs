@@ -1052,7 +1052,23 @@ fn smoke_run(
             .ok()
             .and_then(|v| v.trim().parse::<f32>().ok())
             .unwrap_or(0.0);
-        let at = session.game.stage_farm(mode == "plant", age);
+        // SSC_FARM_GENES="yield,vigor,hardy,hue" (each -100 to 100) gives the staged seeds genes.
+        let genes = std::env::var("SSC_FARM_GENES")
+            .ok()
+            .map(|v| {
+                let mut g = v
+                    .split(',')
+                    .map(|n| n.trim().parse::<i8>().unwrap_or(0).clamp(-100, 100));
+                let mut next = || g.next().unwrap_or(0);
+                ssc::flora::CropGenes {
+                    yield_: next(),
+                    vigor: next(),
+                    hardy: next(),
+                    hue: next(),
+                }
+            })
+            .unwrap_or_default();
+        let at = session.game.stage_farm(mode == "plant", age, genes);
         eprintln!("SSC_FARM staged at {at:?}");
         session.game.player_invulnerability = 1e9;
     }

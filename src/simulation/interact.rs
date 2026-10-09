@@ -54,8 +54,11 @@ impl Game {
         // Planting beats deploying a pad and the hints that wait on one; landing, the bench
         // and a tithe that would work come first.
         let plant = match self.plant_hint() {
-            farm::PlantHint::Ready(species, ..) => {
-                let name = self.farm.flora(species).map_or("SEED", |f| f.name.as_str());
+            farm::PlantHint::Ready(kind, ..) => {
+                let name = self
+                    .farm
+                    .flora(kind.species)
+                    .map_or("SEED", |f| f.name.as_str());
                 Some(prompt(Verb::Plant, &format!("PLANT {name}"), None))
             }
             farm::PlantHint::TooFast => Some(prompt(Verb::Plant, "PLANT", Some("SLOW DOWN"))),
