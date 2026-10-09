@@ -113,6 +113,15 @@ HOME's planetoid has plants from the start. Fly slowly up to it: the key reads P
 - Planting: is the key prompt clear (PLANT NAME, SLOW DOWN, TOO CLOSE TO ANOTHER PLANT) and does it get in the way of landing? Knobs: `PLANT_RANGE`, `PLANT_SPEED`, `SPACING`.
 - Look: plants are drawn as raw grammar line art at scale 16; some bushy ones read as scribble. Knob: `PLANT_SCALE`, leaf rules in `draw_plants`.
 
+## Big herds (workstream 8, slice 1)
+
+A herd is one flock of 100 to 300 Bogey-like members (flat array, not bodies), in about one wild sector in 30 from ring 3 out. To find one: `SSC_TELEPORT="-11300,-22459"` (a herd at sector -2,-4 on the default seed). Check by feel:
+- Calm: the herd drifts, holds together, parts around the ship and never stings. Knobs: `PERCEPTION`, `W_*`, `SHY_RANGE` in `simulation/flock.rs`.
+- Provoked: fly within the species' sight (about 320), or shoot one: the whole herd turns hostile, charges and stings (up to 5 touching members at half the contact damage a second each), and calms again beyond `lose` and 8 s after the last hurt (`PROVOKED`). Too gentle or too deadly? Knobs: `STING_RATE`, `STING_CAP`, `CHASE_PACE`.
+- Killing: one shot kills one member (hull 40 percent of the species', `MEMBER_HULL`) and pays a tenth of the bounty (`MEMBER_BOUNTY`); blasts and novas cut swaths. Does thinning a herd feel good or tedious? Is 100 to 300 right (`herd::MIN_MEMBERS`, `MAX_MEMBERS`)?
+- Look: members are small chevrons, dashes at middle range, dots far away. Does a herd read as one living thing?
+- Not yet: herds do not show on the radar, sonar or map (slice 3), do not drop loot, and shots from ram, mines and Lunatic fields do not hurt members.
+
 ## Questions to answer after the first session
 
 1. Which of the above felt wrong first? One line each is enough.

@@ -336,6 +336,9 @@ impl Game {
         for (id, dealt, pool) in blast_hits {
             self.note_family_hit(id, super::arsenal::Family::Explosive, dealt, pool);
         }
+        if friendly {
+            self.flocks_blast(at, radius, amount);
+        }
         self.effect(at, radius * 0.7, 0.45, EffectKind::Explosion);
     }
 

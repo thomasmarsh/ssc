@@ -2717,6 +2717,7 @@ pub fn draw(
         }
     }
     draw_walls(&mut gizmos, game, camera, half);
+    crate::flockview::draw(&mut gizmos, game, camera, half);
     for cache in game.caches() {
         if (cache.at - camera)
             .abs()

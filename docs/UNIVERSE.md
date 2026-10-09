@@ -345,6 +345,10 @@ The sky behind the ship says where you are, in the colours of the sector map. `s
 - `src/nebula.rs` only draws: seven low-alpha meshes behind everything (far and mid wisps, streaks, filaments, grit, a smooth colour wash, the vignette), each tiling one noise texture the library generates once (`backdrop::texture`), tinted per vertex from a coarse grid of `backdrop_at` samples, on parallax layers. No layer is ever more opaque than `MAX_LAYER_ALPHA`, so ships, rocks and shots stay readable.
 - `U` toggles "reduce effects" (hides the nebula and returns the stars to the plain field); `SSC_REDUCE_EFFECTS=1` starts that way. `SSC_OFFSCREEN=1` renders into an image instead of the window, which makes `SSC_SCREENSHOT` work when the display is locked or asleep (a window renders black then).
 
+## Big herds (built, generator version 28)
+
+Wild sectors from ring 3 out may hold a herd: one flock of 100 to 300 members of the sector's most abundant passive school (`src/herd.rs`, a private salted stream; `world::generate` and the HOME golden are untouched). The runtime is `simulation/flock.rs` (see WORKSTREAMS section 8). HOME and rings 1 and 2 never hold one.
+
 ## Not built yet
 
 - TODO: **More realm levers.** No realm stresses mining or symbiosis as a primary axis (a barren realm with poor rock, a realm of spores that foul organs), realms do not yet change civilizations (territory strength, fortress tier, regard), dynamic well modes do not tilt by realm beyond count and pull, and the sniping counters lack a heat or cargo cost on the stock gun and an accuracy spread at range (falloff only).

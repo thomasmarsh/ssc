@@ -29,6 +29,7 @@ mod ecology;
 pub mod farm;
 pub mod feel;
 mod fields;
+pub mod flock;
 mod food;
 mod fortress;
 mod growth;
@@ -87,6 +88,7 @@ pub use cues::Cue;
 pub use diplomacy::{Regard, Tier, TitheError, TitheHint};
 pub use discovery::Info as DiscoveryInfo;
 pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
+pub use flock::{Flock, Lod as FlockLod, Member as FlockMember};
 pub use food::{FOOD_RADIUS, Food, fertility};
 pub use growth::Egg;
 pub use guide::{
@@ -586,6 +588,8 @@ pub struct Game {
     mine_note: f32,
     loaded: HashSet<SectorId>,
     active: Vec<SectorId>,
+    /// Big herds as flocks with their members in flat arrays (see `flock`).
+    flocks: Vec<flock::Flock>,
     /// HOME is a sanctuary: while the ship is in its sector no creature hunts it unless it
     /// has been hurt. Tests that stage fights at the origin turn it off (`empty_game`).
     sanctuary: bool,
@@ -709,6 +713,7 @@ impl Game {
             fallen: HashMap::new(),
             loaded: HashSet::new(),
             active: Vec::new(),
+            flocks: Vec::new(),
         }
     }
 
@@ -888,6 +893,7 @@ impl Game {
         self.update_civ_mining(dt);
         self.update_roots(dt);
         if !frozen {
+            self.update_flocks(dt);
             self.update_bases(dt);
             self.update_turrets(dt);
         }
@@ -956,6 +962,7 @@ impl Game {
         self.update_parry(dt);
         self.update_dash(dt);
         self.move_bullets(dt);
+        self.shoot_flocks(dt);
         self.update_mines(dt);
         self.update_rune_fields(dt);
         self.update_husks();
@@ -1004,12 +1011,14 @@ impl Game {
         for id in self.active.clone() {
             if self.loaded.insert(id) {
                 self.populate(id);
+                self.populate_flocks(id);
                 self.populate_food(id);
                 self.place_relic(id);
             }
         }
         self.loaded
             .retain(|id| id.chebyshev_distance(home) <= UNLOAD_DISTANCE);
+        self.retain_flocks(home);
         self.mines.retain(|m| {
             SectorId::containing(m.position).chebyshev_distance(home) <= UNLOAD_DISTANCE
         });
@@ -2062,6 +2071,9 @@ impl Game {
                 } else if !friendly && body.kind == BodyKind::Player {
                     damage(body, amount, invulnerability);
                 }
+            }
+            if friendly {
+                self.flocks_blast(at, radius, amount * boost);
             }
             self.effect(at, radius * 0.6, 0.3, EffectKind::Explosion);
         }

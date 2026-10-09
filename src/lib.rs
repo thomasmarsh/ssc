@@ -11,6 +11,7 @@ pub mod flora;
 pub mod fortress;
 pub mod genome;
 pub mod grammar;
+pub mod herd;
 pub mod hosted;
 pub mod mixer;
 pub mod power;

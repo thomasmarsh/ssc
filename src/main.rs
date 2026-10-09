@@ -2,6 +2,7 @@ mod audio;
 mod autosave;
 mod bestiaryview;
 mod devpanel;
+mod flockview;
 mod glitchview;
 mod grammarview;
 mod hud;
