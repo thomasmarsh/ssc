@@ -3,6 +3,7 @@ use super::*;
 
 pub const REFINERY_PRICE: [(Material, f32); 2] =
     [(Material::Metal, 40.0), (Material::Crystal, 10.0)];
+pub const WATER_TANK_PRICE: [(Material, f32); 1] = [(Material::Metal, 20.0)];
 const INPUT: f32 = 10.0;
 const OUTPUT: f32 = 25.0;
 const SECONDS: f32 = 10.0;
@@ -74,6 +75,28 @@ impl Game {
         self.bench_done("FUEL REFINERY BUILT".into(), upgrades::Rarity::Common);
     }
 
+    pub(super) fn water_tank_block(&self) -> Option<&'static str> {
+        match self.landed_pad() {
+            None => Some("LAND AT A PAD"),
+            Some(pad) if pad.water_tank => Some("ALREADY BUILT"),
+            Some(_) => None,
+        }
+    }
+
+    pub(super) fn buy_water_tank(&mut self) {
+        if let Some(why) = self.water_tank_block() {
+            self.bench_failed(why.into());
+            return;
+        }
+        if !self.cargo.spend(&WATER_TANK_PRICE) {
+            self.bench_failed("NEEDS 20M".into());
+            return;
+        }
+        let key = self.pad.landed.unwrap();
+        self.pad.pads.get_mut(&key).unwrap().water_tank = true;
+        self.bench_done("WATER TANK BUILT".into(), upgrades::Rarity::Common);
+    }
+
     pub(super) fn update_production(&mut self, dt: f32) {
         for pad in self.pad.pads.values_mut() {
             if let Some(refinery) = &mut pad.refinery {
@@ -102,6 +125,56 @@ mod tests {
         game.cargo.fuel = 0.0;
         game.bench_select(BenchAction::Refinery);
         game
+    }
+
+    #[test]
+    fn water_tank_purchase_transfers_and_save_preserve_local_caps() {
+        let mut game = setup();
+        game.loadout.research.known.clear();
+        let key = game.pad.landed.unwrap();
+        game.bench_select(BenchAction::WaterTank);
+        game.cargo.metal = 19.0;
+        game.bench_confirm();
+        assert!(!game.pad.pads[&key].water_tank);
+        assert_eq!(game.cargo.metal, 19.0);
+        game.cargo.metal = 40.0;
+        game.bench_confirm();
+        assert!(game.pad.pads[&key].water_tank);
+        assert_eq!(game.cargo.metal, 20.0);
+        game.bench_confirm();
+        assert_eq!(game.cargo.metal, 20.0);
+        assert_eq!(
+            game.pad.pads[&key].stash_cap(Material::Metal),
+            pads::STASH_CAP
+        );
+        game.pad.pads.get_mut(&key).unwrap().stash.water = 290.0;
+        game.cargo.water = 30.0;
+        game.bench_select(BenchAction::Stash(Material::Water));
+        let row = game
+            .bench_panel()
+            .unwrap()
+            .rows
+            .into_iter()
+            .find(|row| row.action == BenchAction::Stash(Material::Water))
+            .unwrap();
+        assert!(row.detail.contains("stores 10.0"));
+        assert!(row.detail.contains("Site cap 300"));
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&key].stash.water, 300.0);
+        assert_eq!(game.cargo.water, 20.0);
+        game.bench_confirm();
+        assert_eq!(game.cargo.water, 20.0);
+        game.bench_alt();
+        assert_eq!(game.cargo.water, 30.0);
+        assert_eq!(game.pad.pads[&key].stash.water, 290.0);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (loaded, _) = Game::from_save(state, generator);
+        assert!(loaded.pad.pads[&key].water_tank);
+        assert_eq!(loaded.pad.pads[&key].stash.water, 290.0);
+        assert_eq!(loaded.pad.pads[&key].stash_cap(Material::Water), 300.0);
+        game.pad.landed = None;
+        game.buy_water_tank();
+        assert_eq!(game.cargo.metal, 20.0);
     }
 
     #[test]

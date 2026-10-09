@@ -35,6 +35,7 @@ pub struct Bench {
 pub enum BenchAction {
     Repair,
     Refinery,
+    WaterTank,
     Research(research::Tech),
     Grade,
     Outfit(Slot),
@@ -115,7 +116,12 @@ impl Game {
                 .chain([Material::Fuel, Material::Water].map(BenchAction::Supply))
                 .chain([Slot::Plating, Slot::Engine, Slot::Core].map(BenchAction::Outfit))
                 .chain(self.pad.contact.map(|_| BenchAction::Tithe))
-                .chain(self.pad.landed.map(|_| BenchAction::Refinery))
+                .chain(
+                    self.pad
+                        .landed
+                        .into_iter()
+                        .flat_map(|_| [BenchAction::Refinery, BenchAction::WaterTank]),
+                )
                 .chain(Material::ALL.map(BenchAction::Stash))
                 .collect(),
             BenchTab::Weapons => Profile::ALL.map(BenchAction::Weapon).to_vec(),
@@ -182,6 +188,7 @@ impl Game {
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
             Some(BenchAction::Refinery) => self.buy_refinery(),
+            Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
             Some(BenchAction::Grade) => self.buy_grade(),
             Some(BenchAction::Outfit(slot)) => self.buy_outfit(slot),
@@ -555,14 +562,35 @@ impl Game {
                     }
                 }
             }
+            BenchAction::WaterTank => {
+                row.group = "PAD PRODUCTION";
+                row.text = "BUILD WATER TANK".into();
+                row.detail = format!(
+                    "Raises this pad's water storage from {:.0} to {:.0}. No research or power needed; store water with Enter and take it with Q / X.",
+                    pads::STASH_CAP,
+                    pads::WATER_TANK_CAP
+                );
+                if self.landed_pad().is_some_and(|p| p.water_tank) {
+                    row.text = "WATER TANK".into();
+                } else {
+                    row.costs = production::WATER_TANK_PRICE.to_vec();
+                }
+                if let Some(why) = self.water_tank_block() {
+                    row.ok = false;
+                    row.state = why.into();
+                }
+            }
             BenchAction::Stash(m) => {
                 row.group = "PAD STASH";
                 let stash = self.landed_pad().map(|p| p.stash).unwrap_or_default();
+                let cap = self
+                    .landed_pad()
+                    .map_or(pads::STASH_CAP, |p| p.stash_cap(m));
                 let store = self
                     .cargo
                     .amount(m)
                     .min(STASH_STEP)
-                    .min((pads::STASH_CAP - stash.amount(m)).max(0.0));
+                    .min((cap - stash.amount(m)).max(0.0));
                 let take = stash.amount(m).min(STASH_STEP).min(self.cargo.room(m));
                 row.text = format!(
                     "STORE {}   hold {:.0} / stash {:.0}",
@@ -571,8 +599,8 @@ impl Game {
                     stash.amount(m)
                 );
                 row.detail = format!(
-                    "Enter stores {store:.1}; Q / X takes {take:.1}. Stash cap {:.0} each; hold cap {:.0}.",
-                    pads::STASH_CAP,
+                    "Enter stores {store:.1}; Q / X takes {take:.1}. Site cap {:.0}; hold cap {:.0}.",
+                    cap,
                     self.cargo.cap(m)
                 );
                 row.ok = store >= 0.5;

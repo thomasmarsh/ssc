@@ -128,6 +128,7 @@ impl Snapshot {
             | BenchAction::Outfit(_)
             | BenchAction::Tithe
             | BenchAction::Research(_)
+            | BenchAction::WaterTank
             | BenchAction::Refinery
             | BenchAction::Grade => receipt.text.clone(),
         };

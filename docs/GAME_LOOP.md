@@ -194,7 +194,9 @@ Build pad modules with connected local storage and power: extractor, refinery, f
 
 **Built narrow D: fuel refinery.** At any landed pad, PARTS commissions one refinery for 40 metal + 10 crystal after Fabrication research (available peacefully at HOME). Integral power is included. Store volatiles using the existing stash rows; each batch reserves 10 volatiles and takes 10 simulation seconds to produce 25 fuel into the pad's 100-unit fuel stash. Q / X retrieves it. Every owned pad advances each simulation tick, including unloaded sites; saved work resumes without wall-clock catch-up. Missing input or insufficient room stops new batches; a finished blocked batch keeps its reservation until room returns. Losing/dismantling the pad also loses its machine and reserved batch; stocked goods use the existing stash salvage/refund rules. Generation and save version stay unchanged (additive defaulted pad field).
 
-TODO: remaining D: water extraction/tanks/irrigation, bought raw-input supply, separate local power/storage modules, and more machine jobs. Refinery balance and its integral-power default need playtesting.
+**Built water storage:** PARTS at any landed pad builds one water tank for 20 metal, without research or power. It raises only local water capacity from 100 to 300; the ship remains capped at 30. Installation and stocks persist with the pad, and removal loses the tank under existing pad salvage rules. No extraction or irrigation yet.
+
+TODO: remaining D: water extraction/irrigation, bought raw-input supply, separate local power/storage modules, and more machine jobs. Refinery balance and its integral-power default need playtesting.
 
 ### Mining drones and escorts
 

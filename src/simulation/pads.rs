@@ -57,8 +57,9 @@ pub const HIDE_SIGHT: f32 = 3.0;
 pub const LOSE_AFTER: f32 = 4.0;
 /// Seconds cover stays broken after firing, damage or a hostile tenant.
 pub const COVER_BREAK: f32 = 10.0;
-/// What a pad stash holds of each material.
+/// Base capacity per material before dedicated site storage.
 pub const STASH_CAP: f32 = 100.0;
+pub const WATER_TANK_CAP: f32 = 300.0;
 /// How much one bench press moves in or out of the stash.
 pub const STASH_STEP: f32 = 25.0;
 /// Field repair: hull per second and metal per hull point; shield per second and fuel
@@ -96,12 +97,24 @@ pub struct Pad {
     pub stash: Cargo,
     #[serde(default)]
     pub refinery: Option<super::production::Refinery>,
+    #[serde(default)]
+    pub water_tank: bool,
     /// Deployment order: the oldest is dismantled first.
     pub order: u64,
     /// The home-base pad on HOME's planetoid, there from the start: never dismantled for a
     /// new one, never counted against `MAX_PADS`, and the fallback recovery point.
     pub home: bool,
     reloads: u32,
+}
+
+impl Pad {
+    pub fn stash_cap(&self, material: Material) -> f32 {
+        if material == Material::Water && self.water_tank {
+            WATER_TANK_CAP
+        } else {
+            STASH_CAP
+        }
+    }
 }
 
 /// What pressing the land key would do right now, for the prompt.
@@ -338,6 +351,7 @@ impl Game {
                 home: true,
                 reloads: 0,
                 refinery: None,
+                water_tank: false,
             },
         );
         self.pad.next_order = 1;
@@ -727,6 +741,7 @@ impl Game {
                 home: false,
                 reloads: 0,
                 refinery: None,
+                water_tank: false,
             },
         );
         let spot = center + Vec2::from_angle(angle + anchor) * radius;
@@ -1449,12 +1464,13 @@ impl Game {
         let Some(pad) = self.pad.pads.get_mut(&key) else {
             return;
         };
+        let cap = pad.stash_cap(kind);
         let moved = if deposit {
             self.cargo.transfer(
                 &mut pad.stash,
                 kind,
                 STASH_STEP,
-                super::mining::Storage::Site(STASH_CAP),
+                super::mining::Storage::Site(cap),
             )
         } else {
             pad.stash.transfer(
@@ -1795,6 +1811,7 @@ mod tests {
                     home: false,
                     reloads: 0,
                     refinery: None,
+                    water_tank: false,
                 },
             );
         }
@@ -2529,6 +2546,7 @@ mod tests {
                 home: false,
                 reloads: 0,
                 refinery: None,
+                water_tank: false,
             },
         );
     }
@@ -3038,10 +3056,7 @@ mod tests {
         let start = total(&game);
         bench(&mut game, 4);
         for i in 0..12 {
-            game.pad.bench = Some(Bench {
-                tab: BenchTab::Parts,
-                cursor: 6 + game.loadout.parts.len() * 2 + i % 3,
-            });
+            game.bench_select(BenchAction::Stash(Material::ALL[i % 3]));
             if i % 4 == 3 {
                 game.bench_alt();
             } else {
@@ -3158,6 +3173,7 @@ mod tests {
                     home: false,
                     reloads: 0,
                     refinery: None,
+                    water_tank: false,
                 },
             );
         }
