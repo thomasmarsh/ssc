@@ -2,7 +2,11 @@
 
 This records the intended shape of the game's procedural universe and how much of it exists today. The design came from a planning discussion; the code is the source of truth for what is built.
 
-Status: BUILT - sectors and latent space, gene pools, niches, ecology and growth, learners (civilizations only), creatures, persistence of kills, asteroid structure, mining and materials, the rig, pads and the bench, stations, weapon patterns, tethers, modular bodies, rooted life, civilizations, diplomacy, apex elders, fortified cities, sector map, rare powers and dynamic wells, realms, sniping counters, the backdrop, run stats, HUD and feel, kinetic impacts, charting, legacy and discovery (each section is tagged "built"). PARTIAL - persistence (kills only), realm effects (civilizations untouched). TODO items are in "Not built yet" and inline tagged `TODO:`; sector size (6000 versus the old 1200) is an open question to settle by playing. Bounded screenshot hooks are in [HOOKS.md](HOOKS.md).
+Status: BUILT - sectors and latent space, gene pools, niches, ecology and growth, learners (civilizations only), creatures, persistence of kills, asteroid structure, mining and materials, the rig, pads and the bench, stations, weapon patterns, tethers, modular bodies, rooted life, civilizations, diplomacy, apex elders, fortified cities, sector map, rare powers and dynamic wells, realms, sniping counters, the backdrop, run stats, HUD and feel, kinetic impacts, charting, legacy and discovery (each section is tagged "built"). PARTIAL - transient creature state (positions/damage/bred creatures are not saved), realm effects (civilizations untouched). TODO items are in "Not built yet" and inline tagged `TODO:`; sector size is 6000 (the old 1200 note was a typo). Bounded screenshot hooks are in [HOOKS.md](HOOKS.md).
+
+## Target loop versus built rules
+
+[GAME_LOOP.md](GAME_LOOP.md) records the 2026-10-09 target; it is unbuilt unless a status says otherwise. Raw-only wildlife/apex rewards, unified biomass/fuel/water, manufactured goods, research/capture, explicit jobs/agreements, fleets, and paid player homestead construction supersede earlier reward/economy proposals. Current three-material cargo and wildlife technological drops below remain code facts pending implementation. There are already no wild Smarties or learners; civilization citizens alone learn. Sector size is 6000, and full progress/crop/pad/structure disk persistence is built in [PERSISTENCE.md](PERSISTENCE.md).
 
 ## Philosophy
 
@@ -139,7 +143,9 @@ Negative mass flips gravity and shot knockback and adds fling strength. Fear (pl
 
 ## Persistence (built)
 
-Every spawn has a stable index within its sector (its position in the generator's output). The simulation records which spawns have been destroyed, so a sector that unloads and reloads comes back as the player left it: killed creatures, shot-out nest stones, consumed rocks and destroyed bases stay gone. A chain counts as destroyed only when its last segment dies. A spawn whose creature wandered off but is still loaded is not duplicated when its home sector reloads. Only kills persist. Positions, damage, bred creatures and shards are not remembered, so the rest of a sector regenerates fresh, and a partly destroyed chain returns whole.
+This paragraph describes generated-body destruction memory, not the full save inventory. Ship progress, materials, crops, pads, structures, chart, and relations are also saved; [PERSISTENCE.md](PERSISTENCE.md) is authoritative.
+
+Every spawn has a stable index within its sector (its position in the generator's output). The simulation records which spawns have been destroyed, so a sector that unloads and reloads comes back as the player left it: killed creatures, shot-out nest stones, consumed rocks and destroyed bases stay gone. A chain counts as destroyed only when its last segment dies. A spawn whose creature wandered off but is still loaded is not duplicated when its home sector reloads. For ordinary generated creatures, only kills persist. Positions, damage, bred creatures and shards are not remembered, so the rest of a sector regenerates fresh, and a partly destroyed chain returns whole.
 
 ## Asteroid structure (built)
 
@@ -150,6 +156,8 @@ Every spawn has a stable index within its sector (its position in the generator'
 - Inhabited husks have a hollow mouth and moving feelers. They release two to four creatures when approached or shot, including on a lethal hit. Shells and sheltered nests are seeded more frequently away from HOME.
 
 ## Mining and materials (built)
+
+TODO: GAME_LOOP slice A generalizes goods and storage, moves `Farm::biomass` into shared inventory, adds fuel/water, and expands the three cargo pips to six fixed counters. Fuel becomes manufactured; volatiles remain raw feedstock. Water uses small ship reserves and bulk site tanks. The rules below describe the current three-material implementation.
 
 The ship carries three materials, `Cargo { metal, volatiles, crystal }`, cap 200 each (`src/simulation/mining.rs`). Hold `M` (gamepad right trigger R2; the bumpers switch weapon) to extend a beam at the nearest minable rock within 260 units of the ship's center to its surface; there is no aiming and no cone. Mining and firing exclude each other (the beam wins while held). The beam draws 4 shield per second, suppresses shield recharge while on, refuses below 6 shield and has no heat. Mute moved to `N`.
 
@@ -180,6 +188,8 @@ Balance (all numbers in `src/simulation/tuning.rs`): free rocks take 1/80 of the
 - **The counter.** Learners and civilization members that come within sight of a pad remember it (per territory for civs); those within 1500 hunt it, and within 300 they gnaw 4 hp/s each (up to 5), hurting a landed ship too. A raid from a territory that knows a pad in the simulated region arrives around the pad. Unloaded sectors simulate nothing: a pad known to enemies takes one seeded raid roll per reload (hash of seed, sector, index and reload count; 50% for 60-220 damage).
 
 ## Stations and where parts come from (built)
+
+TODO: GAME_LOOP slices B/C replace technological wildlife/apex rewards with raw goods and biological specimens. Civilization citizens keep basic equipment salvage; seats/knowledge structures provide bounded captured research instead of their entire technology profile. Peaceful basic equipment/support purchases must land with this loot change. Numbers below are current drop behavior, not the target reward policy.
 
 **There are no wild spawn points.** Ecosystem bases used to appear wherever danger, aggression, tech or swarm ran high (about 0.7 to 0.8 a sector from ring 3 on): they bred the sector's fauna, built guardians and paid a guaranteed part and two or three rolls for a few hits, which was more permanent gear per sector than every creature together and an easy upgrade farm. Generation still makes the old draws on its stream (so nothing after them moves) but places nothing; the `station` stream is retired. Wild life reproduces naturally (eggs, live birth, caps per lineage). Stone-ring nests and inhabited husks remain: they hold creatures but spawn nothing and pay no part.
 
@@ -258,6 +268,8 @@ Code: `src/territory.rs` (where and what), `src/simulation/civ.rs` (play). The l
 - **Known gaps.** Balance is by numbers, not playtested: a bare ship is outclassed in the nearest territories (depth 6 to 8). TODO: doctrine and falls are not persisted past the session. Wildlife is edged away unless it has an affinity for the civilization (see Species and civilizations). TODO: no border cue in the world and no dedicated sounds.
 
 ## Diplomacy (built)
+
+TODO: GAME_LOOP slices E/H add stock-backed offers, explicit agreements, jobs/earned boons, research access, and visiting merchant ships. Tithes and friendly farm exchanges below are the existing contact system, not general trade contracts.
 
 Code: `src/simulation/diplomacy.rs`, numbers in `tuning.rs` (`REGARD_*`, `HURT_*`, `KILL_*`, `MINE_*`, `TITHE_*`, `TRADE_*`, `DOCTRINE_PULL`). Each civilization met has a regard toward the ship (-100 to 100, kept for the run, lost on restart) read as a tier with hysteresis: hostile, wary, ignores, friendly. Ordinary civilizations start at 0 (ignores), the early outpost at 15. It falls with damage to members (0.08 a point), structures (0.02), kills by the ship (member 5, warrior 7, elder 30, turret 8, outpost seat 30, capital 45) and ore taken in a claim (0.12 each); it rises 0.1 a second while the ship lingers in the claim 20 s after the last offence (to 25, the outpost to 60), fades back toward its start away from the claim, and jumps by a tithe (+9). Non-hostile civilizations: members do not attack on sight or join alarms (a hurt member still fights), no raids, turrets and bastions hold fire, nobody hunts a pad, doctrine tables learn slower (`DOCTRINE_PULL`). Friendly: charts shared once, the doctrine table forgotten, a tithe returns a repair or a swap. Wildlife has ties to civilizations (see Species and civilizations), so killing it can cost or earn regard.
 

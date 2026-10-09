@@ -153,3 +153,19 @@ Check `slinger`, `longslinger`, and `softslinger` smoke/dev specimens: the famil
 - Can familiar species still be recognized when appendage counts, proportions or skin vary? Compare the authored Slinger with generated carrier hooks in HOOKS. Knobs: `CARRIER_VARIANT_CHANCE` (0.30), `UNUSUAL_CARRIER_CHANCE` (0.05), carrier variation ranges in `development.rs`.
 - Do extra-power warnings remain readable and escapable alongside the original capability? Knobs: `MULTI_POWER_CHANCE` (0.02), `EXTRA_POWER_CONTINUE_CHANCE` (0.10), `MAX_SAMPLED_POWERS` (3). The telegraph minima and existing source budgets remain fixed.
 - Does a varied body feel too large or too busy? Knob: `MAX_SAMPLED_CARRIER_BODIES` (16), depth-zero weighted anatomy grammar. Founder percentages do not predict local encounter density.
+
+## Proposed game-loop checkpoints (TODO, not current playable checks)
+
+[GAME_LOOP.md](GAME_LOOP.md) section 13 defines the slices. Run these as their milestones land; do not infer the planned features exist from this table.
+
+| Checkpoint | What to try | What would fail the design |
+| --- | --- | --- |
+| A: resources | Harvest/trade biomass, buy fuel, inspect ship and site water, use a narrow window/controller | Two biomass balances, unreadable six counters, raw volatiles labeled fuel, site stock masquerading as ship reserve |
+| B/C: peaceful first frontier | Start fresh, never kill, earn/buy parts and support tech, advance grade and depth | Parry/dash/symbiosis or a required realm counter has a hidden kill gate; no affordable early supplier |
+| B/C: warlike first frontier | Fight wildlife, inspect raw/organ drops, raid a civilization, then push outward | Wildlife still pays cannons; one raid teaches everything; removing loot creates a stalled early game |
+| C: power and realm access | Compare prepared builds through several depths; try bare (100,100); pursue a marked counter | Grade saturates at the old cap, late repair becomes starter-mining grind, required source is inside its own inaccessible realm |
+| D/E: working home | Build a refinery/farm, leave, complete a delivery, come back | Waiting is the best action; water/fuel has circular startup needs; research cooperation pays less access than conquest |
+| F/G: remote industry | Lose drones, salvage a shared wreck, ship water to a dry established pad, block a dock | Losses require constant babysitting; ore or cargo duplicates; ship bulk hauling is easier than tankers; transport ignores endpoints/fuel |
+| H/I: home payoff | Observe a trade arrival, receive a raid warning, upgrade escorts/turrets, follow a shortage across hubs | The network feels invisible, reload changes a settled loss, one incident erases the economy, next useful project is unclear |
+
+Balance knobs to introduce with those slices: starter procurement costs, processing work/throughput, water reserve/tank size, grade/threat relation, capture allowance/cooperation depth, job rewards and repetition limits, fleet fuel/capacity, recovery/replacement costs, route/event budgets, and warning/loss limits. Register them when implemented; no such tuning registry or human verification is claimed here.

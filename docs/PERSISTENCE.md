@@ -63,3 +63,20 @@ Tested in `simulation/save.rs`: the text round trip is a fixed point (apart from
 - Crops are saved (`Farm`, see the table); machines will add their own delta struct when built.
 - Legacy and wrecks ride in the run file (decided, see above); a separate file depends on what 'new game' erases.
 - Migration fixtures and tests: NOT until 1.0 (user decision, permanent until lifted).
+
+## Planned economy and fleet state (TODO)
+
+[GAME_LOOP.md](GAME_LOOP.md) section 12 is the target; no new state below is currently serialized. Extend the existing save in each implementation slice, not after the economy exists.
+
+| Planned authoritative state | Required save behavior |
+| --- | --- |
+| Unified ship/site goods, fuel/water tanks, reservations | One amount per owner; biomass stops being a separate Farm balance; caps and reservations survive loading |
+| Machine jobs, paid construction/modules, local power/storage | Save consumed inputs, progress, blocked output, and ownership; clock-based bounded catch-up cannot produce past exhaustion |
+| Tech/research/grade access and captured archives | Knowledge survives death; one-time capture ceiling survives reload; supplier access remains distinct from ownership |
+| Jobs, offers, agreements, boons, experience if added | Stable IDs and settlement state; no duplicated payment, reward, experience, or obligation |
+| Fleet templates/units, cargo, routes, wrecks, incidents | Same identity across body materialization; delivery/loss/salvage settles once; remote risk is saved, not rerolled on load |
+| Player megastructure districts and later colony ledger | Paid progress, surviving blocks, stocks, population, and bounded worker state |
+
+Closing the app grants no wall-clock production in the first model. Unloaded systems advance on saved simulation time through bounded events, respecting input, capacity, route, and incident limits. UI selection and body instances are not authoritative stock.
+
+Before fleets and factories ship, define generator-change handling for invalid pad/deposit/supplier anchors: suspend routes/jobs, resolve or refund reservations under visible terms, and explicitly relocate/salvage stranded cargo/assets. Existing load behavior drops generated-anchor deltas; new systems must not silently orphan still-consuming machines. Keep knowledge and player inventory where valid. This is a compatibility policy to design, not permission to add old-version migrations: before 1.0 use defaults or a SAVE_VERSION bump with refusal, with no migration fixtures/code.

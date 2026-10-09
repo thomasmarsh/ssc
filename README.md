@@ -4,6 +4,8 @@ SSC is an arena shooter being rebuilt from its C++ prototype in Rust with Bevy 0
 
 Status: BUILT - a playable game with an endless procedural universe of sectors, a living ecosystem, civilizations and diplomacy, apex elders, realms, rare creature powers (Weaver, Slinger, Runekeeper and Seamer included), mining, parts, a three-tab bench, sonar and charting, a geometric HUD, procedural audio and developer toggles. BUILT - disk persistence with autosave history, explicit saves and CONTINUE / NEW GAME. TODO: human playtesting and balance, plus the items tagged `TODO:` across [docs/](docs/); nothing has been played by a human yet and all balance numbers are first guesses.
 
+Design direction: grow from a solo ship into a defended homestead and galactic supply/trade network. The six-resource economy, open technology graph, continued equipment grades, jobs, drones, and tankers are planned in [docs/GAME_LOOP.md](docs/GAME_LOOP.md); [docs/ROADMAP.md](docs/ROADMAP.md) distinguishes that target from built behavior.
+
 ## Build and run
 
 The desktop build targets native Apple Silicon Macs, including an M1 MacBook Air. Install Rust 1.95 or newer and Apple's Xcode Command Line Tools, then run (the package has two binaries, so name the game):

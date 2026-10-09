@@ -1,10 +1,14 @@
 # Flow review: the game through an arcade player's eyes
 
-This is a design review, not a record of built code. It reads the current control and progression surface (README controls, `src/presentation.rs` HUD text, the bench, arsenal, pads, beacons, star map, diplomacy, titles, legacy) as an arcade player who wants to be in flow: a clear goal every few seconds, feedback you can read without reading, and no friction between wanting to do something and doing it. It borrows from No Man's Sky (a legible discovery loop, scanning that tells you where to go, upgrades you can feel, a safe start, hooks that make you want to see the next place) and from classic arcade games (one screen of information, a few verbs, instant restart).
+This began as a design review, not a record of built code. The 2026-10-09 direction update below revises the economy and core loop; earlier review observations and dated built-status sections remain historical context. It reads the current control and progression surface (README controls, `src/presentation.rs` HUD text, the bench, arsenal, pads, beacons, star map, diplomacy, titles, legacy) as an arcade player who wants to be in flow: a clear goal every few seconds, feedback you can read without reading, and no friction between wanting to do something and doing it. It borrows from No Man's Sky (a legible discovery loop, scanning that tells you where to go, upgrades you can feel, a safe start, hooks that make you want to see the next place) and from classic arcade games (one screen of information, a few verbs, instant restart).
 
-Status: BUILT - the whole P0 pass (geometric HUD, single interact key, auto repair, boosts always on, settings screen, shake/hit-stop/chain feedback, free ping and next-lure marker), P1 rock shoving (replacing the Tow Rig), the three-tab bench with purchase receipts and unlock guidance ([BENCH.md](BENCH.md)), organs and symbiotes, the realm balance dimensions, the low-hull heartbeat, and the Slinger, Runekeeper, Seamer and discovery slices (status notes at the end). PARTIAL - section 3 item 11 (bench merge) and item 16 (unlock guidance). TODO items are tagged `TODO:` in "Status: what the P0 pass built" and the bench status notes: docking assist, "BEST BUY" hint, guided first ten minutes, part-plugging animation and rarity-specific chimes, skill merge to about ten, changed material roles, automatic stash overflow, trophy gates, lode fatigue, ring-entry reward, one star-map pin (cutting notes), specimen log, controller-first map, arcade versus tinkerer presets, auto-zooming camera. Section 8 (the Tow Rig) is superseded and not built.
+Status: BUILT - the whole P0 pass (geometric HUD, single interact key, auto repair, boosts always on, settings screen, shake/hit-stop/chain feedback, free ping and next-lure marker), P1 rock shoving (replacing the Tow Rig), the three-tab bench with purchase receipts and unlock guidance ([BENCH.md](BENCH.md)), organs and symbiotes, the realm balance dimensions, the low-hull heartbeat, and the Slinger, Runekeeper, Seamer and discovery slices (status notes at the end). PARTIAL - section 3 item 11 (bench merge) and item 16 (unlock guidance). TODO items are tagged `TODO:` in "Status: what the P0 pass built" and the bench status notes: docking assist, "BEST BUY" hint, guided first ten minutes, part-plugging animation and rarity-specific chimes, skill merge to about ten, changed material roles, automatic stash overflow, technology gates with peaceful alternatives, deferred lode fatigue and ring-entry rewards, one star-map pin (cutting notes), specimen log, controller-first map, arcade versus tinkerer presets, auto-zooming camera. Section 8 (the Tow Rig) is superseded and not built.
 
 Priorities: **P0** is what to do before anyone else plays the game, **P1** is the next pass, **P2** is polish and later. "Cut" means remove the surface from the player's face; the simulation may keep the system. I have read the code and docs, not playtested this pass, so numbers here are proposals, and where I say "I did not verify" I mean it.
+
+## Direction update: resources, frontier progression, and home
+
+The 2026-10-09 target is [GAME_LOOP.md](GAME_LOOP.md): six primary resources, raw-only wildlife rewards, peaceful technology procurement, continued equipment grades, jobs/agreements, and a defended home supplied by drones and pad-built tankers. The sections below retain the arcade review and built-status record; historical observations are not a current inventory. This update supersedes the old three-material role proposal, wild Smarties, kill-only skill trophies, universal wildlife technology drops, and death-triggered legacy progression. New resource/site/trade panels must keep the same readable combat surface.
 
 ## 1. Where the game is today
 
@@ -76,7 +80,7 @@ The honest summary: the game has no cheese that skips progression, but it has a 
 
 11. **Bench from seven tabs to three.** `PARTS` (repair is automatic at a pad for a small fee, reforge and upgrade become two buttons on a selected part), `WEAPONS` (arms), `SKILLS` (rig and sonar as columns: MINING, FLIGHT, SONAR, and later ORGANS). Stash is cut: the pad's stash becomes an automatic overflow of the hold, shown as a pip, because a second inventory is the sort of thing a flow player never visits. The bench panel is icon rows with the cost as three coloured pips (see section 4), not paragraphs.
 12. **Skills from sixteen to about ten.** Merge `BeamRange` and `Magnet` into REACH; merge `Yield` and `Cargo` into HAUL; keep POWER; keep PARRY, DASH, BEACON; sonar reach, speed and recharge fold into PING (one track, three effects by level); the four reveal tiers fold into two (LODES, and LIFE: nests, eggs and predators). That is POWER, REACH, HAUL, PARRY, DASH, PING, SONAR TIERS x2, BEACON, TOW (section 8). A skill is a thing you can describe in four words.
-13. **Resource roles become explicit and coloured.** Keep three materials, give each a job a player can say aloud: **metal builds** (parts, pads, repairs to hull), **crystal tunes** (reforge, rarity, parry and dash unlocks), **volatiles fuel** (ammo, boosts, shield recharge, jump, tow pods). Remove cross-uses that blur this; the price lists already lean this way. Pads kits and stash vanish as counters (a kit is `E` near a planetoid with 40 metal and 10 crystal; the stash is automatic).
+13. **Resource roles become explicit and coloured.** Six primary goods: **metal builds**, **crystal tunes**, **volatiles are chemical feedstock**, **biomass supports biology**, **fuel powers systems**, and **water supplies farms/industry**. Generalize inventory before new recipes: farming biomass joins the same balances and transaction API. Fuel is bought or produced; bulk water lives in site tanks and moves by pad-built tanker, with a small ship service reserve. Processed goods/components stay in inventory and project previews, not extra permanent HUD bars. See GAME_LOOP sections 3 and 4; this is TODO, not the current economy.
 14. **Docking assist.** Landing needs speed under 80 within 80 units, a refusal near a hostile rooter, and a key. Replace with: press `E` within 400 of a pad and the ship eases itself in (a short automatic approach, input cancels it). The ship never fails to land because of a number it cannot see.
 15. **Auto ping on entering a new sector.** The first ping in a sector is free and automatic, so every arrival pays a small discovery. The manual ping keeps its 5 s recharge.
 16. **Make the unlock gates visible before the menu.** When a Rare plating is found, a banner says "PARRY unlocked at the bench". The first-time prompt for parry and dash is the pickup, not a locked line.
@@ -118,11 +122,11 @@ Rules: geometric, colour-coded, scannable in under half a second, and the number
 
 **On the ship (world space, always).** A thin **shield ring** (cyan, a full circle at full shield, an arc that shrinks and flashes at low) and, inside it, a **hull ring** (green to amber to red, segmented into 10 so damage is countable at a glance). The existing `draw_rig` already draws parts on the ship, so rings fit the style. At a glance the player knows both without moving their eyes from the ship, which is where they are looking.
 
-**Bottom-left: the weapon.** One icon for the active profile (cannon, missile, needle, mine, nova, tether) with a small fuel arc in the fuel material's colour, and a text-free tick for each owned profile with the active one lit; `DRY` is the arc turning red. Names only appear for 0.5 s on a switch (the existing banner). Numbers: none.
+**Bottom-left: the weapon.** One icon for the active profile (cannon, missile, needle, mine, nova, tether) with a small reserve arc in the actual consumable's colour, and a text-free tick for each owned profile with the active one lit; `DRY` is the arc turning red. Names only appear for 0.5 s on a switch (the existing banner). Numbers: none.
 
 **Bottom-center: three ability rings.** Parry, dash, ping, each a small ring with a key glyph that fills as the cooldown recovers, glows when ready, and shows a lock icon before it is bought. They replace the "LOCKED (bench: needs a ...)" and "D ready" text lines.
 
-**Bottom-right: cargo.** Three vertical pips in the material colours (grey-orange, cyan, violet) showing fill, with a number only when it changes (a +12 popup). A full pip pulses. It replaces three bar lines.
+**Bottom-right: resources (target, TODO).** Six fixed counters for metal, volatiles, crystal, biomass, fuel, and water, each with a glyph, amount, and cap/fill cue, including zero. Biomass has equal prominence. Use two rows of three at narrow sizes; keep ability/organ indicators clear. Fuel and water display ship reserves with their own tank caps. A separate labeled SITE panel shows local stocks and incoming supply while docked/inspecting, never silently replacing ship water. The current built HUD still has three cargo pips and conditional farming text.
 
 **Top-left: threat pips.** Five pips. Filled pips equal the verdict ladder (OUTCLASSED, UNDERPOWERED, EVEN, STRONG mapped onto one to five), coloured red to green. Hold `Tab` for the numbers. This is the single most useful line of today's HUD, in a thousandth of the space.
 
@@ -140,55 +144,54 @@ The HUD's text count drops from about 30 lines to about 3. The design test: show
 
 ## 5. The core loop
 
+Target (TODO beyond the existing scan/lure/gather/bench mechanics):
+
 ```
- SCAN  ->  CHOOSE A LURE  ->  GO  ->  ENCOUNTER (fight or mine)  ->  HAUL  ->  UPGRADE  ->  DEEPER
-   ^                                                                                          |
-   +------------------------------------------------------------------------------------------+
+SCAN -> CHOOSE A GOAL -> ENCOUNTER -> GATHER / TRADE / COMPLETE A JOB
+  ^                                      |
+  |                                      v
+EXPLORE FARTHER <- PREPARE <- GROW HOME <- LEARN / UPGRADE
 ```
 
-1. **Scan.** Arriving in a sector auto-pings. The ping returns echoes that are **lures**: a lode (a gem in the material's colour), a nest and egg cluster, a planetoid (home for a pad), an outpost, a capital (a fortress to crack), a wreck, an apex crown, a rift (BESTIARY.md). Each has an icon and a distance.
-2. **Choose a lure.** The nearest valuable lure becomes the **next lure** (a gold diamond arrow, one at a time). The star map shows all lures, the player may pin one (the one remaining pin), and a jump to a beacon is a shortcut.
-3. **Go.** Fly. Flying is a pleasure (tight handling, dash, slingshots off wells, the Tow Rig later). The threat pips and the guides tell the player what is ahead.
-4. **Encounter.** Fight (the arcade part: parry, dash, graze chains, special creatures with readable tells) or mine (hold M, the calm part). Either pays.
-5. **Haul.** A full hold is a goal in itself (a pulsing pip), and a return to a pad (or a beacon) banks and repairs.
-6. **Upgrade.** The bench is a short, satisfying menu: one affordable thing is highlighted ("BEST BUY"), a purchase has a show.
-7. **Deeper.** A new ring is a visible event (the region banner, the threat pips gaining one), and the next lure is farther.
+1. **Scan and choose.** Keep the free entry ping and one immediate lure. A pinned project can supply a useful next step without exposing the entire tech graph. A civilization, water source, ripe farm, ruin, or elder can be a lure with a clear promise.
+2. **Go and encounter.** Tight flight and readable combat remain central. Fight, mine, harvest, meet a civilization, survey, or deliver cargo. No new flight binding per economy subsystem.
+3. **Bring value home.** Raw materials, organs, bought equipment, blueprints, and completed work have different provenance and clear receipts. Full cargo suggests a return; fleets eventually carry routine bulk supply.
+4. **Learn and prepare.** The ship bench fits/improves equipment. Context panels handle trade, jobs, research, and site modules using familiar navigation. Show the missing source, cost, or capability; buying a finished part can precede learning its manufacture.
+5. **Grow home and explore farther.** A pad becomes a farm/refinery, then a defended logistics hub and player-grown megastructure. Better-grade ship/fleet equipment and realm counters permit the next expedition. Home can be another planetoid; knowledge travels with the player.
 
-**Goals at three time scales.** Seconds: reach the next lure, dodge the next shot. Minutes: fill the hold, buy the next skill. Session: the next ring, an apex, a title, a named species extirpated or befriended.
+**Goals at several time scales.** Seconds: a reward or dodge. Minutes: a purchase, delivery, or research step. Expedition: a supplier, a pad, or realm access. Long term: stocked docks and a growing home. Machines work during other goals; production waiting is not the default activity.
 
-**First ten minutes (guided by affordance, not a tutorial screen).**
+**First ten minutes (target, pacing proposals).**
 
-| Minute | What happens | How the game says so |
-|---|---|---|
-| 0 to 1 | Fly, thrust and turn; the first free ping shows the HOME planetoid and a gem | A single gold arrow to the lode |
-| 1 to 3 | Mine it, a pip fills, a sound; land at the free pad (`E`) | A prompt glyph over the pad; "BEST BUY" on the first skill |
-| 3 to 5 | First purchase: beam power; a small show; the next lure appears: ring 1 Fatsos | The threat pips show 1 to 2 |
-| 5 to 10 | Shoot a Fatso, get a part, see it appear on the ship; ring 2 Bogeys, the parry teaser (a locked ring with a lock) | Part pop; banner "PARRY: needs a Rare plating" |
+| Minute | Action | Feedback |
+| --- | --- | --- |
+| 0 to 1 | Fly and follow the free ping to a lode or crop | One lure, a visible raw-resource reward |
+| 1 to 3 | Mine/harvest, inspect all six counters, dock at HOME | Ship versus site stocks are clear; no water/fuel trap |
+| 3 to 5 | First beam/utility purchase; buy fuel if needed | Before/after receipt and one next project |
+| 5 to 10 | Choose wildlife combat or a friendly supplier/delivery | Combat pays raw materials and practice; trade pays equipment/knowledge |
 
-Time-to-first-fun target: the first reward within 60 seconds of starting; the first purchase within 4 minutes; the first part within 6.
+First reward within 60 seconds and first purchase within four minutes remain provisional targets. A Fatso kill no longer promises a cannon. The first technological part comes from purchase, a job, civilized salvage, or an engineered cache.
 
 ## 6. Progression ramp
 
-Follow the existing rings and keep the content gates; change what the player is *told* and what they must *do*.
+Keep the safe start and spatial threat ramp. Equipment **grade** must keep scaling while pattern counts, movement, and reaction windows stay bounded. Exploration and cooperation offer the same required capabilities as combat, through different effort. [GAME_LOOP.md](GAME_LOOP.md) sections 5 to 9 give the reward, knowledge, grade, and experience rules.
 
-| Ring | New creatures | New player thing | The feeling |
-|---|---|---|---|
-| 0 (HOME) | none | Mine, pad, bench, first purchase | Safe, learning |
-| 1 | Fatsos | Part drops, first weapon pattern | First fights, slow targets |
-| 2 | Bogeys (school, passive until approached) | Parry teaser; field repair | Reading a flock |
-| 3 | Smarties, Lunatics, Mild specials (Skipjack, Splitter, Remora) | A first organ (a gentle Remora), nests | First strangeness, first gift |
-| 4 to 5 | Leeches, sampled species, first wells that move | Dash unlocked at about ring 4 to 5 via a Rare engine; sonar tiers; apex elders begin at 5 | Skill expression begins |
-| 6 to 8 | Jointed and flinging species, civilizations (depth 6 and out), Strange specials | Diplomacy, beacons, fortresses, the Tow Rig (section 8) | Choosing a fight |
-| 9 and out | Mythic specials, Maws, rifts, relic classics | Titles, extirpations, legacy | Mastery and wonder |
+| Frontier | Existing introduction | Target player opportunity (TODO where unbuilt) |
+| --- | --- | --- |
+| HOME | Peaceful pad, mining, crops | Six-good inventory, first purchase, dependable starter water and fuel procurement |
+| Ring 1 | Fatsos | First optional fights for raw resources/practice; peaceful mining/farming |
+| Ring 2 | Passive Bogeys | Read a flock, find a supplier, plan a support-tech purchase |
+| Ring 3 | Lunatics and mild specials | Biological specimens and symbiote taste; no wild Smarties or technological wildlife drops |
+| Rings 4 to 5 | Leeches, sampled species, wells, apex opportunities | Buy/learn parry, dash, and organ support; an elder yields biological prizes |
+| Rings 6 to 8 | Civilizations, fortresses, stranger species | Jobs, research/trade access, or bounded conquest; first frontier-grade advances |
+| Beyond | Mythic specials, realms, deep civilization sources | Repeat grade/research advances, acquire realm counters, establish supply outposts |
+| Across expeditions | Existing pads and chart progress | Factories, drones, tankers, defended home, and eventually visiting ships/districts |
 
-**The one change that matters: tie progress to a little risk.** Today a player can buy the rig with mining alone at no risk. Proposed, P1:
+**Gates teach a capability, not a mandatory kill.** Top technology can need a component, teacher, biological sample, or demonstrated work with an explicit alternative. Purchased equipment and commissioned manufacturing serve players who do not own every factory. Destroying a civilization yields a limited archive; cooperating gives more access to that civilization's specialties. Every required realm module has a reachable source outside the gated area, including a peaceful route.
 
-- **Rig upgrades past level 2 need a trophy.** Level 3 and 4 skills also need a part or an organ from a creature of the appropriate ring (a "Rare or better" gate like parry's, for every skill's top two levels). This keeps mining as the cash and fighting as the key.
-- **Lode fatigue.** A renewable planetoid regrows 0.5 per second only while the ship is more than 3 sectors away, otherwise at 0.15. Lodes pay if you travel; a stationary farm is slow. (Soft, not a ban.)
-- **Rings pay.** The first time the ship enters a new ring, it gets a small deterministic reward from the region (a weak pickup), so exploration itself pays in the arcade way ("you went somewhere").
-- **Threat-aware difficulty.** The existing verdict machinery already compares SHIP POWER to THREAT; use it to scale *drop quality* (a ship that is underpowered for the ring gets slightly better drops on kills) so a brave player is helped and a stalled player is nudged.
+**Reward purposeful work.** Renewable crops and local mining are useful foundations. The old lode-fatigue penalty and automatic underpowered-drop bonus are deferred until trade/production pacing is tested; raw wildlife rewards cannot solve technology starvation. Frontier procurement and grade scaling must land before removing the gear sources on which current progression depends.
 
-**Legacy.** Keep the 25 percent ore carry, but the carried item is shown in the first seconds of the next run as a ceremony: a ghost of the previous ship shows where it fell, the carried weapon pops on the HUD icon. That is a hook for "one more run".
+**Recovery.** Death continues the same world and progress via local lives or a pad return; knowledge and owned organ strains persist. NEW GAME resets it. Legacy ceremony is historical, not a target progression loop; [PERSISTENCE.md](PERSISTENCE.md) owns the built recovery rules.
 
 ## 7. Moment-to-moment feedback
 
@@ -276,30 +279,17 @@ This is a P1 item because it is a new verb: the HUD, bench and starting-ramp wor
 
 ## 9. Priorities
 
-**P0 (before others play):** hide the debug HUD and latent percentages; the minimal geometric HUD (rings on the ship, ability rings, weapon icon, threat pips, cargo pips); the single interact key and docking assist; auto repair; boosts always on; remove insurance toggle, `S` and `V`, `C`, `U`, `N`, `F1` from play (to settings); the next-lure marker and auto-ping on arrival; the first-ten-minutes guided chain; screen shake system with the budget; hit markers and damage direction.
+The original P0 HUD/input/feel pass is largely built; the status sections below record remaining polish. The next gameplay priority is the first frontier milestone in [ROADMAP.md](ROADMAP.md): shared resources and six counters, peaceful procurement plus honest loot, then a narrow technology/grade loop. Docking assist and layout/controller polish can accompany the panels they affect.
 
-**P1:** bench to three tabs and skills to ten; resource roles; the hit-stop additions; chain bar; purchase show; trophy gating for top skill levels and lode fatigue; Tow Rig prototype; star map icons and one pin; diplomacy as colour; first apex-linked organs (BESTIARY.md).
+Later: local production and jobs, mining drones, two-pad water tankers, visiting trade ships and defenses, then multi-pad distribution and player-grown districts. Specimen log, skill merging, single manual pin, and optional presets remain polish proposals. The Tow Rig remains superseded by built shoving; no legacy ceremony is queued.
 
-**P2:** specimen log; controller-first map; arcade versus tinkerer presets; the tow pod levels and the Slinger sinew link; legacy ceremony; wonder ping layer.
+## 10. Recommended implementation order
 
-## 10. Recommended implementation order across both docs
-
-The order is chosen so each step makes the next one legible and the whole is shippable at every stage.
-
-1. **FLOW P0 HUD and input pass.** Geometric HUD, one interact key, auto repair, boosts always on, settings screen, debug toggle (`F3`). Nothing else makes sense until the player can read the game.
-2. **FLOW P0 feedback.** Screen shake, hit markers, damage direction, next-lure marker, auto ping. Cheap, visible, big.
-3. **BESTIARY step 1 and 2.** The genome block and the pure dynamic wells. Zero risk to HOME, a lot of variety.
-4. **BESTIARY step 3 and 6.** Skipjack, Veilwing and Hullpick: three creatures that change how a fight looks, each a few lines.
-5. **BESTIARY step 4.** The `Jam` status with EMP and glare. It also gives the HUD a reason to show jammed rings (the ability rings dim), so it lands well after the new HUD.
-6. **FLOW P1 bench merge and skill merge.** Three tabs, ten skills, resource roles. Do this before organs, so the new thing has a clean place to live.
-7. **BESTIARY step 8.** Hullworm, Kindling Remora and organs with the SYMBIOSIS skill. The first time the bestiary gives the player something.
-8. **FLOW P1 Tow Rig cable prototype** (with Weaver and Slinger from BESTIARY step 9, which share the creature-to-rock Link).
-9. **FLOW P1 progression changes** (trophy gating, lode fatigue, ring reward).
-10. **The rest of the bestiary** (fields, bodies, sound, mimic, gloom, gorger, the Seamer) and the P2 items.
+[GAME_LOOP.md](GAME_LOOP.md) section 13 defines slices A to J and acceptance gates. [SEED.md](../SEED.md) defines the next work. The former bestiary/P0 implementation list is completed or superseded; it is not a competing queue. Review both peaceful and warlike paths at each frontier checkpoint, and keep source/requirement messages out of the combat HUD unless immediately relevant.
 
 ## 11. Top five ideas
 
-From this document: (1) the geometric HUD of rings, pips and arcs that replaces the text wall; (2) one interact key with docking assist and auto repair; (3) a core loop built on a single next-lure marker and a free ping on arrival; (4) a shake, hit-stop and chain budget that gives feel without noise; (5) the Tow Rig, a one-button asteroid weapon that composes with thrust, rotation and dash.
+From this document: (1) the geometric HUD of rings, pips and arcs that replaces the text wall; (2) one interact key with docking assist and auto repair; (3) a core loop built on a single next-lure marker and a free ping on arrival; (4) a shake, hit-stop and chain budget that gives feel without noise; (5) a persistent home that converts gathering, diplomacy, and combat rewards into the next expedition. The original Tow Rig idea was replaced by built shoving.
 
 ## 12. Status: what the P0 pass built
 
@@ -309,7 +299,7 @@ Written after the pass; the sections above stay as the review. Everything here i
 
 - **Geometric HUD (section 4).** Hull ring (ten segments, green, amber, red) inside a cyan shield arc around the ship; a bottom cluster with the weapon (icon, fuel arc in the material's color, level dots, a tick per owned profile, the name only as a toast on a switch), parry, dash and ping rings (locked, cooling with a fill and the seconds, ready, active, dashed red when the shield cannot pay, a NEW tag until first use) and three cargo bars with small numbers; five threat pips top left; score, chain bar and lives top right; region and sector at the top, fading to a quiet tag after six seconds; a standing meter (tier icon, bar with tier ticks) inside a civilization's land; the nearest-civilization line and arrow under the region; the apex crown and hull bar. Notices are toasts. The six latent percentages, SHIP POWER and THREAT, the ship panel, territory and wildlife detail text moved behind hold `Tab` (the radar comes with it) or `F3`. The long legend is a context line of at most five keys plus a full list on `F1`.
 - **One interact key (P0 item 2).** `E` (B or Select) lands, builds a kit and deploys a pad, opens and closes the bench, tithes, with a keycap prompt over the ship that says which, or why not. `O`, `L` and `K` are gone. The beacon stays on `H` (it is a deliberate, paid act, and `E` near nothing should never spend crystal); on the star map `H` or `E` deploys.
-- **Auto repair (item 3), boosts always on (item 4), insurance fixed (item 5).** Hull mends from metal after three quiet seconds; the shield mends this way only below half and with more than 25 volatiles left (they are fuel, and the shield recharges on its own). The settings screen has switches for repair and boosts for tinkerers. `R`, `B`, `I` are retired.
+- **Auto repair (item 3), boosts always on (item 4), insurance fixed (item 5).** Hull mends from metal after three quiet seconds; the shield mends this way only below half and with more than 25 volatiles left (they currently pay powered-system costs, and the shield recharges on its own). The settings screen has switches for repair and boosts for tinkerers. `R`, `B`, `I` are retired.
 - **Rendering and window keys out of play (item 6).** `V`, `C`, `U`, `N`, `T`, `S` and `F11` live on the settings screen (`Esc`, Start on a pad), which also resumes, restarts and quits. Radar defaults to off and shows with the details (item 8).
 - **Bench and map keys (item 7).** At the bench, arrows pick a row and a tab and Enter does the thing (`[` `]` `F` retired); `Q` still takes from the stash. The star map keeps its own keys (`[` `]` pick a note, `F` pins); cutting the notes (item 9) is not done.
 - **Feedback (section 7).** Screen shake with the budget (per-source caps, one total, six a second, none from firing, mining or pickups, off under reduce effects); hit stops of 0.03 s for big kills and hull hits of 20 or more, at most one per half second with the parry's included; a white tick where the ship's shot hurts something; a ring and a floating score on a kill; a red arc on the shield ring where a hit came from and a red frame on a low hull; a ring out from the ship for a bench purchase; the chain bar (kills, grazes and perfect parries, x3 at most, score only).
@@ -321,7 +311,7 @@ Written after the pass; the sections above stay as the review. Everything here i
 - TODO: the guided first ten minutes beyond the free ping and the lure, and "BEST BUY" at the bench.
 - TODO: the part-plugging animation (proposed). Outcome-derived before/after receipts, bounded purchase rings, and fitted-part purchase guidance are built; see [BENCH.md](BENCH.md).
 - TODO: an auto-zooming camera (the camera is a setting: close, wide, far, whole sector).
-- TODO: the remaining P1 and P2 items: ten skills, changed resource roles, trophy gating, lode fatigue, a ring-entry reward, a single star-map pin (the notes and 24 pins still exist), specimen log, controller-first map, arcade versus tinkerer presets, automatic stash overflow.
+- TODO: the remaining P1 and P2 items: ten skills, changed resource roles, technology gates with peaceful alternatives, deferred lode fatigue and ring-entry rewards, a single star-map pin (the notes and 24 pins still exist), specimen log, controller-first map, arcade versus tinkerer presets, automatic stash overflow.
 - The Tow Rig is dropped (see "Status: shoving rocks").
 
 **Judgement calls worth a look when playing**
@@ -451,7 +441,7 @@ Seamer is built, generator version 19. BESTIARY section 17 records shared-gene m
 
 ## Status: three-tab bench
 
-[BENCH.md](BENCH.md) is authoritative for the built PARTS, WEAPONS, and SKILLS surface, selected action/cost/detail layout, groups, controls, bounds, and tests. Section 3 item 11 is partly built (TODO: the rest, listed below): repair stays explicit and partial, the manual stash stays at the bottom of PARTS, and all 19 existing skills remain. The actual arsenal only buys levels of owned profiles; unowned rows explain the existing part/charge route. Adjacent reforge/rarity rows keep current navigation without adding an action mode. TODO: skill merging, automatic stash overflow, changed economy/material roles, trophy gates, docking assist, and the part-plugging animation remain later work. Generator version remains 19; generated content and RNG draw counts are unchanged.
+[BENCH.md](BENCH.md) is authoritative for the built PARTS, WEAPONS, and SKILLS surface, selected action/cost/detail layout, groups, controls, bounds, and tests. Section 3 item 11 is partly built (TODO: the rest, listed below): repair stays explicit and partial, the manual stash stays at the bottom of PARTS, and all 19 existing skills remain. The actual arsenal only buys levels of owned profiles; unowned rows explain the existing part/charge route. Adjacent reforge/rarity rows keep current navigation without adding an action mode. TODO: skill merging, automatic stash overflow, changed economy/material roles, technology gates with peaceful alternatives, docking assist, and the part-plugging animation remain later work. Generator version remains 19; generated content and RNG draw counts are unchanged.
 
 ## Status: bench purchase feedback and existing unlock guidance
 

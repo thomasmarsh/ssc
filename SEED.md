@@ -13,6 +13,7 @@ Do not read all of `docs/` up front. `BESTIARY.md`, `UNIVERSE.md` and `FLOW.md` 
 
 ## Where things live
 
+- `docs/GAME_LOOP.md`: the 2026-10-09 target loop, resources, provenance, technology, grade scaling, jobs/trade, fleets, homesteads, open defaults, and slice acceptance gates.
 - `docs/WORKSTREAMS.md`: the big upcoming areas (farming, machines and trade, megastructures, fast travel, weavers and asteroid habitats, apex bodies, nested creatures, swarms, urban/wild/desert feelings, gamepad), each with goal, design, slices, dependencies, open questions. The thinking for the queue below.
 - `docs/PLAYTEST.md`: what the user should check by feel, with the knob behind each question.
 - `docs/DEVTOOLS.md`: developer tooling plan (toggles built; tunables registry and overlay queued).
@@ -39,21 +40,26 @@ Decide per slice, and say which in one line.
 - Briefs must be long and concrete: reading list, the working rules above verbatim, the user's stated design (quote it), the slices with the tests required, and a final report format (commits, tuning numbers, tests changed and why, test counts, what was and was not verified visually, caveats). Verify with `git log` and the test suite after each agent, then summarize to the user in plain language.
 - Ask the user before any harness feature that spawns a large swarm of subagents. If an agent is cut off by a usage limit, resume it with SendMessage and tell it to continue from the working tree.
 
-## Queue (rationale in `docs/WORKSTREAMS.md`, "Order of operations"; reset 2026-10-08 by the user's priority)
+## Queue (revised 2026-10-09: expand the game loop)
 
-Tags: [S] small, in-session. [M] one subagent. [L] several subagent slices.
+The user asked for a fuller plan and reconciled docs. That docs pass is complete; implementation is TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
-Current focus (user decision): complete the creature set so mechanics can be tuned together. Farming, population scaling and economy come after, in the order of WORKSTREAMS phases. The gamepad audit, feeling view-model (a poor name, rename when built), weaver rock care and edge-density measurement are anytime items, not next.
+0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
+1. [L] NEXT, first frontier milestone: (A) generalize resources/storage/transactions, merge biomass, add fuel and water with initial procurement/sink/reserve rules, and show six fixed HUD counters. Audit farm, ammo/boost/repair/organ sinks, stash, costs/previews, drops, death, and saves together. Then (B) peaceful basic gear/support purchases at a reachable contact and raw-only wildlife/apex loot; do not remove current gear without a replacement source. Then narrow (C) tech graph, bounded capture, supplier grade, and one continued-grade frontier step. Test both peaceful and warlike access and preservation of handling/projectile bounds.
+2. [L] Working home: D paid local modules, refinery -> fuel, water/tank -> irrigation -> biomass; then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
+3. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk water delivery, fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
+4. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
+5. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
-0. Playtest (the user), at any time. Nothing has been played by a human; all balance is a guess. The checklist is `docs/PLAYTEST.md`: add a section per feature when it lands.
-1. [L] NEXT (user order, 2026-10-08; player interaction for builders skipped for now): bestiary fill. In order: (a) the Foamback (design 21 in `docs/BESTIARY.md`; the Oozer, design 22, is built bar its second half: small creatures as prey, the nucleus soft spot, pinch and spit, path-finding to a gap; also a standalone Oozer study queued from playtest feedback: the pseudopod must be one continuous soft perimeter, not an attached second shape, and reach speed must match the body's slow ooze, see `docs/BESTIARY.md` design 22), (b) swarms: slice 8.1 done (see Recently done); next 8.2 rally dispatch and 8.3 sonar/map markers for herds, (c) the remaining `TODO:` items in `docs/BESTIARY.md` (the other organs, Spinneret, seam needle, Remora spore and so on), weak points per node kind on elder bodies if the playtest asks for them. Builders left open: slice 4 player interaction, visible rock gathering.
-   - Segmented bodies share one health pool in easy places (`simulation/breakup.rs`, decision and measurements in `docs/BESTIARY.md`); open: the early economy now pays one drop and one bounty (scaled) per long creature, check in the playtest.
-2. IN PROGRESS (user returned to the game-loop phases; the creature fill is paused, item 1 stays open): persistence first slice is done (see Recently done). Slice 5 (migration fixtures) is CANCELLED: no migration fixtures or code until 1.0 (user, permanent). Builder structures are saved and farming's first slice is built (see Recently done); farming is built (gene trade-offs only if breeding proves too easy); next, the small Open items in `docs/PERSISTENCE.md` if wanted, then population scaling and rally forces, economy and megastructures, hyperlanes. Farming ships without a HOME golden change; the one re-baseline stays in phase 3.
-3. Alongside: DEVTOOLS B then C (register new constants at birth); hygiene and `TODO:` lists as files are touched.
+Creature backlog remains open: Foamback; Oozer small prey/nucleus/pinch/spit/gap/path and continuous perimeter/reach tuning; remaining organs and realm-discovery follow-ups; swarms/rally dispatch and herd map/sonar; elder weak points if needed. Builders still need visible gathering and player interaction. See BESTIARY/WORKSTREAMS for their built status. These do not block the first economy milestone.
 
-Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to disk wanted (multiplayer eventually, out of scope); crops only on planetoids (stations only inside a greenhouse); one contextual interact for now, full-button pad design long term. Open: sector density tuning after the first playtest.
+Other backlog: density/feeling view-model and measurements, weaver rock care, hyperlanes, generated ruins/living megastructures, local stash overflow, skill merging, and specimen log. Do not follow the historical 19 -> 20 generation batch; use the actual current version. No save-migration fixtures or code before 1.0.
+
+Decided: raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; bulk water via local tanks/tankers; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Game-loop design and doc reconciliation (2026-10-09): six resources, honest loot, peaceful procurement, tech/grade progression, local production, jobs, fleets/tankers, and homestead milestones. Documentation only; implementation remains TODO. See `docs/GAME_LOOP.md`.
 
 - Wild genetic carrier diversity (generator version 32): independently salted body/appearance variation and a rare compatible two/three-module tail; familiar primary identity retained, HOME and caller draws pinned. See `docs/BESTIARY.md`.
 

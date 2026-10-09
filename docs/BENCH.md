@@ -1,6 +1,6 @@
 # Consolidated bench
 
-Status: BUILT - the three-tab bench (PARTS, WEAPONS, SKILLS), typed actions, partial repair, paired reforge/upgrade rows, manual stash, purchase receipts and fitted-part guidance, bounded galleries. TODO: skill merging, automatic stash overflow, changed material roles and prices, trophy gates, docking assist, BEST BUY hints, the part-plugging animation, rarity-specific purchase chimes, and any new weapon acquisition purchase (all later slices; see [FLOW.md](FLOW.md)). Bench hooks are listed in [HOOKS.md](HOOKS.md).
+Status: BUILT - the three-tab bench (PARTS, WEAPONS, SKILLS), typed actions, partial repair, paired reforge/upgrade rows, manual stash, purchase receipts and fitted-part guidance, bounded galleries. TODO: skill merging, automatic stash overflow, changed material roles and prices, technology gates with peaceful alternatives, docking assist, BEST BUY hints, the part-plugging animation, rarity-specific purchase chimes, and any new weapon acquisition purchase (all later slices; see [FLOW.md](FLOW.md)). Bench hooks are listed in [HOOKS.md](HOOKS.md).
 
 This is the built contract for the three-tab bench after discovery `3018f3b`. The bench opens while landed with E or B/Select. Navigation and display live in `simulation/bench.rs`; repairs, part rolls, weapon levels, skill purchases, and stash transfers remain in `simulation/pads.rs`, and grafting/removal remain in `simulation/organs.rs`. Rendering and controls dispatch the selected typed action, never infer a transaction from its label.
 
@@ -15,6 +15,12 @@ FLOW section 3 proposes three tabs together with automatic paid repair, automati
 - The manual pad stash remains 100 per material, moving up to 25 per action, with existing partial transfers, hold-cap checks, and rejection behavior. It appears at the bottom of PARTS. There is no automatic overflow.
 - Material colours and actual numeric costs remain. Metal, crystal, and volatiles retain every current role and cross-use. The view totals duplicate material price entries, including Homing's two crystal entries; the transaction still receives the original price.
 - Organs retain first-graft costs, free subsequent fitting, oldest-slot replacement when full, loans, upkeep, dormant states, and retained ownership after removal. Removal stays available with no fuel or open slots. The selected graft says which fitted organ it replaces. Veil and Skip Node describe their DASH dependency without adding a new purchase gate.
+
+## Planned resource and procurement update (TODO)
+
+[GAME_LOOP.md](GAME_LOOP.md) slices A-C are the next economy contract: one goods/transaction API, biomass/fuel/water, source-backed purchase of unowned equipment, research/support alternatives to combat gates, and continued equipment grades. The built arsenal still upgrades owned profiles only; new acquisition is a deliberate transaction, not a new interpretation of the existing upgrade action.
+
+Keep PARTS / WEAPONS / SKILLS as the ship surface. Trade, jobs, research, and site management use contextual panels with the same navigation conventions. Costs/previews identify ship versus connected local site stock; distant storage is never a free wallet. Extend receipts and requirement guidance to the actual good, source, support prerequisite, and grade. Organs retain owned strains/free refitting/dormancy, but planned upkeep moves to biomass after a usable support path exists. Verify controller routes and compact layouts with six counters. No changed price, stash automation, or new transaction is built by this note.
 
 ## Navigation and state
 
