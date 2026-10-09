@@ -64,7 +64,7 @@ Decided: raw wildlife rewards with organs as biological specials; civilizations 
 
 - Shared resources: six Cargo balances and fixed HUD counters; atomic exchanges/transfers, manufactured fuel services, small water reserve, shared farming biomass, fuel-powered systems and biomass organ upkeep. Save format 3; generation unchanged.
 
-- Game-loop design and doc reconciliation (2026-10-09): six resources, honest loot, peaceful procurement, tech/grade progression, local production, jobs, fleets/tankers, and homestead milestones. Documentation only; implementation remains TODO. See `docs/GAME_LOOP.md`.
+- Game-loop design and doc reconciliation (2026-10-09): target production, jobs, fleets/tankers and homestead milestones are recorded in `docs/GAME_LOOP.md`; first frontier implementation is complete.
 
 - Wild genetic carrier diversity (generator version 32): independently salted body/appearance variation and a rare compatible two/three-module tail; familiar primary identity retained, HOME and caller draws pinned. See `docs/BESTIARY.md`.
 

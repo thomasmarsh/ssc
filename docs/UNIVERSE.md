@@ -187,7 +187,7 @@ Balance (all numbers in `src/simulation/tuning.rs`): free rocks take 1/80 of the
 
 ## Stations and where parts come from (built)
 
-TODO: GAME_LOOP slices B/C replace technological wildlife/apex rewards with raw goods and biological specimens. Civilization citizens keep basic equipment salvage; seats/knowledge structures provide bounded captured research instead of their entire technology profile. Peaceful basic equipment/support purchases must land with this loot change. Numbers below are current drop behavior, not the target reward policy.
+Built in GAME_LOOP slices B/narrow C: wildlife/apex rewards are raw goods and biological specimens. Civilization citizens retain equipment salvage; player-damaged capital/elder conquest settles bounded captured research. HOME and friendly contacts supply peaceful basic equipment and support purchases. The full technology graph and additional engineered knowledge sites remain TODO.
 
 **There are no wild spawn points.** Ecosystem bases used to appear wherever danger, aggression, tech or swarm ran high (about 0.7 to 0.8 a sector from ring 3 on): they bred the sector's fauna, built guardians and paid a guaranteed part and two or three rolls for a few hits, which was more permanent gear per sector than every creature together and an easy upgrade farm. Generation still makes the old draws on its stream (so nothing after them moves) but places nothing; the `station` stream is retired. Wild life reproduces naturally (eggs, live birth, caps per lineage). Stone-ring nests and inhabited husks remain: they hold creatures but spawn nothing and pay no part.
 
