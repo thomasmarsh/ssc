@@ -493,7 +493,7 @@ impl Territory {
             self.capital.x,
             self.capital.y,
         ));
-        Genome::sample(&mut rng, &latent_base(seed, self.capital))
+        Genome::sample_primary(&mut rng, &latent_base(seed, self.capital))
     }
 
     pub fn lineage_of(&self, role: CivRole) -> u64 {

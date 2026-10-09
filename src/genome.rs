@@ -837,6 +837,13 @@ impl Genome {
     /// favors chains, guns and keen senses; distortion negative mass and waves; swarm
     /// schooling; aggression rage and flinging; danger toughness.
     pub fn sample(rng: &mut Rng, params: &SectorParams) -> Self {
+        let mut g = Self::sample_primary(rng, params);
+        crate::development::diversify(&mut g, rng, params);
+        g.limited()
+    }
+
+    /// The original draw schedule and primary lottery, before independent carrier forks.
+    pub(crate) fn sample_primary(rng: &mut Rng, params: &SectorParams) -> Self {
         let above = |p: f32| (p - 0.5).max(0.0) * 2.0;
         let (tech, distortion, swarm, aggression, danger) = (
             params.tech,
@@ -1739,8 +1746,35 @@ mod tests {
         }
     }
 
-    /// Pins sampling, individuals, crossover and mutation (genes and the stream position
-    /// after each) over many seeds, so a genome without an anatomy can never drift.
+    #[test]
+    fn carrier_sampling_preserves_the_primary_lottery_draw_schedule() {
+        for seed in 0..500 {
+            let params = SectorParams {
+                depth: 30.0,
+                danger: 0.5,
+                aggression: 0.5,
+                density: 0.5,
+                distortion: 0.5,
+                tech: 0.5,
+                swarm: 0.5,
+            };
+            let mut old = Rng::new(seed);
+            let mut new = old.clone();
+            let primary = Genome::sample_primary(&mut old, &params);
+            let developed = Genome::sample(&mut new, &params);
+            assert_eq!(old.next_u64(), new.next_u64());
+            assert_eq!(primary.appearance.identity, developed.appearance.identity);
+            for c in primary.live_powers() {
+                assert_eq!(
+                    primary.power_module(c.power),
+                    developed.power_module(c.power)
+                );
+            }
+        }
+    }
+
+    /// Pins the original primary sampler, individuals, crossover and mutation (genes
+    /// and stream positions). Independent founder diversity is covered separately.
     #[test]
     fn genomes_without_an_anatomy_keep_their_draws() {
         let mut h = 0x5EED_u64;
@@ -1755,8 +1789,8 @@ mod tests {
                 tech: rng.f32(),
                 swarm: rng.f32(),
             };
-            let a = Genome::sample(&mut rng, &sp);
-            let b = Genome::sample(&mut rng, &sp).individual(&mut rng);
+            let a = Genome::sample_primary(&mut rng, &sp);
+            let b = Genome::sample_primary(&mut rng, &sp).individual(&mut rng);
             let c = Genome::crossover(a, b, &mut rng);
             let m = c.mutate(&mut rng);
             for g in [&a, &b, &c, &m] {

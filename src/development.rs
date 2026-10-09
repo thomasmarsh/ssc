@@ -79,6 +79,85 @@ impl Appearance {
     }
 }
 
+// Independent forks keep both the primary lottery and all caller draw positions fixed.
+const CARRIER_SALT: u64 = 0xCA22_1E25_0000_0003;
+const MODULE_SALT: u64 = 0xADDE_D902_0000_0003;
+pub const CARRIER_VARIANT_CHANCE: f32 = 0.30;
+pub const UNUSUAL_CARRIER_CHANCE: f32 = 0.05;
+pub const MULTI_POWER_CHANCE: f32 = 0.02;
+pub const EXTRA_POWER_CONTINUE_CHANCE: f32 = 0.10;
+pub const MAX_SAMPLED_POWERS: usize = 3;
+pub const MAX_SAMPLED_CARRIER_BODIES: u32 = 16;
+
+/// Founder species retain their familiar identity, with an independently sampled carrier
+/// and a small compatible capability tail. Authored genomes and awakening never call this.
+pub(crate) fn diversify(g: &mut Genome, source: &Rng, params: &crate::world::SectorParams) {
+    let Some(primary) = g.live_power().map(|c| c.power) else {
+        return;
+    };
+    let key = source.clone().next_u64();
+    let mut body = Rng::new(key ^ CARRIER_SALT);
+    let roll = body.f32();
+    if roll < CARRIER_VARIANT_CHANCE {
+        let mut candidate = *g;
+        candidate.aspect *= body.range(0.75, 1.35);
+        candidate.radius *= body.range(0.8, 1.2);
+        candidate.appearance.organ_reach = body.range(0.6, 1.8);
+        candidate.hue = (candidate.hue + body.range(-0.08, 0.08)).rem_euclid(1.0);
+        if candidate.limbs > 0 {
+            candidate.limbs = body.int(2, 6) as u8;
+            candidate.limb_len = body.int(1, 2) as u8;
+        }
+        if roll < UNUSUAL_CARRIER_CHANCE {
+            candidate.appearance.surface = match body.int(0, 2) {
+                0 => Surface::Solid,
+                1 => Surface::Soft,
+                _ => Surface::Motes,
+            };
+            // Existing weighted animal grammar supplies a full range of independent
+            // body plans. One bounded attempt: no rejection loop or hidden draw coupling.
+            let mut animal = anatomy::AnimalGenome::sample(&mut body);
+            animal.depth = 0;
+            candidate.anatomy = Some(anatomy::AnimalSpecimen {
+                genome: animal.limited(),
+                seed: body.next_u64(),
+            });
+        }
+        candidate = candidate.limited();
+        if primary.fits(&candidate) && candidate.parts() <= MAX_SAMPLED_CARRIER_BODIES {
+            *g = candidate;
+        }
+    }
+    let mut modules = Rng::new(key ^ MODULE_SALT);
+    if !modules.chance(MULTI_POWER_CHANCE) {
+        return;
+    }
+    for _ in 1..MAX_SAMPLED_POWERS {
+        let weights = crate::power::weights(params);
+        let eligible: Vec<_> = Power::ALL
+            .into_iter()
+            .zip(weights)
+            .filter(|(p, w)| *w > 0.0 && !p.active(g) && p.fits(g))
+            .collect();
+        let total: f32 = eligible.iter().map(|(_, w)| w).sum();
+        if total <= 0.0 {
+            break;
+        }
+        let mut pick = modules.f32() * total;
+        for (power, weight) in eligible {
+            if pick < weight {
+                // Express only the module: styling here would erase the original carrier.
+                crate::power::express(g, power, modules.f32(), crate::power::SPECIES_INTENSITY);
+                break;
+            }
+            pick -= weight;
+        }
+        if !modules.chance(EXTRA_POWER_CONTINUE_CHANCE) {
+            break;
+        }
+    }
+}
+
 /// One functional organ on an existing body node. Signed modes use the same organ;
 /// below-gate and unbuilt powers develop none. Constraints are reported by `Power::fits`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -162,6 +241,133 @@ mod tests {
     use super::*;
     use crate::genome::Weapon;
     use crate::power::{self, GATE};
+
+    #[test]
+    fn founder_diversity_is_deterministic_bounded_and_keeps_identity_and_draws() {
+        let params = crate::world::SectorParams {
+            depth: 30.0,
+            danger: 0.5,
+            aggression: 0.5,
+            density: 0.5,
+            distortion: 0.5,
+            tech: 0.5,
+            swarm: 0.5,
+        };
+        let mut variants = 0;
+        let mut unusual = 0;
+        let mut multi = 0;
+        let mut triples = 0;
+        let mut ports = std::collections::HashSet::new();
+        for seed in 0..4000 {
+            let source = Rng::new(seed);
+            let base = Genome::slinger();
+            let mut g = base;
+            diversify(&mut g, &source, &params);
+            let mut repeat = base;
+            diversify(&mut repeat, &source, &params);
+            assert_eq!(g, repeat);
+            assert_eq!(source.clone().next_u64(), Rng::new(seed).next_u64());
+            assert_eq!(g.appearance.identity, base.appearance.identity);
+            assert_eq!(
+                g.power_module(Power::Sling),
+                base.power_module(Power::Sling)
+            );
+            assert_eq!(g.weapon, base.weapon);
+            assert_eq!(g, g.limited());
+            assert!(g.parts() <= MAX_SAMPLED_CARRIER_BODIES);
+            assert!(g.live_powers().all(|c| c.power.fits(&g)));
+            let count = g.live_powers().count();
+            assert!((1..=MAX_SAMPLED_POWERS).contains(&count));
+            if g != base && count == 1 {
+                variants += 1;
+            }
+            unusual += usize::from(g.anatomy.is_some());
+            multi += usize::from(count > 1);
+            triples += usize::from(count == 3);
+            ports.insert(g.power_ports());
+            if seed % 100 == 0 {
+                let child = Genome::crossover(g, base, &mut Rng::new(seed + 8));
+                assert_eq!(child, child.limited());
+                assert!(child.live_powers().any(|c| c.power == Power::Sling));
+            }
+        }
+        assert!((700..1400).contains(&variants), "variants {variants}");
+        assert!((40..220).contains(&unusual), "anatomy {unusual}");
+        assert!((40..130).contains(&multi), "multi {multi}");
+        assert!((1..20).contains(&triples), "triples {triples}");
+        assert!(ports.len() >= 5);
+        eprintln!(
+            "4000 Sling founders: variants={variants}, anatomy={unusual}, multi={multi}, triples={triples}, ports={ports:?}"
+        );
+    }
+
+    #[test]
+    fn sampled_founder_census_respects_depth_and_primary_carrier() {
+        let params = crate::world::SectorParams {
+            depth: 30.0,
+            danger: 0.5,
+            aggression: 0.5,
+            density: 0.5,
+            distortion: 0.5,
+            tech: 0.5,
+            swarm: 0.5,
+        };
+        let mut carriers = 0;
+        let mut multi = 0;
+        let mut triples = 0;
+        let mut anatomy = 0;
+        let mut examples = [false; 3];
+        for seed in 0..20000 {
+            let g = Genome::sample(&mut Rng::new(seed), &params);
+            let count = g.live_powers().count();
+            if count == 0 {
+                continue;
+            }
+            carriers += 1;
+            for (slot, wanted) in [
+                g.anatomy.is_some(),
+                count > 1,
+                g.sling > GATE && g.power_ports() != 4,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if wanted && !examples[slot] {
+                    examples[slot] = true;
+                    eprintln!(
+                        "example {slot}: seed={seed}, identity={:?}, powers={:?}, parts={}, ports={}",
+                        g.appearance.identity,
+                        g.live_powers().map(|c| c.power).collect::<Vec<_>>(),
+                        g.parts(),
+                        g.power_ports()
+                    );
+                }
+            }
+            multi += usize::from(count > 1);
+            triples += usize::from(count == 3);
+            anatomy += usize::from(g.anatomy.is_some());
+            assert!(count <= MAX_SAMPLED_POWERS);
+            assert!(g.live_powers().all(|c| c.power.fits(&g)));
+            assert!(g.appearance.identity.is_some());
+        }
+        assert!(carriers > 1000 && carriers < 2200, "carriers {carriers}");
+        assert!(multi > 10 && multi < carriers / 20, "multi {multi}");
+        assert!(triples > 0 && anatomy > 10);
+        for depth in [0.0, 1.0, 2.0] {
+            for seed in 0..100 {
+                let p = crate::world::SectorParams { depth, ..params };
+                assert_eq!(
+                    Genome::sample(&mut Rng::new(seed), &p)
+                        .live_powers()
+                        .count(),
+                    0
+                );
+            }
+        }
+        eprintln!(
+            "20000 far founders: carriers={carriers}, multi={multi}, triples={triples}, anatomy={anatomy}"
+        );
+    }
 
     #[test]
     fn identity_and_topology_survive_stronger_added_or_removed_powers() {

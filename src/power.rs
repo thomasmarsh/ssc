@@ -2,9 +2,9 @@
 //!
 //! Twenty-two signed/intensity genes and their own period, reach and hold form the power
 //! tail. Named intensities remain convenient rule inputs; `PowerModule` moves an entire
-//! module in inheritance. Below `GATE` a module is dormant. The existing species sampler
-//! still selects at most one power, with its original final draw; authored creatures can
-//! carry any compatible combination. Awakening retains its existing no-carrier policy.
+//! module in inheritance. Below `GATE` a module is dormant. The primary species lottery
+//! retains its original draw; independent development forks vary carriers and rarely add
+//! compatible modules. Awakening retains its existing no-carrier policy.
 
 use crate::genome::{Gene, Genome, Weapon};
 use crate::world::SectorParams;
@@ -857,7 +857,7 @@ fn lerp(lo: f32, hi: f32, t: f32) -> f32 {
 /// Writes `power` into `g` from a position `inner` in [0, 1) inside its band: intensity in
 /// `range`, local parameters near the power's typical ones, all from fract chains so nothing
 /// is drawn.
-fn express(g: &mut Genome, power: Power, inner: f32, range: (f32, f32)) {
+pub(crate) fn express(g: &mut Genome, power: Power, inner: f32, range: (f32, f32)) {
     let part = (inner * 61.0).fract();
     let (a, b, c) = (
         (part * 37.0).fract(),
@@ -884,7 +884,7 @@ fn express(g: &mut Genome, power: Power, inner: f32, range: (f32, f32)) {
 }
 
 /// The one extra final draw of `Genome::sample`: partitions `roll` into one band per power,
-/// each as wide as its weight. At most one power per species.
+/// each as wide as its weight. Chooses one primary module before the independent diversity fork.
 pub fn sample(g: &mut Genome, roll: f32, params: &SectorParams) {
     let mut start = 0.0;
     for (power, weight) in Power::ALL.into_iter().zip(weights(params)) {
@@ -1648,7 +1648,7 @@ mod tests {
     }
 
     #[test]
-    fn built_powers_are_carried_by_their_share_of_far_species_and_only_one_each() {
+    fn built_powers_keep_their_primary_rate_with_a_bounded_multi_power_tail() {
         // Only built powers are sampled: the rate is the sum of their weights (all of them
         // together would be about 7 percent).
         let want: f32 = weights(&far(40.0)).iter().sum();
@@ -1657,11 +1657,11 @@ mod tests {
             (want * 0.8..want * 1.2).contains(&rate),
             "species rate {rate} vs {want}"
         );
-        // And each carrier holds exactly one power above its gate.
+        // Independent development can add compatible modules, never unbounded stacks.
         for i in 0..20_000 {
             let g = Genome::sample(&mut Rng::new(0xBEEF_0000 + i), &far(40.0));
             let n = Power::ALL.iter().filter(|p| p.active(&g)).count();
-            assert!(n <= 1);
+            assert!(n <= crate::development::MAX_SAMPLED_POWERS);
             if let Some(c) = g.power() {
                 assert!(c.strength >= 0.35, "{c:?}");
             }

@@ -55,7 +55,9 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 
 ## Recently done
 
-- Genetic carrier development (generator version 31): appearance/surface and external-organ reach inherit independently of powers; body grammar develops functional organs without replacing carriers. Authored styles preserved; eight-port and soft limbless Slinger hooks. Wild diversity/multi-power rates remain stage 3. See `docs/BESTIARY.md`.
+- Wild genetic carrier diversity (generator version 32): independently salted body/appearance variation and a rare compatible two/three-module tail; familiar primary identity retained, HOME and caller draws pinned. See `docs/BESTIARY.md`.
+
+- Genetic carrier development (generator version 31): appearance/surface and external-organ reach inherit independently of powers; body grammar develops functional organs without replacing carriers. Authored styles preserved; eight-port and soft limbless Slinger hooks. Wild distributions now built in stage 3. See `docs/BESTIARY.md`.
 
 - Independent power modules (generator version 30): power-local cadence/reach/hold, module inheritance, independent jam warnings and digestive growth, all-capability rendering; authored multi-carrier hooks. Ordinary draw golden and HOME preserved. See `docs/BESTIARY.md`.
 
@@ -64,5 +66,3 @@ Decided: HOME golden re-baselined once in phase 3; sector size is 6000; save to 
 - Farming civilizations (workstream 1 slice 5, generator version 29): `Territory::tillage` from the lineage's genes decides who farms (about a third, settlers always); tended fields, a granary, tending rounds, biomass and seed trade at a friendly seat, theft costs regard (`simulation/farm/tend.rs`).
 - Farming slice 4, blight (no generation change, no save version bump): planted crops outside HOME fall ill, it spreads between same-species neighbors, drains growth, is pruned by the beam and resisted by the hardy gene (`Game::update_blight`, hook `SSC_FARM_BLIGHT`). Plants also sway like the grass.
 - Farming slice 3, crop breeding (no generation change, SAVE_VERSION 2): `CropGenes` (yield, vigor, hardy, hue) on plants and seeds (`SeedKind` stacks); each seed from a ripe cut crosses the plant with its nearest mature same-species neighbor (within 260, 10 percent mutation). Gene tag shown in the seed label; hook `SSC_FARM_GENES`. Additive genes, no trade-offs yet (playtest question).
-- Farming seed drops and picker: creature guts drop seeds (12 percent), seed picker on C / d-pad up, seed pickups drawn.
-- Flocks (workstream 8.1, generator version 28, HOME golden untouched): `simulation/flock.rs` keeps a flock as one entity with flat member arrays (boid steering from the genome, light collision, near/mid/far LOD, caps 320 per flock and 640 loaded), `herd.rs` places big passive herds from ring 3 on a salted stream (about 1 sector in 35), `flockview.rs` draws them. Not saved (regenerated), no sonar or map markers yet, no loot.

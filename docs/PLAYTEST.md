@@ -147,3 +147,9 @@ A herd is one flock of 100 to 300 Bogey-like members (flat array, not bodies), i
 ## Genetic carrier identity
 
 Check `slinger`, `longslinger`, and `softslinger` smoke/dev specimens: the familiar crab remains recognizable, the long eight-port carrier keeps its body despite a stronger EMP, and the soft limbless carrier still throws without pretending to engulf. Does a one-port Slinger remain legible? Do organ markings on longer bodies look attached rather than a second silhouette? Appearance organ reach is bounded 0.25 to 3; wild distribution tuning is stage 3. No human playtest yet.
+
+## Procedural carriers and rare power combinations (generator 32)
+
+- Can familiar species still be recognized when appendage counts, proportions or skin vary? Compare the authored Slinger with generated carrier hooks in HOOKS. Knobs: `CARRIER_VARIANT_CHANCE` (0.30), `UNUSUAL_CARRIER_CHANCE` (0.05), carrier variation ranges in `development.rs`.
+- Do extra-power warnings remain readable and escapable alongside the original capability? Knobs: `MULTI_POWER_CHANCE` (0.02), `EXTRA_POWER_CONTINUE_CHANCE` (0.10), `MAX_SAMPLED_POWERS` (3). The telegraph minima and existing source budgets remain fixed.
+- Does a varied body feel too large or too busy? Knob: `MAX_SAMPLED_CARRIER_BODIES` (16), depth-zero weighted anatomy grammar. Founder percentages do not predict local encounter density.

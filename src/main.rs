@@ -1146,6 +1146,9 @@ fn smoke_run(
                 | "oozer"
                 | "longslinger"
                 | "softslinger"
+                | "wildslinger"
+                | "wildsong"
+                | "wildmulti"
                 | "multijammer"
                 | "multioozer"
         ) {
@@ -1154,7 +1157,13 @@ fn smoke_run(
         }
         if matches!(
             name.as_str(),
-            "multijammer" | "multioozer" | "longslinger" | "softslinger"
+            "multijammer"
+                | "multioozer"
+                | "longslinger"
+                | "softslinger"
+                | "wildslinger"
+                | "wildsong"
+                | "wildmulti"
         ) {
             // A bounded authored encounter: load first, then remove wild threats so the
             // warning capture cannot lose the observer or relocate on death recovery.
@@ -1228,6 +1237,9 @@ fn smoke_run(
                 | "multioozer"
                 | "longslinger"
                 | "softslinger"
+                | "wildslinger"
+                | "wildsong"
+                | "wildmulti"
         ) {
             1
         } else {
@@ -1238,7 +1250,13 @@ fn smoke_run(
             let id = session.game.place_creature(&Species::of(genome), at);
             if matches!(
                 name.as_str(),
-                "multijammer" | "multioozer" | "longslinger" | "softslinger"
+                "multijammer"
+                    | "multioozer"
+                    | "longslinger"
+                    | "softslinger"
+                    | "wildslinger"
+                    | "wildsong"
+                    | "wildmulti"
             ) && let Some(body) = session.game.bodies.iter_mut().find(|b| b.id == id)
             {
                 body.pinned = true;
