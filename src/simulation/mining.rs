@@ -197,6 +197,8 @@ pub struct Beam {
     pub progress: f32,
     /// Crystal only: how close the burst is, in [0, 1].
     pub danger: f32,
+    /// The beam is cutting a plant, not mining a rock (`target` is the planetoid it grows on).
+    pub crop: bool,
 }
 
 /// How rich a kind of rock is per unit of area.
@@ -515,6 +517,7 @@ impl Game {
             end,
             material,
             progress,
+            crop: false,
             danger: if kind == RockKind::Crystal {
                 (self.mine_clock / BURST_AFTER).clamp(0.0, 1.0)
             } else {

@@ -1249,12 +1249,14 @@ pub enum Tag {
     PromptKey,
     Key(usize),
     Cargo(usize),
+    /// Biomass and seeds, under the cargo pips, once the farm has anything.
+    Farm,
     /// The developer tag, while any dev toggle is on.
     Dev,
 }
 
 impl Tag {
-    const ALL: [Tag; 35] = [
+    const ALL: [Tag; 36] = [
         Tag::Discovery(0),
         Tag::Discovery(1),
         Tag::Discovery(2),
@@ -1289,6 +1291,7 @@ impl Tag {
         Tag::Cargo(0),
         Tag::Cargo(1),
         Tag::Cargo(2),
+        Tag::Farm,
         Tag::Dev,
     ];
 
@@ -1311,7 +1314,7 @@ impl Tag {
             | Tag::Nearest
             | Tag::Apex => 12.0,
             Tag::Vitals | Tag::Key(_) => 11.0,
-            Tag::Cargo(_) => 10.0,
+            Tag::Cargo(_) | Tag::Farm => 10.0,
         }
     }
 }
@@ -1625,6 +1628,23 @@ fn describe(
                 color,
                 c + Vec2::new(0.0, RING_R + 10.0),
                 Align::Center,
+            )
+        }
+        Tag::Farm => {
+            let farm = game.farm();
+            if farm.biomass < 0.05 && farm.seed_count() == 0 {
+                return None;
+            }
+            let mut text = format!("BIOMASS {:.0}", farm.biomass);
+            if let Some(species) = farm.selected_seed() {
+                let name = farm.flora(species).map_or("", |f| f.name.as_str());
+                text.push_str(&format!("   SEEDS {} {name}", farm.seed_count()));
+            }
+            (
+                text,
+                Color::srgb(0.55, 0.95, 0.6).with_alpha(0.9),
+                layout.cargo + Vec2::new(0.0, CARGO_HALF_HEIGHT + 24.0),
+                Align::Left,
             )
         }
         Tag::Cargo(i) => {

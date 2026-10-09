@@ -102,6 +102,17 @@ Saving is on by default; a launch with a save shows the title menu (see `docs/PE
 - Does the 30 second autosave ever stutter a frame? Knob: `INTERVAL` in `src/autosave.rs`.
 - Dying with a save on disk: the last autosave is still there and loads alive with a sliver of hull; is that a reload-to-undo-death exploit worth closing (delete the save on death)?
 
+## Farming (workstream 1, first slice)
+
+HOME's planetoid has plants from the start. Fly slowly up to it: the key reads PLANT once you hold a seed, and hold the beam over a ripe plant (a small green pip over it) to cut it.
+- Which plants are crops for you and which are not? Forage (plants you cannot cut) should feed Bogeys and other grazers; does the difference read from the plant's look alone, or do you need a label (the tint is a faint hint)? Knob: `Flora::tint`, the pip in `draw_plants`.
+- Pace: a crop ripens in 4 to 10 minutes (`grow_secs`, 240 to 600). Too slow to be a loop, or about right for flying off and coming back? Knobs: grow range in `flora::species`, `STUMP` (regrowth start).
+- Reward: a ripe harvest gives 6 times the crop's nutrition in biomass and one seed; biomass mends the hull at 0.35 a point. Worth the detour compared with mining metal? Knobs: `CROP_YIELD`, `BIOMASS_PER_HULL`, `BIOMASS_CAP`.
+- Harvest feel: one second of beam, shield drain as mining. Does cutting too early (and losing the plant) feel fair or like a trap? Knobs: `SPROUT`, `RIPE`, `HARVEST_TIME`.
+- Grazers: do solitary grazers visibly walk to the plants they like and bite them down to a stump? Do Bogeys ignore them (they only graze what they drift past)? Knobs: `GRAZE_RATE`, `GRAZE_FLOOR`, the pull in `creature.rs`.
+- Planting: is the key prompt clear (PLANT NAME, SLOW DOWN, TOO CLOSE TO ANOTHER PLANT) and does it get in the way of landing? Knobs: `PLANT_RANGE`, `PLANT_SPEED`, `SPACING`.
+- Look: plants are drawn as raw grammar line art at scale 16; some bushy ones read as scribble. Knob: `PLANT_SCALE`, leaf rules in `draw_plants`.
+
 ## Questions to answer after the first session
 
 1. Which of the above felt wrong first? One line each is enough.

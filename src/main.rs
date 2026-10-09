@@ -1038,6 +1038,19 @@ fn smoke_run(
         session.game.teleport(Vec2::new(x, y));
         session.game.player_invulnerability = 1e9;
     }
+    // SSC_FARM=stage|plant: pose the ship beside HOME's crop with seeds and biomass in hand
+    // (`plant` also plants one); SSC_FARM_AGE=<seconds> then ages the clock (a ripe crop).
+    if run.frames == 0
+        && let Ok(mode) = std::env::var("SSC_FARM")
+    {
+        let age = std::env::var("SSC_FARM_AGE")
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .unwrap_or(0.0);
+        let at = session.game.stage_farm(mode == "plant", age);
+        eprintln!("SSC_FARM staged at {at:?}");
+        session.game.player_invulnerability = 1e9;
+    }
     // SSC_TIME=<seconds>: start the game clock there (wells and anything else posed by time).
     if run.frames == 0
         && let Some(time) = std::env::var("SSC_TIME")
@@ -1658,6 +1671,11 @@ fn smoke_run(
             session.input.mine = true;
             session.input.fire = false;
         }
+    }
+    // SSC_FARM_BEAM=1 (with SSC_FARM=stage): hold the beam over the crop.
+    if std::env::var_os("SSC_FARM_BEAM").is_some() && run.frames > 2 {
+        session.input.mine = true;
+        session.input.fire = false;
     }
     if std::env::var_os("SSC_SHIP_VIEW").is_some() {
         session.game.player_invulnerability = 0.0;

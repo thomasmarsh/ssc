@@ -1013,6 +1013,7 @@ mod tests {
             material: Material::Metal,
             progress: 0.0,
             danger: 0.0,
+            crop: false,
         });
         g.gripped = Some(rock);
         move_body(

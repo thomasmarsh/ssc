@@ -84,6 +84,11 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 - `SSC_MENU=save|armed|new`: show the title menu (with a save, with the erase armed, or with none) for screenshots. `SSC_DIE=1`: lose every ship at frame 6. Check no-undo: `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s SSC_SMOKE_FRAMES=30 cargo run --bin ssc`, then again with `SSC_DIE=1`: the slot holds a fresh run with the legacy and a wreck, `generation: 1`. Format and rules: [PERSISTENCE.md](PERSISTENCE.md).
 - `SSC_SAVE_DIR=<dir>`: where the slot lives (default the per-user data folder, macOS `~/Library/Application Support/ssc`). Use a scratch directory for checks. Check a reload: `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s SSC_TELEPORT=12000,0 SSC_SMOKE_FRAMES=60 cargo run --bin ssc` (writes on exit), then the same command without `SSC_TELEPORT` and with `SSC_SCREENSHOT=/tmp/s.png` starts where the first ended; stderr says `save: loaded`.
 
+## Farming
+
+- `SSC_FARM=stage|plant`: pose the ship beside HOME's crop-only plant with 3 seeds and 14 biomass; `plant` also plants one seed (the interact key) beside it. `SSC_FARM_AGE=<seconds>` then ages the game clock, so a seedling grows. Prints where the ship was put. Combine with `SSC_SAVE=1 SSC_SAVE_DIR=<scratch>` to save, then relaunch with `SSC_TELEPORT` near the plant to check it came back.
+- `SSC_FARM_BEAM=1`: hold the mining beam each frame (use with `SSC_FARM=stage`); a ring fills at the plant as it is cut.
+
 ## Developer panel (not smoke-gated)
 
 - `SSC_DEV=1`: enable the developer toggles and panel (backquote). See [DEVTOOLS.md](DEVTOOLS.md).

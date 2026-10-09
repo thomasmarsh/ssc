@@ -200,9 +200,12 @@ pub fn species(master: u64, id: u16) -> Flora {
         }
     }
     let grow_secs = rng.range(240.0, 600.0);
+    // The first syllable walks the table from a per-universe offset, so names never repeat.
+    let offset = (stream(master ^ FLORA_SALT, Domain::Gallery, 0).next_u64()
+        % SYLLABLES.len() as u64) as usize;
     let name = format!(
         "{}{}",
-        SYLLABLES[rng.int(0, SYLLABLES.len() as u32 - 1) as usize],
+        SYLLABLES[(usize::from(id) + offset) % SYLLABLES.len()],
         ENDINGS[rng.int(0, ENDINGS.len() as u32 - 1) as usize]
     );
     let c = chemistry.0;
@@ -325,6 +328,9 @@ mod tests {
 
     #[test]
     fn crops_are_a_minority_and_species_names_differ() {
+        let names: std::collections::HashSet<String> =
+            (0..SPECIES).map(|id| species(42, id).name).collect();
+        assert_eq!(names.len(), usize::from(SPECIES));
         let crowd = sample_palates(42, 64);
         let roles: Vec<Role> = (0..SPECIES)
             .map(|id| role(&species(42, id), &crowd))

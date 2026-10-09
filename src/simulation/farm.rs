@@ -23,7 +23,7 @@ pub const PLANT_RANGE: f32 = 160.0;
 /// Planting needs a gentle ship.
 pub const PLANT_SPEED: f32 = 60.0;
 /// Least distance along the surface between two plants, or a plant and a pad.
-pub const SPACING: f32 = 70.0;
+pub const SPACING: f32 = 90.0;
 /// Growth at which a plant is ripe.
 pub const RIPE: f32 = 0.9;
 /// Below this growth the beam ignores a plant (too small to cut).
@@ -33,7 +33,7 @@ pub const STUMP: f32 = 0.4;
 /// Grazers leave at least this much standing.
 pub const GRAZE_FLOOR: f32 = 0.45;
 /// World units per plan unit: a full plant is a few dozen to a hundred units tall.
-pub const PLANT_SCALE: f32 = 24.0;
+pub const PLANT_SCALE: f32 = 16.0;
 /// Seconds of beam on a plant to cut it.
 pub const HARVEST_TIME: f32 = 1.0;
 /// Biomass from a ripe harvest of a perfect (nutrition 1) crop.
@@ -446,6 +446,7 @@ impl Game {
             material: Material::Volatiles,
             progress: (progress / HARVEST_TIME).min(1.0),
             danger: 0.0,
+            crop: true,
         });
         let _ = ship;
         if progress < HARVEST_TIME {
@@ -550,6 +551,42 @@ impl Game {
             .min(self.farm.biomass / BIOMASS_PER_HULL);
         self.farm.biomass -= hull * BIOMASS_PER_HULL;
         hull
+    }
+
+    /// Smoke hook (`SSC_FARM`): poses the ship just above HOME's crop-only plant with seeds and
+    /// biomass in hand; with `plant` it also presses the interact key beside it, and `age`
+    /// seconds pass on the game clock afterwards. Returns where the ship was put.
+    pub fn stage_farm(&mut self, plant: bool, age: f32) -> Option<Vec2> {
+        self.update_farm();
+        let crowd = flora::sample_palates(self.seed, 64);
+        let crop = self
+            .farm
+            .species_table()
+            .iter()
+            .find(|f| flora::role(f, &crowd) == flora::Role::CropOnly)?
+            .id;
+        let live = self
+            .farm
+            .live
+            .iter()
+            .find(|l| {
+                l.species == crop && self.farm.plants[l.index].planet.0 == (SectorId { x: 0, y: 0 })
+            })
+            .copied()?;
+        let spot = live.position + live.normal * 130.0;
+        self.teleport(spot);
+        self.farm.seeds.insert(crop, 3);
+        self.farm.biomass = 14.0;
+        if plant {
+            // Step aside along the surface so the new seedling has room.
+            let along = Vec2::new(-live.normal.y, live.normal.x);
+            self.teleport(spot + along * 150.0);
+            self.step(1.0 / 60.0, Input::default());
+            self.interact();
+            self.time += age;
+            self.update_farm();
+        }
+        Some(spot)
     }
 
     /// Developer and test hook: drops the plants and seeds of a game (a fresh farm).

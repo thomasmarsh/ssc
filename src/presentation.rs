@@ -2466,6 +2466,7 @@ pub fn draw(
     ui_scale: Res<UiScale>,
     mut gizmos: Gizmos,
     mut ship_view: Local<crate::shipview::ShipView>,
+    mut plant_cache: Local<PlantCache>,
 ) {
     let game = &session.game;
     let camera = view.0.translation.truncate();
@@ -2814,6 +2815,7 @@ pub fn draw(
             game.gripped() == Some(beam.target),
         );
     }
+    draw_plants(&mut gizmos, game, &mut plant_cache);
     draw_symbiosis(&mut gizmos, game);
     for pickup in game.pickups.iter().filter(|p| {
         (p.position - camera)
@@ -4592,6 +4594,79 @@ fn draw_symbiosis(gizmos: &mut Gizmos, game: &Game) {
 /// The mining beam: a flickering line from the ship's nose to the rock's face, and a ring
 /// around the rock that fills as it is worked (for crystal, the harvest cycle, turning red
 /// as the burst nears).
+/// Plans of plants already derived, by plant and growth step, so a frame derives nothing new.
+#[derive(Default)]
+pub struct PlantCache(std::collections::HashMap<(u32, u16), ssc::grammar::Plan>);
+
+/// Plants on planetoids: the species' own grammar at the plant's growth, swaying a little,
+/// leaves tinted by chemistry. A ripe crop wears a small pip above it so a harvest reads at a
+/// glance; forage (which the ship cannot use) does not.
+fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
+    use ssc::grammar::PartKind;
+    use ssc::simulation::farm::{PLANT_SCALE, RIPE};
+    let farm = game.farm();
+    let Some(ship) = game.player() else { return };
+    if cache.0.len() > 160 {
+        cache.0.clear();
+    }
+    for live in &farm.live {
+        if live.position.distance(ship.position) > 2400.0 {
+            continue;
+        }
+        let (Some(plant), Some(flora)) = (farm.plants.get(live.index), farm.flora(live.species))
+        else {
+            continue;
+        };
+        let step = (live.growth * 40.0).round() as u16;
+        let plan = cache
+            .0
+            .entry((plant.id, step))
+            .or_insert_with(|| flora.specimen(plant.seed).plan(f32::from(step) / 40.0));
+        let turn = live.normal.to_angle() - std::f32::consts::FRAC_PI_2;
+        let sway = (game.time * 0.9 + plant.id as f32).sin() * 0.04;
+        let place = |p: Vec2| {
+            live.position
+                + Vec2::from_angle(turn).rotate(Vec2::from_angle(sway).rotate(p)) * PLANT_SCALE
+        };
+        let [tr, tg, tb] = flora.tint;
+        let leaf = Color::srgb(tr, tg, tb);
+        for part in &plan.parts {
+            let (a, b) = (place(part.start), place(part.end()));
+            match part.kind {
+                PartKind::Stem => {
+                    gizmos.line_2d(a, b, Color::srgb(0.45 + 0.2 * tr, 0.36 + 0.3 * tg, 0.2));
+                }
+                PartKind::Leaf => {
+                    let side = Vec2::from_angle(part.angle + std::f32::consts::FRAC_PI_2);
+                    let mid = place(
+                        part.start
+                            + Vec2::from_angle(part.angle) * part.length * 0.5
+                            + side * part.radius,
+                    );
+                    gizmos.linestrip_2d([a, mid, b], leaf);
+                }
+                PartKind::Fruit => {
+                    gizmos
+                        .circle_2d(
+                            a,
+                            (part.radius * PLANT_SCALE).max(2.0),
+                            Color::srgb(0.95, 0.75 - 0.4 * tb, 0.25),
+                        )
+                        .resolution(8);
+                }
+                _ => {}
+            }
+        }
+        if live.growth >= RIPE && flora.is_crop() {
+            let tip = live.position + live.normal * (PLANT_SCALE * 4.5);
+            let pulse = 0.6 + 0.4 * (game.time * 3.0 + plant.id as f32).sin();
+            gizmos
+                .circle_2d(tip, 4.0, Color::srgba(0.45, 1.0, 0.7, 0.8 * pulse))
+                .resolution(10);
+        }
+    }
+}
+
 fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Beam, held: bool) {
     let [r, g, b] = beam.material.color();
     let tint = Color::srgb(r, g, b);
@@ -4608,6 +4683,25 @@ fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Be
         let spark =
             beam.end + Vec2::from_angle(t.sin() * 2.0 + k as f32) * (4.0 + 5.0 * t.cos().abs());
         gizmos.line_2d(beam.end, spark, tint.with_alpha(0.8));
+    }
+    if beam.crop {
+        // A plant: a small ring at the cut that fills as the stem parts.
+        gizmos
+            .circle_2d(beam.end, 20.0, tint.with_alpha(0.25))
+            .resolution(24);
+        let steps = (beam.progress.clamp(0.0, 1.0) * 24.0).ceil() as usize;
+        if steps > 0 {
+            gizmos.linestrip_2d(
+                (0..=steps).map(|i| {
+                    let t = (i as f32 / 24.0).min(beam.progress.clamp(0.0, 1.0));
+                    beam.end
+                        + Vec2::from_angle(std::f32::consts::FRAC_PI_2 - t * std::f32::consts::TAU)
+                            * 20.0
+                }),
+                tint,
+            );
+        }
+        return;
     }
     let ring_radius = rock.radius + 9.0;
     if held {
