@@ -243,7 +243,7 @@ pub fn graft_price(strain: &Strain) -> [(Material, f32); 2] {
     let k = f32::from(strain.level);
     [
         (Material::Crystal, t::GRAFT_CRYSTAL * k),
-        (Material::Volatiles, t::GRAFT_VOLATILES * k),
+        (Material::Fuel, t::GRAFT_VOLATILES * k),
     ]
 }
 
@@ -296,7 +296,7 @@ impl Game {
                 upgrades::Rarity::Rare,
             ),
             Found::Lesser(volatiles) => {
-                let taken = self.cargo.add(Material::Volatiles, volatiles);
+                let taken = self.cargo.add(Material::Biomass, volatiles);
                 self.notify(
                     format!("{name} ORGAN AT MAX  VOLATILES +{taken:.0}"),
                     upgrades::Rarity::Common,
@@ -331,12 +331,12 @@ impl Game {
         let fitted = organs.slots.len();
         if fitted > 0 {
             let want = t::ORGAN_UPKEEP / 60.0 * fitted as f32 * dt;
-            let taken = self.cargo.take(Material::Volatiles, want);
-            let dry = taken + 1e-6 < want || self.cargo.amount(Material::Volatiles) <= 0.0;
+            let taken = self.cargo.take(Material::Biomass, want);
+            let dry = taken + 1e-6 < want || self.cargo.amount(Material::Biomass) <= 0.0;
             let organs = &mut self.loadout.organs;
             if dry {
                 organs.dormant = true;
-            } else if self.cargo.amount(Material::Volatiles) >= 1.0 {
+            } else if self.cargo.amount(Material::Biomass) >= 1.0 {
                 organs.dormant = false;
             }
         } else {
@@ -449,6 +449,8 @@ mod tests {
         game.cargo = Cargo {
             metal: 100.0,
             volatiles: 100.0,
+            fuel: 100.0,
+            biomass: 100.0,
             crystal: 100.0,
             ..Default::default()
         };
@@ -519,7 +521,7 @@ mod tests {
         // A level 2 graft: 2 x (8 crystal, 20 volatiles).
         assert!(game.bench_organ(Organ::Veil).is_ok());
         assert_eq!(game.cargo.crystal, 100.0 - t::GRAFT_CRYSTAL * 2.0);
-        assert_eq!(game.cargo.volatiles, 100.0 - t::GRAFT_VOLATILES * 2.0);
+        assert_eq!(game.cargo.fuel, 100.0 - t::GRAFT_VOLATILES * 2.0);
         assert!(game.loadout.organs.is_fitted(Organ::Veil));
         // One slot: a second organ bumps the first, never destroying it.
         assert!(game.bench_organ(Organ::Faraday).is_ok());
@@ -527,9 +529,9 @@ mod tests {
         assert!(!game.loadout.organs.is_fitted(Organ::Veil));
         assert!(game.loadout.organs.owns(Organ::Veil));
         // Swapping back costs nothing: the graft was paid.
-        let (c, v) = (game.cargo.crystal, game.cargo.volatiles);
+        let (c, v) = (game.cargo.crystal, game.cargo.biomass);
         assert!(game.bench_organ(Organ::Veil).is_ok());
-        assert_eq!((game.cargo.crystal, game.cargo.volatiles), (c, v));
+        assert_eq!((game.cargo.crystal, game.cargo.biomass), (c, v));
         // Short of the price: refused, nothing spent.
         let mut poor = stocked();
         poor.loadout.skills.raise(Skill::Symbiosis);
@@ -562,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn fitted_organs_cost_volatiles_by_the_minute_and_sleep_when_the_hold_is_dry() {
+    fn fitted_organs_cost_biomass_by_the_minute_and_sleep_when_the_hold_is_dry() {
         let mut game = stocked();
         game.loadout.skills.raise(Skill::Symbiosis);
         game.loadout.skills.raise(Skill::Symbiosis);
@@ -570,25 +572,25 @@ mod tests {
         game.loadout.organs.acquire(strain(Organ::Veil, 1, 1.0));
         game.bench_organ(Organ::Remora).unwrap();
         game.bench_organ(Organ::Veil).unwrap();
-        game.cargo.volatiles = 50.0;
+        game.cargo.biomass = 50.0;
         for _ in 0..(60.0 / DT) as usize {
             game.update_organs(DT);
         }
-        let spent = 50.0 - game.cargo.volatiles;
+        let spent = 50.0 - game.cargo.biomass;
         assert!(
             (spent - 2.0 * t::ORGAN_UPKEEP).abs() < 0.05,
             "two organs for a minute: {spent}"
         );
         assert!(game.loadout.organs.perk(Organ::Veil).is_some());
         // A dry hold puts them to sleep, nothing is lost, and feeding it wakes them.
-        game.cargo.volatiles = 0.0;
+        game.cargo.biomass = 0.0;
         game.update_organs(DT);
         assert!(game.loadout.organs.dormant);
         assert!(game.loadout.organs.perk(Organ::Veil).is_none());
         assert!(
             game.loadout.organs.owns(Organ::Veil) && game.loadout.organs.is_fitted(Organ::Veil)
         );
-        game.cargo.volatiles = 5.0;
+        game.cargo.biomass = 5.0;
         game.update_organs(DT);
         assert!(!game.loadout.organs.dormant);
         assert!(game.loadout.organs.perk(Organ::Veil).is_some());
@@ -810,13 +812,13 @@ mod tests {
             2
         );
         game.collect(Item::Specimen(donor));
-        let v = game.cargo.volatiles;
+        let v = game.cargo.biomass;
         game.collect(Item::Specimen(donor));
         assert_eq!(
             game.loadout.organs.strain(Organ::Skipjack).unwrap().level,
             3
         );
-        assert_eq!(game.cargo.volatiles, v + t::LESSER_VOLATILES * 3.0);
+        assert_eq!(game.cargo.biomass, v + t::LESSER_VOLATILES * 3.0);
     }
 
     #[test]
@@ -910,7 +912,7 @@ mod tests {
             }
             (
                 game.bodies[0].health,
-                game.cargo.volatiles,
+                game.cargo.biomass,
                 game.loadout.organs.clone(),
             )
         };

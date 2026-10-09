@@ -255,7 +255,8 @@ pub fn upgrade_price(rarity: Rarity) -> Vec<(Material, f32)> {
 /// Raising a weapon profile from `level` to the next: 40 of its own material, doubling each
 /// level, and a little crystal. None for the stock gun.
 pub fn level_price(profile: Profile, level: u8) -> Option<Vec<(Material, f32)>> {
-    let material = profile.material()?;
+    profile.material()?;
+    let material = Material::Metal;
     let k = 2.0_f32.powi(i32::from(level.max(1)) - 1);
     Some(vec![
         (material, 40.0 * k),
@@ -472,8 +473,8 @@ impl Game {
             return;
         }
         let hull = ship.health < ship.max_health - 1e-3
-            && (self.cargo.metal > 0.0 || self.farm.biomass > 0.0);
-        let shield = ship.shield < ship.max_shield - 1e-3 && self.cargo.volatiles > 0.0;
+            && (self.cargo.metal > 0.0 || self.cargo.biomass > 0.0);
+        let shield = ship.shield < ship.max_shield - 1e-3 && self.cargo.fuel > 0.0;
         if !hull && !shield {
             let full =
                 ship.health >= ship.max_health - 1e-3 && ship.shield >= ship.max_shield - 1e-3;
@@ -481,7 +482,7 @@ impl Game {
                 if full {
                     "NOTHING TO REPAIR"
                 } else {
-                    "REPAIR NEEDS METAL (HULL) OR VOLATILES (SHIELD)"
+                    "REPAIR NEEDS METAL (HULL) OR FUEL (SHIELD)"
                 }
                 .into(),
                 Rarity::Common,
@@ -535,7 +536,7 @@ impl Game {
         }
         let hull = ship.health < ship.max_health - 1e-3 && self.cargo.metal > 0.0;
         let shield = ship.shield < ship.max_shield * t::AUTO_SHIELD_BELOW
-            && self.cargo.volatiles > t::AUTO_VOLATILE_RESERVE;
+            && self.cargo.fuel > t::AUTO_VOLATILE_RESERVE;
         if hull || shield {
             self.pad.repairing = true;
             self.pad.auto_run = true;
@@ -562,7 +563,7 @@ impl Game {
         let hull_missing = (ship.max_health - ship.health).max(0.0);
         let shield_missing = (ship.max_shield - ship.shield).max(0.0);
         let (mut hull, mut shield) = (0.0, 0.0);
-        if hull_missing > 1e-3 && self.farm.biomass > 1e-4 {
+        if hull_missing > 1e-3 && self.cargo.biomass > 1e-4 {
             // Biomass is the renewable mend: it goes first, metal covers the rest.
             hull = self.repair_with_biomass(hull_missing, REPAIR_HULL_RATE, dt);
         } else if hull_missing > 1e-3 && self.cargo.metal > 1e-4 {
@@ -571,13 +572,12 @@ impl Game {
                 .min(self.cargo.metal / REPAIR_METAL);
             self.cargo.take(Material::Metal, hull * REPAIR_METAL);
         } else if shield_missing > 1e-3
-            && self.cargo.volatiles > if auto { t::AUTO_VOLATILE_RESERVE } else { 1e-4 }
+            && self.cargo.fuel > if auto { t::AUTO_VOLATILE_RESERVE } else { 1e-4 }
         {
             shield = (REPAIR_SHIELD_RATE * dt)
                 .min(shield_missing)
-                .min(self.cargo.volatiles / REPAIR_VOLATILES);
-            self.cargo
-                .take(Material::Volatiles, shield * REPAIR_VOLATILES);
+                .min(self.cargo.fuel / REPAIR_VOLATILES);
+            self.cargo.take(Material::Fuel, shield * REPAIR_VOLATILES);
         }
         if hull > 0.0 || shield > 0.0 {
             if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
@@ -1264,14 +1264,13 @@ impl Game {
             return;
         }
         let hull = hull_missing.min(self.cargo.metal / REPAIR_METAL);
-        let shield = shield_missing.min(self.cargo.volatiles / REPAIR_VOLATILES);
+        let shield = shield_missing.min(self.cargo.fuel / REPAIR_VOLATILES);
         if hull < 1e-3 && shield < 1e-3 {
-            self.bench_failed("REPAIR NEEDS METAL (HULL) OR VOLATILES (SHIELD)".into());
+            self.bench_failed("REPAIR NEEDS METAL (HULL) OR FUEL (SHIELD)".into());
             return;
         }
         self.cargo.take(Material::Metal, hull * REPAIR_METAL);
-        self.cargo
-            .take(Material::Volatiles, shield * REPAIR_VOLATILES);
+        self.cargo.take(Material::Fuel, shield * REPAIR_VOLATILES);
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.health = (ship.health + hull).min(ship.max_health);
             ship.shield = (ship.shield + shield).min(ship.max_shield);
@@ -1426,14 +1425,19 @@ impl Game {
             return;
         };
         let moved = if deposit {
-            let room = (STASH_CAP - pad.stash.amount(kind)).max(0.0);
-            let out = self.cargo.take(kind, STASH_STEP.min(room));
-            pad.stash.add_capped(kind, out, STASH_CAP);
-            out
+            self.cargo.transfer(
+                &mut pad.stash,
+                kind,
+                STASH_STEP,
+                super::mining::Storage::Site(STASH_CAP),
+            )
         } else {
-            let out = pad.stash.take(kind, STASH_STEP.min(self.cargo.room(kind)));
-            self.cargo.add(kind, out);
-            out
+            pad.stash.transfer(
+                &mut self.cargo,
+                kind,
+                STASH_STEP,
+                super::mining::Storage::Ship,
+            )
         };
         if moved < 0.5 {
             let why = match (deposit, kind) {
@@ -1474,6 +1478,7 @@ mod tests {
         game.cargo = Cargo {
             metal,
             volatiles,
+            fuel: volatiles,
             crystal,
             ..Default::default()
         };
@@ -1603,7 +1608,7 @@ mod tests {
         stock(&mut game, 0.0, 100.0, 0.0);
         hurt(&mut game, 0.0, 10.0);
         run(&mut game, 5.0);
-        assert_eq!(game.cargo.volatiles, 100.0);
+        assert_eq!(game.cargo.fuel, 100.0);
         // A broken shield is mended, but never below the reserve.
         game.bodies
             .iter_mut()
@@ -1618,8 +1623,8 @@ mod tests {
         game.stats.recharge = 0.0;
         stock(&mut game, 0.0, t::AUTO_VOLATILE_RESERVE + 3.0, 0.0);
         run(&mut game, 30.0);
-        assert!(game.cargo.volatiles >= t::AUTO_VOLATILE_RESERVE - 0.5);
-        assert!(game.cargo.volatiles < t::AUTO_VOLATILE_RESERVE + 3.0);
+        assert!(game.cargo.fuel >= t::AUTO_VOLATILE_RESERVE - 0.5);
+        assert!(game.cargo.fuel < t::AUTO_VOLATILE_RESERVE + 3.0);
     }
 
     #[test]
@@ -1645,10 +1650,7 @@ mod tests {
         let gained = ship(&game).health - hull;
         assert!((gained - 20.0).abs() < 0.6, "5 hull a second: {gained}");
         assert!((100.0 - game.cargo.metal - gained * 0.2).abs() < 0.05);
-        assert_eq!(
-            game.cargo.volatiles, 100.0,
-            "hull repair costs no volatiles"
-        );
+        assert_eq!(game.cargo.fuel, 100.0, "hull repair costs no volatiles");
     }
 
     #[test]
@@ -1659,7 +1661,7 @@ mod tests {
         game.toggle_repair();
         run(&mut game, 3.0);
         // 6 shield a second at 2 volatiles per 15 shield: 18 shield for 2.4 volatiles.
-        let spent = 30.0 - game.cargo.volatiles;
+        let spent = 30.0 - game.cargo.fuel;
         assert!((spent - 2.4).abs() < 0.15, "{spent}");
     }
 
@@ -2112,7 +2114,7 @@ mod tests {
             "10 metal for 50 hull"
         );
         assert!(
-            (game.cargo.volatiles - 11.0).abs() < 0.05,
+            (game.cargo.fuel - 11.0).abs() < 0.05,
             "4 volatiles for 30 shield"
         );
     }
@@ -2352,7 +2354,7 @@ mod tests {
             stock(&mut game, 1000.0, 1000.0, 0.0);
             game.bench_confirm();
             assert_eq!(game.loadout.skills.level(Skill::Cargo), level + 1);
-            let spent = 2000.0 - game.cargo.metal - game.cargo.volatiles;
+            let spent = 2000.0 - game.cargo.metal - game.cargo.fuel;
             assert!(spent > last);
             last = spent;
         }
@@ -3008,7 +3010,7 @@ mod tests {
         for i in 0..12 {
             game.pad.bench = Some(Bench {
                 tab: BenchTab::Parts,
-                cursor: 1 + game.loadout.parts.len() * 2 + i % 3,
+                cursor: 3 + game.loadout.parts.len() * 2 + i % 3,
             });
             if i % 4 == 3 {
                 game.bench_alt();

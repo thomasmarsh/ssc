@@ -303,7 +303,7 @@ pub struct HudModel {
     pub shield_fraction: f32,
     pub abilities: [AbilityRing; 3],
     pub weapon: WeaponIcon,
-    pub cargo: [CargoPip; 3],
+    pub cargo: [CargoPip; 6],
     pub threat: u8,
     pub lives: u32,
     pub score: u64,
@@ -637,7 +637,7 @@ mod tests {
         assert_eq!(hud.weapon.profile, Profile::Stock);
         assert_eq!(hud.weapon.fuel, 1.0);
         assert!(!hud.weapon.dry);
-        assert_eq!(hud.cargo.len(), 3);
+        assert_eq!(hud.cargo.len(), 6);
         assert_eq!(hud.threat, 0);
         assert_eq!(hud.lives, 3);
     }

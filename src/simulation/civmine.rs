@@ -188,7 +188,7 @@ impl Game {
         let stock = std::mem::take(&mut mining.stock);
         mining.active = false;
         let mut spilled = 0.0;
-        for (k, kind) in Material::ALL.into_iter().enumerate() {
+        for (k, kind) in Material::MINERALS.into_iter().enumerate() {
             let amount = (stock[k] * SPILL).floor();
             if amount >= 1.0 {
                 spilled += amount;

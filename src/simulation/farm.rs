@@ -55,8 +55,6 @@ pub const UNRIPE_SEED_CHANCE: f32 = 0.35;
 
 /// Chance a generated creature's death leaves a seed of something its lineage eats.
 pub const GUT_SEED_CHANCE: f32 = 0.12;
-/// Most biomass the hold keeps.
-pub const BIOMASS_CAP: f32 = 60.0;
 /// Biomass spent per hull point in the field repair (metal costs more, see `pads`).
 pub const BIOMASS_PER_HULL: f32 = 0.35;
 /// Growth a grazer takes per second at its table, and the energy a unit of growth gives a
@@ -216,7 +214,6 @@ pub struct Live {
 /// generation (wild ones are stocked once per planetoid, then kept here).
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Farm {
-    pub biomass: f32,
     /// Seeds in hand by kind (species and genes).
     #[serde(with = "seed_stacks")]
     pub seeds: BTreeMap<SeedKind, u32>,
@@ -723,7 +720,7 @@ impl Game {
         self.beam = Some(Beam {
             target: host,
             end: live.position,
-            material: Material::Volatiles,
+            material: Material::Biomass,
             progress: (progress / HARVEST_TIME).min(1.0),
             danger: 0.0,
             crop: true,
@@ -764,9 +761,11 @@ impl Game {
             * genes.yield_mult();
         let harvests = self.farm.plants[live.index].harvests;
         let (food, seeds) = harvest_roll(self.seed, id, harvests, ripe);
-        let room = (BIOMASS_CAP - self.farm.biomass).max(0.0);
-        let got = if food { amount.min(room) } else { 0.0 };
-        self.farm.biomass += got;
+        let got = if food {
+            self.cargo.add(Material::Biomass, amount)
+        } else {
+            0.0
+        };
         for n in 0..seeds {
             let kind = SeedKind {
                 species: live.species,
@@ -999,13 +998,13 @@ impl Game {
 
     /// Hull mended from biomass in a field repair; returns the hull restored.
     pub(super) fn repair_with_biomass(&mut self, want: f32, rate: f32, dt: f32) -> f32 {
-        if self.farm.biomass <= 1e-4 {
+        if self.cargo.biomass <= 1e-4 {
             return 0.0;
         }
         let hull = (rate * dt)
             .min(want)
-            .min(self.farm.biomass / BIOMASS_PER_HULL);
-        self.farm.biomass -= hull * BIOMASS_PER_HULL;
+            .min(self.cargo.biomass / BIOMASS_PER_HULL);
+        self.cargo.biomass -= hull * BIOMASS_PER_HULL;
         hull
     }
 
@@ -1039,7 +1038,7 @@ impl Game {
             },
             3,
         );
-        self.farm.biomass = 14.0;
+        self.cargo.biomass = 14.0;
         if plant {
             // Step aside along the surface so the new seedling has room.
             let along = Vec2::new(-live.normal.y, live.normal.x);
@@ -1211,7 +1210,7 @@ mod tests {
         let forage = species_with(&game, flora::Role::Forage);
         plant(&mut game, forage, 1.0);
         beam(&mut game, 2.5);
-        assert_eq!(game.farm.biomass, 0.0, "forage is not ours to harvest");
+        assert_eq!(game.cargo.biomass, 0.0, "forage is not ours to harvest");
         assert!(game.farm.seeds.is_empty());
         assert_eq!(game.farm.plants.len(), 1);
 
@@ -1221,9 +1220,9 @@ mod tests {
         let (food, seeds) = harvest_roll(game.seed, game.farm.plants[at].id, 0, true);
         beam(&mut game, 2.5);
         if food {
-            assert!(game.farm.biomass > 1.0, "{}", game.farm.biomass);
+            assert!(game.cargo.biomass > 1.0, "{}", game.cargo.biomass);
         } else {
-            assert_eq!(game.farm.biomass, 0.0);
+            assert_eq!(game.cargo.biomass, 0.0);
         }
         assert_eq!(
             game.farm.seeds_of(crop),
@@ -1290,8 +1289,8 @@ mod tests {
         assert!(game.farm.plants.is_empty(), "over-harvest kills");
         assert!(seeds <= 1, "never a pair from an unripe cut");
         assert_eq!(game.farm.seeds_of(crop), seeds);
-        assert!(game.farm.biomass < 3.0);
-        assert_eq!(game.farm.biomass > 0.0, food);
+        assert!(game.cargo.biomass < 3.0);
+        assert_eq!(game.cargo.biomass > 0.0, food);
     }
 
     #[test]
@@ -1502,7 +1501,7 @@ mod tests {
     fn crops_and_biomass_survive_a_save_and_a_generator_change_drops_only_plants() {
         let mut game = Game::new(42);
         game.step(DT, Input::default());
-        game.farm.biomass = 12.0;
+        game.cargo.biomass = 12.0;
         game.farm.add_seeds(SeedKind::wild(3), 2);
         let wild = game.farm.plants.len();
         assert!(wild > 0);
@@ -1513,20 +1512,20 @@ mod tests {
         assert!(report.world_deltas_kept);
         assert_eq!(loaded.farm.plants, game.farm.plants);
         assert_eq!(loaded.farm.stocked, game.farm.stocked);
-        assert_eq!(loaded.farm.biomass, 12.0);
+        assert_eq!(loaded.cargo.biomass, 12.0);
         assert_eq!(loaded.farm.seeds_of(3), 2);
         assert!(loaded.farm.flora(0).is_some(), "the table is rederived");
         let (state, _) = save::SaveState::from_text(&text).unwrap();
         let (moved, report) = Game::from_save(state, GENERATOR_VERSION + 1);
         assert!(!report.world_deltas_kept);
-        assert_eq!(moved.farm.biomass, 12.0);
+        assert_eq!(moved.cargo.biomass, 12.0);
         assert!(moved.farm.plants.len() <= wild);
     }
 
     #[test]
     fn biomass_mends_the_hull_before_metal() {
         let mut game = rig();
-        game.farm.biomass = 20.0;
+        game.cargo.biomass = 20.0;
         game.cargo.metal = 10.0;
         let ship = game
             .bodies
@@ -1539,7 +1538,7 @@ mod tests {
         for _ in 0..(5.0 / DT) as usize {
             game.step(DT, Input::default());
         }
-        assert!(game.farm.biomass < 20.0, "biomass was spent");
+        assert!(game.cargo.biomass < 20.0, "biomass was spent");
         assert_eq!(
             game.cargo.metal, 10.0,
             "metal untouched while biomass lasts"
@@ -1625,7 +1624,7 @@ mod tests {
                 .unwrap();
             game.farm.plants[at].harvests = h;
             beam(&mut game, 2.5);
-            paid[n] = game.farm.biomass;
+            paid[n] = game.cargo.biomass;
         }
         assert!(
             paid[0] > 0.0 && paid[0] < paid[1] && paid[1] < paid[2],
@@ -1848,7 +1847,7 @@ mod tests {
         let plant = game.farm.plants.iter().find(|p| p.id == pruned).unwrap();
         assert!(!plant.blighted, "the cut took the blight out");
         assert!(plant.immune_until > game.time);
-        assert!(plant.harvests == 0 && game.farm.biomass == 0.0, "no pay");
+        assert!(plant.harvests == 0 && game.cargo.biomass == 0.0, "no pay");
         let id = plant.id;
         run(&mut game, BLIGHT_IMMUNE - 20.0);
         let plant = game.farm.plants.iter().find(|p| p.id == id).unwrap();
@@ -1998,7 +1997,7 @@ mod tests {
             game.farm.growth_of(plant, game.time) < RIPE,
             "back to a stump"
         );
-        assert_eq!(game.farm.biomass, 0.0, "the ship got none of it");
+        assert_eq!(game.cargo.biomass, 0.0, "the ship got none of it");
         let _ = seed;
         // A full granary leaves the crop ripe on the stalk.
         let (mut game, at) = tended_rig(&t, 1.0);
@@ -2155,7 +2154,7 @@ mod tests {
         game.cargo.metal = 100.0;
         game.cargo.crystal = 0.0;
         game.cargo.volatiles = 30.0;
-        game.farm.biomass = 0.0;
+        game.cargo.biomass = 0.0;
         hold_at(&mut game, near, 0.2);
         let hint = game.tithe_hint().expect("a seat in reach");
         assert_eq!(hint.store, 40.0);
@@ -2163,9 +2162,9 @@ mod tests {
         let expect = farm::biomass_offer(40.0, regard, 20.0);
         assert_eq!(game.tithe(), Ok(()));
         assert!(
-            (game.farm.biomass - expect).abs() < 1e-3,
+            (game.cargo.biomass - expect).abs() < 1e-3,
             "{}",
-            game.farm.biomass
+            game.cargo.biomass
         );
         assert!((game.farm.stored(t.id) - (40.0 - expect)).abs() < 1e-3);
         assert_eq!(
@@ -2180,7 +2179,7 @@ mod tests {
         game.cargo.metal = 100.0;
         hold_at(&mut game, seat + Vec2::new(200.0, 0.0), 0.2);
         assert_eq!(game.tithe(), Ok(()));
-        assert_eq!(game.farm.biomass, 0.0);
+        assert_eq!(game.cargo.biomass, 0.0);
         assert_eq!(game.farm.stored(t.id), 40.0);
     }
 
@@ -2190,14 +2189,14 @@ mod tests {
         let (mut game, _) = tended_rig(&t, 1.0);
         game.set_regard(t.id, 10.0);
         beam(&mut game, HARVEST_TIME + 0.3);
-        assert!(game.farm.biomass > 0.0);
+        assert!(game.cargo.biomass > 0.0);
         assert!((game.civ_regard(t.id) - (10.0 - THEFT_REGARD)).abs() < 0.01);
         // Wild or planted crops cost nothing.
         let mut game = rig();
         let crop = species_with(&game, flora::Role::CropOnly);
         plant(&mut game, crop, 1.0);
         beam(&mut game, HARVEST_TIME + 0.3);
-        assert!(game.farm.biomass > 0.0);
+        assert!(game.cargo.biomass > 0.0);
         // Pruning a tended crop's blight is a favor.
         let (mut game, at) = tended_rig(&t, 1.0);
         game.set_regard(t.id, 10.0);

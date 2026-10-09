@@ -123,7 +123,7 @@ impl Snapshot {
                     )
                 }
             }
-            BenchAction::Stash(_) => receipt.text.clone(),
+            BenchAction::Stash(_) | BenchAction::Supply(_) => receipt.text.clone(),
         };
         let spent = Material::ALL
             .into_iter()
@@ -342,6 +342,9 @@ mod tests {
             metal: 10000.0,
             crystal: 10000.0,
             volatiles: 10000.0,
+            fuel: 10000.0,
+            biomass: 10000.0,
+            water: 10000.0,
             ..Default::default()
         };
         game
@@ -372,7 +375,7 @@ mod tests {
         ship.health = 50.0;
         ship.shield = 10.0;
         game.cargo.metal = 1.0;
-        game.cargo.volatiles = 0.0;
+        game.cargo.fuel = 0.0;
         game.bench_confirm();
         assert_eq!(game.player().unwrap().health, 55.0);
         assert_eq!(game.player().unwrap().shield, 10.0);
@@ -495,7 +498,7 @@ mod tests {
         game.bench_confirm();
         assert_eq!(game.loadout.arsenal.level(arsenal::Profile::Spread), 2);
         assert!(result(&game).contains("LEVEL 1 -> 2"));
-        assert!(result(&game).contains("Ammo cost 0.45 -> 0.54 METAL per volley"));
+        assert!(result(&game).contains("Ammo cost 0.45 -> 0.54 FUEL per volley"));
         game.bench_select(BenchAction::Weapon(arsenal::Profile::Missiles));
         game.bench_confirm();
         assert!(!game.bench_feedback.as_ref().unwrap().success);

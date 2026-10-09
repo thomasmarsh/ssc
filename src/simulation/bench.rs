@@ -34,6 +34,7 @@ pub struct Bench {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BenchAction {
     Repair,
+    Supply(Material),
     Reforge(usize),
     Upgrade(usize),
     Weapon(Profile),
@@ -100,6 +101,7 @@ impl Game {
                     (0..self.loadout.parts.len())
                         .flat_map(|i| [BenchAction::Reforge(i), BenchAction::Upgrade(i)]),
                 )
+                .chain([Material::Fuel, Material::Water].map(BenchAction::Supply))
                 .chain(Material::ALL.map(BenchAction::Stash))
                 .collect(),
             BenchTab::Weapons => Profile::ALL.map(BenchAction::Weapon).to_vec(),
@@ -160,6 +162,19 @@ impl Game {
         let before = super::bench_feedback::Snapshot::capture(self);
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
+            Some(BenchAction::Supply(m)) => {
+                if self
+                    .cargo
+                    .exchange(&supply_price(m), &[(m, supply_amount(m))])
+                {
+                    self.bench_done(
+                        format!("{} +{:.0} TO SHIP RESERVE", m.label(), supply_amount(m)),
+                        Rarity::Common,
+                    );
+                } else {
+                    self.bench_failed("NEEDS INPUTS OR RESERVE SPACE".into());
+                }
+            }
             Some(BenchAction::Reforge(i)) => self.bench_reforge(i),
             Some(BenchAction::Upgrade(i)) => self.bench_upgrade(i),
             Some(BenchAction::Weapon(p)) => {
@@ -227,6 +242,17 @@ impl Game {
             ok: true,
         };
         match action {
+            BenchAction::Supply(m) => {
+                row.group = "SHIP SERVICES";
+                row.text = format!("BUY {} +{:.0}", m.label(), supply_amount(m));
+                row.detail = "Local pad service. Ship hold pays; reserve capacity checked before payment. Water commissions future sites; crops still grow without irrigation.".into();
+                row.costs = supply_price(m);
+                row.ok =
+                    self.cargo.can_afford(&row.costs) && self.cargo.room(m) >= supply_amount(m);
+                if !row.ok {
+                    row.state = "NEEDS INPUTS OR RESERVE SPACE".into();
+                }
+            }
             BenchAction::Repair => {
                 row.group = "REPAIR";
                 row.text = "REPAIR HULL + SHIELD".into();
@@ -236,7 +262,7 @@ impl Game {
                         .min(self.cargo.metal / REPAIR_METAL);
                     let shield = (ship.max_shield - ship.shield)
                         .max(0.0)
-                        .min(self.cargo.volatiles / REPAIR_VOLATILES);
+                        .min(self.cargo.fuel / REPAIR_VOLATILES);
                     row.detail = format!(
                         "Hull {:.0} -> {:.0}   Shield {:.0} -> {:.0}. Repairs only what you can pay.",
                         ship.health,
@@ -246,7 +272,7 @@ impl Game {
                     );
                     row.costs = vec![
                         (Material::Metal, hull * REPAIR_METAL),
-                        (Material::Volatiles, shield * REPAIR_VOLATILES),
+                        (Material::Fuel, shield * REPAIR_VOLATILES),
                     ];
                     row.ok = hull >= 1e-3 || shield >= 1e-3;
                     if !row.ok {
@@ -254,7 +280,7 @@ impl Game {
                             if ship.health >= ship.max_health && ship.shield >= ship.max_shield {
                                 "FULL"
                             } else {
-                                "NEEDS METAL OR VOLATILES"
+                                "NEEDS METAL OR FUEL"
                             }
                             .into();
                     }
@@ -449,6 +475,21 @@ impl Game {
     }
 }
 
+fn supply_amount(kind: Material) -> f32 {
+    match kind {
+        Material::Fuel => 30.0,
+        Material::Water => 10.0,
+        _ => 0.0,
+    }
+}
+fn supply_price(kind: Material) -> Vec<(Material, f32)> {
+    match kind {
+        Material::Fuel => vec![(Material::Volatiles, 12.0), (Material::Metal, 3.0)],
+        Material::Water => vec![(Material::Metal, 5.0)],
+        _ => vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::organs::Strain;
@@ -466,6 +507,9 @@ mod tests {
         game.cargo = Cargo {
             metal: 10000.0,
             volatiles: 10000.0,
+            fuel: 10000.0,
+            biomass: 10000.0,
+            water: 10000.0,
             crystal: 10000.0,
             ..Default::default()
         };
@@ -624,7 +668,7 @@ mod tests {
         ship.health = 50.0;
         ship.shield = 0.0;
         game.cargo.metal = 1.0;
-        game.cargo.volatiles = 0.0;
+        game.cargo.fuel = 0.0;
         assert!(selected(&game).ok);
         assert!(selected(&game).detail.contains("50 -> 55"));
         game.bench_confirm();
@@ -761,7 +805,7 @@ mod tests {
         game.bench_confirm();
         assert_eq!(selected(&game).state, "REMOVE");
         assert_eq!(game.cargo.crystal, 9992.0);
-        assert_eq!(game.cargo.volatiles, 9980.0);
+        assert_eq!(game.cargo.fuel, 9980.0);
         game.bench_select(BenchAction::Organ(Organ::Faraday));
         assert!(selected(&game).detail.contains("Replaces SKIP NODE"));
         game.bench_confirm();
@@ -783,15 +827,24 @@ mod tests {
         game.cargo = Cargo {
             metal: 100.0,
             volatiles: 100.0,
+            fuel: 100.0,
+            biomass: 100.0,
+            water: 30.0,
             crystal: 100.0,
             ..Default::default()
         };
         for m in Material::ALL {
             game.bench_select(BenchAction::Stash(m));
             game.bench_confirm();
-            assert_eq!(game.cargo.amount(m), 75.0);
+            assert_eq!(
+                game.cargo.amount(m),
+                if m == Material::Water { 5.0 } else { 75.0 }
+            );
             game.bench_alt();
-            assert_eq!(game.cargo.amount(m), 100.0);
+            assert_eq!(
+                game.cargo.amount(m),
+                if m == Material::Water { 30.0 } else { 100.0 }
+            );
         }
         for tab in 0..3 {
             game.bench_tab(tab);

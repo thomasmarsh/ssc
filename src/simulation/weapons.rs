@@ -787,7 +787,7 @@ mod tests {
                 Trait::Nova => assert!(game.bullets.iter().any(|b| b.shape == Shape::Orb)),
                 _ => assert!(game.mines.iter().any(|m| m.friendly)),
             }
-            let spent = 100.0 - game.cargo.volatiles;
+            let spent = 100.0 - game.cargo.fuel;
             assert!(
                 spent >= volatiles - 0.01 && spent < volatiles + 1.0,
                 "{kind:?} {spent}"

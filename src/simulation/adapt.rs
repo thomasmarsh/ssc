@@ -227,7 +227,7 @@ mod tests {
         use crate::simulation::tests::{empty_game, set_player, spawn};
         let fight = |switch: bool| -> (f32, f32) {
             let mut game = empty_game();
-            game.cargo.metal = 200.0;
+            game.cargo.fuel = 200.0;
             game.loadout.arsenal.acquire(Profile::Pierce, 1);
             let mut species = crate::genome::Species::bogey();
             species.genome.hull = 8000.0;

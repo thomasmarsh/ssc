@@ -90,7 +90,7 @@ impl Game {
         let insured = self.is_insured();
         let (share, cap, weapon_cap) = terms(insured);
         let mut carried = Cargo::default();
-        for (k, kind) in Material::ALL.into_iter().enumerate() {
+        for (k, kind) in Material::MINERALS.into_iter().enumerate() {
             carried.add(kind, (self.run.mined[k] * share).min(cap).floor());
         }
         let weapon = (weapon_cap > 0)

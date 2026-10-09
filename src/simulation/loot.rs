@@ -581,33 +581,29 @@ mod tests {
             ..surge(Effect::Stat(Stat::FireRate, 1.0))
         };
         game.collect(Item::Surge(overdrive));
-        assert_eq!(game.cargo.metal, 3.0);
+        assert_eq!(game.cargo.fuel, 3.0);
         // Idle: nothing runs, nothing burns.
         for _ in 0..30 {
             game.step(DT, Input::default());
         }
         assert_eq!(game.stats.fire_period, Stats::BASE.fire_period);
-        assert_eq!(game.cargo.metal, 3.0);
+        assert_eq!(game.cargo.fuel, 3.0);
         // Firing wakes it and it burns 2 a second.
         for _ in 0..30 {
             game.step(DT, fire());
         }
         assert!(game.stats.fire_period < 0.09);
-        assert!(
-            (game.cargo.metal - 2.0).abs() < 0.05,
-            "{}",
-            game.cargo.metal
-        );
+        assert!((game.cargo.fuel - 2.0).abs() < 0.05, "{}", game.cargo.fuel);
         // The fuel runs out about a second later, and the ship is back to base.
         for _ in 0..90 {
             game.step(DT, fire());
         }
         assert_eq!(game.stats.fire_period, Stats::BASE.fire_period);
-        assert!(game.cargo.metal < 0.05);
+        assert!(game.cargo.fuel < 0.05);
         assert!(game.loadout.arsenal.boosts[0].dry);
-        assert!(game.notices.iter().any(|n| n.text.contains("OUT OF METAL")));
+        assert!(game.notices.iter().any(|n| n.text.contains("OUT OF FUEL")));
         // It stays owned: fuel makes it run again, and the master switch stops it.
-        game.collect(Item::Material(Material::Metal, 20.0));
+        game.collect(Item::Material(Material::Fuel, 20.0));
         game.step(DT, fire());
         assert!(game.stats.fire_period < 0.09);
         game.toggle_boosts();
@@ -659,7 +655,7 @@ mod tests {
         game.collect(Item::Surge(surge(Effect::Stat(Stat::Damage, 1.0))));
         game.step(DT, fire());
         assert_eq!(game.bullets[0].damage, 52.0);
-        assert!(game.cargo.metal < 100.0);
+        assert!(game.cargo.fuel < 100.0);
     }
 
     #[test]

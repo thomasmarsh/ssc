@@ -25,9 +25,9 @@ const RING_GAP: f32 = 58.0;
 const WEAPON_R: f32 = 25.0;
 const WEAPON_X: f32 = -152.0;
 const CARGO_X: f32 = 112.0;
-const CARGO_W: f32 = 12.0;
-const CARGO_H: f32 = 44.0;
-const CARGO_STEP: f32 = 21.0;
+const CARGO_W: f32 = 40.0;
+const CARGO_H: f32 = 4.0;
+const CARGO_STEP: f32 = 48.0;
 /// Distance from the window bottom to the cluster's center line.
 const CLUSTER_UP: f32 = 88.0;
 
@@ -1021,11 +1021,11 @@ pub fn draw_weapon(g: &mut Gizmos, hud: &HudModel, c: Vec2, s: &Screen, time: f3
     }
 }
 
-/// Three vertical pips filled with the hold, in the materials' colors; a full one pulses.
-pub fn draw_cargo(g: &mut Gizmos, pips: &[CargoPip; 3], origin: Vec2, s: &Screen, time: f32) {
+/// Six fixed counters with capacity bars, arranged in two rows of three.
+pub fn draw_cargo(g: &mut Gizmos, pips: &[CargoPip; 6], origin: Vec2, s: &Screen, time: f32) {
     for (i, pip) in pips.iter().enumerate() {
-        let x = origin.x + i as f32 * CARGO_STEP;
-        let top = origin.y - CARGO_H / 2.0;
+        let x = origin.x + (i % 3) as f32 * CARGO_STEP;
+        let top = origin.y + (i / 3) as f32 * 29.0 - CARGO_H / 2.0;
         let color = material_color(pip.material);
         let edge = if pip.full {
             color.with_alpha(0.6 + 0.4 * pulse(time, 7.0))
@@ -1033,17 +1033,9 @@ pub fn draw_cargo(g: &mut Gizmos, pips: &[CargoPip; 3], origin: Vec2, s: &Screen
             DIM.with_alpha(0.8)
         };
         outline_box(g, s, x - 1.0, top - 1.0, CARGO_W + 2.0, CARGO_H + 2.0, edge);
-        let h = CARGO_H * pip.fill.clamp(0.0, 1.0);
+        let h = CARGO_W * pip.fill.clamp(0.0, 1.0);
         if h > 0.5 {
-            solid_box(
-                g,
-                s,
-                x,
-                top + CARGO_H - h,
-                CARGO_W,
-                h,
-                color.with_alpha(0.9),
-            );
+            solid_box(g, s, x, top, h, CARGO_H, color.with_alpha(0.9));
         }
     }
 }
@@ -1068,8 +1060,8 @@ impl ClusterLayout {
     /// The center of cargo pip `i`.
     pub fn cargo_pip(&self, i: usize) -> Vec2 {
         Vec2::new(
-            self.cargo.x + i as f32 * CARGO_STEP + CARGO_W / 2.0,
-            self.cargo.y,
+            self.cargo.x + (i % 3) as f32 * CARGO_STEP + CARGO_W / 2.0,
+            self.cargo.y + (i / 3) as f32 * 29.0,
         )
     }
 }
@@ -1200,8 +1192,6 @@ pub fn draw_realm(g: &mut Gizmos, hud: &HudModel, s: &Screen) {
     }
 }
 
-pub const CARGO_HALF_HEIGHT: f32 = CARGO_H / 2.0;
-
 /// The whole HUD apart from the ship's own rings.
 pub fn draw_hud(g: &mut Gizmos, game: &Game, hud: &HudModel, s: &Screen, time: f32) {
     draw_threat(g, hud, s, time);
@@ -1256,7 +1246,7 @@ pub enum Tag {
 }
 
 impl Tag {
-    const ALL: [Tag; 36] = [
+    const ALL: [Tag; 39] = [
         Tag::Discovery(0),
         Tag::Discovery(1),
         Tag::Discovery(2),
@@ -1291,6 +1281,9 @@ impl Tag {
         Tag::Cargo(0),
         Tag::Cargo(1),
         Tag::Cargo(2),
+        Tag::Cargo(3),
+        Tag::Cargo(4),
+        Tag::Cargo(5),
         Tag::Farm,
         Tag::Dev,
     ];
@@ -1632,10 +1625,10 @@ fn describe(
         }
         Tag::Farm => {
             let farm = game.farm();
-            if farm.biomass < 0.05 && farm.seed_count() == 0 {
+            if farm.seed_count() == 0 {
                 return None;
             }
-            let mut text = format!("BIOMASS {:.0}", farm.biomass);
+            let mut text = String::new();
             if let Some(kind) = farm.selected_seed() {
                 let label = farm.seed_label(kind);
                 text.push_str(&format!("   SEEDS {} {label}", farm.seed_count()));
@@ -1643,20 +1636,20 @@ fn describe(
             (
                 text,
                 Color::srgb(0.55, 0.95, 0.6).with_alpha(0.9),
-                layout.cargo + Vec2::new(0.0, CARGO_HALF_HEIGHT + 24.0),
+                layout.cargo + Vec2::new(0.0, 45.0),
                 Align::Left,
             )
         }
         Tag::Cargo(i) => {
-            if i >= 3 {
+            if i >= 6 {
                 return None;
             }
             let pip = hud.cargo[i];
             let c = layout.cargo_pip(i);
             (
-                format!("{:.0}", pip.amount),
+                format!("{} {:.0}", pip.material.letter(), pip.amount),
                 material_color(pip.material).with_alpha(0.9),
-                c + Vec2::new(0.0, CARGO_HALF_HEIGHT + 11.0),
+                c + Vec2::new(0.0, -9.0),
                 Align::Center,
             )
         }

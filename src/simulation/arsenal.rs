@@ -201,16 +201,11 @@ impl Profile {
         self.weapon_trait().map_or(1, Trait::cap)
     }
 
-    /// The material this profile burns: metal for kinetic, volatiles for explosive,
-    /// crystal for exotic guidance.
+    /// Powered profiles share manufactured fuel; stock remains free.
     pub fn material(self) -> Option<Material> {
         match self {
             Self::Stock => None,
-            Self::Spread | Self::Needles | Self::Broadside | Self::Tail | Self::Pierce => {
-                Some(Material::Metal)
-            }
-            Self::Missiles | Self::Mines | Self::Nova | Self::Blast => Some(Material::Volatiles),
-            Self::Homing => Some(Material::Crystal),
+            _ => Some(Material::Fuel),
         }
     }
 

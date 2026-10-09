@@ -30,16 +30,40 @@ pub enum Material {
     Metal,
     Volatiles,
     Crystal,
+    Biomass,
+    Fuel,
+    Water,
 }
 
 impl Material {
-    pub const ALL: [Material; 3] = [Material::Metal, Material::Volatiles, Material::Crystal];
+    pub const ALL: [Material; 6] = [
+        Self::Metal,
+        Self::Volatiles,
+        Self::Crystal,
+        Self::Biomass,
+        Self::Fuel,
+        Self::Water,
+    ];
+    pub const MINERALS: [Material; 3] = [Self::Metal, Self::Volatiles, Self::Crystal];
+
+    pub fn class(self) -> ResourceClass {
+        match self {
+            Self::Metal | Self::Crystal => ResourceClass::Mineral,
+            Self::Volatiles => ResourceClass::Chemical,
+            Self::Biomass => ResourceClass::Biological,
+            Self::Fuel => ResourceClass::Manufactured,
+            Self::Water => ResourceClass::Utility,
+        }
+    }
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Metal => "METAL",
             Self::Volatiles => "VOLATILES",
             Self::Crystal => "CRYSTAL",
+            Self::Biomass => "BIOMASS",
+            Self::Fuel => "FUEL",
+            Self::Water => "WATER",
         }
     }
 
@@ -48,6 +72,9 @@ impl Material {
             Self::Metal => 'M',
             Self::Volatiles => 'V',
             Self::Crystal => 'C',
+            Self::Biomass => 'B',
+            Self::Fuel => 'F',
+            Self::Water => 'W',
         }
     }
 
@@ -57,6 +84,38 @@ impl Material {
             Self::Metal => [1.0, 0.72, 0.32],
             Self::Volatiles => [0.45, 0.88, 1.0],
             Self::Crystal => [0.88, 0.5, 1.0],
+            Self::Biomass => [0.55, 0.95, 0.6],
+            Self::Fuel => [1.0, 0.55, 0.25],
+            Self::Water => [0.35, 0.6, 1.0],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceClass {
+    Mineral,
+    Chemical,
+    Biological,
+    Manufactured,
+    Utility,
+}
+
+/// Capacity belongs to the owner, never to the resource counter.
+#[derive(Clone, Copy, Debug)]
+pub enum Storage {
+    Ship,
+    Site(f32),
+    FuelTank(f32),
+    WaterTank(f32),
+}
+impl Storage {
+    pub fn cap(self, cargo: &Cargo, kind: Material) -> f32 {
+        match self {
+            Self::Ship => cargo.cap(kind),
+            Self::Site(cap) => cap,
+            Self::FuelTank(cap) if kind == Material::Fuel => cap,
+            Self::WaterTank(cap) if kind == Material::Water => cap,
+            _ => 0.0,
         }
     }
 }
@@ -67,6 +126,9 @@ pub struct Cargo {
     pub metal: f32,
     pub volatiles: f32,
     pub crystal: f32,
+    pub biomass: f32,
+    pub fuel: f32,
+    pub water: f32,
     /// Hold space added to every material by cargo upgrades.
     pub extra: f32,
     /// Developer toggle: every price is waived (see `dev`). Never set in a normal run.
@@ -80,6 +142,9 @@ impl Cargo {
             Material::Metal => self.metal,
             Material::Volatiles => self.volatiles,
             Material::Crystal => self.crystal,
+            Material::Biomass => self.biomass,
+            Material::Fuel => self.fuel,
+            Material::Water => self.water,
         }
     }
 
@@ -88,12 +153,19 @@ impl Cargo {
             Material::Metal => &mut self.metal,
             Material::Volatiles => &mut self.volatiles,
             Material::Crystal => &mut self.crystal,
+            Material::Biomass => &mut self.biomass,
+            Material::Fuel => &mut self.fuel,
+            Material::Water => &mut self.water,
         }
     }
 
     /// The most the hold carries of one material.
-    pub fn cap(&self, _kind: Material) -> f32 {
-        CAP + self.extra
+    pub fn cap(&self, kind: Material) -> f32 {
+        match kind {
+            Material::Fuel => 120.0,
+            Material::Water => 30.0,
+            _ => CAP + self.extra,
+        }
     }
 
     /// How much more of a material fits.
@@ -107,11 +179,14 @@ impl Cargo {
     }
 
     pub fn total(&self) -> f32 {
-        self.metal + self.volatiles + self.crystal
+        Material::ALL.into_iter().map(|k| self.amount(k)).sum()
     }
 
     /// Stores up to `amount` (never past the cap, never negative) and returns what fit.
     pub fn add(&mut self, kind: Material, amount: f32) -> f32 {
+        if !amount.is_finite() {
+            return 0.0;
+        }
         let taken = amount.max(0.0).min(self.room(kind));
         *self.slot(kind) += taken;
         taken
@@ -120,6 +195,9 @@ impl Cargo {
     /// Stores up to `amount` but never past `cap` (a pad stash is smaller than the hold),
     /// and returns what fit.
     pub fn add_capped(&mut self, kind: Material, amount: f32, cap: f32) -> f32 {
+        if !amount.is_finite() || !cap.is_finite() {
+            return 0.0;
+        }
         let room = (cap - self.amount(kind)).max(0.0);
         let taken = amount.max(0.0).min(room);
         *self.slot(kind) += taken;
@@ -128,6 +206,9 @@ impl Cargo {
 
     /// Removes up to `amount` of one material and returns what came out.
     pub fn take(&mut self, kind: Material, amount: f32) -> f32 {
+        if !amount.is_finite() {
+            return 0.0;
+        }
         let taken = amount.max(0.0).min(self.amount(kind));
         *self.slot(kind) -= taken;
         taken
@@ -135,15 +216,16 @@ impl Cargo {
 
     /// Whether every part of a price is on board.
     pub fn can_afford(&self, price: &[(Material, f32)]) -> bool {
-        self.dev_free
-            || Material::ALL.into_iter().all(|kind| {
-                let due: f32 = price
-                    .iter()
-                    .filter(|(k, _)| *k == kind)
-                    .map(|(_, a)| a.max(0.0))
-                    .sum();
-                self.amount(kind) + 1e-4 >= due
-            })
+        price.iter().all(|(_, a)| a.is_finite() && *a >= 0.0)
+            && (self.dev_free
+                || Material::ALL.into_iter().all(|kind| {
+                    let due: f32 = price
+                        .iter()
+                        .filter(|(k, _)| *k == kind)
+                        .map(|(_, a)| a.max(0.0))
+                        .sum();
+                    self.amount(kind) >= due
+                }))
     }
 
     /// Pays a price in full or not at all.
@@ -161,19 +243,63 @@ impl Cargo {
         true
     }
 
+    /// Transfers only what fits at the destination; never creates or discards overflow.
+    pub fn transfer(
+        &mut self,
+        destination: &mut Cargo,
+        kind: Material,
+        amount: f32,
+        storage: Storage,
+    ) -> f32 {
+        let cap = storage.cap(destination, kind);
+        if !amount.is_finite() || !cap.is_finite() {
+            return 0.0;
+        }
+        let moved = amount
+            .max(0.0)
+            .min(self.amount(kind))
+            .min((cap - destination.amount(kind)).max(0.0));
+        self.take(kind, moved);
+        destination.add_capped(kind, moved, cap);
+        moved
+    }
+
+    /// A manufactured purchase rejects output overflow before atomically paying its inputs.
+    pub fn exchange(&mut self, price: &[(Material, f32)], output: &[(Material, f32)]) -> bool {
+        if price
+            .iter()
+            .chain(output)
+            .any(|(_, a)| !a.is_finite() || *a < 0.0)
+        {
+            return false;
+        }
+        if !self.can_afford(price) {
+            return false;
+        }
+        let mut next = *self;
+        next.spend(price);
+        for kind in Material::ALL {
+            let amount: f32 = output
+                .iter()
+                .filter(|(k, _)| *k == kind)
+                .map(|(_, a)| *a)
+                .sum();
+            if amount > next.room(kind) {
+                return false;
+            }
+            next.add(kind, amount);
+        }
+        *self = next;
+        true
+    }
+
     /// Removes `fraction` of every material and returns what was taken.
     pub fn take_fraction(&mut self, fraction: f32) -> Cargo {
         let f = fraction.clamp(0.0, 1.0);
-        let lost = Cargo {
-            metal: self.metal * f,
-            volatiles: self.volatiles * f,
-            crystal: self.crystal * f,
-            extra: 0.0,
-            dev_free: false,
-        };
-        self.metal -= lost.metal;
-        self.volatiles -= lost.volatiles;
-        self.crystal -= lost.crystal;
+        let mut lost = Cargo::default();
+        for kind in Material::ALL {
+            *lost.slot(kind) = self.take(kind, self.amount(kind) * f);
+        }
         lost
     }
 }
@@ -578,6 +704,66 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn six_goods_transactions_transfers_death_and_save_conserve_stocks() {
+        let mut game = Game::new(42);
+        for kind in Material::ALL {
+            game.cargo.add(kind, 20.0);
+        }
+        assert!(
+            !game
+                .cargo
+                .can_afford(&[(Material::Metal, 12.0), (Material::Metal, 12.0)])
+        );
+        let before = game.cargo;
+        assert!(
+            !game
+                .cargo
+                .exchange(&[(Material::Metal, 2.0)], &[(Material::Water, 20.0)])
+        );
+        assert_eq!(game.cargo, before);
+        assert!(game.cargo.exchange(
+            &[(Material::Volatiles, 3.0), (Material::Volatiles, 2.0)],
+            &[(Material::Fuel, 10.0)]
+        ));
+        assert_eq!(game.cargo.volatiles, 15.0);
+        let mut site = Cargo::default();
+        assert_eq!(
+            game.cargo
+                .transfer(&mut site, Material::Water, 100.0, Storage::WaterTank(100.0)),
+            20.0
+        );
+        assert_eq!(
+            site.transfer(&mut game.cargo, Material::Water, 100.0, Storage::Ship),
+            20.0
+        );
+        assert_eq!(
+            game.cargo
+                .transfer(&mut site, Material::Metal, 5.0, Storage::FuelTank(100.0)),
+            0.0
+        );
+        let before = game.cargo;
+        let lost = game.cargo.take_fraction(DEATH_LOSS);
+        for kind in Material::ALL {
+            assert_eq!(
+                before.amount(kind),
+                game.cargo.amount(kind) + lost.amount(kind)
+            );
+        }
+        let (state, generation) =
+            super::save::SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (loaded, _) = Game::from_save(state, generation);
+        assert_eq!(game.cargo, loaded.cargo);
+        let mut expanded = Cargo {
+            extra: 1000.0,
+            ..Cargo::default()
+        };
+        assert_eq!(expanded.add(Material::Fuel, 1000.0), 120.0);
+        assert_eq!(expanded.add(Material::Water, 1000.0), 30.0);
+        assert_eq!(expanded.add(Material::Metal, f32::INFINITY), 0.0);
+    }
+
     use crate::genome::{Genome, Species, Weapon};
     use crate::simulation::skills;
     use crate::simulation::tests::{DT, add, body, empty_game, set_player};
@@ -659,7 +845,7 @@ mod tests {
                     .unwrap()
             })
             .collect();
-        for kind in Material::ALL {
+        for kind in Material::MINERALS {
             assert!(kinds.contains(&kind), "{kind:?} never chosen");
         }
         // The same spawn always gives the same material.

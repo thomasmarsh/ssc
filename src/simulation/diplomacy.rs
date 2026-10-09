@@ -557,12 +557,12 @@ impl Game {
             return None;
         }
         let regard = self.civ_regard(civ.id);
-        let room = (farm::BIOMASS_CAP - self.farm.biomass).max(0.0);
+        let room = self.cargo.room(Material::Biomass);
         let offer = farm::biomass_offer(self.farm.stored(civ.id), regard, given).min(room);
         if offer < 1.0 {
             return None;
         }
-        self.farm.biomass += offer;
+        self.cargo.add(Material::Biomass, offer);
         if let Some(store) = self.farm.granary.get_mut(&civ.id) {
             *store = (*store - offer).max(0.0);
         }

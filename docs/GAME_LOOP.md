@@ -2,7 +2,7 @@
 
 Design direction recorded 2026-10-09. This is the target game loop and implementation plan, not a list of built features. A portable [visual overview](GAME_LOOP.html) illustrates the loop and milestones. `TODO:` means unbuilt. Numbers, recipe names, and pacing targets below are proposals to test. [ROADMAP.md](ROADMAP.md) tracks the gap, [FLOW.md](FLOW.md) owns interaction and readability, [WORKSTREAMS.md](WORKSTREAMS.md) maps the work, and [SEED.md](../SEED.md) holds the next slices.
 
-This direction supersedes the older three-resource economy, wildlife technology drops, combat-only trophy gates, universal raw-only bench prices, and a fixed weapon-power ceiling. Existing code keeps its current behavior until the relevant slice lands. [UNIVERSE.md](UNIVERSE.md), [BENCH.md](BENCH.md), and [PERSISTENCE.md](PERSISTENCE.md) describe built contracts.
+This direction supersedes the older three-resource economy, wildlife technology drops, combat-only trophy gates, universal raw-only bench prices, and a fixed weapon-power ceiling. Slices A resources/services and six HUD counters are built; B/C remain queued. [UNIVERSE.md](UNIVERSE.md), [BENCH.md](BENCH.md), and [PERSISTENCE.md](PERSISTENCE.md) describe built contracts.
 
 ## 1. The intended loop
 
@@ -32,9 +32,9 @@ The next-lure system continues to offer one immediate goal. A separately pinned 
 
 | System | Evidence in the current code | Gap to the target |
 | --- | --- | --- |
-| Resources | `simulation/mining.rs`: `Material::ALL` has Metal, Volatiles, Crystal; `Cargo` has three stores | General goods, biomass in the same inventory, fuel, water, storage profiles |
-| Farming | `simulation/farm.rs`: plants, seeds, genes, blight, `Farm::biomass`; `farm/tend.rs`: fields, greenhouses, granaries | Biomass remains a separate store and hull-repair input; water and machines do not exist |
-| HUD | `simulation/hud.rs`: three cargo pips; `src/hud.rs` also draws conditional farm text | Six equally legible resource counters and selected-site stock |
+| Resources | `simulation/mining.rs`: six shared goods, atomic prices/exchanges/transfers; fixed ship fuel/water reserves | Local production, reservations and remote transport |
+| Farming | `simulation/farm.rs`: plants, seeds, genes, blight, `Farm::biomass`; `farm/tend.rs`: fields, greenhouses, granaries | Ship biomass uses Cargo; civilization granaries remain local stocks. Irrigation/machines remain TODO |
+| HUD | `simulation/hud.rs`: three cargo pips; `src/hud.rs` also draws conditional farm text | Six fixed counters built; selected-site production/incoming deliveries remain TODO |
 | Loot | `simulation/loot.rs` and `apexes.rs`: ordinary wildlife, carriers, and apex elders can pay technological parts/charges | Separate biology, citizen equipment, structure salvage, and knowledge rewards |
 | Progression | `upgrades.rs`: source grades grow, but computed damage/hull/shield cap at 8x base; `arsenal.rs`: profile level follows trait caps | Equipment grade must keep increasing independently of bounded patterns and handling |
 | Civilizations | `diplomacy.rs`, `civ.rs`, `farm/tend.rs`: regard, tithes, chart sharing, repairs/swaps, biomass/seeds | Explicit offers, purchasing unowned equipment, agreements, jobs, research access, visiting trade ships |
@@ -90,7 +90,7 @@ Each important manufactured good must have a purchase route. The peaceful player
 
 ## 4. HUD and interaction
 
-`TODO:` show **Metal, Volatiles, Crystal, Biomass, Fuel, Water** as six fixed compact counters, including zero. Each has a glyph, a distinct color, current amount, and a cap/fill cue. Labels or glyph shapes must distinguish them without color. Fuel and water use their own tank caps. Biomass has the same prominence as the minerals.
+Built: show **Metal, Volatiles, Crystal, Biomass, Fuel, Water** as six fixed compact counters, including zero. Each has a glyph, a distinct color, current amount, and a cap/fill cue. Labels or glyph shapes must distinguish them without color. Fuel and water use their own tank caps. Biomass has the same prominence as the minerals.
 
 Keep the cluster compact: two rows of three at narrow sizes, with stable ordering and no overlap with weapon, organ, or ability indicators. The weapon's arc shows its actual consumable reserve, without calling raw volatiles "fuel." In flight, water means the ship reserve. While docked or inspecting a site, a clearly labeled SITE panel shows local stocks, consumption, incoming deliveries, and shortages; do not substitute a planet's water for the ship's number.
 
@@ -265,3 +265,5 @@ Use meaningful headless scenario tests for resource conservation, capture limits
 | Further material tiers? | Few processed goods, reusable component families, equipment grades | A recipe choice that adds a new activity or geographic dependency |
 
 The principal risks are early gear starvation after removing wildlife tech, peaceful play hitting a hidden combat gate, production becoming waiting, logistics turning into invisible teleportation, and deep-space grade getting clamped away again. The slice gates address these before the network and settlement grow.
+
+Resource slice A: ship fuel cap 120 and water cap 30 are independent of cargo upgrades. Pad services buy 30 fuel for 12 volatiles + 3 metal, or 10 water for 5 metal; reject overflow before payment. Powered weapons/boosts and rapid shield repair spend shared fuel; stock fire/flight and ordinary shield recharge stay free. Organ upkeep uses biomass and first grafts use crystal + fuel. All six carried goods lose 25% on death; pad stocks survive. Save format 3 refuses incompatible older formats. Crops still grow without water; biological hull repair remains transitional until support research lands.

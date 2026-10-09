@@ -18,7 +18,7 @@ use crate::world::SectorId;
 use serde::{Deserialize, Serialize};
 
 /// The layout version this build writes.
-pub const SAVE_VERSION: u32 = 2;
+pub const SAVE_VERSION: u32 = 3;
 
 /// Why a save could not be read.
 #[derive(Debug, PartialEq, Eq)]
@@ -147,7 +147,7 @@ impl SaveState {
         ron::ser::to_string_pretty(&out, pretty).unwrap_or_default()
     }
 
-    /// Reads a save, migrating older layouts. Returns the state and the generator version it
+    /// Reads a compatible save, refusing older incompatible layouts. Returns the state and the generator version it
     /// was written under.
     pub fn from_text(text: &str) -> Result<(SaveState, u32), SaveError> {
         let header: Header = ron::from_str(text).map_err(|e| SaveError::Parse(e.to_string()))?;
@@ -157,7 +157,7 @@ impl SaveState {
                 supported: SAVE_VERSION,
             });
         }
-        let text = migrate(header.version, text)?;
+        let text = compatible_layout(header.version, text)?;
         #[derive(Deserialize)]
         #[serde(rename = "Save")]
         struct Body {
@@ -168,13 +168,12 @@ impl SaveState {
     }
 }
 
-/// Brings an older layout's text up to `SAVE_VERSION`. Version 1 is the first, so there is
-/// nothing to do yet; each later bump adds one `match` arm that rewrites the text one step.
-fn migrate(from: u32, text: &str) -> Result<String, SaveError> {
+/// Refuses incompatible pre-1.0 layouts without migration.
+fn compatible_layout(from: u32, text: &str) -> Result<String, SaveError> {
     match from {
         SAVE_VERSION => Ok(text.to_string()),
         other => Err(SaveError::Parse(format!(
-            "no migration from version {other}"
+            "incompatible save version {other}"
         ))),
     }
 }

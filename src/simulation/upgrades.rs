@@ -906,7 +906,7 @@ impl Loadout {
             slot: surge.slot,
             rarity: surge.rarity,
             effects: surge.effects.clone(),
-            material: surge.material,
+            material: Material::Fuel,
             drain: surge.drain,
             need: surge.need,
             running: false,
@@ -1501,16 +1501,12 @@ pub fn roll_salvage(rng: &mut Rng, source: &Source) -> Item {
 /// A plain surge for tests: one effect, 100 fuel, a drain of 1 a second while firing.
 #[cfg(test)]
 pub(crate) fn test_surge(effect: Effect) -> Surge {
-    let material = match effect {
-        Effect::Trait(kind, _) => Profile::from_trait(kind).and_then(Profile::material),
-        Effect::Stat(..) => None,
-    };
     Surge {
         name: "Test Surge".into(),
         slot: Slot::Cannon,
         rarity: Rarity::Common,
         effects: vec![effect],
-        material: material.unwrap_or(Material::Metal),
+        material: Material::Fuel,
         fuel: 100.0,
         drain: 1.0,
         need: Need::Firing,

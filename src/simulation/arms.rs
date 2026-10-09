@@ -217,7 +217,7 @@ impl Game {
                 }
             }
             Charged::Boost(gain) => {
-                let taken = self.cargo.add(surge.material, surge.fuel);
+                let taken = self.cargo.add(Material::Fuel, surge.fuel);
                 let what = match gain {
                     BoostGain::New => "BOOST",
                     BoostGain::Upgraded => "BOOST UPGRADED",
@@ -376,10 +376,10 @@ mod tests {
             game.loadout.parts.is_empty(),
             "weapon-only parts take no slot"
         );
-        assert_eq!(game.cargo.volatiles, UNLOCK_FUEL);
+        assert_eq!(game.cargo.fuel, UNLOCK_FUEL);
         game.collect(Item::Part(part(vec![Effect::Trait(Trait::Missiles, 1)])));
         assert_eq!(game.loadout.arsenal.level(Profile::Missiles), 2);
-        assert_eq!(game.cargo.volatiles, UNLOCK_FUEL + UPGRADE_FUEL);
+        assert_eq!(game.cargo.fuel, UNLOCK_FUEL + UPGRADE_FUEL);
         // A weaker find never lowers it, and a maxed one only brings fuel.
         for _ in 0..4 {
             game.collect(Item::Part(part(vec![Effect::Trait(Trait::Missiles, 1)])));
@@ -513,13 +513,13 @@ mod tests {
     fn firing_is_billed_and_a_dry_profile_falls_back_to_stock_with_a_cue() {
         let mut game = empty_game();
         game.collect(Item::Surge(test_surge(Effect::Trait(Trait::Spread, 1))));
-        let fuel = |game: &Game| game.cargo.metal;
+        let fuel = |game: &Game| game.cargo.fuel;
         assert_eq!(fuel(&game), 100.0);
         game.step(DT, fire());
         assert!((fuel(&game) - (100.0 - Profile::Spread.cost(1))).abs() < 1e-4);
         assert_eq!(game.bullets.len(), 3);
         // Run the hold down to a hair under one volley.
-        game.cargo.metal = Profile::Spread.cost(1) * 0.5;
+        game.cargo.fuel = Profile::Spread.cost(1) * 0.5;
         game.drain_cues();
         game.notices.clear();
         for _ in 0..12 {
@@ -534,20 +534,20 @@ mod tests {
         // The trigger pull that found it dry still fired (the stock pellet).
         assert!(game.bullets.iter().any(|b| b.friendly));
         // Stock fire costs nothing, ever.
-        let metal = game.cargo.metal;
+        let metal = game.cargo.fuel;
         for _ in 0..30 {
             game.step(DT, fire());
         }
-        assert_eq!(game.cargo.metal, metal);
+        assert_eq!(game.cargo.fuel, metal);
         // Refilling makes the profile usable again.
         assert!(!game.usable(Profile::Spread));
-        game.collect(Item::Material(Material::Metal, 50.0));
+        game.collect(Item::Material(Material::Fuel, 50.0));
         assert!(game.usable(Profile::Spread));
         settle(&mut game);
         assert!(game.switch_weapon(1));
         assert_eq!(game.loadout.arsenal.active, Profile::Spread);
         game.step(DT, fire());
-        assert!(game.cargo.metal < metal + 50.0);
+        assert!(game.cargo.fuel < metal + 50.0);
     }
 
     #[test]
@@ -557,7 +557,7 @@ mod tests {
         game.collect(Item::Surge(test_surge(Effect::Trait(Trait::Spread, 1))));
         game.collect(Item::Surge(test_surge(Effect::Trait(Trait::Missiles, 1))));
         assert_eq!(game.loadout.arsenal.previous, Profile::Spread);
-        game.cargo.volatiles = 0.0;
+        game.cargo.fuel = Profile::Spread.cost(1);
         game.step(DT, fire());
         assert_eq!(game.loadout.arsenal.active, Profile::Spread);
         assert!(game.stats.spread == 1 && game.stats.missiles == 0);
@@ -629,7 +629,7 @@ mod tests {
                 if step % 50 == 0 {
                     let source = Source::plain(2.0, SectorParams::HOME);
                     game.collect(Item::Surge(upgrades::roll_surge(&mut rng, &source)));
-                    game.collect(Item::Material(Material::Metal, 30.0));
+                    game.collect(Item::Material(Material::Fuel, 30.0));
                 }
                 if step % 70 == 0 {
                     game.switch_weapon(1);
