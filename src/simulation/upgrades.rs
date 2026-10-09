@@ -752,6 +752,8 @@ pub enum Item {
     Surge(Surge),
     /// A specimen of another creature's organ (see `organs`).
     Specimen(super::organs::Strain),
+    /// A plant seed (the flora species id), carried by creatures that eat that plant.
+    Seed(u16),
 }
 
 impl Item {
@@ -774,6 +776,7 @@ impl Item {
             Self::Part(p) => p.name.clone(),
             Self::Surge(s) => s.name.clone(),
             Self::Specimen(s) => format!("Specimen: {}", s.organ.label()),
+            Self::Seed(_) => "Seed".into(),
         }
     }
 }

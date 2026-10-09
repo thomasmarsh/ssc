@@ -513,6 +513,10 @@ fn controls(
         {
             session.game.interact();
         }
+        // Seed picker: C (d-pad up) cycles the species planted next.
+        if keys.just_pressed(KeyCode::KeyC) || pad(GamepadButton::DPadUp) {
+            session.game.cycle_seed();
+        }
         // Beacon (locked until bought at the bench's SKILLS tab): H, or Y on a pad.
         if keys.just_pressed(KeyCode::KeyH) || pad(GamepadButton::North) {
             let _ = session.game.deploy_beacon();

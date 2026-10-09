@@ -48,6 +48,9 @@ pub const RIPE_SEED_CUM: [f32; 2] = [0.25, 0.70];
 /// `UNRIPE_SEED_CHANCE`, never a guaranteed pair. Expected seeds 0.35.
 pub const UNRIPE_FOOD_CHANCE: f32 = 0.5;
 pub const UNRIPE_SEED_CHANCE: f32 = 0.35;
+
+/// Chance a generated creature's death leaves a seed of something its lineage eats.
+pub const GUT_SEED_CHANCE: f32 = 0.12;
 /// Most biomass the hold keeps.
 pub const BIOMASS_CAP: f32 = 60.0;
 /// Biomass spent per hull point in the field repair (metal costs more, see `pads`).
@@ -140,6 +143,10 @@ pub struct Farm {
     /// The plant under the beam and the seconds of beam it has had.
     #[serde(skip)]
     cut: Option<(u32, f32)>,
+    /// The seed species the player picked to plant (none, or one no longer held, means the
+    /// lowest id in hand).
+    #[serde(skip)]
+    chosen: Option<u16>,
 }
 
 impl Farm {
@@ -172,9 +179,33 @@ impl Farm {
         self.seeds.values().sum()
     }
 
-    /// The species that planting would use now: the lowest id with a seed in hand.
+    /// The species that planting would use now: the one picked if still in hand, else the
+    /// lowest id with a seed in hand.
     pub fn selected_seed(&self) -> Option<u16> {
-        self.seeds.iter().find(|(_, n)| **n > 0).map(|(id, _)| *id)
+        self.chosen
+            .filter(|id| self.seeds.get(id).is_some_and(|n| *n > 0))
+            .or_else(|| self.seeds.iter().find(|(_, n)| **n > 0).map(|(id, _)| *id))
+    }
+
+    /// Species held, how many kinds of seed.
+    pub fn seed_kinds(&self) -> usize {
+        self.seeds.values().filter(|n| **n > 0).count()
+    }
+
+    /// The seed picker: the next species in hand after the selected one, wrapping. Returns the
+    /// new selection (none when nothing is held).
+    pub fn cycle_seed(&mut self) -> Option<u16> {
+        let current = self.selected_seed()?;
+        let held: Vec<u16> = self
+            .seeds
+            .iter()
+            .filter(|(_, n)| **n > 0)
+            .map(|(id, _)| *id)
+            .collect();
+        let at = held.iter().position(|id| *id == current).unwrap_or(0);
+        let next = held[(at + 1) % held.len()];
+        self.chosen = Some(next);
+        Some(next)
     }
 
     fn take_seed(&mut self, id: u16) -> bool {
@@ -384,6 +415,57 @@ impl Game {
             return PlantHint::Crowded;
         }
         PlantHint::Ready(species, key, anchor)
+    }
+
+    /// A seed from a dead creature's gut: some chance, of a species its lineage eats. Bred
+    /// creatures (no generated origin) are poor foragers.
+    pub(super) fn gut_seed(&self, body: &Body, rng: &mut Rng) -> Option<Item> {
+        let chance = if body.origin.is_some() {
+            GUT_SEED_CHANCE
+        } else {
+            GUT_SEED_CHANCE / 3.0
+        };
+        if !rng.chance(chance) {
+            return None;
+        }
+        let palate = flora::creature_palate(self.seed, body.species);
+        let eaten: Vec<u16> = self
+            .farm
+            .species_table()
+            .iter()
+            .filter(|f| palate.eats(&f.chemistry))
+            .map(|f| f.id)
+            .collect();
+        if eaten.is_empty() {
+            return None;
+        }
+        let pick = (rng.next_u64() % eaten.len() as u64) as usize;
+        Some(Item::Seed(eaten[pick]))
+    }
+
+    /// The seed picker key: cycles the species planted next, and says which.
+    pub fn cycle_seed(&mut self) {
+        if self.farm.seed_kinds() < 2 {
+            return;
+        }
+        if let Some(species) = self.farm.cycle_seed() {
+            let held = self.farm.seeds.get(&species).copied().unwrap_or(0);
+            let name = self
+                .farm
+                .flora(species)
+                .map_or("SEED".into(), |f| f.name.clone());
+            self.notify(format!("SEED {name} x{held}"), upgrades::Rarity::Common);
+        }
+    }
+
+    /// A seed picked up: into the hold of seeds.
+    pub(super) fn gain_seed(&mut self, species: u16) {
+        *self.farm.seeds.entry(species).or_insert(0) += 1;
+        let name = self
+            .farm
+            .flora(species)
+            .map_or("SEED".into(), |f| f.name.clone());
+        self.notify(format!("SEED +1 {name}"), upgrades::Rarity::Common);
     }
 
     /// The interact key, planting: spends a seed and puts a seedling on the planetoid.
@@ -853,6 +935,73 @@ mod tests {
         assert_eq!(game.farm.seeds.get(&crop).copied().unwrap_or(0), seeds);
         assert!(game.farm.biomass < 3.0);
         assert_eq!(game.farm.biomass > 0.0, food);
+    }
+
+    #[test]
+    fn the_seed_picker_cycles_held_species_and_planting_uses_the_pick() {
+        let mut game = rig();
+        game.cycle_seed();
+        assert_eq!(
+            game.farm.selected_seed(),
+            None,
+            "nothing held, nothing picked"
+        );
+        game.farm.seeds.insert(2, 1);
+        game.farm.seeds.insert(5, 1);
+        game.farm.seeds.insert(9, 0);
+        assert_eq!(
+            game.farm.selected_seed(),
+            Some(2),
+            "default is the lowest id"
+        );
+        game.cycle_seed();
+        assert_eq!(game.farm.selected_seed(), Some(5));
+        assert!(game.notices.iter().any(|n| n.text.starts_with("SEED ")));
+        game.cycle_seed();
+        assert_eq!(
+            game.farm.selected_seed(),
+            Some(2),
+            "wraps, skipping empty stacks"
+        );
+        game.cycle_seed();
+        game.interact();
+        assert_eq!(game.farm.plants[0].species, 5, "plants the picked species");
+        assert_eq!(
+            game.farm.selected_seed(),
+            Some(2),
+            "a spent stack falls back"
+        );
+    }
+
+    #[test]
+    fn a_collected_seed_joins_the_stock_and_creatures_drop_what_they_eat() {
+        let mut game = rig();
+        game.collect(Item::Seed(3));
+        game.collect(Item::Seed(3));
+        assert_eq!(game.farm.seeds.get(&3), Some(&2));
+        let body = game
+            .bodies
+            .iter()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap()
+            .clone();
+        let mut body = body;
+        body.origin = Some(KEY);
+        let palate = flora::creature_palate(game.seed, body.species);
+        let (mut drops, n) = (0u32, 4000u32);
+        let mut rng = Rng::new(77);
+        for _ in 0..n {
+            if let Some(Item::Seed(id)) = game.gut_seed(&body, &mut rng) {
+                drops += 1;
+                let f = game.farm.flora(id).unwrap();
+                assert!(palate.eats(&f.chemistry), "only what its lineage eats");
+            }
+        }
+        let rate = drops as f32 / n as f32;
+        assert!(
+            (rate - GUT_SEED_CHANCE).abs() < 0.03 || drops == 0,
+            "gut seed rate {rate}"
+        );
     }
 
     #[test]

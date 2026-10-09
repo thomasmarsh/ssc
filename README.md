@@ -81,6 +81,7 @@ Xbox controllers use the existing gilrs input path and its built-in mappings. Fo
 | Dash (a later upgrade) | Shift | L3 |
 | Sonar ping | X | R3 |
 | Interact: land, build and deploy a pad, open and close the bench, tithe | E | B or Select |
+| Cycle the seed to plant next | C | D-pad up |
 | Beacon (a later upgrade) | H | Y |
 | Star map | G | D-pad left |
 | Details panel and radar | hold Tab, or F3 to latch | |

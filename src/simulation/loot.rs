@@ -42,6 +42,7 @@ fn lifetime(item: &Item) -> f32 {
         Item::Part(_) | Item::Life => 90.0,
         Item::Surge(_) => 50.0,
         Item::Specimen(_) => 120.0,
+        Item::Seed(_) => 90.0,
         Item::Material(..) => 60.0,
         _ => 30.0,
     }
@@ -243,6 +244,7 @@ impl Game {
             Item::Specimen(strain) => {
                 self.take_strain(strain, "SPECIMEN");
             }
+            Item::Seed(species) => self.gain_seed(species),
         }
     }
 
@@ -310,6 +312,9 @@ impl Game {
                 {
                     drops.push(Item::Specimen(organs::Strain::from_donor(organ, genome)));
                 }
+                // A grazer's gut may hold seeds of what it eats (drawn after everything else,
+                // so no other drop of this body moves).
+                drops.extend(self.gut_seed(body, &mut rng));
             }
             BodyKind::Asteroid if !body.pinned && body.radius >= 30.0 => {
                 let grade = world::threat(params.depth);

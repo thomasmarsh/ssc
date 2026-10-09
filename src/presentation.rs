@@ -4005,6 +4005,13 @@ fn draw_pickup(gizmos: &mut Gizmos, pickup: &Pickup) {
                 .circle_2d(p, 24.0 * pulse, tint.with_alpha(0.15))
                 .resolution(24);
         }
+        Item::Seed(_) => {
+            let green = Color::srgb(0.55, 0.95, 0.6);
+            ring(gizmos, 3, 5.0 * pulse, spin * 0.5, green);
+            gizmos
+                .circle_2d(p, 9.0 * pulse, green.with_alpha(0.35))
+                .resolution(12);
+        }
         Item::Surge(surge) => {
             ring(gizmos, 4, 11.0 * pulse, spin, rarity);
             slot_glyph(gizmos, p, surge.slot, rarity);
