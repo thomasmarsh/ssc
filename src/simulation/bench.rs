@@ -701,7 +701,7 @@ impl Game {
             BenchAction::MiningDrone => {
                 row.group = "PAD FLEET";
                 row.text = "BUILD MINING DRONE".into();
-                row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. No flight/combat yet.".into();
+                row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. Local flight; no combat yet.".into();
                 row.costs = fleet::DRONE_PRICE.to_vec();
                 if let Some(pad) = self.landed_pad() {
                     row.text = format!(
@@ -720,7 +720,7 @@ impl Game {
                 row.text = format!("MINING DRONE #{}", slot + 1);
                 row.ok = false;
                 row.state = "UNIT LOST".into();
-                row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. No flight/combat yet.".into();
+                row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. Local flight; no combat yet.".into();
                 if let Some(pad) = self.landed_pad()
                     && let Some(drone) = pad.drones.get(slot)
                 {

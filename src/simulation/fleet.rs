@@ -60,6 +60,29 @@ impl DroneModules {
     }
 }
 
+/// Presentation of a saved unit, never a second simulation body or cargo owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DronePhase {
+    Docked,
+    Launching,
+    Mining,
+    Returning,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DroneView {
+    pub home: PadKey,
+    pub slot: usize,
+    pub position: Vec2,
+    pub heading: Vec2,
+    pub deposit: Vec2,
+    pub phase: DronePhase,
+    pub powered: bool,
+    pub cargo: f32,
+    pub cargo_pod: bool,
+    pub mining_head: bool,
+}
+
 /// A fixed home-planetoid order. Stable identity is (pad key, append-only fleet slot).
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MiningDrone {
@@ -85,7 +108,7 @@ impl MiningDrone {
 
     pub(super) fn trip_detail(&self) -> String {
         format!(
-            "Home deposit: {:.0} local F, up to {:.0} ore, {:.0}s work + 5s return. Cargo waits for stash room. No flight/combat yet.",
+            "Home deposit: {:.0} local F, up to {:.0} ore, {:.0}s work + 5s return. Cargo waits for stash room. Visible local flight; no combat yet.",
             self.fitted.fuel(),
             self.fitted.capacity(),
             self.fitted.work()
@@ -95,6 +118,8 @@ impl MiningDrone {
     pub(super) fn status(&self, pad: &Pad, material: Material) -> String {
         if !pad.power {
             "NEEDS LOCAL POWER".into()
+        } else if self.remaining > self.fitted.work() + RETURN_SECONDS - 2.0 {
+            format!("LAUNCHING - {:.1} CARGO", self.cargo)
         } else if self.remaining > RETURN_SECONDS {
             format!(
                 "MINING {:.1}s - {:.1} CARGO",
@@ -118,6 +143,60 @@ impl MiningDrone {
 }
 
 impl Game {
+    /// Materialize only loaded hosts. Flight follows saved progress and host rotation;
+    /// pausing power freezes progress, while docking follows the rotating surface.
+    pub fn mining_drone_views(&self) -> Vec<DroneView> {
+        let mut views = Vec::new();
+        for pad in self.pads().filter(|p| !p.drones.is_empty()) {
+            let Some(host) = self
+                .bodies
+                .iter()
+                .find(|b| b.origin == Some(pad.key) && b.rock == RockKind::Planetoid)
+            else {
+                continue;
+            };
+            for (slot, drone) in pad.drones.iter().enumerate() {
+                let work = drone.fitted.work();
+                let elapsed = work + RETURN_SECONDS - drone.remaining;
+                let (phase, flight) = if drone.remaining <= 0.0 {
+                    (DronePhase::Docked, 0.0)
+                } else if drone.remaining <= RETURN_SECONDS {
+                    (DronePhase::Returning, drone.remaining / RETURN_SECONDS)
+                } else if elapsed < 2.0 {
+                    (DronePhase::Launching, elapsed / 2.0)
+                } else {
+                    (DronePhase::Mining, 1.0)
+                };
+                let dock_angle =
+                    host.angle + pad.anchor - 0.22 - slot as f32 * 26.0 / (host.radius + 30.0);
+                let sweep = -(0.22 + slot as f32 * 0.13);
+                let direction = Vec2::from_angle(dock_angle + sweep * flight);
+                let position = host.position + direction * (host.radius + 30.0 + 55.0 * flight);
+                let tangent = (direction * 55.0
+                    + direction.perp() * (host.radius + 30.0 + 55.0 * flight) * sweep)
+                    .normalize_or_zero();
+                let heading = match phase {
+                    DronePhase::Returning => -tangent,
+                    DronePhase::Mining => -direction,
+                    _ => tangent,
+                };
+                views.push(DroneView {
+                    home: pad.key,
+                    slot,
+                    position,
+                    heading,
+                    deposit: host.position + direction * host.radius,
+                    phase,
+                    powered: pad.power,
+                    cargo: drone.cargo,
+                    cargo_pod: drone.fitted.cargo,
+                    mining_head: drone.fitted.mining,
+                });
+            }
+        }
+        views
+    }
+
     pub(super) fn mining_drone_block(&self) -> Option<&'static str> {
         match self.landed_pad() {
             None => Some("LAND AT A PAD"),
@@ -332,6 +411,98 @@ mod tests {
         game.cargo.crystal = 5.0;
         game.bench_select(BenchAction::DroneUpgrade(slot, upgrade));
         game.bench_confirm();
+    }
+
+    #[test]
+    fn flight_tracks_saved_trips_without_owning_cargo_or_unloaded_bodies() {
+        let (mut game, key, material) = setup();
+        game.bench_confirm();
+        let dock = game.mining_drone_views()[0];
+        assert_eq!(dock.phase, DronePhase::Docked);
+        game.update_mining_drones(1.0);
+        let launch = game.mining_drone_views()[0];
+        assert_eq!(launch.phase, DronePhase::Launching);
+        assert_eq!((launch.home, launch.slot, launch.cargo), (key, 0, 10.0));
+        assert_ne!(dock.position, launch.position);
+        game.update_mining_drones(1.0);
+        let mining = game.mining_drone_views()[0];
+        assert_eq!(mining.phase, DronePhase::Mining);
+        game.update_mining_drones(8.0);
+        let returning = game.mining_drone_views()[0];
+        assert_eq!(returning.phase, DronePhase::Returning);
+        assert_eq!(mining.position, returning.position);
+        assert_eq!(game.pad.pads[&key].stash.amount(material), 0.0);
+        let state = game.save_state();
+        let text = state.to_text();
+        for _ in 0..3 {
+            assert_eq!(game.mining_drone_views()[0], returning);
+        }
+        assert_eq!(game.save_state().to_text(), text);
+        let (state, generator) = SaveState::from_text(&text).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        let recovered = loaded.mining_drone_views()[0];
+        // Host rotation is regenerated, but identity, phase, cargo and clearance persist.
+        assert_eq!(
+            (
+                recovered.home,
+                recovered.slot,
+                recovered.phase,
+                recovered.cargo
+            ),
+            (
+                returning.home,
+                returning.slot,
+                returning.phase,
+                returning.cargo
+            )
+        );
+        loaded.bodies.retain(|b| b.origin != Some(key));
+        assert!(loaded.mining_drone_views().is_empty());
+        loaded.update_mining_drones(5.0);
+        assert_eq!(loaded.pad.pads[&key].stash.amount(material), 10.0);
+        assert_eq!(loaded.pad.pads[&key].drones[0].cargo, 0.0);
+    }
+
+    #[test]
+    fn flight_clearance_slots_and_power_pause_follow_the_ledger() {
+        let (mut game, key, material) = setup();
+        for _ in 0..MAX_DRONES {
+            game.cargo.metal = 40.0;
+            game.cargo.crystal = 10.0;
+            game.bench_confirm();
+        }
+        game.pad.pads.get_mut(&key).unwrap().stash.fuel = 4.0;
+        let host = game.bodies.iter().find(|b| b.origin == Some(key)).unwrap();
+        let (center, radius) = (host.position, host.radius);
+        for _ in 0..29 {
+            game.update_mining_drones(0.5);
+            let views = game.mining_drone_views();
+            assert_eq!(views.len(), MAX_DRONES);
+            for (slot, view) in views.iter().enumerate() {
+                assert_eq!(view.slot, slot);
+                assert!(view.position.distance(center) >= radius + 29.9);
+                assert!(view.heading.is_normalized());
+                for other in &views[..slot] {
+                    assert!(view.position.distance(other.position) >= 25.0);
+                }
+            }
+        }
+        game.pad.pads.get_mut(&key).unwrap().power = false;
+        let paused = game.mining_drone_views();
+        game.update_mining_drones(30.0);
+        assert_eq!(game.mining_drone_views(), paused);
+        assert!(paused.iter().all(|v| !v.powered));
+        let pad = game.pad.pads.get_mut(&key).unwrap();
+        pad.power = true;
+        pad.stash.add_capped(material, 300.0, 300.0);
+        game.update_mining_drones(0.5);
+        assert!(
+            game.mining_drone_views()
+                .iter()
+                .all(|v| v.phase == DronePhase::Docked && v.cargo == 10.0)
+        );
+        game.pad.pads.remove(&key);
+        assert!(game.mining_drone_views().is_empty());
     }
 
     #[test]

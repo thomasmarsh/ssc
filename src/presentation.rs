@@ -2740,6 +2740,52 @@ pub fn draw(
             .resolution(6);
         gizmos.circle_2d(to, 7.0, c.with_alpha(0.4)).resolution(8);
     }
+    for drone in game.mining_drone_views() {
+        if !ssc::simulation::extent_in_view(drone.position, 24.0, camera, half, 0.0) {
+            continue;
+        }
+        let p = drone.position;
+        let forward = drone.heading;
+        let side = forward.perp();
+        let color = if drone.powered { CYAN } else { MUTED };
+        gizmos.lineloop_2d(
+            [
+                p + forward * 12.0,
+                p - forward * 8.0 + side * 8.0,
+                p - forward * 4.0,
+                p - forward * 8.0 - side * 8.0,
+            ],
+            color,
+        );
+        if drone.cargo_pod {
+            gizmos
+                .circle_2d(p - forward * 3.0, 5.0, color)
+                .resolution(6);
+        }
+        if drone.cargo > 0.0 {
+            gizmos.line_2d(p - side * 4.0, p + side * 4.0, Color::srgb(1.0, 0.72, 0.25));
+        }
+        if drone.powered {
+            use ssc::simulation::fleet::DronePhase;
+            match drone.phase {
+                DronePhase::Mining => {
+                    gizmos.line_2d(
+                        p + forward * 12.0,
+                        drone.deposit,
+                        color.with_alpha(if drone.mining_head { 0.9 } else { 0.45 }),
+                    );
+                }
+                DronePhase::Launching | DronePhase::Returning => {
+                    gizmos.line_2d(
+                        p - forward * 8.0,
+                        p - forward * 19.0,
+                        Color::srgb(1.0, 0.45, 0.15),
+                    );
+                }
+                DronePhase::Docked => {}
+            }
+        }
+    }
     for pad in game.pads() {
         let at = game.pad_position(pad);
         if (at - camera).abs().cmplt(half + Vec2::splat(200.0)).all() {

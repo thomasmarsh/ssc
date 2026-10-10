@@ -1512,6 +1512,35 @@ fn smoke_run(
         smoke_bench(game, &mode);
         run.hold = true;
     }
+    if run.frames == 0
+        && let Ok(seconds) = std::env::var("SSC_FLEET_FLIGHT")
+    {
+        let game = &mut session.game;
+        let at = game
+            .pads()
+            .find(|pad| pad.home)
+            .map(|pad| game.pad_position(pad))
+            .unwrap();
+        game.teleport(at);
+        game.pad_action();
+        game.bench_toggle();
+        smoke_bench(game, "mining-fleet-status");
+        game.cargo.fuel = 4.0;
+        game.bench_select(ssc::simulation::BenchAction::Stash(
+            ssc::simulation::Material::Fuel,
+        ));
+        game.bench_confirm();
+        game.bench_toggle();
+        let seconds = seconds.parse::<f32>().unwrap_or(5.0).clamp(0.0, 15.0);
+        for _ in 0..(seconds * 60.0) as usize {
+            game.step(1.0 / 60.0, Input::default());
+        }
+        // Settle the endpoint despite accumulated fixed-step rounding.
+        if seconds >= 15.0 {
+            game.step(1.0 / 60.0, Input::default());
+        }
+        run.hold = true;
+    }
     // SSC_JAM=emp|confuse|glitch|hud: just before the screenshot, jam the ship (with the dash
     // and parry owned, so their rings show).
     if run.frames + 36 == limit
