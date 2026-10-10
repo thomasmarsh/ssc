@@ -347,7 +347,6 @@ fn main() {
                 presentation::setup,
                 hud::setup,
                 nebula::setup,
-                chartview::setup,
                 bestiaryview::setup,
                 audio::setup,
             ),
@@ -373,12 +372,6 @@ fn main() {
                 presentation::update_hud.run_if(not(bestiaryview::gallery_active)),
                 presentation::scroll_panels,
                 hud::update_texts.run_if(not(bestiaryview::gallery_active)),
-                (
-                    chartview::update,
-                    chartview::update_geometry,
-                    presentation::update_chart,
-                )
-                    .chain(),
                 smoke_run,
             )
                 .chain(),
@@ -427,7 +420,6 @@ fn controls(
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     view: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
     mut session: ResMut<Session>,
-    mut stick_latch: Local<bool>,
     time: Res<Time>,
 ) {
     let Devices {
@@ -498,8 +490,9 @@ fn controls(
             }),
         };
     }
+    // The star map takes its own input in `chartview::drive` (before this system); a map left
+    // open under the settings or the help only holds the ship still.
     if session.chart.is_some() {
-        chart_controls(&keys, &gamepads, &mut session, &mut stick_latch);
         session.input = Input::default();
         return;
     }
@@ -729,96 +722,6 @@ fn bench_controls(
     }
     if fired(Action::BenchClose) {
         game.interact();
-    }
-}
-
-/// The star map's keys. Arrows (or the left stick, d-pad up, down and right) move the cursor,
-/// [ ] (triggers) pick the note preset, F (A) pins the cursor's sector with it, Backspace (X)
-/// removes the pin, H (Y) deploys a beacon at the ship, J (B) starts a jump to the beacon in
-/// the cursor's sector, R recalls it, Z returns the cursor to the ship. G (d-pad left) closes.
-fn chart_controls(
-    keys: &ButtonInput<KeyCode>,
-    gamepads: &Query<&Gamepad>,
-    session: &mut Session,
-    stick_latch: &mut bool,
-) {
-    let Some(mut cursor) = session.chart else {
-        return;
-    };
-    let pad = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
-    let (mut dx, mut dy) = (0, 0);
-    if keys.just_pressed(KeyCode::ArrowLeft) {
-        dx -= 1;
-    }
-    if keys.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight) {
-        dx += 1;
-    }
-    if keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
-        dy += 1;
-    }
-    if keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown) {
-        dy -= 1;
-    }
-    let stick = gamepads
-        .iter()
-        .map(|pad| pad.left_stick())
-        .find(|s| s.length() > 0.6);
-    match (stick, *stick_latch) {
-        (Some(s), false) => {
-            *stick_latch = true;
-            if s.x.abs() >= s.y.abs() {
-                dx += s.x.signum() as i32;
-            } else {
-                dy += s.y.signum() as i32;
-            }
-        }
-        (None, true) => *stick_latch = false,
-        _ => {}
-    }
-    cursor.sector.x += dx;
-    cursor.sector.y += dy;
-    if dx != 0 || dy != 0 {
-        cursor.center = cursor.sector;
-    }
-    if ui::controls::fired(ui::controls::Action::ChartCenter, &|k| keys.just_pressed(k), &pad) {
-        cursor.sector = session.game.sector();
-        cursor.center = cursor.sector;
-    }
-    if keys.just_pressed(KeyCode::BracketRight) || pad(GamepadButton::RightTrigger) {
-        cursor.label = cursor.label.step(1);
-    }
-    if keys.just_pressed(KeyCode::BracketLeft) || pad(GamepadButton::LeftTrigger) {
-        cursor.label = cursor.label.step(-1);
-    }
-    if keys.just_pressed(KeyCode::KeyF) || pad(GamepadButton::South) {
-        session.game.chart_pin(cursor.sector, cursor.label);
-    }
-    if keys.just_pressed(KeyCode::Backspace)
-        || keys.just_pressed(KeyCode::Delete)
-        || pad(GamepadButton::West)
-    {
-        session.game.chart_unpin(cursor.sector);
-    }
-    if keys.just_pressed(KeyCode::KeyH) || pad(GamepadButton::North) {
-        let _ = session.game.deploy_beacon();
-    }
-    if ui::controls::fired(ui::controls::Action::ChartRecall, &|k| keys.just_pressed(k), &pad)
-        && let Some(id) = session.game.beacon_in(cursor.sector)
-    {
-        session.game.recall_beacon(id);
-    }
-    let jump = keys.just_pressed(KeyCode::KeyJ) || pad(GamepadButton::East);
-    session.chart = Some(cursor);
-    if jump {
-        match session.game.beacon_in(cursor.sector) {
-            Some(id) => {
-                // A started charge-up needs the world to run: leave the map.
-                if session.game.begin_travel(id).is_ok() {
-                    session.chart = None;
-                }
-            }
-            None => session.game.chart_note("NO BEACON IN THIS SECTOR"),
-        }
     }
 }
 

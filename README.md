@@ -89,7 +89,7 @@ Xbox controllers use the existing gilrs input path and its built-in mappings. Fo
 | Interact: land, build and deploy a pad, open and close the bench, tithe | E | B or Select |
 | Cycle the seed to plant next | C | D-pad up |
 | Beacon (a later upgrade) | H | Y |
-| Star map | G | D-pad left |
+| Star map | G | D-pad left (B closes it) |
 | Details panel and radar | hold Tab, or F3 to latch | X (latches; press again to close) |
 | Controls reference | F1 | Menu / Start, then CONTROLS |
 | Pause | P | Menu / Start (the settings pause the game; Start also resumes a P pause) |
@@ -111,9 +111,9 @@ PARTS pairs reforge and rarity actions for each fitted part, with repair above a
 
 Ordinary asteroids share a rocky outline. Colored flecks show metal (gold), volatiles (cyan), crystal (magenta), and water (blue), with only water/volatiles and metal/crystal mixtures; barren rocks have no material flecks. Mining is continuous, including crystal, with no timed crystal burst. Mining skips full holds and leaves those materials in the asteroid while extracting the others. Hold brake + mine while nearly still to use onboard electrolysis: 0.5 water/s becomes 1 fuel/s, costing 6 shield/s. Release to recharge shields; the converter stops at the shield floor, without water, or at full fuel.
 
-The star map is a visual sector chart colored by the same ecology/nebula palette as the offline sector map. Planetoids and lodes use their actual positions and radii; discovered civilization centers, walls and turrets show their real footprints. Geometric markers show pads, beacons, pins, wrecks and the ship; uncharted sectors stay dark. Click a sector for details. Scroll over the map, use `+`/`-`, the onscreen buttons, or controller L2/R2 to zoom through six scales (1×1 to 25×19 sectors). Scroll over the sidebar to read longer details.
+The star map is a visual sector chart colored by the same ecology/nebula palette as the offline sector map. Planetoids and lodes use their actual positions and radii (a speck gets a planet mark); discovered civilization centers, walls and turrets show their real footprints. Procedural icons mark pads, beacons, pins, wrecks, wells, relics, danger and the ship, the same shapes in the map, the legend and the side panel; uncharted sectors stay dark. The side panel details the selected sector with icon counts and the civilization readouts, and pages (TAB, L3) rather than clipping in a small window. Zoom with the triggers or `+`/`-` (or the wheel and onscreen buttons) through six scales (1x1 to 25x19 sectors); a mouse click selects a sector but nothing needs a mouse.
 
-On the star map: arrows move the cursor and pan the view (the left stick or D-pad on a pad), F (A) pins the sector, Backspace (X) clears the pin, `[` and `]` (L1 and R1) pick the note, Z returns to the ship, J (B) starts a jump to the beacon in that sector, H or E (Y) deploys a beacon, R recalls one, G closes.
+On the star map: arrows, the D-pad or the left stick select a sector, WASD or the right stick pan the view, LT/RT or `-`/`+` zoom, `[` and `]` (LB and RB) pick the note, F, Enter or A pins the sector, Backspace or X clears the pin, H sets a beacon down at the ship, J jumps to the beacon in the selected sector, Y does whichever the sector allows, R (R3) recalls a beacon, Z (Select) selects the ship, Tab (L3) pages the side panel, G or B closes. Esc or Start still opens the settings.
 
 In the settings (Esc): Up and Down choose, Left, Right or Enter change. Auto repair, boosts, edge arrows, the radar (always, or with the details), camera, render style, reduce effects, sound, fullscreen, slow motion (a debug tool), save game, resume, new game and quit. SAVE GAME keeps an explicit save separate from the last 10 autosaves. These used to be keys (R, B, T, Tab, C, V, U, N, F1, S, I); the retired ones are gone from play on purpose: repair and boosts run by themselves, the pad kit is built by E, and part insurance is always on.
 

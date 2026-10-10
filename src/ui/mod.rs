@@ -31,6 +31,7 @@ impl Plugin for UiPlugin {
         app.init_resource::<screens::console_ui::ConsoleScene>()
             .init_resource::<controls::ActiveDevice>()
             .init_resource::<screens::help::HelpScene>()
+            .init_resource::<crate::chartview::ChartScene>()
             .init_resource::<screens::title::TitleScene>()
             .init_resource::<screens::settings::SettingsScene>()
             .add_systems(
@@ -43,6 +44,7 @@ impl Plugin for UiPlugin {
                     screens::summary::setup,
                     screens::help::setup,
                     screens::toast::setup,
+                    crate::chartview::setup,
                 ),
             )
             // Input runs before the frame's `controls`, which skips the frame it was consumed.
@@ -55,6 +57,7 @@ impl Plugin for UiPlugin {
                     screens::title::drive,
                     screens::settings::drive,
                     screens::help::drive,
+                    crate::chartview::drive,
                 )
                     .chain()
                     .after(InputSystems),
@@ -69,6 +72,7 @@ impl Plugin for UiPlugin {
                     screens::summary::render,
                     screens::help::render,
                     screens::toast::update,
+                    crate::chartview::render,
                 ),
             );
     }

@@ -2,7 +2,7 @@
 //! look as the game's gizmo-drawn HUD and nothing to commit as an atlas. The shapes are pure
 //! data (tested); `widgets::icon` turns them into rotated `bevy_ui` nodes.
 
-use std::f32::consts::FRAC_PI_4;
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 
 /// One primitive of an icon.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -85,6 +85,25 @@ pub enum Icon {
     Load,
     /// An exclamation mark in a ring.
     Warn,
+    // The star map's marks (U4): the same shapes on the map, in the legend and in the details.
+    /// A rock: a disc inside a ring.
+    Planet,
+    /// A dynamic well: two nested rings.
+    Well,
+    /// A civilization: a square footprint with a core.
+    Civ,
+    /// A landing pad: an arrow onto a platform.
+    Pad,
+    /// A beacon: a mast with a head.
+    Beacon,
+    /// A pin: a diamond on a stem.
+    Pin,
+    /// A wreck: a hollow diamond.
+    Wreck,
+    /// The ship: an arrow.
+    Ship,
+    /// A sealed organ or relic: a sparkle.
+    Relic,
 }
 
 impl Icon {
@@ -129,26 +148,66 @@ impl Icon {
             ],
             Self::Search => vec![ring(0.42, 0.42, 0.56), bar(0.76, 0.76, 0.34, STROKE, A)],
             Self::Save => vec![
-                bar(0.5, 0.30, 0.46, STROKE, std::f32::consts::FRAC_PI_2),
+                bar(0.5, 0.30, 0.46, STROKE, FRAC_PI_2),
                 bar(0.5, 0.82, 0.70, STROKE, 0.0),
                 bar(0.38, 0.52, 0.28, STROKE, A),
                 bar(0.62, 0.52, 0.28, STROKE, -A),
             ],
             Self::Load => vec![
-                bar(0.5, 0.52, 0.46, STROKE, std::f32::consts::FRAC_PI_2),
+                bar(0.5, 0.52, 0.46, STROKE, FRAC_PI_2),
                 bar(0.5, 0.86, 0.70, STROKE, 0.0),
                 bar(0.38, 0.30, 0.28, STROKE, -A),
                 bar(0.62, 0.30, 0.28, STROKE, A),
             ],
             Self::Warn => vec![
                 ring(0.5, 0.5, 0.78),
-                bar(0.5, 0.40, 0.30, STROKE, std::f32::consts::FRAC_PI_2),
+                bar(0.5, 0.40, 0.30, STROKE, FRAC_PI_2),
                 disc(0.5, 0.72, 0.14),
+            ],
+            Self::Planet => vec![disc(0.5, 0.5, 0.44), ring(0.5, 0.5, 0.9)],
+            Self::Well => vec![ring(0.5, 0.5, 0.9), ring(0.5, 0.5, 0.38)],
+            Self::Civ => vec![
+                bar(0.5, 0.12, 0.76, STROKE, 0.0),
+                bar(0.5, 0.88, 0.76, STROKE, 0.0),
+                bar(0.12, 0.5, 0.76, STROKE, FRAC_PI_2),
+                bar(0.88, 0.5, 0.76, STROKE, FRAC_PI_2),
+                disc(0.5, 0.5, 0.3),
+            ],
+            Self::Pad => vec![
+                bar(0.5, 0.86, 0.86, STROKE, 0.0),
+                bar(0.5, 0.37, 0.54, STROKE, FRAC_PI_2),
+                bar(0.35, 0.5, 0.4, STROKE, A),
+                bar(0.65, 0.5, 0.4, STROKE, -A),
+            ],
+            Self::Beacon => vec![
+                disc(0.5, 0.22, 0.32),
+                bar(0.5, 0.6, 0.56, STROKE, FRAC_PI_2),
+                bar(0.5, 0.9, 0.56, STROKE, 0.0),
+            ],
+            Self::Pin => vec![
+                bar(0.5, 0.36, 0.44, 0.44, A),
+                bar(0.5, 0.8, 0.4, STROKE, FRAC_PI_2),
+            ],
+            Self::Wreck => vec![
+                bar(0.7, 0.3, 0.58, STROKE, A),
+                bar(0.7, 0.7, 0.58, STROKE, -A),
+                bar(0.3, 0.7, 0.58, STROKE, A),
+                bar(0.3, 0.3, 0.58, STROKE, -A),
+            ],
+            Self::Ship => vec![
+                bar(0.35, 0.38, 0.5, STROKE, -A),
+                bar(0.65, 0.38, 0.5, STROKE, A),
+                bar(0.5, 0.62, 0.56, STROKE, FRAC_PI_2),
+            ],
+            Self::Relic => vec![
+                bar(0.5, 0.5, 0.92, STROKE, 0.0),
+                bar(0.5, 0.5, 0.92, STROKE, FRAC_PI_2),
+                disc(0.5, 0.5, 0.34),
             ],
         }
     }
 
-    pub const ALL: [Icon; 13] = [
+    pub const ALL: [Icon; 22] = [
         Self::ChevronLeft,
         Self::ChevronRight,
         Self::ChevronUp,
@@ -162,6 +221,15 @@ impl Icon {
         Self::Save,
         Self::Load,
         Self::Warn,
+        Self::Planet,
+        Self::Well,
+        Self::Civ,
+        Self::Pad,
+        Self::Beacon,
+        Self::Pin,
+        Self::Wreck,
+        Self::Ship,
+        Self::Relic,
     ];
 }
 
@@ -173,7 +241,7 @@ mod tests {
     fn every_icon_has_parts_inside_the_box() {
         for icon in Icon::ALL {
             let parts = icon.parts();
-            assert!(!parts.is_empty() && parts.len() <= 4, "{icon:?}");
+            assert!(!parts.is_empty() && parts.len() <= 5, "{icon:?}");
             for p in &parts {
                 assert!(p.w > 0.0 && p.h > 0.0, "{icon:?} has an empty part");
                 assert!(

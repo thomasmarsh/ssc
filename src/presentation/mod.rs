@@ -1,7 +1,7 @@
 //! Procedural vector art and HUD. Nothing here changes gameplay state.
 //!
 //! Shared theme (colors, view size), the marker components every panel file uses, and the
-//! module list. Each panel owns its file (`bench`, `chart_sidebar`); the
+//! module list. Each panel owns its file (`bench`); the
 //! details, run summary, help and toasts are `ui::screens`; `panels` is only the per-frame
 //! orchestration and scrolling.
 use bevy::prelude::*;
@@ -74,7 +74,6 @@ pub(crate) fn bar(fraction: f32, width: usize) -> String {
 }
 
 mod bench;
-mod chart_sidebar;
 mod draw_overlay;
 mod draw_ship;
 mod draw_world;
@@ -83,7 +82,6 @@ mod panels;
 mod setup;
 
 pub(crate) use self::draw_overlay::draw_discovery_glyph;
-pub(crate) use self::chart_sidebar::{ChartSpan, update_chart};
 pub(crate) use self::frame::draw;
 pub(crate) use self::panels::{scroll_panels, update_hud};
 pub(crate) use self::setup::setup;

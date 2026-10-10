@@ -1,122 +1,289 @@
-//! A bounded, zoomable chart built from vector UI shapes and remembered sector data.
-//! The adapter owns selection and view scale; discovery and travel remain simulation rules.
-use crate::{
-    Session,
-    presentation::{CYAN, ChartSpan, MUTED},
+//! The star map's Bevy side (slice U4): reads the devices, applies the map's actions to the
+//! cursor and the game, and draws `ui::screens::chart::ChartView` as vector shapes and text on
+//! the widget layer. The view-model, layout and navigation are pure and tested there; this file
+//! only spawns nodes (rebuilt when the view differs from the last one) and listens.
+//!
+//! Gamepad first: selection and pan are held-key repeats from the sticks, the d-pad and the
+//! keyboard; a mouse click selects a sector and the wheel zooms, as an extra. Esc and Start
+//! still open the settings (the action table's `Any` rows), so the frame they are pressed on is
+//! left to `controls`.
+use crate::Session;
+use crate::presentation::CYAN;
+use crate::ui::controls::{self, Action, ActiveDevice};
+use crate::ui::glyphs::Device;
+use crate::ui::icons::{Icon, STROKE, Shape};
+use crate::ui::input;
+use crate::ui::screens::bench::Tint;
+use crate::ui::screens::chart::{
+    self as chart, Act, ChartView, Count, GAP, HEADER_H, MAX_ZOOM, PAD, SIDE_PAD, Side, Strip,
 };
-use bevy::{input::mouse::MouseWheel, prelude::*, ui::FocusPolicy};
-use ssc::{
-    backdrop,
-    simulation::{ChartEntry, ChartGeometry, ChartGeometryKind},
-    world::{SECTOR_SIZE, SectorId},
-};
-use std::collections::BTreeMap;
+use crate::ui::screens::title::MenuInput;
+use crate::ui::theme::{self, FONT_BODY, FONT_SMALL, FONT_TITLE, Tone};
+use bevy::ecs::system::SystemParam;
+use bevy::input::gamepad::GamepadAxis;
+use bevy::input::mouse::MouseWheel;
+use bevy::prelude::*;
+use bevy::ui::FocusPolicy;
+use ssc::simulation::Input;
+use ssc::world::SectorId;
 
-const SCALES: [(i32, i32); 6] = [(1, 1), (3, 3), (7, 5), (11, 9), (17, 13), (25, 19)];
-const CELLS: usize = 25 * 19;
-const INK: Color = Color::srgb(0.82, 0.88, 0.95);
-const BLUE: Color = CYAN;
-const GREEN: Color = Color::srgb(0.29, 0.87, 0.50);
-const GOLD: Color = Color::srgb(0.96, 0.77, 0.26);
-const PURPLE: Color = Color::srgb(0.72, 0.58, 0.96);
-const RED: Color = Color::srgb(0.95, 0.36, 0.40);
+type Kids<'a> = ChildSpawnerCommands<'a>;
 
+/// The chart's root: a full-window overlay hidden while the map is closed.
 #[derive(Component)]
-pub(crate) struct ChartRoot;
+pub struct ChartRoot;
+
+/// A sector of the window, a click target (mouse is optional).
 #[derive(Component)]
-pub(crate) struct Cell(usize);
+pub struct ChartTile(pub SectorId);
+
+/// A zoom button: positive widens the window.
 #[derive(Component)]
-pub(crate) struct Marker {
-    cell: usize,
-    kind: usize,
-}
-#[derive(Component)]
-pub(crate) struct Zoom(i32);
-#[derive(Component)]
-pub(crate) struct ScaleLabel;
-#[derive(Component)]
-pub(crate) struct ChartScroll;
-#[derive(Component)]
-pub(crate) struct CellLabel(usize);
-#[derive(Component)]
-pub(crate) struct MapViewport;
-#[derive(Component)]
-pub(crate) struct MapArea;
-#[derive(Component)]
-pub(crate) struct GeometryNode(ChartGeometry);
-#[derive(Default)]
-pub(crate) struct GeometryCache {
-    snapshot: Option<(u64, SectorId, usize, Vec<ChartEntry>)>,
+pub struct ZoomButton(pub i32);
+
+/// What the map draws now; the render system rebuilds only when it changes.
+#[derive(Resource, Default)]
+pub struct ChartScene {
+    pub view: Option<ChartView>,
 }
 
-fn sector(center: SectorId, index: usize, cols: i32, rows: i32) -> SectorId {
-    SectorId {
-        x: center.x + index as i32 % cols - cols / 2,
-        y: center.y + rows / 2 - index as i32 / cols,
+const GRID: Color = Color::srgb(0.075, 0.085, 0.11);
+const SIDE_FILL: Color = Color::srgba(0.05, 0.08, 0.12, 0.85);
+
+fn rgb(c: [f32; 3]) -> Color {
+    Color::srgb(c[0], c[1], c[2])
+}
+
+fn tint(t: Tint) -> Color {
+    match t {
+        Tint::Tone(tone) => tone.color(),
+        Tint::Rgb(c) => rgb(c),
     }
 }
 
-/// The same shapes appear in the legend and the map. Their size is in UI pixels, so they
-/// remain readable as the sector scale changes. Offset markers never obscure the ship.
-fn marker(kind: usize) -> (Node, BackgroundColor, BorderColor, UiTransform, FocusPolicy) {
-    let (x, y, size, color, round, hollow, turn) = match kind {
-        0 => (
-            25.0,
-            35.0,
-            12.0,
-            Color::srgb(0.76, 0.65, 0.54),
-            true,
-            false,
-            false,
-        ),
-        1 => (72.0, 35.0, 13.0, PURPLE, true, true, false),
-        2 => (50.0, 30.0, 12.0, GOLD, false, true, false),
-        3 => (25.0, 72.0, 9.0, GREEN, false, true, false),
-        4 => (75.0, 72.0, 10.0, BLUE, true, true, false),
-        5 => (85.0, 16.0, 6.0, GOLD, false, false, true),
-        6 => (50.0, 72.0, 8.0, RED, false, true, true),
-        7 => (50.0, 53.0, 11.0, INK, false, false, true),
-        8 => (14.0, 16.0, 5.0, RED, true, false, false),
-        _ => (
-            72.0,
-            52.0,
-            7.0,
-            Color::srgb(0.88, 0.25, 0.60),
-            false,
-            true,
-            true,
-        ),
-    };
+// ---- input ---------------------------------------------------------------------------------
+
+/// What `drive` remembers between frames.
+#[derive(Default)]
+pub struct DriveState {
+    select: MenuInput,
+    pan: MenuInput,
+    page: usize,
+    receipt: Option<(String, Tone, f32)>,
+    /// Frames left in which a pressed tile counts as this click (the pointer state arrives a
+    /// frame after the mouse button).
+    armed: u8,
+    key: Option<ViewKey>,
+}
+
+/// What a built view depends on besides the game; a change rebuilds it.
+#[derive(Clone, PartialEq)]
+struct ViewKey {
+    sector: SectorId,
+    center: SectorId,
+    zoom: usize,
+    label: ssc::simulation::PinLabel,
+    viewport: (u32, u32),
+    device: Device,
+    page: usize,
+    receipt: Option<String>,
+}
+
+#[derive(SystemParam)]
+pub struct Pointer<'w, 's> {
+    mouse: Res<'w, ButtonInput<MouseButton>>,
+    wheel: MessageReader<'w, 's, MouseWheel>,
+    tiles: Query<'w, 's, (&'static ChartTile, &'static Interaction)>,
+    zooms: Query<'w, 's, (&'static ZoomButton, &'static Interaction)>,
+}
+
+fn right_stick(pad: &Gamepad) -> (f32, f32) {
     (
-        Node {
-            position_type: PositionType::Absolute,
-            left: percent(x),
-            top: percent(y),
-            width: px(size),
-            height: px(size),
-            margin: UiRect {
-                left: px(-size / 2.0),
-                top: px(-size / 2.0),
-                ..default()
-            },
-            border: UiRect::all(px(if hollow { 2.0 } else { 0.0 })),
-            border_radius: if round {
-                BorderRadius::MAX
-            } else {
-                BorderRadius::ZERO
-            },
-            ..default()
-        },
-        BackgroundColor(if hollow { Color::NONE } else { color }),
-        BorderColor::all(color),
-        UiTransform::from_rotation(Rot2::radians(if turn {
-            std::f32::consts::FRAC_PI_4
-        } else {
-            0.0
-        })),
-        FocusPolicy::Pass,
+        pad.get(GamepadAxis::RightStickX).unwrap_or(0.0),
+        pad.get(GamepadAxis::RightStickY).unwrap_or(0.0),
     )
 }
+
+/// Reads the devices while the map is open, applies the acts and keeps the scene's view
+/// current. Runs before `controls`; the frame it handles is consumed (`Session::ui_consumed`).
+#[allow(clippy::too_many_arguments)]
+pub fn drive(
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    time: Res<Time>,
+    cameras: Query<&Camera, With<Camera2d>>,
+    ui_scale: Res<UiScale>,
+    active: Res<ActiveDevice>,
+    mut session: ResMut<Session>,
+    mut scene: ResMut<ChartScene>,
+    mut state: Local<DriveState>,
+    mut pointer: Pointer,
+) {
+    let session = &mut *session;
+    let wheel: f32 = pointer.wheel.read().map(|e| e.y).sum();
+    let open = session.chart.is_some()
+        && session.menu.is_none()
+        && session.settings.is_none()
+        && session.console.is_none()
+        && !session.help;
+    let dt = time.delta_secs();
+    let key = |c: KeyCode| keys.pressed(c);
+    let button = |b: GamepadButton| pads.iter().any(|p| p.pressed(b));
+    let live_stick = |s: (f32, f32)| s.0.abs() > 0.2 || s.1.abs() > 0.2;
+    let left = pads
+        .iter()
+        .map(input::stick)
+        .find(|s| live_stick(*s))
+        .unwrap_or((0.0, 0.0));
+    let right = pads
+        .iter()
+        .map(right_stick)
+        .find(|s| live_stick(*s))
+        .unwrap_or((0.0, 0.0));
+    let moves = chart::move_held(&key, &button, left);
+    let pans = chart::pan_held(&key, right);
+    let used = if pads.iter().any(|p| p.get_pressed().next().is_some()) || left != (0.0, 0.0) {
+        Some(Device::Pad)
+    } else if keys.get_pressed().next().is_some() {
+        Some(Device::Keys)
+    } else {
+        None
+    };
+    let move_fires = state.select.fires(open, &moves, used, dt);
+    let pan_fires = state.pan.fires(open, &pans, used, dt);
+    if !open {
+        state.armed = 0;
+        state.key = None;
+        state.page = 0;
+        state.receipt = None;
+        if scene.view.is_some() {
+            scene.view = None;
+        }
+        return;
+    }
+    let just_key = |c: KeyCode| keys.just_pressed(c);
+    let just_button = |b: GamepadButton| pads.iter().any(|p| p.just_pressed(b));
+    // Settings, pause, help and fullscreen are `Any` rows of the action table: this frame is
+    // `controls`'s, and the map keeps its place beneath them.
+    if [
+        Action::Settings,
+        Action::Pause,
+        Action::Help,
+        Action::Fullscreen,
+    ]
+    .into_iter()
+    .any(|a| controls::fired(a, &just_key, &just_button))
+    {
+        return;
+    }
+    session.ui_consumed = true;
+    session.input = Input::default();
+
+    let mut acts: Vec<Act> = Vec::new();
+    acts.extend(
+        move_fires
+            .iter()
+            .filter_map(|f| chart::move_act(f.key, f.count)),
+    );
+    acts.extend(pan_fires.iter().filter_map(|f| chart::pan_act(f.key)));
+    acts.extend(chart::pressed_acts(&just_key, &just_button));
+    if wheel != 0.0 {
+        acts.push(Act::Zoom(-(wheel.signum() as i32)));
+    }
+    if pointer.mouse.just_pressed(MouseButton::Left) {
+        state.armed = 3;
+    }
+    if state.armed > 0 {
+        let mut clicked = false;
+        for (zoom, interaction) in &pointer.zooms {
+            if *interaction == Interaction::Pressed {
+                acts.push(Act::Zoom(zoom.0));
+                clicked = true;
+            }
+        }
+        if !clicked {
+            for (tile, interaction) in &pointer.tiles {
+                if *interaction == Interaction::Pressed {
+                    acts.push(Act::Select(tile.0));
+                    clicked = true;
+                    break;
+                }
+            }
+        }
+        state.armed = if clicked { 0 } else { state.armed - 1 };
+    }
+
+    let Some(mut cursor) = session.chart else {
+        return;
+    };
+    let mut dirty = false;
+    for act in acts {
+        let out = chart::perform(&mut session.game, &mut cursor, act);
+        dirty = true;
+        if matches!(act, Act::Move(..) | Act::Select(_) | Act::Ship) {
+            state.page = 0;
+        }
+        if let Some((text, tone)) = out.receipt {
+            state.receipt = Some((text, tone, 4.0));
+        }
+        if out.page != 0 {
+            let pages = scene.view.as_ref().map_or(1, |v| v.pages.max(1));
+            state.page = (state.page + 1) % pages;
+        }
+        if out.close {
+            session.chart = None;
+            if scene.view.is_some() {
+                scene.view = None;
+            }
+            return;
+        }
+    }
+    session.chart = Some(cursor);
+    if let Some(r) = &mut state.receipt {
+        r.2 -= dt;
+        if r.2 <= 0.0 {
+            state.receipt = None;
+            dirty = true;
+        }
+    }
+
+    let viewport = cameras
+        .iter()
+        .next()
+        .and_then(|c| c.logical_viewport_size())
+        .unwrap_or(Vec2::new(1280.0, 800.0))
+        / ui_scale.0.max(0.1);
+    let view_key = ViewKey {
+        sector: cursor.sector,
+        center: cursor.center,
+        zoom: cursor.zoom,
+        label: cursor.label,
+        viewport: (viewport.x.round() as u32, viewport.y.round() as u32),
+        device: active.device,
+        page: state.page,
+        receipt: state.receipt.as_ref().map(|r| r.0.clone()),
+    };
+    if dirty || scene.view.is_none() || state.key.as_ref() != Some(&view_key) {
+        let receipt = state
+            .receipt
+            .as_ref()
+            .map(|(t, tone, _)| (t.clone(), *tone));
+        let view = ChartView::build(
+            &session.game,
+            &cursor,
+            (viewport.x.round(), viewport.y.round()),
+            active.device,
+            state.page,
+            receipt,
+        );
+        if scene.view.as_ref() != Some(&view) {
+            scene.view = Some(view);
+        }
+        state.key = Some(view_key);
+    }
+}
+
+// ---- drawing -------------------------------------------------------------------------------
 
 pub fn setup(mut commands: Commands) {
     commands.spawn((
@@ -124,408 +291,556 @@ pub fn setup(mut commands: Commands) {
         GlobalZIndex(20),
         Node {
             position_type: PositionType::Absolute,
-            left: percent(3), right: percent(3), top: percent(8), bottom: percent(5),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::all(px(16)), row_gap: px(12),
-            border: UiRect::all(px(1)), display: Display::None,
+            left: px(0),
+            top: px(0),
+            width: percent(100),
+            height: percent(100),
+            display: Display::None,
             ..default()
         },
-        BackgroundColor(Color::srgb(0.012, 0.022, 0.045)),
-        BorderColor::all(CYAN.with_alpha(0.45)),
-    )).with_children(|root| {
-        root.spawn(Node { align_items: AlignItems::Center, flex_wrap: FlexWrap::Wrap, row_gap: px(6), column_gap: px(12), ..default() })
-            .with_children(|bar| {
-                bar.spawn((Text::new("STAR MAP"), TextFont::from_font_size(14.0), TextColor(CYAN)));
-                bar.spawn((ScaleLabel, Text::new(""), TextFont::from_font_size(14.0), TextColor(BLUE)));
-                for (by, label) in [(-1, "+"), (1, "-")] {
-                    bar.spawn((Button, Zoom(by), Node { padding: UiRect::axes(px(12), px(4)), border: UiRect::all(px(1)), ..default() }, BackgroundColor(Color::srgb(0.08, 0.10, 0.15)), BorderColor::all(BLUE)))
-                        .with_children(|b| { b.spawn((Text::new(label), TextFont::from_font_size(14.0), TextColor(INK), FocusPolicy::Pass)); });
-                }
-                bar.spawn((Text::new("Scroll / + - zoom   |   Click selects   |   Arrows pan   |   Z ship   |   G close"), TextFont::from_font_size(13.0), TextColor(MUTED)));
-            });
-        root.spawn(Node { flex_grow: 1.0, min_height: px(0), column_gap: px(20), ..default() })
-            .with_children(|body| {
-                body.spawn((MapArea, Node { width: percent(68), height: percent(100), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }))
-                    .with_children(|area| {
-                    area.spawn((MapViewport, Node { overflow: Overflow::clip(), ..default() }, BackgroundColor(Color::srgb(0.027, 0.035, 0.051))))
-                    .with_children(|map| {
-                        for index in 0..CELLS {
-                            map.spawn((Button, Cell(index), Node { position_type: PositionType::Absolute, border: UiRect::all(px(1)), ..default() }, BackgroundColor(Color::NONE), BorderColor::all(Color::NONE)))
-                                .with_children(|cell| {
-                                    for kind in 0..10 { if kind != 0 && kind != 2 { cell.spawn((Marker { cell: index, kind }, marker(kind))); } }
-                                    cell.spawn((CellLabel(index), Text::new(""), TextFont::from_font_size(10.0), TextColor(INK.with_alpha(0.55)), Node { position_type: PositionType::Absolute, left: px(5), bottom: px(3), ..default() }, FocusPolicy::Pass));
-                                });
-                        }
-                    });
-                    });
-                body.spawn((Node { flex_grow: 1.0, flex_basis: px(0), min_width: px(0), height: percent(100), overflow: Overflow::scroll_y(), padding: UiRect::right(px(8)), ..default() }, ScrollPosition::default(), ChartScroll))
-                    .with_children(|side| {
-                        side.spawn((Text::new(""), TextFont::from_font_size(14.0), TextColor(INK)))
-                            .with_children(|text| {
-                                for i in 0..16 { text.spawn((ChartSpan(i), TextSpan::new(""), TextFont::from_font_size(14.0), TextColor(INK))); }
-                            });
-                    });
-            });
-        root.spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: px(18), row_gap: px(8), ..default() })
-            .with_children(|legend| {
-                for (kind, label) in ["Planetoid / lode", "Well", "Civilization", "Pad", "Beacon", "Pin", "Wreck", "Ship", "Danger", "Relic"].iter().enumerate() {
-                    legend.spawn(Node { align_items: AlignItems::Center, column_gap: px(5), ..default() })
-                        .with_children(|item| {
-                            item.spawn(Node { width: px(20), height: px(20), ..default() }).with_children(|icon| { icon.spawn(marker(kind)); });
-                            item.spawn((Text::new(*label), TextFont::from_font_size(13.0), TextColor(INK)));
-                        });
-                }
-                legend.spawn((Text::new("Green planet rim: renewable   |   Color: local nebula   |   Dark: uncharted   |   North is up"), TextFont::from_font_size(13.0), TextColor(MUTED)));
-            });
-    });
+    ));
 }
 
-type ScaleFilter = (With<ScaleLabel>, Without<CellLabel>);
-type RootFilter = (
-    With<ChartRoot>,
-    Without<Cell>,
-    Without<Marker>,
-    Without<MapViewport>,
-    Without<GeometryNode>,
-);
-type ViewFilter = (
-    With<MapViewport>,
-    Without<Cell>,
-    Without<Marker>,
-    Without<ChartRoot>,
-    Without<GeometryNode>,
-);
-
-type CellQuery<'w, 's> = Query<
-    'w,
-    's,
-    (
-        &'static Cell,
-        &'static Interaction,
-        &'static mut Node,
-        &'static mut BackgroundColor,
-        &'static mut BorderColor,
-    ),
-    (Without<Marker>, Without<MapViewport>, Without<GeometryNode>),
->;
-type MarkerQuery<'w, 's> = Query<
-    'w,
-    's,
-    (
-        &'static Marker,
-        &'static mut Node,
-        &'static mut BackgroundColor,
-        &'static mut BorderColor,
-    ),
-    (Without<Cell>, Without<MapViewport>, Without<GeometryNode>),
->;
-
-#[allow(clippy::too_many_arguments)]
-pub fn update(
-    area: Single<&ComputedNode, With<MapArea>>,
-    mut session: ResMut<Session>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    gamepads: Query<&Gamepad>,
-    mut wheel: MessageReader<MouseWheel>,
-    mut root: Single<&mut Node, RootFilter>,
-    mut cells: CellQuery,
-    mut viewport: Single<(Entity, &ComputedNode, &mut Node), ViewFilter>,
-    mut markers: MarkerQuery,
-    zoom_buttons: Query<(&Zoom, &Interaction), Changed<Interaction>>,
-    mut label: Single<&mut Text, ScaleFilter>,
-    mut cell_labels: Query<(&CellLabel, &mut Text), Without<ScaleLabel>>,
-    mut scroll: Query<&mut ScrollPosition, With<ChartScroll>>,
+/// Rebuilds the map's tree when the scene's view changed; hides it when the map is closed.
+pub fn render(
+    scene: Res<ChartScene>,
+    mut commands: Commands,
+    mut root: Query<(Entity, &mut Node), With<ChartRoot>>,
 ) {
-    let delta: f32 = wheel.read().map(|e| e.y).sum();
-    root.display = if session.chart.is_some() {
+    if !scene.is_changed() {
+        return;
+    }
+    let Ok((entity, mut node)) = root.single_mut() else {
+        return;
+    };
+    let want = if scene.view.is_some() {
         Display::Flex
     } else {
         Display::None
     };
-    let Some(mut cursor) = session.chart else {
+    if node.display != want {
+        node.display = want;
+    }
+    commands.entity(entity).despawn_children();
+    let Some(view) = &scene.view else {
         return;
     };
-    let mut zoom = 0;
-    for pad in &gamepads {
-        if pad.just_pressed(GamepadButton::RightTrigger2) {
-            zoom -= 1;
-        }
-        if pad.just_pressed(GamepadButton::LeftTrigger2) {
-            zoom += 1;
-        }
-    }
-    if keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd) {
-        zoom -= 1;
-    }
-    if keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract) {
-        zoom += 1;
-    }
-    let map_hovered = cells.iter().any(|(_, interaction, node, _, _)| {
-        node.display != Display::None && *interaction != Interaction::None
-    });
-    if delta != 0.0 {
-        if map_hovered {
-            zoom -= delta.signum() as i32;
-        } else {
-            for mut pos in &mut scroll {
-                pos.0.y = (pos.0.y - delta * 24.0).max(0.0);
-            }
-        }
-    }
-    for (button, interaction) in &zoom_buttons {
-        if *interaction == Interaction::Pressed {
-            zoom += button.0;
-        }
-    }
-    // Clicks use the layout from the previous frame, before applying a new zoom.
-    let (cols, rows) = SCALES[cursor.zoom];
-    for (cell, interaction, node, _, _) in &cells {
-        if mouse.just_pressed(MouseButton::Left)
-            && node.display != Display::None
-            && *interaction == Interaction::Pressed
-        {
-            cursor.sector = sector(cursor.center, cell.0, cols, rows);
-        }
-    }
-    cursor.zoom = (cursor.zoom as i32 + zoom).clamp(0, SCALES.len() as i32 - 1) as usize;
-    let (cols, rows) = SCALES[cursor.zoom];
-    label.0 = format!("{} x {} sectors", cols, rows);
-    // Use one world-to-pixel scale on both axes: planets stay circular and distances agree.
-    let available = area.size() * area.inverse_scale_factor;
-    let tile_size = (available / Vec2::new(cols as f32, rows as f32)).min_element();
-    let map_size = Vec2::new(cols as f32, rows as f32) * tile_size;
-    viewport.2.width = px(map_size.x);
-    viewport.2.height = px(map_size.y);
-    let icon_scale = (tile_size / 52.0).clamp(0.3, 1.0);
-    let entries: BTreeMap<_, _> = session
-        .game
-        .chart_entries()
-        .into_iter()
-        .map(|e| (e.sector, e))
-        .collect();
-    let here = session.game.sector();
-    for (cell, interaction, mut node, mut fill, mut border) in &mut cells {
-        if cell.0 >= (cols * rows) as usize {
-            node.display = Display::None;
-            continue;
-        }
-        node.display = Display::Flex;
-        node.left = percent((cell.0 as i32 % cols) as f32 * 100.0 / cols as f32);
-        node.top = percent((cell.0 as i32 / cols) as f32 * 100.0 / rows as f32);
-        node.width = percent(100.0 / cols as f32);
-        node.height = percent(100.0 / rows as f32);
-        let id = sector(cursor.center, cell.0, cols, rows);
-        let entry = entries.get(&id);
-        fill.0 = if let Some(e) = entry.filter(|e| {
-            e.visited || (0..10).any(|kind| kind != 5 && kind != 6 && visible(kind, Some(e), false))
-        }) {
-            let sky = backdrop::backdrop_at(session.game.seed(), id.center());
-            let strength = if e.visited { 0.44 } else { 0.24 };
-            let [r, g, b] = sky.tint;
-            Color::srgb(
-                0.035 + r * strength,
-                0.043 + g * strength,
-                0.065 + b * strength,
-            )
-        } else {
-            Color::srgb(0.027, 0.035, 0.051)
-        };
-        border.set_all(if id == cursor.sector {
-            BLUE
-        } else if *interaction == Interaction::Hovered {
-            INK.with_alpha(0.5)
-        } else if let Some(civ) = entry.and_then(|e| e.civ).filter(|c| !c.fallen) {
-            let [r, g, b] = civ.tint;
-            Color::srgba(r, g, b, 0.42)
-        } else {
-            Color::srgb(0.075, 0.085, 0.11)
-        });
-        node.border = UiRect::all(px(if id == cursor.sector { 2.0 } else { 1.0 }));
-    }
-    for (mark, mut node, _, _) in &mut markers {
-        let id = sector(cursor.center, mark.cell, cols, rows);
-        let entry = entries.get(&id);
-        let show = mark.cell < (cols * rows) as usize
-            && mark.kind != 0
-            && mark.kind != 2
-            && visible(mark.kind, entry, id == here);
-        node.display = if show { Display::Flex } else { Display::None };
-        let base = marker(mark.kind).0;
-        let size = match base.width {
-            Val::Px(size) => size * icon_scale,
-            _ => 8.0,
-        };
-        node.left = base.left;
-        node.top = base.top;
-        let position = match mark.kind {
-            7 => session.game.player().map(|p| p.position),
-            3 => session
-                .game
-                .pads()
-                .map(|p| session.game.pad_position(p))
-                .find(|p| SectorId::containing(*p) == id),
-            4 => session
-                .game
-                .beacons()
-                .iter()
-                .find(|b| SectorId::containing(b.position) == id)
-                .map(|b| b.position),
-            _ => None,
-        };
-        if let Some(position) = position {
-            let offset = (position - id.center()) / SECTOR_SIZE;
-            node.left = percent(50.0 + offset.x * 100.0);
-            node.top = percent(50.0 - offset.y * 100.0);
-        }
-        node.width = px(size);
-        node.height = px(size);
-        node.border = UiRect::all(px(match base.border.left {
-            Val::Px(width) if width > 0.0 => (width * icon_scale).max(1.0),
-            _ => 0.0,
-        }));
-        node.margin = UiRect {
-            left: px(-size / 2.0),
-            top: px(-size / 2.0),
-            ..default()
-        };
-    }
-    for (cell, mut text) in &mut cell_labels {
-        let id = sector(cursor.center, cell.0, cols, rows);
-        text.0 = if cell.0 >= (cols * rows) as usize || tile_size < 36.0 {
-            String::new()
-        } else if id == SectorId::ORIGIN {
-            "HOME".into()
-        } else if id == here {
-            "YOU".into()
-        } else if cursor.zoom < 4 && (entries.contains_key(&id) || id == cursor.sector) {
-            format!("{},{}", id.x, id.y)
-        } else {
-            String::new()
-        };
-    }
-    session.chart = Some(cursor);
+    commands
+        .entity(entity)
+        .with_children(|root| build(root, view));
 }
 
-type GeometryFilter = (
-    With<GeometryNode>,
-    Without<Cell>,
-    Without<Marker>,
-    Without<ChartRoot>,
-    Without<MapViewport>,
-);
-type GeometryQuery<'w, 's> =
-    Query<'w, 's, (Entity, &'static GeometryNode, &'static mut Node), GeometryFilter>;
+fn text(parent: &mut Kids, s: impl Into<String>, size: f32, color: Color) {
+    parent.spawn((
+        Text::new(s),
+        TextFont::from_font_size(size),
+        TextColor(color),
+        TextLayout::no_wrap(),
+    ));
+}
 
-pub fn update_geometry(
-    mut commands: Commands,
-    session: Res<Session>,
-    mut cache: Local<GeometryCache>,
-    mut geometry: GeometryQuery,
-    viewport: Single<(Entity, &ComputedNode), With<MapViewport>>,
-) {
-    let Some(cursor) = session.chart else {
-        cache.snapshot = None;
-        return;
+/// An icon as rotated bars, discs and rings in a `size` box, in any color. With `at` it is
+/// placed absolutely by its top left corner.
+fn icon_node(parent: &mut Kids, icon: Icon, size: f32, color: Color, at: Option<(f32, f32)>) {
+    let mut node = Node {
+        width: px(size),
+        height: px(size),
+        flex_shrink: 0.0,
+        ..default()
     };
-    let (cols, rows) = SCALES[cursor.zoom];
-    let tile_size = viewport.1.size().x * viewport.1.inverse_scale_factor / cols as f32;
-    let entries: BTreeMap<_, _> = session
-        .game
-        .chart_entries()
-        .into_iter()
-        .filter(|e| {
-            e.sector.x.abs_diff(cursor.center.x) <= (cols / 2 + 1) as u32
-                && e.sector.y.abs_diff(cursor.center.y) <= (rows / 2 + 1) as u32
-        })
-        .map(|e| (e.sector, e))
-        .collect();
-    let snapshot = (
-        session.game.seed(),
-        cursor.center,
-        cursor.zoom,
-        entries.values().cloned().collect::<Vec<_>>(),
-    );
-    if cache.snapshot.as_ref() != Some(&snapshot) {
-        for (entity, _, _) in &geometry {
-            commands.entity(entity).despawn();
+    if let Some((x, y)) = at {
+        node.position_type = PositionType::Absolute;
+        node.left = px(x);
+        node.top = px(y);
+    }
+    parent.spawn(node).with_children(|boxed| {
+        for part in icon.parts() {
+            let (w, h) = (part.w * size, part.h * size);
+            let stroke = (STROKE * size).max(1.5);
+            let mut node = Node {
+                position_type: PositionType::Absolute,
+                left: px(part.x * size - w / 2.0),
+                top: px(part.y * size - h / 2.0),
+                width: px(w),
+                height: px(h),
+                ..default()
+            };
+            let mut entity = match part.shape {
+                Shape::Bar => boxed.spawn((node, BackgroundColor(color))),
+                Shape::Disc => {
+                    node.border_radius = BorderRadius::MAX;
+                    boxed.spawn((node, BackgroundColor(color)))
+                }
+                Shape::Ring => {
+                    node.border = UiRect::all(px(stroke));
+                    node.border_radius = BorderRadius::MAX;
+                    boxed.spawn((node, BorderColor::all(color)))
+                }
+            };
+            if part.angle != 0.0 {
+                entity.insert(UiTransform::from_rotation(Rot2::radians(part.angle)));
+            }
         }
-        for id in entries.keys() {
-            for site in session.game.chart_geometry(*id) {
-                let color = Color::srgb(site.tint[0], site.tint[1], site.tint[2]);
-                let planet = matches!(
-                    site.kind,
-                    ChartGeometryKind::Planetoid | ChartGeometryKind::Lode
-                );
-                let node = geometry_node(site, cursor.center, cols, rows, tile_size);
-                commands.entity(viewport.0).with_children(|map| {
-                    map.spawn((
-                        GeometryNode(site),
-                        node,
-                        BackgroundColor(if planet {
-                            color.with_alpha(0.35)
-                        } else {
-                            Color::NONE
-                        }),
-                        BorderColor::all(if site.renewable { GREEN } else { color }),
-                        FocusPolicy::Pass,
+    });
+}
+
+fn key_chip(parent: &mut Kids, label: &str) {
+    parent
+        .spawn((
+            Node {
+                padding: UiRect::axes(px(5), px(1)),
+                border: UiRect::all(px(theme::BORDER)),
+                border_radius: BorderRadius::all(px(3)),
+                align_items: AlignItems::Center,
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BorderColor::all(Tone::Muted.color()),
+        ))
+        .with_children(|chip| text(chip, label, FONT_SMALL, Tone::Accent.color()));
+}
+
+fn build(root: &mut Kids, v: &ChartView) {
+    let l = v.layout;
+    root.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(l.left),
+            top: px(l.top),
+            width: px(l.width),
+            height: px(l.height),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(px(PAD)),
+            row_gap: px(GAP),
+            border: UiRect::all(px(theme::BORDER)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(theme::PANEL),
+        BorderColor::all(CYAN.with_alpha(0.45)),
+    ))
+    .with_children(|panel| {
+        header(panel, v);
+        panel
+            .spawn(Node {
+                width: percent(100),
+                height: px(l.body_h),
+                column_gap: px(chart::SIDE_GAP),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|body| {
+                body.spawn(Node {
+                    width: px(l.area_w),
+                    height: percent(100),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|area| map(area, v));
+                sidebar(body, v);
+            });
+        strip(panel, v);
+        hints(panel, v);
+    });
+}
+
+fn header(panel: &mut Kids, v: &ChartView) {
+    panel
+        .spawn(Node {
+            width: percent(100),
+            height: px(HEADER_H),
+            align_items: AlignItems::Center,
+            column_gap: px(12),
+            flex_shrink: 0.0,
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .with_children(|bar| {
+            text(bar, "STAR MAP", FONT_TITLE, CYAN);
+            text(bar, v.header.scale.clone(), FONT_SMALL, Tone::Muted.color());
+            // Zoom: a button, six pips (more filled is closer), a button. Mouse is optional;
+            // the triggers and the plus and minus keys do the same.
+            bar.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: px(4),
+                ..default()
+            })
+            .with_children(|zoom| {
+                zoom_button(zoom, "-", 1);
+                for i in 0..=MAX_ZOOM {
+                    let filled = i <= MAX_ZOOM - v.header.zoom;
+                    zoom.spawn((
+                        Node {
+                            width: px(5),
+                            height: px(12),
+                            ..default()
+                        },
+                        BackgroundColor(if filled { CYAN } else { theme::TRACK }),
                     ));
+                }
+                zoom_button(zoom, "+", -1);
+            });
+            bar.spawn(Node {
+                margin: UiRect::left(Val::Auto),
+                align_items: AlignItems::Center,
+                column_gap: px(14),
+                ..default()
+            })
+            .with_children(|chips| {
+                for (icon, label, tone) in &v.header.chips {
+                    chips
+                        .spawn(Node {
+                            align_items: AlignItems::Center,
+                            column_gap: px(4),
+                            ..default()
+                        })
+                        .with_children(|chip| {
+                            icon_node(chip, *icon, 12.0, tone.color(), None);
+                            text(chip, label.clone(), FONT_SMALL, tone.color());
+                        });
+                }
+            });
+        });
+}
+
+fn zoom_button(parent: &mut Kids, label: &str, by: i32) {
+    parent
+        .spawn((
+            Button,
+            ZoomButton(by),
+            Node {
+                width: px(22),
+                height: px(20),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(px(theme::BORDER)),
+                border_radius: BorderRadius::all(px(3)),
+                ..default()
+            },
+            BackgroundColor(theme::CELL),
+            BorderColor::all(Tone::Muted.color()),
+        ))
+        .with_children(|b| text(b, label, FONT_BODY, Tone::Normal.color()));
+}
+
+/// The window of sectors: tiles, literal geometry, marks, labels and the selection reticle,
+/// in that order (later draws on top).
+fn map(area: &mut Kids, v: &ChartView) {
+    let tile = v.layout.tile;
+    area.spawn((
+        Node {
+            width: px(v.map_w),
+            height: px(v.map_h),
+            overflow: Overflow::clip(),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.027, 0.035, 0.051)),
+    ))
+    .with_children(|map| {
+        for t in &v.tiles {
+            let edge = t.edge.map_or(GRID, |[r, g, b, a]| Color::srgba(r, g, b, a));
+            map.spawn((
+                Button,
+                ChartTile(t.sector),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(t.col as f32 * tile),
+                    top: px(t.row as f32 * tile),
+                    width: px(tile),
+                    height: px(tile),
+                    border: UiRect::all(px(1)),
+                    ..default()
+                },
+                BackgroundColor(rgb(t.fill)),
+                BorderColor::all(edge),
+            ));
+        }
+        for s in &v.sites {
+            let color = rgb(s.rgb);
+            let mut node = Node {
+                position_type: PositionType::Absolute,
+                left: px(s.x),
+                top: px(s.y),
+                width: px(s.d),
+                height: px(s.d),
+                border: UiRect::all(px(s.stroke)),
+                ..default()
+            };
+            if s.round {
+                node.border_radius = BorderRadius::MAX;
+            }
+            map.spawn((
+                node,
+                BackgroundColor(if s.filled {
+                    color.with_alpha(0.35)
+                } else {
+                    Color::NONE
+                }),
+                BorderColor::all(color),
+                FocusPolicy::Pass,
+            ));
+        }
+        for m in &v.marks {
+            icon_node(
+                map,
+                m.icon,
+                m.size,
+                rgb(m.rgb),
+                Some((m.x - m.size / 2.0, m.y - m.size / 2.0)),
+            );
+        }
+        for t in &v.tiles {
+            if t.label.is_empty() {
+                continue;
+            }
+            map.spawn((
+                Text::new(t.label.clone()),
+                TextFont::from_font_size(10.0),
+                TextColor(theme::TEXT.with_alpha(0.7)),
+                TextLayout::no_wrap(),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(t.col as f32 * tile + 4.0),
+                    top: px((t.row + 1) as f32 * tile - 14.0),
+                    ..default()
+                },
+                FocusPolicy::Pass,
+            ));
+        }
+        if let Some((col, row)) = v.selected {
+            map.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(col as f32 * tile),
+                    top: px(row as f32 * tile),
+                    width: px(tile),
+                    height: px(tile),
+                    border: UiRect::all(px(theme::FOCUS_RING)),
+                    ..default()
+                },
+                BackgroundColor(theme::FOCUS.with_alpha(0.10)),
+                BorderColor::all(theme::FOCUS),
+                FocusPolicy::Pass,
+            ));
+        }
+    });
+}
+
+fn sidebar(body: &mut Kids, v: &ChartView) {
+    body.spawn((
+        Node {
+            width: px(v.layout.side_w),
+            height: percent(100),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(chart::ROW_GAP),
+            padding: UiRect::all(px(SIDE_PAD)),
+            border: UiRect::all(px(theme::BORDER)),
+            overflow: Overflow::clip(),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(SIDE_FILL),
+        BorderColor::all(Tone::Muted.color().with_alpha(0.5)),
+    ))
+    .with_children(|side| {
+        for entry in &v.side {
+            match entry {
+                Side::Heading {
+                    coords,
+                    state,
+                    state_icon,
+                    state_tone,
+                    meta,
+                } => {
+                    text(side, coords.clone(), FONT_TITLE, theme::TEXT);
+                    side.spawn(Node {
+                        width: percent(100),
+                        flex_wrap: FlexWrap::Wrap,
+                        align_items: AlignItems::Center,
+                        column_gap: px(8),
+                        row_gap: px(1),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        row.spawn(Node {
+                            align_items: AlignItems::Center,
+                            column_gap: px(4),
+                            ..default()
+                        })
+                        .with_children(|badge| {
+                            icon_node(badge, *state_icon, 11.0, state_tone.color(), None);
+                            text(badge, *state, FONT_SMALL, state_tone.color());
+                        });
+                        text(row, meta.clone(), FONT_SMALL, Tone::Muted.color());
+                    });
+                }
+                Side::Line {
+                    icon,
+                    text: line,
+                    tint: t,
+                    small,
+                } => {
+                    side.spawn(Node {
+                        width: percent(100),
+                        column_gap: px(5),
+                        align_items: AlignItems::FlexStart,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        if let Some((icon, c)) = icon {
+                            icon_node(row, *icon, 14.0, rgb(*c), None);
+                        }
+                        wrapped(
+                            row,
+                            line.clone(),
+                            if *small { FONT_SMALL } else { FONT_BODY },
+                            tint(*t),
+                        );
+                    });
+                }
+                Side::Counts(items) => counts(side, items),
+            }
+        }
+        if v.pages > 1 {
+            side.spawn(Node {
+                margin: UiRect::top(Val::Auto),
+                align_items: AlignItems::Center,
+                column_gap: px(6),
+                ..default()
+            })
+            .with_children(|more| {
+                let label = controls::entry(Action::ChartPage)
+                    .labels(v.device)
+                    .join(" ");
+                key_chip(more, &label);
+                text(
+                    more,
+                    format!("MORE  {}/{}", v.page + 1, v.pages),
+                    FONT_SMALL,
+                    Tone::Muted.color(),
+                );
+            });
+        }
+    });
+}
+
+/// Wrapped text that takes the rest of its row.
+fn wrapped(parent: &mut Kids, s: impl Into<String>, size: f32, color: Color) {
+    parent.spawn((
+        Text::new(s),
+        TextFont::from_font_size(size),
+        TextColor(color),
+        Node {
+            flex_grow: 1.0,
+            flex_basis: px(0),
+            min_width: px(0),
+            ..default()
+        },
+    ));
+}
+
+fn counts(side: &mut Kids, items: &[Count]) {
+    side.spawn(Node {
+        width: percent(100),
+        flex_wrap: FlexWrap::Wrap,
+        column_gap: px(12),
+        row_gap: px(2),
+        ..default()
+    })
+    .with_children(|row| {
+        for c in items {
+            row.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: px(4),
+                ..default()
+            })
+            .with_children(|chip| {
+                icon_node(chip, c.icon, 14.0, rgb(c.rgb), None);
+                text(chip, c.text.clone(), FONT_SMALL, theme::TEXT);
+            });
+        }
+    });
+}
+
+/// The legend, or the receipt of the last action in its place.
+fn strip(panel: &mut Kids, v: &ChartView) {
+    panel
+        .spawn(Node {
+            width: percent(100),
+            height: px(v.layout.strip_h),
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            align_content: AlignContent::FlexStart,
+            column_gap: px(14),
+            row_gap: px(4),
+            flex_shrink: 0.0,
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .with_children(|row| match &v.strip {
+            Strip::Receipt(message, tone) => {
+                icon_node(
+                    row,
+                    if *tone == Tone::Bad {
+                        Icon::Warn
+                    } else {
+                        Icon::Check
+                    },
+                    14.0,
+                    tone.color(),
+                    None,
+                );
+                text(row, message.clone(), FONT_BODY, tone.color());
+            }
+            Strip::Legend { note } => {
+                for (icon, label) in chart::LEGEND {
+                    row.spawn(Node {
+                        align_items: AlignItems::Center,
+                        column_gap: px(5),
+                        ..default()
+                    })
+                    .with_children(|item| {
+                        icon_node(item, icon, 14.0, rgb(chart::mark_rgb(icon)), None);
+                        text(item, label, FONT_SMALL, theme::TEXT);
+                    });
+                }
+                if *note {
+                    text(row, chart::NOTE, FONT_SMALL, Tone::Muted.color());
+                }
+            }
+        });
+}
+
+fn hints(panel: &mut Kids, v: &ChartView) {
+    panel
+        .spawn(Node {
+            width: percent(100),
+            height: px(v.layout.hint_h),
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            align_content: AlignContent::FlexStart,
+            column_gap: px(12),
+            row_gap: px(2),
+            flex_shrink: 0.0,
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .with_children(|bar| {
+            for h in &v.hints {
+                bar.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: px(4),
+                    ..default()
+                })
+                .with_children(|pair| {
+                    key_chip(pair, &h.label);
+                    text(pair, h.text, FONT_SMALL, Tone::Muted.color());
                 });
             }
-        }
-        cache.snapshot = Some(snapshot);
-    }
-    for (_, site, mut node) in &mut geometry {
-        *node = geometry_node(site.0, cursor.center, cols, rows, tile_size);
-    }
-}
-
-/// A literal disc or structural footprint: no minimum radius or artificial sector offset.
-fn geometry_node(site: ChartGeometry, center: SectorId, cols: i32, rows: i32, tile: f32) -> Node {
-    let delta = (site.position - center.center()) / SECTOR_SIZE;
-    let radius = site.radius / SECTOR_SIZE * tile;
-    let round = matches!(
-        site.kind,
-        ChartGeometryKind::Planetoid
-            | ChartGeometryKind::Lode
-            | ChartGeometryKind::Wall
-            | ChartGeometryKind::Turret
-    );
-    Node {
-        position_type: PositionType::Absolute,
-        left: px((cols as f32 * 0.5 + delta.x) * tile - radius),
-        top: px((rows as f32 * 0.5 - delta.y) * tile - radius),
-        width: px(radius * 2.0),
-        height: px(radius * 2.0),
-        border: UiRect::all(px((radius * 0.18).clamp(0.25, 1.0))),
-        border_radius: if round {
-            BorderRadius::MAX
-        } else {
-            BorderRadius::ZERO
-        },
-        ..default()
-    }
-}
-
-fn visible(kind: usize, entry: Option<&ChartEntry>, ship: bool) -> bool {
-    if kind == 7 {
-        return ship;
-    }
-    let Some(e) = entry else {
-        return false;
-    };
-    match kind {
-        0 => e.planetoids > 0 || e.lodes > 0,
-        1 => e.dynamic_wells > 0,
-        2 => e.civ.is_some(),
-        3 => e.pads > 0,
-        4 => e.beacons > 0,
-        5 => e.pin.is_some(),
-        6 => e.wreck,
-        8 => e.predators.is_some_and(|n| n > 0) || e.nests > 0,
-        9 => e.relics > 0,
-        _ => false,
-    }
+        });
 }
 
 #[cfg(test)]
@@ -543,130 +858,143 @@ mod tests {
                 label: PinLabel::Camp,
                 zoom: 3,
             }),
+            // The title menu is up in a fresh session; the map under test is the flight one.
+            menu: None,
             ..default()
         };
         app.insert_resource(session)
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<Time>()
+            .init_resource::<UiScale>()
+            .init_resource::<ActiveDevice>()
+            .init_resource::<ChartScene>()
             .add_message::<MouseWheel>()
             .add_systems(Startup, setup)
-            .add_systems(Update, (update, update_geometry).chain());
+            .add_systems(Update, (drive, render).chain());
         app.update();
         app
     }
 
+    fn press(app: &mut App, code: KeyCode) {
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.reset_all();
+        keys.press(code);
+        app.update();
+        // No input plugin runs here to end the frame's edge, so the test does.
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.clear();
+        keys.release(code);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+    }
+
+    fn cursor(app: &App) -> ChartCursor {
+        app.world().resource::<Session>().chart.unwrap()
+    }
+
     #[test]
-    fn selection_keeps_view_fixed_and_zoom_is_bounded() {
+    fn keys_select_zoom_and_close_the_map() {
         let mut app = chart_app();
+        let tiles = |app: &mut App| {
+            app.world_mut()
+                .query::<&ChartTile>()
+                .iter(app.world())
+                .count()
+        };
+        assert_eq!(tiles(&mut app), 11 * 9);
+        press(&mut app, KeyCode::ArrowRight);
+        assert_eq!(cursor(&app).sector, SectorId { x: 1, y: 0 });
+        press(&mut app, KeyCode::ArrowUp);
+        assert_eq!(cursor(&app).sector, SectorId { x: 1, y: 1 });
+        // The view stays put until the selection nears its edge.
+        assert_eq!(cursor(&app).center, SectorId::ORIGIN);
+        press(&mut app, KeyCode::KeyD);
+        assert_eq!(cursor(&app).sector, SectorId { x: 1, y: 1 });
+        assert_eq!(cursor(&app).center, SectorId { x: 1, y: 0 });
+        // Zoom is bounded at both ends.
+        for _ in 0..8 {
+            press(&mut app, KeyCode::Minus);
+        }
+        assert_eq!(cursor(&app).zoom, MAX_ZOOM);
+        assert_eq!(tiles(&mut app), 25 * 19);
+        for _ in 0..8 {
+            press(&mut app, KeyCode::Equal);
+        }
+        assert_eq!(cursor(&app).zoom, 0);
+        assert_eq!(tiles(&mut app), 1);
+        // The map owns the frame while it is open and hides when closed.
+        assert!(app.world().resource::<ChartScene>().view.is_some());
+        press(&mut app, KeyCode::KeyG);
+        assert!(app.world().resource::<Session>().chart.is_none());
         assert!(
             app.world_mut()
-                .query::<(&ChartSpan, &TextFont)>()
-                .iter(app.world())
-                .all(|(_, font)| font.font_size == bevy::text::FontSize::Px(14.0))
+                .query_filtered::<&Node, With<ChartRoot>>()
+                .single(app.world())
+                .is_ok_and(|n| n.display == Display::None)
         );
-        let cell = app
+    }
+
+    #[test]
+    fn a_click_selects_and_a_held_pointer_does_not_reselect() {
+        let mut app = chart_app();
+        let target = SectorId { x: -2, y: 3 };
+        let entity = app
             .world_mut()
-            .query::<(Entity, &Cell)>()
+            .query::<(Entity, &ChartTile)>()
             .iter(app.world())
-            .find(|(_, cell)| cell.0 == 0)
+            .find(|(_, t)| t.0 == target)
             .unwrap()
             .0;
-        *app.world_mut().get_mut::<Interaction>(cell).unwrap() = Interaction::Pressed;
+        *app.world_mut().get_mut::<Interaction>(entity).unwrap() = Interaction::Pressed;
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
         app.update();
-        let cursor = app.world().resource::<Session>().chart.unwrap();
-        assert_eq!(cursor.sector, SectorId { x: -5, y: 4 });
-        assert_eq!(cursor.center, SectorId::ORIGIN);
+        assert_eq!(cursor(&app).sector, target);
+        // The rebuilt tiles are new nodes; pressing keeps no stale target.
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .clear();
-        // A held interaction must not reselect a different sector after zooming.
-        for _ in 0..8 {
-            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            keys.reset_all();
-            keys.press(KeyCode::Minus);
-            app.update();
-        }
-        let cursor = app.world().resource::<Session>().chart.unwrap();
-        assert_eq!(cursor.zoom, SCALES.len() - 1);
-        assert_eq!(cursor.sector, SectorId { x: -5, y: 4 });
-        for _ in 0..8 {
-            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            keys.reset_all();
-            keys.press(KeyCode::Equal);
-            app.update();
-        }
-        assert_eq!(app.world().resource::<Session>().chart.unwrap().zoom, 0);
-        let shown = app
-            .world_mut()
-            .query::<(&Cell, &Node)>()
-            .iter(app.world())
-            .filter(|(_, node)| node.display != Display::None)
-            .count();
-        assert_eq!(shown, 1);
+        app.update();
+        assert_eq!(cursor(&app).sector, target);
     }
 
     #[test]
-    fn literal_geometry_preserves_positions_and_dimensions_at_each_scale() {
-        let site = ChartGeometry {
-            position: Vec2::new(1200.0, -900.0),
-            radius: 350.0,
-            kind: ChartGeometryKind::Planetoid,
-            tint: backdrop::ROCK,
-            renewable: true,
-        };
-        for (cols, rows) in SCALES {
-            let tile = 90.0;
-            let node = geometry_node(site, SectorId::ORIGIN, cols, rows, tile);
-            let Val::Px(width) = node.width else {
-                panic!("pixel width");
-            };
-            let Val::Px(height) = node.height else {
-                panic!("pixel height");
-            };
-            let Val::Px(left) = node.left else {
-                panic!("pixel x");
-            };
-            let Val::Px(top) = node.top else {
-                panic!("pixel y");
-            };
-            assert_eq!(width, height);
-            assert!((width / tile * SECTOR_SIZE - 2.0 * site.radius).abs() < 0.001);
-            let world = Vec2::new(
-                (left + width / 2.0) / tile - cols as f32 / 2.0,
-                rows as f32 / 2.0 - (top + height / 2.0) / tile,
-            ) * SECTOR_SIZE;
-            assert!(world.distance(site.position) < 0.01);
-        }
-    }
-
-    #[test]
-    fn uncharted_space_has_no_site_markers_and_closing_hides_map() {
+    fn pin_and_unpin_show_a_receipt_in_the_legend_strip() {
         let mut app = chart_app();
-        app.world_mut()
-            .resource_mut::<Session>()
-            .chart
-            .as_mut()
-            .unwrap()
-            .center = SectorId { x: 100, y: 100 };
-        app.update();
-        assert!(
-            app.world_mut()
-                .query::<(&Marker, &Node)>()
-                .iter(app.world())
-                .all(|(_, node)| node.display == Display::None)
-        );
-        app.world_mut().resource_mut::<Session>().chart = None;
-        app.update();
+        press(&mut app, KeyCode::KeyF);
+        let view = app.world().resource::<ChartScene>().view.clone().unwrap();
+        assert!(matches!(view.strip, Strip::Receipt(_, Tone::Good)));
         assert_eq!(
-            app.world_mut()
-                .query_filtered::<&Node, With<ChartRoot>>()
-                .single(app.world())
-                .unwrap()
-                .display,
-            Display::None
+            app.world()
+                .resource::<Session>()
+                .game
+                .chart_pin_at(SectorId::ORIGIN),
+            Some(PinLabel::Camp)
         );
+        press(&mut app, KeyCode::Backspace);
+        let view = app.world().resource::<ChartScene>().view.clone().unwrap();
+        assert!(
+            matches!(&view.strip, Strip::Receipt(t, _) if t == "PIN CLEARED"),
+            "{:?}",
+            view.strip
+        );
+    }
+
+    #[test]
+    fn settings_keys_are_left_to_controls() {
+        let mut app = chart_app();
+        // `controls` takes the flag each frame; nothing does here.
+        app.world_mut().resource_mut::<Session>().ui_consumed = false;
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.reset_all();
+        keys.press(KeyCode::Escape);
+        app.update();
+        // The frame was not consumed: `controls` opens the settings from it.
+        let session = app.world().resource::<Session>();
+        assert!(session.chart.is_some() && !session.ui_consumed);
     }
 }
