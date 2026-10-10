@@ -245,7 +245,7 @@ fn skill_value(s: Skill, skills: &Skills, tune: &Tunables) -> String {
         Skill::BeamRange => format!("{:.0} beam reach", skills.beam_range(tune)),
         Skill::Yield => format!("x{:.2} ore yield", skills.yield_mult(tune)),
         Skill::Magnet => format!("{:.0} extra pickup pull", skills.magnet_bonus(tune)),
-        Skill::Cargo => format!("{:.0} hold each", mining::CAP + skills.cargo_bonus(tune)),
+        Skill::Cargo => format!("{:.0} hold each", tune.hold_cap + skills.cargo_bonus(tune)),
         Skill::Dash => format!("{:.0} jump", skills.dash_distance(tune)),
         Skill::Parry => format!("{:.0}% block", skills.parry_chance(tune) * 100.0),
         Skill::PingReach => format!("{:.0} ping reach", skills.ping_range(tune.ping_range, tune)),

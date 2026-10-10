@@ -12,7 +12,6 @@ use super::upgrades::Item;
 use super::*;
 use crate::world::hash2;
 
-pub use super::tuning::{CAP, PLANETOID_BUDGET};
 const MINE_SALT: u64 = 0x31A3_0000_0000_00FE;
 const REGROW_SALT: u64 = 0x6E6B_0000_0000_0A11;
 /// Spent ore is remembered to this grain, rounded up so reloading never refreshes a rock.
@@ -154,10 +153,11 @@ impl Cargo {
 
     /// The most the hold carries of one material.
     pub fn cap(&self, kind: Material) -> f32 {
+        let tune = super::tuning_gen::active();
         match kind {
-            Material::Fuel => 120.0,
-            Material::Water => 30.0,
-            _ => CAP + self.extra,
+            Material::Fuel => tune.hold_fuel_cap,
+            Material::Water => tune.hold_water_cap,
+            _ => tune.hold_cap + self.extra,
         }
     }
 
@@ -383,7 +383,7 @@ fn richness(rock: RockKind) -> f32 {
 /// Ore in a rock of `radius`, a pure function of size and kind.
 pub fn ore_for(rock: RockKind, radius: f32) -> f32 {
     match rock {
-        RockKind::Planetoid => PLANETOID_BUDGET,
+        RockKind::Planetoid => super::tuning_gen::active().planetoid_budget,
         _ => radius * radius / 40.0 * richness(rock),
     }
 }
@@ -1323,11 +1323,14 @@ mod tests {
             }
         }
         taken += game.cargo.total();
-        assert!((taken - PLANETOID_BUDGET).abs() < 1.0, "{taken}");
+        assert!(
+            (taken - DEFAULT_TUNING.planetoid_budget).abs() < 1.0,
+            "{taken}"
+        );
         let planet = body(&game, id);
         assert_eq!(planet.radius, 250.0);
         assert!(game.beam.is_none(), "spent: no beam");
-        assert!(game.mined[&(SectorId { x: 1, y: 1 }, 4)] >= PLANETOID_BUDGET - 1.0);
+        assert!(game.mined[&(SectorId { x: 1, y: 1 }, 4)] >= DEFAULT_TUNING.planetoid_budget - 1.0);
     }
 
     #[test]
@@ -1504,7 +1507,7 @@ mod tests {
         let mut cargo = Cargo::default();
         assert_eq!(cargo.add(Material::Metal, 150.0), 150.0);
         assert_eq!(cargo.add(Material::Metal, 100.0), 50.0);
-        assert_eq!(cargo.metal, CAP);
+        assert_eq!(cargo.metal, DEFAULT_TUNING.hold_cap);
         assert_eq!(cargo.room(Material::Metal), 0.0);
         assert_eq!(cargo.add(Material::Crystal, -5.0), 0.0);
         let price = [(Material::Metal, 80.0), (Material::Crystal, 10.0)];
@@ -1513,9 +1516,12 @@ mod tests {
         assert!(cargo.can_afford(&price));
         // Pay in full or not at all.
         assert!(!cargo.spend(&[(Material::Metal, 100.0), (Material::Volatiles, 1.0)]));
-        assert_eq!(cargo.metal, CAP);
+        assert_eq!(cargo.metal, DEFAULT_TUNING.hold_cap);
         assert!(cargo.spend(&price));
-        assert_eq!((cargo.metal, cargo.crystal), (CAP - 80.0, 0.0));
+        assert_eq!(
+            (cargo.metal, cargo.crystal),
+            (DEFAULT_TUNING.hold_cap - 80.0, 0.0)
+        );
         // A repeated material in one price is summed.
         assert!(!cargo.can_afford(&[(Material::Metal, 100.0), (Material::Metal, 100.0)]));
     }
@@ -1564,13 +1570,13 @@ mod tests {
     fn a_full_hold_refuses_more_and_says_so() {
         let mut game = rig();
         rock(&mut game, RockKind::Ore, Vec2::new(110.0, 0.0), 40.0);
-        game.cargo.metal = CAP;
+        game.cargo.metal = DEFAULT_TUNING.hold_cap;
         hold(&mut game, 1.0);
         assert!(game.beam.is_none());
         assert!(game.notices.iter().any(|n| n.text.contains("FULL")));
         // A salvage pickup is still collected, the overflow lost.
         game.collect(Item::Material(Material::Metal, 30.0));
-        assert_eq!(game.cargo.metal, CAP);
+        assert_eq!(game.cargo.metal, DEFAULT_TUNING.hold_cap);
     }
 
     #[test]
@@ -1706,17 +1712,35 @@ mod tests {
     }
 
     #[test]
+    fn a_tuned_hold_cap_is_honored_by_room_and_add_and_the_budget_is_regen() {
+        let mut game = rig();
+        game.tune_set("hold_cap", 80.0).unwrap();
+        game.tune_set("hold_water_cap", 10.0).unwrap();
+        assert_eq!(game.cargo.cap(Material::Metal), 80.0);
+        assert_eq!(game.cargo.add(Material::Metal, 500.0), 80.0);
+        assert_eq!(game.cargo.room(Material::Metal), 0.0);
+        assert_eq!(game.cargo.add(Material::Water, 500.0), 10.0);
+        let applied = game.tune_set("planetoid_budget", 100.0).unwrap();
+        assert!(applied.regen);
+        assert_eq!(ore_for(RockKind::Planetoid, 250.0), 100.0);
+        game.tune_reset("hold_cap").unwrap();
+        game.tune_reset("hold_water_cap").unwrap();
+        game.tune_reset("planetoid_budget").unwrap();
+        assert_eq!(game.cargo.cap(Material::Metal), DEFAULT_TUNING.hold_cap);
+    }
+
+    #[test]
     fn cargo_upgrades_grow_the_hold_and_the_magnet_pulls_from_farther() {
         let mut game = rig();
-        assert_eq!(game.cargo.cap(Material::Metal), CAP);
+        assert_eq!(game.cargo.cap(Material::Metal), DEFAULT_TUNING.hold_cap);
         game.loadout.skills.raise(skills::Skill::Cargo);
         game.loadout.skills.raise(skills::Skill::Cargo);
         game.refresh_stats();
         assert_eq!(
             game.cargo.cap(Material::Metal),
-            CAP + 2.0 * DEFAULT_TUNING.cargo_step
+            DEFAULT_TUNING.hold_cap + 2.0 * DEFAULT_TUNING.cargo_step
         );
-        game.cargo.metal = CAP;
+        game.cargo.metal = DEFAULT_TUNING.hold_cap;
         assert!(game.cargo.room(Material::Metal) > 99.0);
         // A pickup just past the base magnet is drawn in once the magnet is upgraded.
         let reach = game.stats.magnet + 18.0 + 30.0;
@@ -1748,7 +1772,7 @@ mod tests {
         assert_eq!(game.loadout.skills.level(skills::Skill::BeamPower), 1);
         assert_eq!(
             game.cargo.cap(Material::Metal),
-            CAP + DEFAULT_TUNING.cargo_step
+            DEFAULT_TUNING.hold_cap + DEFAULT_TUNING.cargo_step
         );
         game.reset();
         assert_eq!(game.loadout.skills.level(skills::Skill::BeamPower), 0);

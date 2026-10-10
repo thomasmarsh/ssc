@@ -270,6 +270,15 @@ tuning_life::groups! {
         rate_husk: f32 = 2.5, 0.0, 1000.0, Rate;
         /// Substrate worked per second on a planetoid.
         rate_planetoid: f32 = 1.2, 0.0, 1000.0, Rate;
+        /// Ore a planetoid gives before it is spent (it never shrinks). Read when a rock's lode is
+        /// first derived, so a change reaches rocks generated or loaded afterwards: `Regen`.
+        planetoid_budget: f32 = 400.0, 1.0, 1_000_000.0, Amount, Regen;
+        /// How much of each solid material the hold carries before cargo upgrades.
+        hold_cap: f32 = 200.0, 1.0, 1_000_000.0, Amount;
+        /// How much fuel the hold carries (cargo upgrades do not add to it).
+        hold_fuel_cap: f32 = 120.0, 1.0, 1_000_000.0, Amount;
+        /// How much water the hold carries (cargo upgrades do not add to it).
+        hold_water_cap: f32 = 30.0, 1.0, 1_000_000.0, Amount;
         /// Water per second onboard electrolysis converts.
         electrolysis_water_rate: f32 = 0.5, 0.0, 100.0, Rate;
         /// Fuel gained per unit of water electrolysed.
@@ -992,14 +1001,6 @@ pub const SKILL_MAX: u8 = 4;
 pub const ORGAN_LEVELS: u8 = 3;
 /// SYMBIOSIS opens up to this many organ slots (a fixed-size layout).
 pub const SYMBIOSIS_SLOTS: usize = 3;
-/// How much of each material the hold carries before cargo upgrades. Read by `Cargo::cap`, a
-/// value type used in about sixty places without game access; becomes a registry entry with the
-/// other hold caps (fuel 120, water 30) when `Cargo` is threaded.
-pub const CAP: f32 = 200.0;
-/// Ore a planetoid will give before it is spent (it never shrinks). Read by `Body::ore` through
-/// the pure `ore_for`, used widely without game access; deferred with `CAP`.
-pub const PLANETOID_BUDGET: f32 = 400.0;
-
 #[cfg(test)]
 mod tests {
     use super::*;

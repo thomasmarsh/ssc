@@ -2446,7 +2446,7 @@ mod tests {
         game.bench_confirm();
         assert_eq!(game.loadout.skills.level(Skill::Cargo), 1);
         assert_eq!(game.cargo.metal, 100.0 - price[0].1);
-        assert!(game.cargo.cap(Material::Metal) > super::mining::CAP);
+        assert!(game.cargo.cap(Material::Metal) > DEFAULT_TUNING.hold_cap);
         // Climb to the top, paying more each time, then no more.
         let mut last = 0.0;
         for level in 1..Skill::Cargo.max_level() {
