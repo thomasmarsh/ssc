@@ -9,6 +9,7 @@
 use crate::Session;
 use crate::presentation::CYAN;
 use crate::titlemenu::{Outcome, Row, TitleMenu};
+use crate::ui::controls::ActiveDevice;
 use crate::ui::focus::{Fire, ItemId, Repeater, UiKey};
 use crate::ui::glyphs::{Device, Glyph};
 use crate::ui::icons::Icon;
@@ -225,6 +226,7 @@ pub fn drive(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     time: Res<Time>,
+    active: Res<ActiveDevice>,
     mut session: ResMut<Session>,
     mut scene: ResMut<TitleScene>,
     mut menu_input: Local<MenuInput>,
@@ -247,10 +249,7 @@ pub fn drive(
             }
         }
     }
-    let want = session
-        .menu
-        .as_ref()
-        .map(|menu| view(menu, menu_input.device));
+    let want = session.menu.as_ref().map(|menu| view(menu, active.device));
     if scene.view != want {
         scene.view = want;
     }

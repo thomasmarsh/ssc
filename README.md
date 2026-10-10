@@ -71,7 +71,7 @@ See [docs/UNIVERSE.md](docs/UNIVERSE.md#sector-map-built) for the options and wh
 
 ## Controls
 
-The final bindings. Everything else in the game is reached through these, the bench, the star map or the settings screen.
+The final bindings. Everything else in the game is reached through these, the bench, the star map or the settings screen. The in-game reference (F1, or CONTROLS in the settings on a pad) is generated from the same action table the game reads (`src/ui/controls.rs`) and shows the keys or the buttons of whichever device you used last; the prompts over the ship and the hint line follow the device too.
 
 Xbox controllers use the existing gilrs input path and its built-in mappings. For an Xbox Series X/S controller on macOS, pair it in System Settings → Bluetooth, then run `cargo run --bin ssc`; connecting while the game is running also works. The Switch 2 Pro controller bridge mapping remains supported. Face-button names below use Xbox labels; L1/R1 are LB/RB, L2/R2 are LT/RT, and L3/R3 mean clicking the sticks. Menu (Start) opens settings, and View (Select) is an alternate interact button.
 
@@ -90,11 +90,11 @@ Xbox controllers use the existing gilrs input path and its built-in mappings. Fo
 | Cycle the seed to plant next | C | D-pad up |
 | Beacon (a later upgrade) | H | Y |
 | Star map | G | D-pad left |
-| Details panel and radar | hold Tab, or F3 to latch | |
-| Key list and HUD key | F1 | |
-| Pause | P | |
+| Details panel and radar | hold Tab, or F3 to latch | X (latches; press again to close) |
+| Controls reference | F1 | Menu / Start, then CONTROLS |
+| Pause | P | Menu / Start (the settings pause the game; Start also resumes a P pause) |
 | Settings (and quit) | Esc | Menu / Start |
-| Fullscreen | F11 | |
+| Fullscreen | F11 | Menu / Start, then FULLSCREEN |
 | Title menu: continue / new game | Up, Down, Enter | D-pad, A |
 
 At a powered warehouse after Automation, SAVE FLEET BLUEPRINT copies the local template for reuse; MERGE FLEET BLUEPRINT pays only for missing modules at another pad. SELECT FLEET ROLE cycles independent saved slots A/B/C. NAME FLEET ROLE edits a 12-character label: arrows/D-pad choose position and character, Q/X clears, Enter/A saves, E/B cancels; blank restores the role letter. Saving overwrites only the selected slot; merges keep existing modules and wait for cargo unloading.

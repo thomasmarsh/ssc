@@ -39,19 +39,6 @@ use ssc::world::{Rng, SECTOR_SIZE, SectorId};
 /// Left stick deadzone for thrust; the right stick aims and fires past a larger push.
 const STICK_DEADZONE: f32 = 0.15;
 const FIRE_STICK_THRESHOLD: f32 = 0.3;
-/// Number keys that pick the 1st to 9th owned weapon profile.
-const DIGITS: [KeyCode; 9] = [
-    KeyCode::Digit1,
-    KeyCode::Digit2,
-    KeyCode::Digit3,
-    KeyCode::Digit4,
-    KeyCode::Digit5,
-    KeyCode::Digit6,
-    KeyCode::Digit7,
-    KeyCode::Digit8,
-    KeyCode::Digit9,
-];
-
 /// Camera preferences belong to the desktop adapter, independent of simulation rules.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum CameraView {
@@ -406,6 +393,7 @@ fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>, smoke: Res<Smo
         || session.settings.is_some()
         || session.console.is_some()
         || session.menu.is_some()
+        || session.help
     {
         return;
     }
@@ -448,14 +436,12 @@ fn controls(
         gamepads,
     } = devices;
     let pad = |button| gamepads.iter().any(|pad| pad.just_pressed(button));
+    // Every binding below is a row of the action table (`ui::controls`).
+    let fired = |action| ui::controls::fired(action, &|k| keys.just_pressed(k), &pad);
     // Settings that live in the game are pushed in every frame, so a restart keeps them.
     let (auto_repair, boosts) = (session.auto_repair, session.boosts);
     session.game.set_auto_repair(auto_repair);
     session.game.set_boosts(boosts);
-    // Esc (Start on a pad) opens the settings, which pause the game; Esc closes the key list
-    // first if that is what is showing.
-    let escape = keys.just_pressed(KeyCode::Escape);
-    let start = pad(GamepadButton::Start);
     // The developer console (SSC_DEV=1, `ui`) takes every key while it is open, and the frame
     // it opens or closes on.
     if std::mem::take(&mut session.ui_consumed) {
@@ -467,25 +453,32 @@ fn controls(
         session.input = Input::default();
         return;
     }
-    if session.help && (escape || keys.just_pressed(KeyCode::F1)) {
-        session.help = false;
-    } else if escape || start {
+    // START resumes a pause made from the keyboard; otherwise Esc (Start on a pad) opens the
+    // settings, which pause the game. The controls reference (F1, or the settings' CONTROLS
+    // row) takes the screen and its own keys through `ui::screens::help`.
+    if session.paused && pad(GamepadButton::Start) {
+        session.paused = false;
+        session.input = Input::default();
+        return;
+    }
+    if fired(ui::controls::Action::Settings) {
         session.settings = Some(0);
         session.input = Input::default();
         return;
     }
-    if keys.just_pressed(KeyCode::KeyP) || keys.just_pressed(KeyCode::Pause) {
+    if fired(ui::controls::Action::Pause) {
         session.paused = !session.paused;
     }
-    // Tab held shows the details (and the radar); F3 latches them; F1 is the full key list.
-    session.tab_held = keys.pressed(KeyCode::Tab);
-    if keys.just_pressed(KeyCode::F3) {
-        session.details = !session.details;
+    // Tab held shows the details (and the radar); F3 or X on a pad latches them (in flight).
+    session.tab_held = ui::controls::fired(
+        ui::controls::Action::DetailsPeek,
+        &|k| keys.pressed(k),
+        &|_| false,
+    );
+    if fired(ui::controls::Action::Help) {
+        session.help = true;
     }
-    if keys.just_pressed(KeyCode::F1) {
-        session.help = !session.help;
-    }
-    if keys.just_pressed(KeyCode::F11) {
+    if fired(ui::controls::Action::Fullscreen) {
         window.mode = if window.mode == WindowMode::Windowed {
             WindowMode::BorderlessFullscreen(MonitorSelection::Current)
         } else {
@@ -493,9 +486,7 @@ fn controls(
         };
     }
     // The star map: G (d-pad left), while flying. It pauses the simulation; see `chart_controls`.
-    if !session.game.game_over
-        && !session.game.bench_open()
-        && (keys.just_pressed(KeyCode::KeyG) || pad(GamepadButton::DPadLeft))
+    if !session.game.game_over && !session.game.bench_open() && fired(ui::controls::Action::StarMap)
     {
         session.chart = match session.chart {
             Some(_) => None,
@@ -520,50 +511,53 @@ fn controls(
         session.input = Input::default();
         return;
     }
+    // The details latch (F3, X on a pad) is a flight key: the bench and the map cover them.
+    if fired(ui::controls::Action::DetailsLatch) {
+        session.details = !session.details;
+    }
     // Weapon profiles: ] next, [ previous, 1-9 pick directly; the shoulders on a pad.
     // Switching is instant and ignored while paused.
     if !session.paused {
-        let next = keys.just_pressed(KeyCode::BracketRight) || pad(GamepadButton::RightTrigger);
-        let previous = keys.just_pressed(KeyCode::BracketLeft) || pad(GamepadButton::LeftTrigger);
-        if next {
+        use ui::controls::Action;
+        if fired(Action::WeaponNext) {
             session.game.switch_weapon(1);
         }
-        if previous {
+        if fired(Action::WeaponPrev) {
             session.game.switch_weapon(-1);
         }
-        for (n, key) in DIGITS.into_iter().enumerate() {
-            if keys.just_pressed(key) {
+        for (n, key) in ui::controls::entry(Action::WeaponPick)
+            .keys
+            .iter()
+            .enumerate()
+        {
+            if keys.just_pressed(*key) {
                 session.game.select_weapon(n);
             }
         }
-        // Parry (a later upgrade, refused while locked): D, or d-pad right on a pad.
-        if keys.just_pressed(KeyCode::KeyD) || pad(GamepadButton::DPadRight) {
+        // Parry (a later upgrade, refused while locked), sonar ping, then the one context key:
+        // E (B or Select on a pad) lands, builds and deploys a pad, opens the bench, or
+        // tithes, whichever the prompt over the ship says.
+        if fired(Action::Parry) {
             session.game.parry();
         }
-        // Sonar ping: X (right stick click on a pad).
-        if keys.just_pressed(KeyCode::KeyX) || pad(GamepadButton::RightThumb) {
+        if fired(Action::Ping) {
             session.game.ping();
         }
-        // The one context key: E (B or Select on a pad) lands, builds and deploys a pad, opens
-        // the bench, or tithes, whichever the prompt over the ship says.
-        if keys.just_pressed(KeyCode::KeyE)
-            || pad(GamepadButton::East)
-            || pad(GamepadButton::Select)
-        {
+        if fired(Action::Interact) {
             session.game.interact();
         }
-        // Seed picker: C (d-pad up) cycles the species planted next.
-        if keys.just_pressed(KeyCode::KeyC) || pad(GamepadButton::DPadUp) {
+        // Seed picker: cycles the species planted next.
+        if fired(Action::SeedNext) {
             session.game.cycle_seed();
         }
-        // Beacon (locked until bought at the bench's SKILLS tab): H, or Y on a pad.
-        if keys.just_pressed(KeyCode::KeyH) || pad(GamepadButton::North) {
+        // Beacon (locked until bought at the bench's SKILLS tab).
+        if fired(Action::Beacon) {
             let _ = session.game.deploy_beacon();
         }
     }
     // Enter or the south face button (Xbox A) starts a new run once the last ship is lost.
     // Restarting mid-run is in the settings.
-    if session.game.game_over && (keys.just_pressed(KeyCode::Enter) || pad(GamepadButton::South)) {
+    if session.game.game_over && fired(ui::controls::Action::Restart) {
         restart(&mut session);
         session.input = Input::default();
         return;
@@ -582,8 +576,6 @@ fn controls(
     // Twin-stick: left stick thrusts in any direction, right stick aims and fires past a larger push.
     let mut stick_move = None;
     let mut stick_aim = None;
-    let mut pad_brake = false;
-    let mut pad_mine = false;
     for pad in &gamepads {
         let left = pad.left_stick();
         if left.length() > STICK_DEADZONE {
@@ -593,35 +585,28 @@ fn controls(
         if right.length() > FIRE_STICK_THRESHOLD {
             stick_aim = Some(right);
         }
-        pad_brake |= pad.pressed(GamepadButton::LeftTrigger2) || pad.pressed(GamepadButton::South);
-        // The right trigger (R2) holds the mining beam (no aiming needed; the guns go quiet).
-        // The bumpers are the weapon switch.
-        pad_mine |= pad.pressed(GamepadButton::RightTrigger2);
     }
+    // Held controls read the table too: the brake (L2 or A), the mining beam (R2, no aiming
+    // needed; the guns go quiet) and the keyboard's thrust, turn and fire. The bumpers are the
+    // weapon switch.
+    let held = |action| {
+        ui::controls::fired(action, &|k| keys.pressed(k), &|b| {
+            gamepads.iter().any(|pad| pad.pressed(b))
+        })
+    };
+    use ui::controls::Action;
     let pad_fire = stick_aim.is_some();
     // Dash (a later upgrade, refused while locked): Shift or L3, toward the left stick, else
     // where the ship faces.
-    let dash_pressed = !session.paused
-        && (keys.just_pressed(KeyCode::ShiftLeft)
-            || keys.just_pressed(KeyCode::ShiftRight)
-            || pad(GamepadButton::LeftThumb));
-    if dash_pressed {
+    if !session.paused && fired(Action::Dash) {
         session.game.dash(stick_move);
     }
     session.input = Input {
-        thrust: if keys.pressed(KeyCode::ArrowUp) {
-            1.0
-        } else {
-            0.0
-        },
-        turn: keys.pressed(KeyCode::ArrowLeft) as u8 as f32
-            - keys.pressed(KeyCode::ArrowRight) as u8 as f32,
-        brake: keys.pressed(KeyCode::ArrowDown) || pad_brake,
-        fire: keys.pressed(KeyCode::KeyA)
-            || keys.pressed(KeyCode::Space)
-            || mouse.pressed(MouseButton::Left)
-            || pad_fire,
-        mine: keys.pressed(KeyCode::KeyM) || pad_mine,
+        thrust: if held(Action::Thrust) { 1.0 } else { 0.0 },
+        turn: held(Action::TurnLeft) as u8 as f32 - held(Action::TurnRight) as u8 as f32,
+        brake: held(Action::Brake),
+        fire: held(Action::Fire) || mouse.pressed(MouseButton::Left) || pad_fire,
+        mine: held(Action::Mine),
         aim_direction: stick_aim.or(aim_direction),
         move_direction: stick_move,
     };
@@ -689,74 +674,60 @@ fn bench_navigation(
     ui::screens::bench::apply_steps(&mut session.game, steps);
 }
 
-/// The bench's keys; see `controls`.
+/// The bench's keys (the table's bench rows); see `controls`.
 fn bench_controls(
     keys: &ButtonInput<KeyCode>,
     pad: &impl Fn(GamepadButton) -> bool,
     session: &mut Session,
 ) {
+    use ui::controls::Action;
+    let fired = |action| ui::controls::fired(action, &|k| keys.just_pressed(k), pad);
     let game = &mut session.game;
     if game.drone_name_editing() {
+        // The name editor reuses the arrows and d-pad: left and right move the cursor, up and
+        // down change the character (the shoulders do nothing here).
         let cursor =
-            i32::from(keys.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight))
-                - i32::from(keys.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft));
+            i32::from(fired(Action::BenchTabNext)) - i32::from(fired(Action::BenchTabPrev));
         let character =
             i32::from(keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp))
                 - i32::from(keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown));
         game.drone_name_step(cursor, character);
-        if keys.just_pressed(KeyCode::KeyE)
-            || pad(GamepadButton::East)
-            || pad(GamepadButton::Select)
-        {
+        if fired(Action::BenchClose) {
             game.finish_drone_name(false);
-        } else if keys.just_pressed(KeyCode::Enter)
-            || keys.just_pressed(KeyCode::Space)
-            || pad(GamepadButton::South)
-        {
+        } else if fired(Action::BenchConfirm) {
             game.finish_drone_name(true);
-        } else if keys.just_pressed(KeyCode::KeyQ)
-            || keys.just_pressed(KeyCode::Delete)
-            || pad(GamepadButton::West)
-        {
+        } else if fired(Action::BenchAlt) {
             game.drone_name_clear();
         }
         return;
     }
-    if keys.just_pressed(KeyCode::ArrowDown)
-        || pad(GamepadButton::DPadDown)
-        || pad(GamepadButton::RightTrigger)
-    {
+    if fired(Action::BenchDown) {
         game.bench_move(1);
     }
-    if keys.just_pressed(KeyCode::ArrowUp)
-        || pad(GamepadButton::DPadUp)
-        || pad(GamepadButton::LeftTrigger)
-    {
+    if fired(Action::BenchUp) {
         game.bench_move(-1);
     }
-    if keys.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight) {
+    if fired(Action::BenchTabNext) {
         game.bench_tab_step(1);
     }
-    if keys.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft) {
+    if fired(Action::BenchTabPrev) {
         game.bench_tab_step(-1);
     }
-    for (n, key) in DIGITS.into_iter().take(3).enumerate() {
-        if keys.just_pressed(key) {
+    for (n, key) in ui::controls::entry(Action::BenchTabPick)
+        .keys
+        .iter()
+        .enumerate()
+    {
+        if keys.just_pressed(*key) {
             game.bench_tab(n);
         }
     }
-    if keys.just_pressed(KeyCode::Enter)
-        || keys.just_pressed(KeyCode::Space)
-        || pad(GamepadButton::South)
-    {
+    if fired(Action::BenchConfirm) {
         game.bench_confirm();
-    } else if keys.just_pressed(KeyCode::KeyQ)
-        || keys.just_pressed(KeyCode::Delete)
-        || pad(GamepadButton::West)
-    {
+    } else if fired(Action::BenchAlt) {
         game.bench_alt();
     }
-    if keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::East) || pad(GamepadButton::Select) {
+    if fired(Action::BenchClose) {
         game.interact();
     }
 }
@@ -809,7 +780,7 @@ fn chart_controls(
     if dx != 0 || dy != 0 {
         cursor.center = cursor.sector;
     }
-    if keys.just_pressed(KeyCode::KeyZ) {
+    if ui::controls::fired(ui::controls::Action::ChartCenter, &|k| keys.just_pressed(k), &pad) {
         cursor.sector = session.game.sector();
         cursor.center = cursor.sector;
     }
@@ -831,7 +802,7 @@ fn chart_controls(
     if keys.just_pressed(KeyCode::KeyH) || pad(GamepadButton::North) {
         let _ = session.game.deploy_beacon();
     }
-    if keys.just_pressed(KeyCode::KeyR)
+    if ui::controls::fired(ui::controls::Action::ChartRecall, &|k| keys.just_pressed(k), &pad)
         && let Some(id) = session.game.beacon_in(cursor.sector)
     {
         session.game.recall_beacon(id);

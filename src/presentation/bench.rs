@@ -3,7 +3,6 @@
 //! The view-model is pure and tested there; this file only spawns nodes and rebuilds them when
 //! the view differs from the last frame's. Transactions stay with `Game::bench_confirm` and
 //! `Game::bench_alt`, dispatched by `bench_controls` in `main.rs`.
-use super::help::{HelpBody, HelpPanel};
 use super::{DETAILS_BOTTOM, DETAILS_TOP};
 use crate::ui::glyphs::Device;
 use crate::ui::icons::Icon;
@@ -22,8 +21,8 @@ use ssc::simulation::{Game, Material, RowKind};
 #[derive(Component)]
 pub(crate) struct BenchPanelNode;
 
-/// The root node, kept disjoint from the help panel's nodes.
-type BenchRootOnly = (With<BenchPanelNode>, Without<HelpPanel>, Without<HelpBody>);
+/// The root node.
+type BenchRootOnly = With<BenchPanelNode>;
 
 type Kids<'a> = ChildSpawnerCommands<'a>;
 

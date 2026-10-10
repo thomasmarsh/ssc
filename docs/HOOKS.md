@@ -31,7 +31,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 
 ## Panels and HUD
 
-- `SSC_DETAILS=1`, `SSC_HELP=1`, `SSC_RADAR=1`, `SSC_SETTINGS=1`: open the details panel, key list, radar, or settings screen. `SSC_SETTINGS=save` selects SAVE GAME and executes the same explicit-save action once (use `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s` for a scratch save); shows SAVED, DISABLED or SAVE FAILED.
+- `SSC_DETAILS=1`, `SSC_HELP=1`, `SSC_RADAR=1`, `SSC_SETTINGS=1`: open the details panel, the controls reference (`ui::screens::help`, generated from the action table; it pauses the game), radar, or settings screen. `SSC_DEVICE=pad|keys` pins the device whose words the HUD prompts and hint line, the toasts, the controls reference, the title and the settings use (otherwise the device last touched; like the rest it needs `SSC_SMOKE_FRAMES`), so `SSC_HELP=1 SSC_DEVICE=pad` shows the gamepad reference and `SSC_PAD=land SSC_DEVICE=pad` the prompt over the ship as `B BENCH`. Capture the help at `SSC_OFFSCREEN_SIZE=1280x800` and `640x480` (the compact size hides the other device's column). `SSC_SETTINGS=save` selects SAVE GAME and executes the same explicit-save action once (use `SSC_SAVE=1 SSC_SAVE_DIR=/tmp/s` for a scratch save); shows SAVED, DISABLED or SAVE FAILED.
 - `SSC_HURT=<fraction>`: set hull and shield to that fraction (checks the rings and low-hull cues).
 - `SSC_HIT=<degrees>`: a hostile shot lands from that direction just before capture (damage direction mark, hit feel).
 - `SSC_ABILITIES=1`: unlock parry and dash and use the dash, so the rings are cooling.

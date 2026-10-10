@@ -22,6 +22,7 @@ pub enum Setting {
     Sound,
     Fullscreen,
     SlowMotion,
+    Controls,
     Save,
     Resume,
     Restart,
@@ -29,7 +30,7 @@ pub enum Setting {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 14] = [
+    pub const ALL: [Setting; 15] = [
         Setting::AutoRepair,
         Setting::Boosts,
         Setting::Arrows,
@@ -40,6 +41,7 @@ impl Setting {
         Setting::Sound,
         Setting::Fullscreen,
         Setting::SlowMotion,
+        Setting::Controls,
         Setting::Save,
         Setting::Resume,
         Setting::Restart,
@@ -49,7 +51,10 @@ impl Setting {
     /// Whether Left and Right change the row (options), as opposed to an action that only
     /// Confirm runs (save, resume, new game, quit).
     pub fn adjusts(self) -> bool {
-        !matches!(self, Self::Save | Self::Resume | Self::Restart | Self::Quit)
+        !matches!(
+            self,
+            Self::Controls | Self::Save | Self::Resume | Self::Restart | Self::Quit
+        )
     }
 
     pub fn label(self) -> &'static str {
@@ -64,6 +69,7 @@ impl Setting {
             Self::Sound => "SOUND",
             Self::Fullscreen => "FULLSCREEN",
             Self::SlowMotion => "SLOW MOTION (DEBUG)",
+            Self::Controls => "CONTROLS",
             Self::Save => "SAVE GAME",
             Self::Resume => "RESUME",
             Self::Restart => "NEW GAME",
@@ -84,6 +90,9 @@ impl Setting {
             Self::Sound => "mute or restore every sound",
             Self::Fullscreen => "borderless fullscreen (F11 does the same)",
             Self::SlowMotion => "run the simulation at 35% speed",
+            Self::Controls => {
+                "every key and button, for the device you are using (F1 on a keyboard)"
+            }
             Self::Save => "keep an explicit save separate from autosaves",
             Self::Resume => "back to the game",
             Self::Restart => "start over (asks before replacing saves)",
@@ -97,6 +106,8 @@ impl Setting {
 pub enum Outcome {
     Stay,
     Close,
+    /// Open the controls reference (it takes the screen).
+    Help,
     Restart,
     Quit,
 }
@@ -124,7 +135,7 @@ pub fn value(setting: Setting, session: &Session, audio: &Audio, window: &Window
         Setting::Fullscreen => on_off(window.mode != WindowMode::Windowed),
         Setting::SlowMotion => on_off(session.slow),
         Setting::Save => session.save_feedback.clone(),
-        Setting::Resume | Setting::Restart | Setting::Quit => String::new(),
+        Setting::Controls | Setting::Resume | Setting::Restart | Setting::Quit => String::new(),
     }
 }
 
@@ -171,6 +182,7 @@ pub fn change(
                 save_game(session);
             }
         }
+        Setting::Controls => return Outcome::Help,
         Setting::Resume => return Outcome::Close,
         Setting::Restart => return Outcome::Restart,
         Setting::Quit => return Outcome::Quit,

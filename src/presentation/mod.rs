@@ -1,8 +1,8 @@
 //! Procedural vector art and HUD. Nothing here changes gameplay state.
 //!
 //! Shared theme (colors, view size), the marker components every panel file uses, and the
-//! module list. Each panel owns its file (`bench`, `help`, `banners`, `chart_sidebar`); the
-//! details and run summary panels are `ui::screens`; `panels` is only the per-frame
+//! module list. Each panel owns its file (`bench`, `chart_sidebar`); the
+//! details, run summary, help and toasts are `ui::screens`; `panels` is only the per-frame
 //! orchestration and scrolling.
 use bevy::prelude::*;
 use ssc::simulation::Material;
@@ -17,8 +17,6 @@ pub(crate) const CYAN: Color = Color::srgb(0.28, 0.94, 0.92);
 pub(crate) const MUTED: Color = Color::srgb(0.36, 0.49, 0.62);
 pub(crate) const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
-#[derive(Component)]
-pub(crate) struct Overlay;
 /// A panel that scrolls with the mouse wheel while it is showing.
 #[derive(Component)]
 pub(crate) struct Scrollable;
@@ -75,20 +73,17 @@ pub(crate) fn bar(fraction: f32, width: usize) -> String {
     format!("{}{}", "#".repeat(filled), ".".repeat(width - filled))
 }
 
-mod banners;
 mod bench;
 mod chart_sidebar;
 mod draw_overlay;
 mod draw_ship;
 mod draw_world;
 mod frame;
-mod help;
 mod panels;
 mod setup;
 
-pub(crate) use self::banners::arsenal_banner;
-pub(crate) use self::chart_sidebar::{ChartSpan, update_chart};
 pub(crate) use self::draw_overlay::draw_discovery_glyph;
+pub(crate) use self::chart_sidebar::{ChartSpan, update_chart};
 pub(crate) use self::frame::draw;
 pub(crate) use self::panels::{scroll_panels, update_hud};
 pub(crate) use self::setup::setup;

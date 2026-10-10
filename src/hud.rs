@@ -10,6 +10,8 @@ use crate::Session;
 use crate::presentation::{
     AMBER, APEX_GOLD, CYAN, DRY_RED, MUTED, PAD_AMBER, PAD_GREEN, material_color,
 };
+use crate::ui::controls::{self, ActiveDevice};
+use crate::ui::glyphs::Device;
 use bevy::prelude::*;
 use ssc::simulation::arsenal::Profile;
 use ssc::simulation::hud::{
@@ -1371,6 +1373,7 @@ fn describe(
     session: &Session,
     hud: &HudModel,
     s: &Screen,
+    device: Device,
 ) -> Option<(String, Color, Vec2, Align)> {
     let game = &session.game;
     let layout = ClusterLayout::of(s);
@@ -1496,9 +1499,9 @@ fn describe(
             // As many as fit: the standing keys give way before the window does.
             let mut items: Vec<String> = hints
                 .iter()
-                .map(|h| format!("{} {}", h.key, h.action))
+                .map(|h| format!("{} {}", controls::hint_key(h.key, device), h.action))
                 .collect();
-            items.extend(["F1 HELP", "TAB DETAILS", "ESC SETTINGS"].map(String::from));
+            items.extend(controls::standing_hints(device));
             let room = (s.size.x - 24.0) / 7.4;
             let mut text = String::new();
             for item in items {
@@ -1523,7 +1526,7 @@ fn describe(
             if session.details_open() || session.help {
                 return None;
             }
-            let (text, color) = crate::presentation::arsenal_banner(game);
+            let (text, color) = crate::ui::screens::toast::arsenal_banner(game);
             if text.is_empty() {
                 return None;
             }
@@ -1586,13 +1589,13 @@ fn describe(
             if tag == Tag::Prompt {
                 (text, color, label, Align::Center)
             } else {
-                ("E".to_string(), color, key, Align::Center)
+                (controls::hint_key("E", device), color, key, Align::Center)
             }
         }
         Tag::Key(i) => {
             let ability = Ability::ALL[i];
             let ring = hud.abilities[i];
-            let label = ability.key();
+            let label = controls::ring_key(ability.key(), device);
             let color = match ring.state {
                 RingState::Locked => DIM.with_alpha(0.7),
                 RingState::Cooling => CYAN.with_alpha(0.6),
@@ -1609,7 +1612,7 @@ fn describe(
             } else if ring.fresh && ring.state == RingState::Ready {
                 "NEW".to_string()
             } else {
-                label.to_string()
+                label
             };
             let color = if ring.fresh && ring.state == RingState::Ready {
                 LURE_GOLD
@@ -1666,6 +1669,7 @@ pub enum Align {
 /// Places and fills the HUD texts for this frame.
 pub fn update_texts(
     session: Res<Session>,
+    active: Res<ActiveDevice>,
     view: Single<(&Camera, &Transform, &Projection), With<Camera2d>>,
     ui_scale: Res<UiScale>,
     mut texts: Query<(&Tag, &mut Text, &mut TextColor, &mut Node, &mut TextLayout)>,
@@ -1685,7 +1689,7 @@ pub fn update_texts(
         let described = if hidden {
             None
         } else {
-            describe(*tag, &session, &hud, &s)
+            describe(*tag, &session, &hud, &s, active.device)
         };
         let Some((string, tint, at, align)) = described else {
             if !text.0.is_empty() {

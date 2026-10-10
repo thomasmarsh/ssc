@@ -10,6 +10,7 @@
 //!
 //! `UiPlugin` is the one registration. With `SSC_DEV` unset it adds nothing to the frame.
 
+pub mod controls;
 pub mod focus;
 pub mod glyphs;
 pub mod icons;
@@ -28,6 +29,8 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<screens::console_ui::ConsoleScene>()
+            .init_resource::<controls::ActiveDevice>()
+            .init_resource::<screens::help::HelpScene>()
             .init_resource::<screens::title::TitleScene>()
             .init_resource::<screens::settings::SettingsScene>()
             .add_systems(
@@ -38,6 +41,8 @@ impl Plugin for UiPlugin {
                     screens::settings::setup,
                     screens::details::setup,
                     screens::summary::setup,
+                    screens::help::setup,
+                    screens::toast::setup,
                 ),
             )
             // Input runs before the frame's `controls`, which skips the frame it was consumed.
@@ -45,9 +50,11 @@ impl Plugin for UiPlugin {
             .add_systems(
                 PreUpdate,
                 (
+                    controls::track_device,
                     screens::console_ui::drive,
                     screens::title::drive,
                     screens::settings::drive,
+                    screens::help::drive,
                 )
                     .chain()
                     .after(InputSystems),
@@ -60,6 +67,8 @@ impl Plugin for UiPlugin {
                     screens::settings::render,
                     screens::details::render,
                     screens::summary::render,
+                    screens::help::render,
+                    screens::toast::update,
                 ),
             );
     }

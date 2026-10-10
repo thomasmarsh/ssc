@@ -7,6 +7,7 @@ use super::title::{MenuInput, held_now, line, panel};
 use crate::Session;
 use crate::audio::Audio;
 use crate::settings::{self, Outcome, Setting};
+use crate::ui::controls::ActiveDevice;
 use crate::ui::focus::{Event, Fire, FocusStack, Item, ItemId, Scope, UiKey, Window};
 use crate::ui::glyphs::{Device, Glyph};
 use crate::ui::theme::{self, Tone};
@@ -125,7 +126,7 @@ fn values(session: &Session, audio: &Audio, window: &Window2) -> Vec<Value> {
             }
             Setting::Save if session.save_feedback.is_empty() => Value::None,
             Setting::Save => Value::Action(session.save_feedback.clone()),
-            Setting::Resume | Setting::Restart | Setting::Quit => Value::None,
+            Setting::Controls | Setting::Resume | Setting::Restart | Setting::Quit => Value::None,
         })
         .collect()
 }
@@ -174,6 +175,7 @@ pub fn drive(
     time: Res<Time>,
     ui_scale: Res<UiScale>,
     camera: Query<&Camera, With<Camera2d>>,
+    active: Res<ActiveDevice>,
     mut session: ResMut<Session>,
     mut audio: ResMut<Audio>,
     mut primary: Single<&mut Window2, With<PrimaryWindow>>,
@@ -219,6 +221,12 @@ pub fn drive(
                             session.settings = None;
                             break;
                         }
+                        Outcome::Help => {
+                            // The reference takes the screen; its own close returns to flight.
+                            session.help = true;
+                            session.settings = None;
+                            break;
+                        }
                         Outcome::Restart => {
                             // The title menu asks before it replaces the saves.
                             let mut menu = crate::titlemenu::TitleMenu::new(
@@ -258,7 +266,7 @@ pub fn drive(
                 row,
                 &values(&session, &audio, &primary),
                 driver.window,
-                driver.input.device,
+                active.device,
             )
         });
     if scene.view != want {
