@@ -365,11 +365,11 @@ impl BaseKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RockKind {
     Plain,
-    /// Brittle; shatters into more pieces and gives up shield charge.
+    /// Legacy ecological archetype; free asteroid contents are independently salted.
     Ice,
-    /// Dense and tough; heavy to push, rich in salvage.
+    /// Legacy ore ecology; ordinary asteroids now share toughness and density.
     Ore,
-    /// Volatile: bursts when destroyed, hurting everything near it, and holds surges.
+    /// Legacy crystal ecology; continuous mining and ordinary shattering.
     Crystal,
     /// An inhabited shell that hatches creatures when approached or hurt.
     Husk,
@@ -402,7 +402,7 @@ pub struct Spawn {
     /// Bases only: what kind of station, and the pattern its turrets (or its depot) fire.
     pub base_kind: Option<BaseKind>,
     pub arms: Option<(Weapon, u8)>,
-    /// Asteroids: what it is made of.
+    /// Asteroid ecological archetype; extractable contents are sampled independently.
     pub rock: RockKind,
     /// Husks only: the species inside and how many.
     pub den: Option<(Species, u8)>,

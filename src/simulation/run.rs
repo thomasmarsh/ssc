@@ -93,6 +93,8 @@ pub struct RunStats {
     pub threat: f32,
     /// Ore taken by the beam, per material (metal, volatiles, crystal).
     pub mined: [f32; 3],
+    #[serde(default)]
+    pub mined_water: f32,
     pub rocks_depleted: u32,
     pub planetoids_drained: u32,
     pub shots: u32,
@@ -127,7 +129,7 @@ impl RunStats {
     }
 
     pub fn total_mined(&self) -> f32 {
-        self.mined.iter().sum()
+        self.mined.iter().sum::<f32>() + self.mined_water
     }
 }
 
@@ -381,11 +383,12 @@ impl Game {
             ),
             format!("{most}LOST TO NATURE {}", r.lost_to_nature),
             format!(
-                "MINED {:.0}   METAL {:.0}  VOLATILES {:.0}  CRYSTAL {:.0}",
+                "MINED {:.0}   METAL {:.0}  VOLATILES {:.0}  CRYSTAL {:.0}  WATER {:.0}",
                 r.total_mined(),
                 r.mined[0],
                 r.mined[1],
-                r.mined[2]
+                r.mined[2],
+                r.mined_water
             ),
             format!(
                 "ROCKS WORKED OUT {}   PLANETOIDS DRAINED {}",

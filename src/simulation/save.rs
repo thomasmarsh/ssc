@@ -99,6 +99,8 @@ pub struct SaveState {
     fallen: Vec<(SectorId, Vec<u32>)>,
     /// Ore taken from rocks by spawn, and when each renewable entry was last current.
     mined: Vec<((SectorId, u32), f32)>,
+    #[serde(default)]
+    mined_contents: Vec<((SectorId, u32), [f32; 4])>,
     regrow: Vec<((SectorId, u32), f32)>,
     relics: Vec<SectorId>,
     /// Creature-built structures: what is left of each, block by block (see `build`).
@@ -223,6 +225,7 @@ impl Game {
             falls: sorted(&self.civ_fall),
             fallen,
             mined: sorted(&self.mined),
+            mined_contents: sorted(&self.mined_contents),
             regrow: sorted(&self.regrow_stamp),
             relics,
             structures: self.structures_snapshot().into_iter().collect(),
@@ -264,6 +267,7 @@ impl Game {
                 .map(|(id, spawns)| (id, spawns.into_iter().collect()))
                 .collect();
             game.mined = state.mined.into_iter().collect();
+            game.mined_contents = state.mined_contents.into_iter().collect();
             game.regrow_stamp = state.regrow.into_iter().collect();
             game.relics_taken = state.relics.into_iter().collect();
             game.builds.kept = state.structures.into_iter().collect();

@@ -40,6 +40,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 - `SSC_CHART=1`: buy sonar tiers and a beacon, drop a beacon and a pin, ping, and open the star map at frame 90.
 - `SSC_SUMMARY=over|death`: stage a run with a few extirpations and show its summary panel.
 - `SSC_KILL=1`: destroy the nearest three creatures just before capture (floating scores, kill rings).
+- `SSC_ELECTROLYSIS=1`: stage 20 ship water and empty fuel, then hold the real brake + mine input; conversion status appears above the ship.
 - `SSC_MINE=1`: hold the mining beam on the nearest free rock each frame.
 - `SSC_ARM=<threat>`: kit the ship out and scatter samples of every drop kind at that grade (equipment art, pickups).
 - `SSC_ORGANS=1`: own the four organs with two slots fitted, a bond running and a hold to pay upkeep.

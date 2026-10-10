@@ -225,9 +225,15 @@ pub(super) fn sites_of(seed: u64, id: SectorId) -> Vec<Site> {
                 };
                 sites.push(single(kind, spawn, tint, Some(tag.territory), 0.0, false));
             }
-            (BodyKind::Asteroid, rock @ (RockKind::Ore | RockKind::Crystal | RockKind::Ice), _)
-                if !spawn.pinned =>
-            {
+            (
+                BodyKind::Asteroid,
+                rock @ (RockKind::Plain | RockKind::Ore | RockKind::Crystal | RockKind::Ice),
+                _,
+            ) if !spawn.pinned => {
+                let contents = super::mining::asteroid_contents(seed, (id, spawn.index));
+                if contents.amounts().next().is_none() {
+                    continue;
+                }
                 let ore = ore_for(rock, spawn.radius.unwrap_or(0.0));
                 if ore >= t::LODE_MIN_ORE {
                     let material = material_of(seed, rock, Some((id, spawn.index)));

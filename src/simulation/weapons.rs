@@ -455,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn ice_splinters_more_ore_stays_dense_and_crystals_burst() {
+    fn ordinary_asteroids_shatter_uniformly_without_crystal_blasts() {
         use crate::simulation::tests::{add, body};
         let shards = |kind| {
             let mut game = empty_game();
@@ -474,8 +474,9 @@ mod tests {
             (shards.len(), shards[0].mass)
         };
         let plain = shards(RockKind::Plain);
-        assert!(shards(RockKind::Ice).0 > plain.0);
-        assert!(shards(RockKind::Ore).1 > plain.1);
+        assert_eq!(shards(RockKind::Ice), plain);
+        assert_eq!(shards(RockKind::Ore), plain);
+        assert_eq!(shards(RockKind::Crystal), plain);
         let mut game = empty_game();
         let id = add(&mut game, BodyKind::Asteroid, Vec2::new(90.0, 0.0));
         let prey = spawn(&mut game, &Species::fatso(), Vec2::new(180.0, 0.0));
@@ -484,9 +485,9 @@ mod tests {
         rock.rock = RockKind::Crystal;
         rock.health = 0.0;
         game.remove_destroyed();
-        assert!(game.player().unwrap().shield < before.0);
-        assert!(body(&game, prey).health < before.1);
-        assert!(game.bodies.iter().all(|b| b.kind != BodyKind::Asteroid));
+        assert_eq!(game.player().unwrap().shield, before.0);
+        assert_eq!(body(&game, prey).health, before.1);
+        assert!(game.bodies.iter().any(|b| b.kind == BodyKind::Asteroid));
     }
 
     #[test]

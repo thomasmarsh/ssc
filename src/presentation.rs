@@ -913,6 +913,9 @@ fn pad_banner(game: &Game) -> (String, Color) {
     if game.game_over {
         return (String::new(), CYAN);
     }
+    if let Some(status) = game.electrolysis {
+        return (status.into(), CYAN);
+    }
     if let Some((fraction, left)) = game.travel_progress() {
         return (
             format!(
@@ -2369,83 +2372,52 @@ fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
         draw_planetoid(gizmos, time, body);
         return;
     }
-    let tint = match body.rock {
-        RockKind::Plain => color,
-        RockKind::Ice => Color::srgb(0.5, 0.85, 1.0),
-        RockKind::Ore => Color::srgb(0.8, 0.58, 0.3),
-        RockKind::Crystal => Color::srgb(0.8, 0.4, 1.0),
-        RockKind::Husk => Color::srgb(0.55, 0.85, 0.45),
-        RockKind::Planetoid | RockKind::Wall => color,
-    };
-    let sides = match body.rock {
-        RockKind::Crystal => 6,
-        RockKind::Ice => 7,
-        _ => 8 + (body.id % 5) as u32,
-    };
+    let tint = color;
+    let sides = 8 + (body.id % 5) as u32;
     let corner = |k: u32| {
         let angle = body.angle + k as f32 * std::f32::consts::TAU / sides as f32;
         let uneven = 0.75 + ((body.id + k as u64 * 13) % 9) as f32 * 0.028;
         p + Vec2::from_angle(angle) * r * uneven
     };
     gizmos.lineloop_2d((0..sides).map(corner), tint);
-    match body.rock {
-        RockKind::Plain => {
-            let d = Vec2::from_angle(body.angle);
-            gizmos
-                .circle_2d(p + d * r * 0.3, r * 0.18, tint.with_alpha(0.35))
-                .resolution(7);
-            gizmos.line_2d(
-                p - d * r * 0.5,
-                p + Vec2::new(-d.y, d.x) * r * 0.35,
-                tint.with_alpha(0.3),
-            );
-        }
-        RockKind::Ice | RockKind::Crystal => {
-            let glow = if body.rock == RockKind::Crystal {
-                0.5 + 0.2 * (time * 3.0).sin()
-            } else {
-                0.35
-            };
-            for k in 0..sides {
-                gizmos.line_2d(p, corner(k), tint.with_alpha(glow));
-            }
-            gizmos.lineloop_2d((0..sides).map(|k| p + (corner(k) - p) * 0.45), tint);
-        }
-        RockKind::Ore => {
-            for k in 0..3 {
-                let d = Vec2::from_angle(body.angle + k as f32 * 2.1);
-                gizmos.linestrip_2d(
-                    [
-                        p + d * r * 0.75,
-                        p + d * r * 0.22,
-                        p + Vec2::new(-d.y, d.x) * r * 0.4,
-                    ],
-                    tint.with_alpha(0.7),
-                );
+    let d = Vec2::from_angle(body.angle);
+    gizmos
+        .circle_2d(p + d * r * 0.3, r * 0.18, tint.with_alpha(0.35))
+        .resolution(7);
+    gizmos.line_2d(
+        p - d * r * 0.5,
+        p + Vec2::new(-d.y, d.x) * r * 0.35,
+        tint.with_alpha(0.3),
+    );
+    if !body.pinned {
+        for (material, amount) in body.available_contents(0).amounts() {
+            let rgb = material.color();
+            let fleck = Color::srgb(rgb[0], rgb[1], rgb[2]);
+            let fraction = amount / body.ore().max(1e-3);
+            let count = (fraction * (r / 18.0).clamp(1.0, 3.0)).round().max(1.0) as u32;
+            for k in 0..count {
+                let angle = body.angle + k as f32 * 2.4 + material as usize as f32 * 1.1;
+                let radial = 0.25 + 0.055 * ((k * 7 + material as u32 * 3) % 9) as f32;
+                let at = p + Vec2::from_angle(angle) * r * radial;
+                let size = (r * 0.055).clamp(1.2, 3.2);
+                match k % 3 {
+                    0 => {
+                        gizmos.circle_2d(at, size, fleck).resolution(4);
+                    }
+                    1 => {
+                        gizmos.line_2d(at - d * size, at + d * size, fleck);
+                    }
+                    _ => {
+                        gizmos.rect_2d(at, Vec2::splat(size * 1.5), fleck);
+                    }
+                }
             }
         }
-        RockKind::Husk => {
-            // A dark hollow mouth and twitching feelers advertise the inhabitants.
-            gizmos.circle_2d(p, r * 0.48, tint).resolution(9);
-            for k in 0..3 {
-                let d = Vec2::from_angle(body.angle + k as f32 * 2.1);
-                let s = Vec2::new(-d.y, d.x);
-                gizmos.linestrip_2d(
-                    [
-                        p + d * r * 0.25,
-                        p + d * r * 0.55,
-                        p + d * r * 0.8 + s * r * 0.12 * (time * 4.0 + k as f32).sin(),
-                    ],
-                    tint,
-                );
-            }
-        }
-        RockKind::Planetoid | RockKind::Wall => {}
     }
     // A faint lichen film on rocks that sprout plankton: a few lime flecks on the rim.
     if fertility(body).is_some() {
         let lichen = Color::srgba(0.7, 0.95, 0.35, 0.4);
-        for k in 0..3u32 {
+        for k in 0..2u32 {
             let at = corner((k * 3 + body.id as u32) % sides);
             let inward = p + (at - p) * 0.86;
             gizmos
@@ -4795,11 +4767,6 @@ fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Be
             );
         }
     }
-    let warn = if beam.danger > 0.66 {
-        Color::srgb(1.0, 0.3, 0.25)
-    } else {
-        tint
-    };
     gizmos
         .circle_2d(rock.position, ring_radius, tint.with_alpha(0.18))
         .resolution(40);
@@ -4811,7 +4778,7 @@ fn draw_beam(gizmos: &mut Gizmos, time: f32, ship: &Body, rock: &Body, beam: &Be
                 let t = (i as f32 / 40.0).min(beam.progress.clamp(0.0, 1.0));
                 rock.position + Vec2::from_angle(start - t * std::f32::consts::TAU) * ring_radius
             }),
-            warn,
+            tint,
         );
     }
 }

@@ -148,9 +148,6 @@ const PLAYER_SPEED: f32 = 460.0;
 const KILL_FEEL_RANGE: f32 = 1400.0;
 /// A wall segment's hull per unit of radius on top of a rock's 1.6, before depth.
 pub const WALL_HULL: f32 = 5.0;
-/// A destroyed crystal's burst.
-const CRYSTAL_BLAST: f32 = 150.0;
-const CRYSTAL_DAMAGE: f32 = 30.0;
 /// An inhabited rock hatches when the ship comes this close.
 const HUSK_TRIGGER: f32 = 320.0;
 /// Damage per ram level at a leisurely approach; faster impacts hurt more.
@@ -281,6 +278,7 @@ pub struct Body {
     pub rock: RockKind,
     /// Asteroids: the ore it holds (derived from size, see `mining`).
     pub lode: Lode,
+    pub contents: Option<mining::Contents>,
     pub den: Option<(Species, u8)>,
     /// Creatures: stored energy, up to `max_energy` (which scales with size). It drains with
     /// time and movement and is restored by eating; see `food`.
@@ -503,6 +501,7 @@ pub struct Game {
     legacy: legacy::Legacy,
     bequest: Option<legacy::Bequest>,
     pub beam: Option<Beam>,
+    pub electrolysis: Option<&'static str>,
     pub score: u64,
     /// Counters for this run, and the extirpations it caused; see `run`.
     pub run: run::RunStats,
@@ -583,6 +582,7 @@ pub struct Game {
     fallen: HashMap<SectorId, HashSet<u32>>,
     /// Ore taken from rocks (planetoid budget spent), by spawn, quantized; see `mining`.
     mined: HashMap<(SectorId, u32), f32>,
+    mined_contents: HashMap<(SectorId, u32), [f32; 4]>,
     /// Game time a renewable planetoid's `mined` entry was last current, to catch up on reload.
     regrow_stamp: HashMap<(SectorId, u32), f32>,
     /// Seconds the beam has held its target, the target, and the throttle on full-hold notes.
@@ -655,7 +655,9 @@ impl Game {
             legacy: legacy::Legacy::default(),
             bequest: None,
             beam: None,
+            electrolysis: None,
             mined: HashMap::new(),
+            mined_contents: HashMap::new(),
             regrow_stamp: HashMap::new(),
             mine_clock: 0.0,
             mine_target: None,
@@ -834,7 +836,8 @@ impl Game {
         self.update_organs(dt);
         self.update_builders(dt);
         let recharge = self.stats.recharge;
-        let beaming = self.beam.is_some();
+        let electrolyzing = input.brake && input.mine;
+        let beaming = self.beam.is_some() || electrolyzing;
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             body.fire_cooldown = (body.fire_cooldown - dt).max(0.0);
             body.contact_cooldown = (body.contact_cooldown - dt).max(0.0);
@@ -865,7 +868,13 @@ impl Game {
         self.update_pads(dt, &input);
         let shots = (self.bullets.len(), self.mines.len());
         self.control_player(dt, input);
-        let drained = self.update_mining(dt, input.mine);
+        self.electrolysis = None;
+        let drained = self.update_mining(dt, input.mine && !electrolyzing);
+        let drained = if electrolyzing {
+            drained + self.update_electrolysis(dt)
+        } else {
+            drained
+        };
         self.update_grip(dt);
         self.update_regrowth(dt);
         if let Some(before) = ship_before.as_mut() {
@@ -1169,10 +1178,9 @@ impl Game {
                 body.rock = spawn.rock;
                 body.den = spawn.den;
                 let (toughness, density) = match spawn.rock {
-                    RockKind::Plain => (1.0, 1.0),
-                    RockKind::Ice => (0.7, 0.8),
-                    RockKind::Ore => (1.6, 2.2),
-                    RockKind::Crystal => (0.55, 1.0),
+                    RockKind::Plain | RockKind::Ice | RockKind::Ore | RockKind::Crystal => {
+                        (1.0, 1.0)
+                    }
                     RockKind::Husk => (1.5, 1.2),
                     // Heavy enough to read as fixed; it never takes damage anyway.
                     RockKind::Planetoid => (1.0, 6.0),
@@ -1194,6 +1202,15 @@ impl Game {
             body.genes = spawn.phenotype;
             body.pinned = spawn.pinned;
             body.origin = Some((id, spawn.index));
+            if body.kind == BodyKind::Asteroid
+                && !body.pinned
+                && !matches!(
+                    body.rock,
+                    RockKind::Planetoid | RockKind::Wall | RockKind::Husk
+                )
+            {
+                body.contents = Some(mining::asteroid_contents(self.seed, (id, spawn.index)));
+            }
             if let Some(rank) = spawn.apex {
                 self.register_apex(id, spawn.index, rank, &mut body);
             }
@@ -1278,9 +1295,7 @@ impl Game {
         if radius < MIN_SHARD_RADIUS || self.bodies.len() >= MAX_BODIES {
             return;
         }
-        // Ice splinters into more pieces.
-        let pieces =
-            if rock.radius >= 45.0 { 3 } else { 2 } + u32::from(rock.rock == RockKind::Ice);
+        let pieces = if rock.radius >= 45.0 { 3 } else { 2 };
         let start = self.rng.range(0.0, TAU);
         for piece in 0..pieces {
             if self.bodies.len() >= MAX_BODIES {
@@ -1298,13 +1313,8 @@ impl Game {
             } else {
                 rock.rock
             };
-            shard.mass = radius
-                * 0.6
-                * if shard.rock == RockKind::Ore {
-                    2.2
-                } else {
-                    1.0
-                };
+            shard.contents = rock.contents;
+            shard.mass = radius * 0.6;
             shard.rune_pushed = rock.rune_pushed;
             shard.rift_redirected = rock.rift_redirected;
             shard.lode = Self::fragment_lode(rock, pieces, radius);
@@ -2185,17 +2195,6 @@ impl Game {
             }
             match kind {
                 BodyKind::Player => lost_player = Some(position),
-                BodyKind::Asteroid if body.rock == RockKind::Crystal => {
-                    // Crystal does not break, it bursts: everything near is hurt, ship included.
-                    if (body.rune_pushed > 0.0 || body.rift_redirected > 0.0)
-                        && body.hostile_rock_kill
-                    {
-                        self.rune_blast(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
-                    } else {
-                        self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, false);
-                        self.explode(position, CRYSTAL_BLAST, CRYSTAL_DAMAGE, true);
-                    }
-                }
                 // A wall segment just comes down: no shards, no loot.
                 BodyKind::Asteroid if body.rock == RockKind::Wall => {}
                 BodyKind::Asteroid => {
@@ -2329,6 +2328,7 @@ impl Game {
             rig: Rig::default(),
             rock: RockKind::Plain,
             lode: Lode::default(),
+            contents: None,
             den: None,
             energy: 0.0,
             max_energy: 0.0,

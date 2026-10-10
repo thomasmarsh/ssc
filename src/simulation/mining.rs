@@ -13,10 +13,7 @@ use super::*;
 use crate::world::hash2;
 
 use super::tuning as t;
-pub use super::tuning::{
-    BEAM_DRAIN, BURST_AFTER, CAP, CRUMBLE_RADIUS, CYCLE, CYCLE_YIELD, PLANETOID_BUDGET,
-    SHIELD_FLOOR,
-};
+pub use super::tuning::{BEAM_DRAIN, CAP, CRUMBLE_RADIUS, PLANETOID_BUDGET, SHIELD_FLOOR};
 /// Fraction of each material lost when the ship is destroyed.
 pub const DEATH_LOSS: f32 = 0.25;
 const MINE_SALT: u64 = 0x31A3_0000_0000_00FE;
@@ -304,6 +301,58 @@ impl Cargo {
     }
 }
 
+/// Fractions of one finite lode, in metal/volatiles/crystal/water order.
+/// Empty rocks have no extractable contents. Fragments inherit the same fractions.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Contents(pub [f32; 4]);
+impl Contents {
+    pub const MATERIALS: [Material; 4] = [
+        Material::Metal,
+        Material::Volatiles,
+        Material::Crystal,
+        Material::Water,
+    ];
+    pub fn amounts(self) -> impl Iterator<Item = (Material, f32)> {
+        Self::MATERIALS
+            .into_iter()
+            .zip(self.0)
+            .filter(|(_, fraction)| *fraction > 0.0)
+    }
+    pub fn primary(self) -> Material {
+        self.amounts()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map_or(Material::Metal, |(m, _)| m)
+    }
+    fn single(material: Material) -> Self {
+        Self(Self::MATERIALS.map(|m| if m == material { 1.0 } else { 0.0 }))
+    }
+}
+
+/// Independent salted composition, without changing existing generation draws or HOME geometry.
+pub fn asteroid_contents(seed: u64, key: (SectorId, u32)) -> Contents {
+    let mut rng = Rng::new(hash2(
+        seed ^ 0xC017_0000_0000_0001 ^ u64::from(key.1),
+        key.0.x,
+        key.0.y,
+    ));
+    let profile = rng.int(0, 7);
+    if profile == 0 {
+        return Contents([0.0; 4]);
+    }
+    if profile == 1 {
+        return Contents::single(Material::Water);
+    }
+    if profile < 6 {
+        return Contents::single(Contents::MATERIALS[(profile - 2) as usize]);
+    }
+    let fraction = rng.range(0.25, 0.75);
+    if profile == 6 {
+        Contents([fraction, 0.0, 1.0 - fraction, 0.0])
+    } else {
+        Contents([0.0, fraction, 0.0, 1.0 - fraction])
+    }
+}
+
 /// The ore a rock still holds. `full` is what it held at the size in `radius`; the rock's
 /// radius follows `radius * sqrt(ore / full)`. All zero means not yet derived.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -311,6 +360,8 @@ pub struct Lode {
     pub ore: f32,
     pub full: f32,
     pub radius: f32,
+    /// Absolute remaining goods; selective mining leaves other goods intact.
+    pub remaining: Option<Contents>,
 }
 
 /// The beam as drawn: where it ends, and the ring on the rock.
@@ -319,10 +370,8 @@ pub struct Beam {
     pub target: u64,
     pub end: Vec2,
     pub material: Material,
-    /// Ring fill in [0, 1]: ore mined so far, or the crystal harvest cycle.
+    /// Ring fill in [0, 1]: fraction of the finite lode mined.
     pub progress: f32,
-    /// Crystal only: how close the burst is, in [0, 1].
-    pub danger: f32,
     /// The beam is cutting a plant, not mining a rock (`target` is the planetoid it grows on).
     pub crop: bool,
 }
@@ -330,7 +379,6 @@ pub struct Beam {
 /// How rich a kind of rock is per unit of area.
 fn richness(rock: RockKind) -> f32 {
     match rock {
-        RockKind::Ore => 1.5,
         RockKind::Husk => 0.5,
         _ => 1.0,
     }
@@ -344,14 +392,11 @@ pub fn ore_for(rock: RockKind, radius: f32) -> f32 {
     }
 }
 
-/// What a rock gives and how fast (units per second of beam), except crystal's cycles.
+/// Substrate worked per second; ordinary asteroids use the same continuous beam.
 pub(super) fn rate(rock: RockKind) -> f32 {
     match rock {
-        RockKind::Ore => t::RATE_ORE,
-        RockKind::Plain => t::RATE_PLAIN,
-        RockKind::Ice => t::RATE_ICE,
+        RockKind::Ore | RockKind::Plain | RockKind::Ice | RockKind::Crystal => t::RATE_PLAIN,
         RockKind::Husk => t::RATE_HUSK,
-        RockKind::Crystal => CYCLE_YIELD / CYCLE,
         RockKind::Planetoid => t::RATE_PLANETOID,
         RockKind::Wall => 0.0,
     }
@@ -360,6 +405,11 @@ pub(super) fn rate(rock: RockKind) -> f32 {
 /// The material a rock kind gives; a planetoid's is chosen by a hash of its spawn key. Pure,
 /// so the sonar and the chart can name it without a body.
 pub fn material_of(seed: u64, rock: RockKind, origin: Option<(SectorId, u32)>) -> Material {
+    if !matches!(rock, RockKind::Planetoid | RockKind::Wall | RockKind::Husk)
+        && let Some(key) = origin
+    {
+        return asteroid_contents(seed, key).primary();
+    }
     match rock {
         RockKind::Ore | RockKind::Plain | RockKind::Wall => Material::Metal,
         RockKind::Ice | RockKind::Husk => Material::Volatiles,
@@ -401,6 +451,7 @@ impl Body {
                 ore,
                 full: ore,
                 radius: self.radius,
+                remaining: self.contents.map(|c| Contents(c.0.map(|f| f * ore))),
             };
         }
     }
@@ -417,7 +468,16 @@ impl Body {
     /// Sets the ore left and resizes the rock to match (planetoids keep their size).
     pub(super) fn set_ore(&mut self, ore: f32) {
         self.init_lode();
-        self.lode.ore = ore.clamp(0.0, self.lode.full);
+        let next = ore.clamp(0.0, self.lode.full);
+        if let Some(remaining) = &mut self.lode.remaining {
+            let scale = if self.lode.ore > 0.0 {
+                next / self.lode.ore
+            } else {
+                0.0
+            };
+            remaining.0 = remaining.0.map(|amount| amount * scale);
+        }
+        self.lode.ore = next;
         if self.rock == RockKind::Planetoid {
             return;
         }
@@ -430,9 +490,25 @@ impl Body {
         self.max_health *= scale;
     }
 
-    /// The material a rock gives. Planetoids give one chosen from a hash of the spawn index.
+    pub fn contents(&self, seed: u64) -> Contents {
+        self.contents.unwrap_or_else(|| {
+            Contents::single(material_of(
+                seed,
+                self.rock,
+                self.origin.filter(|_| self.rock == RockKind::Planetoid),
+            ))
+        })
+    }
+
+    pub fn available_contents(&self, seed: u64) -> Contents {
+        self.lode
+            .remaining
+            .unwrap_or_else(|| Contents(self.contents(seed).0.map(|f| f * self.ore())))
+    }
+
+    /// The dominant material, for beam and sensor tinting.
     pub(super) fn material(&self, seed: u64) -> Material {
-        material_of(seed, self.rock, self.origin)
+        self.available_contents(seed).primary()
     }
 
     /// Whether the beam may work this body: free rocks and planetoids, not nest stones.
@@ -443,6 +519,7 @@ impl Body {
             && !self.consumed
             && (!self.pinned || self.rock == RockKind::Planetoid)
             && self.ore() > 1e-3
+            && self.contents.is_none_or(|c| c.amounts().next().is_some())
     }
 }
 
@@ -453,6 +530,11 @@ impl Game {
             return;
         }
         body.init_lode();
+        if let Some(&remaining) = body.origin.and_then(|o| self.mined_contents.get(&o)) {
+            body.set_ore(remaining.iter().sum());
+            body.lode.remaining = Some(Contents(remaining));
+            return;
+        }
         if let Some(&spent) = body.origin.and_then(|o| self.mined.get(&o)) {
             let regrown = match (body.origin, body.rock) {
                 (Some(key), RockKind::Planetoid) => self
@@ -470,14 +552,36 @@ impl Game {
     /// miner), by the same rules as the beam: the rock shrinks toward its floor, the spent ore
     /// is remembered per spawn, and at the floor it crumbles (recorded as fallen when removed).
     /// Returns the leftover ore if it crumbled. A planetoid never shrinks or crumbles.
+    #[cfg(test)]
     pub(super) fn drain_rock(&mut self, index: usize, mined: f32) -> Option<f32> {
+        let rock = &self.bodies[index];
+        let share = (mined / rock.ore().max(1e-6)).clamp(0.0, 1.0);
+        let extracted = Contents(rock.available_contents(self.seed).0.map(|n| n * share));
+        self.drain_rock_contents(index, extracted)
+            .map(|c| c.0.iter().sum())
+    }
+
+    pub(super) fn drain_rock_contents(
+        &mut self,
+        index: usize,
+        extracted: Contents,
+    ) -> Option<Contents> {
+        let available = self.bodies[index].available_contents(self.seed);
+        let remaining = Contents(std::array::from_fn(|i| {
+            (available.0[i] - extracted.0[i]).max(0.0)
+        }));
         let body = &mut self.bodies[index];
         body.init_lode();
-        let ore = body.lode.ore - mined;
-        body.set_ore(ore);
+        body.set_ore(remaining.0.iter().sum());
+        if body.contents.is_some() {
+            body.lode.remaining = Some(remaining);
+        }
         let spent = body.lode.full - body.lode.ore;
         if let Some(key) = body.origin {
             self.mined.insert(key, quantize(spent));
+            if let Some(remaining) = body.lode.remaining {
+                self.mined_contents.insert(key, remaining.0);
+            }
         }
         let planetoid = body.rock == RockKind::Planetoid;
         let floor = CRUMBLE_RADIUS.min(body.lode.radius);
@@ -491,8 +595,9 @@ impl Game {
         body.consumed = true;
         if let Some(key) = rock.origin {
             self.mined.remove(&key);
+            self.mined_contents.remove(&key);
         }
-        Some(rock.lode.ore)
+        Some(rock.available_contents(self.seed))
     }
 
     /// Splits a shot rock's remaining ore among its `pieces` fragments.
@@ -502,7 +607,47 @@ impl Game {
             ore: share,
             full: share,
             radius,
+            remaining: rock
+                .lode
+                .remaining
+                .map(|c| Contents(c.0.map(|n| n * t::SHOT_ORE_KEEP / pieces.max(1) as f32))),
         }
+    }
+
+    /// Brake + mine selects the onboard electrolyzer instead of the external beam.
+    pub(super) fn update_electrolysis(&mut self, dt: f32) -> f32 {
+        let Some(ship) = self.player() else {
+            return 0.0;
+        };
+        let (speed, shield) = (ship.velocity.length(), ship.shield);
+        let blocked = if speed > t::ELECTROLYSIS_MAX_SPEED {
+            Some("ELECTROLYSIS - HOLD STILL")
+        } else if self.cargo.water <= 1e-3 {
+            Some("ELECTROLYSIS - NEEDS WATER")
+        } else if self.cargo.room(Material::Fuel) <= 1e-3 {
+            Some("ELECTROLYSIS - FUEL FULL")
+        } else if shield <= SHIELD_FLOOR {
+            Some("ELECTROLYSIS - NEEDS SHIELD")
+        } else {
+            None
+        };
+        if let Some(status) = blocked {
+            self.electrolysis = Some(status);
+            return 0.0;
+        }
+        let water = (t::ELECTROLYSIS_WATER_RATE * dt)
+            .min(self.cargo.water)
+            .min(self.cargo.room(Material::Fuel) / t::ELECTROLYSIS_FUEL_PER_WATER)
+            .min((shield - SHIELD_FLOOR) / t::ELECTROLYSIS_SHIELD_PER_WATER);
+        self.cargo.take(Material::Water, water);
+        self.cargo
+            .add(Material::Fuel, water * t::ELECTROLYSIS_FUEL_PER_WATER);
+        let drained = water * t::ELECTROLYSIS_SHIELD_PER_WATER;
+        if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
+            ship.shield -= drained;
+        }
+        self.electrolysis = Some("ELECTROLYSIS - WATER TO FUEL");
+        drained
     }
 
     /// The beam: finds the nearest minable rock in range, draws shield, yields material
@@ -534,9 +679,12 @@ impl Game {
             if gap > reach {
                 continue;
             }
-            let material = rock.material(seed);
-            if self.cargo.room(material) <= 1e-3 {
-                blocked = Some(material);
+            let available = rock.available_contents(seed);
+            if !available
+                .amounts()
+                .any(|(m, amount)| amount > 1e-3 && self.cargo.room(m) > 1e-3)
+            {
+                blocked = available.amounts().next().map(|(m, _)| m);
                 continue;
             }
             if best.is_none_or(|(g, _)| gap < g) {
@@ -594,27 +742,45 @@ impl Game {
         }
 
         let rock = &self.bodies[index];
-        let material = rock.material(seed);
         let kind = rock.rock;
         let power = self.loadout.skills.beam_power();
         let gain = self.loadout.skills.yield_mult() * self.realm_effects().mining;
-        let units = if kind == RockKind::Crystal {
-            let cycles = |t: f32| ((t + 1e-4) / CYCLE).floor().min(3.0);
-            (cycles(self.mine_clock) - cycles(before)) * CYCLE_YIELD * power
-        } else {
-            rate(kind) * power * dt
-        };
-        let burst = kind == RockKind::Crystal && self.mine_clock >= BURST_AFTER;
-        let mined = units.min(rock.ore()).min(self.cargo.room(material) / gain);
-        let stored = self.cargo.add(material, mined * gain);
-        self.run.mined[material as usize] += stored;
+        let contents = rock.contents(seed);
+        let available = rock.available_contents(seed);
+        let work = rate(kind) * power * dt;
+        let extracted = Contents(std::array::from_fn(|i| {
+            let material = Contents::MATERIALS[i];
+            (work * contents.0[i])
+                .min(available.0[i])
+                .min(self.cargo.room(material) / gain)
+        }));
+        let material = extracted.primary();
+        let mined: f32 = extracted.0.iter().sum();
+        let remaining = Contents(std::array::from_fn(|i| {
+            (available.0[i] - extracted.0[i]).max(0.0)
+        }));
+        for (m, amount) in extracted.amounts() {
+            let stored = self.cargo.add(m, amount * gain);
+            if m == Material::Water {
+                self.run.mined_water += stored;
+            } else {
+                self.run.mined[m as usize] += stored;
+            }
+        }
         self.civ_mined(mined);
 
         let body = &mut self.bodies[index];
         body.init_lode();
         let before_ore = body.lode.ore;
-        let ore = before_ore - mined;
+        let ore = if body.contents.is_some() {
+            remaining.0.iter().sum()
+        } else {
+            before_ore - mined
+        };
         body.set_ore(ore);
+        if body.contents.is_some() {
+            body.lode.remaining = Some(remaining);
+        }
         if kind == RockKind::Planetoid && before_ore > 1e-3 && body.lode.ore <= 1e-3 {
             self.run.planetoids_drained += 1;
         }
@@ -623,6 +789,9 @@ impl Game {
         let spent = body.lode.full - body.lode.ore;
         if let Some(key) = origin_key {
             self.mined.insert(key, quantize(spent));
+            if let Some(remaining) = body.lode.remaining {
+                self.mined_contents.insert(key, remaining.0);
+            }
         }
         // Husks hatch as if shot; the hull dips just enough to read as hurt.
         let body = &mut self.bodies[index];
@@ -632,11 +801,7 @@ impl Game {
         let planetoid = kind == RockKind::Planetoid;
         let floor = CRUMBLE_RADIUS.min(body.lode.radius);
         let crumbled = !planetoid && (body.radius <= floor + 1e-3 || body.lode.ore <= 1e-3);
-        let progress = if kind == RockKind::Crystal {
-            (self.mine_clock % CYCLE) / CYCLE
-        } else {
-            1.0 - body.lode.ore / body.lode.full
-        };
+        let progress = 1.0 - body.lode.ore / body.lode.full;
         let end = body.position - (body.position - origin).normalize_or_zero() * body.radius;
         self.beam = Some(Beam {
             target,
@@ -644,18 +809,9 @@ impl Game {
             material,
             progress,
             crop: false,
-            danger: if kind == RockKind::Crystal {
-                (self.mine_clock / BURST_AFTER).clamp(0.0, 1.0)
-            } else {
-                0.0
-            },
         });
-        if burst {
-            // Held too long: the crystal goes off, hurting everything near, ship included.
-            self.bodies[index].health = 0.0;
-            self.stop_beam();
-        } else if crumbled {
-            self.crumble(index, material);
+        if crumbled {
+            self.crumble(index);
         }
         drained
     }
@@ -667,7 +823,7 @@ impl Game {
     }
 
     /// A worked-out rock falls apart into what is left of it: no shards, no score.
-    fn crumble(&mut self, index: usize, material: Material) {
+    fn crumble(&mut self, index: usize) {
         let rock = self.bodies[index].clone();
         self.release_from(&rock);
         let leftover = rock.lode.ore;
@@ -677,13 +833,12 @@ impl Game {
         body.consumed = true;
         if let Some(key) = rock.origin {
             self.mined.remove(&key);
+            self.mined_contents.remove(&key);
         }
         if leftover > 0.05 {
-            self.drop_item(
-                rock.position,
-                Vec2::ZERO,
-                Item::Material(material, leftover),
-            );
+            for (material, amount) in rock.available_contents(self.seed).amounts() {
+                self.drop_item(rock.position, Vec2::ZERO, Item::Material(material, amount));
+            }
         }
         self.stop_beam();
     }
@@ -752,7 +907,7 @@ mod tests {
             );
         }
         let (state, generation) =
-            super::save::SaveState::from_text(&game.save_state().to_text()).unwrap();
+            crate::simulation::save::SaveState::from_text(&game.save_state().to_text()).unwrap();
         let (loaded, _) = Game::from_save(state, generation);
         assert_eq!(game.cargo, loaded.cargo);
         let mut expanded = Cargo {
@@ -767,6 +922,138 @@ mod tests {
     use crate::genome::{Genome, Species, Weapon};
     use crate::simulation::skills;
     use crate::simulation::tests::{DT, add, body, empty_game, set_player};
+
+    #[test]
+    fn compositions_include_barren_water_and_mixed_without_spending_caller_rng() {
+        let samples: Vec<_> = (0..128)
+            .map(|i| asteroid_contents(42, (SectorId::ORIGIN, i)))
+            .collect();
+        assert!(samples.iter().any(|c| c.amounts().next().is_none()));
+        assert!(samples.contains(&Contents([0.0, 0.0, 0.0, 1.0])));
+        assert!(samples.iter().any(|c| c.amounts().count() == 2));
+        for c in &samples {
+            let kinds: Vec<_> = c.amounts().map(|(m, _)| m).collect();
+            assert!(
+                kinds.len() <= 1
+                    || kinds == vec![Material::Metal, Material::Crystal]
+                    || kinds == vec![Material::Volatiles, Material::Water]
+            );
+        }
+        for (i, c) in samples.iter().enumerate() {
+            assert_eq!(*c, asteroid_contents(42, (SectorId::ORIGIN, i as u32)));
+            let total: f32 = c.0.iter().sum();
+            assert!(total == 0.0 || (total - 1.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn mixed_mining_caps_save_depletion_and_fragments_conserve_contents() {
+        let mut game = rig();
+        let id = rock(&mut game, RockKind::Plain, Vec2::new(110.0, 0.0), 60.0);
+        let key = (SectorId::ORIGIN, 1000);
+        let b = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+        b.origin = Some(key);
+        b.contents = Some(Contents([0.0, 0.5, 0.0, 0.5]));
+        hold(&mut game, 2.0);
+        assert!((game.cargo.volatiles - 4.5).abs() < 0.1);
+        assert!((game.cargo.water - 4.5).abs() < 0.1);
+        assert!(game.mined[&key] >= 9.0 - 0.01);
+        let before = game.body(id).unwrap().available_contents(game.seed);
+        game.cargo.water = 30.0;
+        hold(&mut game, 2.0);
+        assert_eq!(game.cargo.water, 30.0);
+        assert_eq!(game.beam.unwrap().material, Material::Volatiles);
+        assert!((game.cargo.volatiles - 9.0).abs() < 0.1);
+        let remaining = game.body(id).unwrap().available_contents(game.seed);
+        assert_eq!(remaining.0[3], before.0[3]);
+        let (state, generator) =
+            crate::simulation::save::SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (loaded, _) = Game::from_save(state, generator);
+        assert_eq!(loaded.mined[&key], game.mined[&key]);
+        assert_eq!(loaded.mined_contents[&key], remaining.0);
+        let rock = game.body(id).unwrap().clone();
+        let mut fresh = rock.clone();
+        fresh.lode = Lode::default();
+        fresh.radius = rock.lode.radius;
+        loaded.apply_mined(&mut fresh);
+        assert_eq!(fresh.available_contents(game.seed), remaining);
+        game.shatter(&rock);
+        let shards: Vec<_> = game
+            .bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Asteroid && b.id != id)
+            .collect();
+        for i in 0..4 {
+            let total: f32 = shards
+                .iter()
+                .map(|s| s.available_contents(game.seed).0[i])
+                .sum();
+            assert!((total - remaining.0[i] * t::SHOT_ORE_KEEP).abs() < 0.001);
+        }
+        game.cargo.water = 0.0;
+        hold(&mut game, 1.0);
+        assert!((game.cargo.water - 2.25).abs() < 0.1);
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == id)
+            .unwrap()
+            .contents = Some(Contents([0.0; 4]));
+        assert!(!game.body(id).unwrap().minable());
+    }
+
+    #[test]
+    fn electrolysis_uses_brake_mine_water_shield_and_fuel_room() {
+        let mut game = rig();
+        rock(&mut game, RockKind::Plain, Vec2::new(110.0, 0.0), 60.0);
+        game.cargo.water = 10.0;
+        game.cargo.fuel = 0.0;
+        game.bodies[0].max_shield = 120.0;
+        game.bodies[0].shield = 120.0;
+        let shield = 120.0;
+        let input = Input {
+            brake: true,
+            mine: true,
+            ..Default::default()
+        };
+        for _ in 0..60 {
+            game.step(DT, input);
+        }
+        assert!((game.cargo.water - 9.5).abs() < 0.01);
+        assert!((game.cargo.fuel - 1.0).abs() < 0.01);
+        assert!((game.player().unwrap().shield - (shield - 6.0)).abs() < 0.05);
+        assert_eq!(game.cargo.metal, 0.0);
+        assert!(game.beam.is_none());
+        game.cargo.fuel = 119.99;
+        let water = game.cargo.water;
+        game.step(DT, input);
+        assert_eq!(game.cargo.fuel, 120.0);
+        assert!((water - game.cargo.water - 0.005).abs() < 0.001);
+        let balances = game.cargo;
+        game.step(DT, input);
+        assert_eq!(game.cargo, balances);
+        assert_eq!(game.electrolysis, Some("ELECTROLYSIS - FUEL FULL"));
+        game.cargo.fuel = 0.0;
+        game.bodies[0].shield = SHIELD_FLOOR;
+        game.step(DT, input);
+        assert_eq!(game.cargo.fuel, 0.0);
+        assert_eq!(game.electrolysis, Some("ELECTROLYSIS - NEEDS SHIELD"));
+        game.bodies[0].shield = SHIELD_FLOOR + 0.01;
+        game.step(DT, input);
+        assert!((game.player().unwrap().shield - SHIELD_FLOOR).abs() < 1e-5);
+        game.bodies[0].velocity = Vec2::X * 100.0;
+        let balances = game.cargo;
+        game.step(DT, input);
+        assert_eq!(game.cargo, balances);
+        assert_eq!(game.electrolysis, Some("ELECTROLYSIS - HOLD STILL"));
+        game.bodies[0].velocity = Vec2::ZERO;
+        game.cargo.water = 0.0;
+        game.step(DT, input);
+        assert_eq!(game.electrolysis, Some("ELECTROLYSIS - NEEDS WATER"));
+        game.bodies[0].since_hit = 3.0;
+        game.step(DT, Input::default());
+        assert!(game.electrolysis.is_none());
+        assert!(game.player().unwrap().shield > SHIELD_FLOOR);
+    }
 
     fn mine() -> Input {
         Input {
@@ -807,12 +1094,11 @@ mod tests {
     #[test]
     fn yields_follow_the_kind_of_rock() {
         for (kind, material, per_second) in [
-            (RockKind::Ore, Material::Metal, t::RATE_ORE),
+            (RockKind::Ore, Material::Metal, t::RATE_PLAIN),
             (RockKind::Plain, Material::Metal, t::RATE_PLAIN),
-            (RockKind::Ice, Material::Volatiles, t::RATE_ICE),
+            (RockKind::Ice, Material::Volatiles, t::RATE_PLAIN),
             (RockKind::Husk, Material::Volatiles, t::RATE_HUSK),
-            // Two full cycles in two seconds would burst; one second is two cycles of 4.
-            (RockKind::Crystal, Material::Crystal, 8.0),
+            (RockKind::Crystal, Material::Crystal, t::RATE_PLAIN),
         ] {
             let mut game = rig();
             rock(&mut game, kind, Vec2::new(110.0, 0.0), 40.0);
@@ -907,12 +1193,25 @@ mod tests {
                 s.kind == BodyKind::Asteroid
                     && !s.pinned
                     && s.rock == RockKind::Ore
+                    && asteroid_contents(seed, (SectorId::containing(s.position), s.index))
+                        .amounts()
+                        .next()
+                        .is_some()
                     && s.radius.is_none_or(|r| r > 30.0)
             })
         });
         let spawn = world::generate(seed, q)
             .into_iter()
-            .find(|s| s.kind == BodyKind::Asteroid && !s.pinned && s.rock == RockKind::Ore)
+            .find(|s| {
+                s.kind == BodyKind::Asteroid
+                    && !s.pinned
+                    && s.rock == RockKind::Ore
+                    && asteroid_contents(seed, (q, s.index))
+                        .amounts()
+                        .next()
+                        .is_some()
+                    && s.radius.is_none_or(|r| r > 30.0)
+            })
             .unwrap();
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
@@ -984,33 +1283,18 @@ mod tests {
     }
 
     #[test]
-    fn crystal_bursts_when_the_beam_is_held_past_three_cycles() {
+    fn crystal_mines_continuously_without_a_timed_burst() {
         let mut game = rig();
         game.player_invulnerability = 0.0;
-        let id = rock(&mut game, RockKind::Crystal, Vec2::new(100.0, 0.0), 40.0);
-        let shield = game.bodies[0].shield;
-        hold(&mut game, 1.5);
-        assert!(game.body(id).is_some(), "three cycles are safe");
-        assert!(
-            (game.cargo.crystal - 12.0).abs() < 1e-3,
-            "{}",
-            game.cargo.crystal
-        );
-        hold(&mut game, 0.3);
-        assert!(game.body(id).is_none(), "held longer: it bursts");
-        assert!(
-            game.bodies[0].shield < shield - BEAM_DRAIN * 1.8 - 10.0,
-            "the blast hurt the ship"
-        );
-        // Letting go between pulses resets the count.
-        let mut game = rig();
         let id = rock(&mut game, RockKind::Crystal, Vec2::new(100.0, 0.0), 60.0);
-        for _ in 0..4 {
-            hold(&mut game, 1.0);
-            game.step(DT, Input::default());
-        }
+        game.bodies[0].max_shield = 120.0;
+        game.bodies[0].shield = 120.0;
+        let shield = 120.0;
+        hold(&mut game, 4.0);
         assert!(game.body(id).is_some());
-        assert!(game.cargo.crystal > 20.0);
+        assert!((game.cargo.crystal - 4.0 * t::RATE_PLAIN).abs() < 0.2);
+        assert!((game.bodies[0].shield - (shield - BEAM_DRAIN * 4.0)).abs() < 1.0);
+        assert!((game.beam.unwrap().progress - 18.0 / 90.0).abs() < 0.01);
     }
 
     #[test]
@@ -1357,10 +1641,10 @@ mod tests {
 
     #[test]
     fn metal_is_attainable_in_the_first_minute() {
-        // One ordinary ore rock, a few seconds of beam: dozens of metal, a quarter of the hold.
+        // A normal 60-radius metal asteroid supplies dozens of metal within the first minute.
         let mut game = rig();
-        rock(&mut game, RockKind::Ore, Vec2::new(110.0, 0.0), 36.0);
-        hold(&mut game, 6.0);
+        rock(&mut game, RockKind::Ore, Vec2::new(110.0, 0.0), 60.0);
+        hold(&mut game, 9.0);
         assert!(game.cargo.metal > 35.0, "{}", game.cargo.metal);
     }
 

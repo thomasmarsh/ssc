@@ -1769,6 +1769,18 @@ fn smoke_run(
     {
         smoke_summary(&mut session, &mode);
     }
+    // SSC_ELECTROLYSIS=1: use the real brake + mine input with water and an empty fuel tank.
+    if std::env::var_os("SSC_ELECTROLYSIS").is_some() {
+        if run.frames == 2 {
+            session.game.cargo.water = 20.0;
+            session.game.cargo.fuel = 0.0;
+        }
+        if run.frames > 2 {
+            session.input.brake = true;
+            session.input.mine = true;
+            session.input.fire = false;
+        }
+    }
     // SSC_MINE=1: hold the mining beam on the nearest free rock (aimed at it each frame).
     if std::env::var_os("SSC_MINE").is_some() && run.frames > 2 {
         let ship = session.game.player().map(|p| p.position);

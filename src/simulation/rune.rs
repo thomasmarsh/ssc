@@ -563,7 +563,7 @@ mod tests {
         }
     }
     #[test]
-    fn environmental_crystal_cascade_does_not_pay_player_credit() {
+    fn environmental_hit_shatters_crystal_without_a_cascade_or_player_credit() {
         let (mut g, _) = arena(Payload::Blast, Vec2::ZERO);
         let rock = add(&mut g, BodyKind::Asteroid, Vec2::new(40.0, 0.0));
         let crystal = g.bodies.iter_mut().find(|b| b.id == rock).unwrap();
@@ -573,7 +573,7 @@ mod tests {
         g.bodies.iter_mut().find(|b| b.id == foe).unwrap().health = 1.0;
         tick(&mut g, ARM + DT);
         g.remove_destroyed();
-        assert!(body(&g, foe).health <= 0.0);
+        assert!(body(&g, foe).health > 0.0);
         g.remove_destroyed();
         assert_eq!(g.run.kills, 0);
         assert_eq!(g.score, 0);

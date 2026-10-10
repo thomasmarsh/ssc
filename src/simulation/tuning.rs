@@ -227,19 +227,18 @@ pub const BEAM_DRAIN: f32 = 4.0;
 pub const SHIELD_FLOOR: f32 = 6.0;
 /// A rock never shrinks below this radius: it crumbles there.
 pub const CRUMBLE_RADIUS: f32 = 14.0;
-/// Crystal is harvested in cycles of this many seconds, each worth `CYCLE_YIELD`; held past
-/// `BURST_AFTER` seconds it bursts.
-pub const CYCLE: f32 = 0.5;
-pub const CYCLE_YIELD: f32 = 4.0;
-pub const BURST_AFTER: f32 = 3.0 * CYCLE + 0.1;
 /// Ore a planetoid will give before it is spent (it never shrinks).
 pub const PLANETOID_BUDGET: f32 = 400.0;
-/// Ore per second of beam, by kind of rock (crystal uses its cycles instead).
-pub const RATE_ORE: f32 = 7.0;
+/// Substrate worked per second by the beam.
 pub const RATE_PLAIN: f32 = 4.5;
-pub const RATE_ICE: f32 = 6.0;
 pub const RATE_HUSK: f32 = 2.5;
 pub const RATE_PLANETOID: f32 = 1.2;
+
+/// Onboard electrolysis: slow emergency refueling, powered by the ship's shield.
+pub const ELECTROLYSIS_WATER_RATE: f32 = 0.5;
+pub const ELECTROLYSIS_FUEL_PER_WATER: f32 = 2.0;
+pub const ELECTROLYSIS_SHIELD_PER_WATER: f32 = 12.0;
+pub const ELECTROLYSIS_MAX_SPEED: f32 = 8.0;
 
 // ---- rig upgrades --------------------------------------------------------------------------
 

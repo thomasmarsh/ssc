@@ -840,6 +840,8 @@ mod tests {
             r.health = 100.0;
             r.max_health = 100.0;
         }
+        // One ordinary lode should cross the wary boundary from a mildly strained regard.
+        game.set_regard(t.id, -4.0);
         let before = game.civ_regard(t.id);
         let beam = Input {
             mine: true,

@@ -24,7 +24,10 @@ fn suitable(body: &Body) -> bool {
         && body.sling_free <= 0.0
         && body.shoved <= 0.0
         && body.grip_free <= 0.0
-        && matches!(body.rock, RockKind::Plain | RockKind::Ice | RockKind::Ore)
+        && matches!(
+            body.rock,
+            RockKind::Plain | RockKind::Ice | RockKind::Ore | RockKind::Crystal
+        )
 }
 
 impl Game {
@@ -544,6 +547,7 @@ mod tests {
     fn gather_uses_nearest_free_suitable_rock_and_respects_shared_claims() {
         let (mut game, owner, first) = arena();
         game.tethers.clear();
+        game.bodies.iter_mut().find(|b| b.id == first).unwrap().rock = RockKind::Crystal;
         let mut rejected = Vec::new();
         for k in 0..7 {
             let id = rock(&mut game, Vec2::new(80.0, k as f32 - 3.0));
@@ -553,7 +557,7 @@ mod tests {
                 1 => b.rock = RockKind::Planetoid,
                 2 => b.rock = RockKind::Husk,
                 3 => b.radius = 31.0,
-                4 => b.rock = RockKind::Crystal,
+                4 => b.rock = RockKind::Wall,
                 5 => b.mass = -25.0,
                 _ => b.sling_free = 1.0,
             }

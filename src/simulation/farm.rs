@@ -722,7 +722,6 @@ impl Game {
             end: live.position,
             material: Material::Biomass,
             progress: (progress / HARVEST_TIME).min(1.0),
-            danger: 0.0,
             crop: true,
         });
         let _ = ship;

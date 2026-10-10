@@ -6,7 +6,7 @@
 //! - **Who and what.** At most `MAX_MINERS` per territory, one rock each, never the same rock
 //!   twice. A miner is the lowest-spawn-index free member (generated, not bred) and its rock
 //!   one of the three lowest-index minable rocks in reach, chosen with `civ_rng`, so a run is
-//!   deterministic. Crystal (it bursts) and husks (they hatch) are left alone, and so is any
+//!   deterministic. Water-only rocks and husks (they hatch) are left alone, and so is any
 //!   rock the ship is working.
 //! - **Flee or escort.** A miner that has the ship within `FLEE_RANGE` and no warrior or
 //!   elder near drops what it is doing and runs; with an escort it keeps working.
@@ -236,7 +236,12 @@ impl Game {
             let body_ok = self.body(m.body).is_some_and(|b| {
                 b.active && b.health > b.max_health * 0.6 && b.since_hit > 2.5 && !b.consumed
             });
-            let rock_ok = self.body(m.rock).is_some_and(|r| r.minable());
+            let rock_ok = self.body(m.rock).is_some_and(|r| {
+                r.minable()
+                    && r.available_contents(self.seed)
+                        .amounts()
+                        .any(|(m, _)| Material::MINERALS.contains(&m))
+            });
             body_ok && rock_ok
         });
         let escorts: Vec<Vec2> = self
@@ -295,27 +300,60 @@ impl Game {
                 continue;
             }
             // In range: hold still and work the rock.
-            let (kind, material, ore, radius) =
-                (rock.rock, rock.material(seed), rock.ore(), rock.radius);
+            let (kind, contents, ore, radius) = (
+                rock.rock,
+                super::mining::Contents(
+                    rock.available_contents(seed)
+                        .0
+                        .map(|n| n / rock.ore().max(1e-6)),
+                ),
+                rock.ore(),
+                rock.radius,
+            );
+            let fraction: f32 = contents
+                .amounts()
+                .filter(|(m, _)| Material::MINERALS.contains(m))
+                .map(|(_, f)| f)
+                .sum();
             let end = rock.position - offset.normalize_or_zero() * radius;
             self.bodies[bi].velocity *= 0.8;
             let want = rate(kind) * YIELD * dt;
             let left = (budget - mining.spent).max(0.0);
-            let mined = want.min(ore).min(mining.room()).min(left);
+            let mined = want
+                .min(ore)
+                .min(mining.room() / fraction.max(1e-6))
+                .min(left / fraction.max(1e-6));
             if mined <= 1e-6 {
                 if left <= 1e-6 || mining.room() <= 1e-6 {
                     ended.push(slot);
                 }
                 continue;
             }
-            mining.stock[material as usize] += mined;
-            mining.spent += mined;
+            for (material, fraction) in contents
+                .amounts()
+                .filter(|(m, _)| Material::MINERALS.contains(m))
+            {
+                mining.stock[material as usize] += mined * fraction;
+            }
+            mining.spent += mined * fraction;
             mining.miners[slot].working = true;
             mining.miners[slot].patience = PATIENCE;
             mining.miners[slot].end = end;
-            if let Some(leftover) = self.drain_rock(ri, mined) {
-                let room = mining.room();
-                mining.stock[material as usize] += leftover.min(room);
+            let extracted = super::mining::Contents(std::array::from_fn(|i| {
+                if Material::MINERALS.contains(&super::mining::Contents::MATERIALS[i]) {
+                    contents.0[i] * mined
+                } else {
+                    0.0
+                }
+            }));
+            if let Some(leftover) = self.drain_rock_contents(ri, extracted) {
+                for (material, amount) in leftover.amounts() {
+                    if Material::MINERALS.contains(&material) {
+                        mining.stock[material as usize] += amount.min(mining.room());
+                    } else {
+                        self.drop_item(end, Vec2::ZERO, Item::Material(material, amount));
+                    }
+                }
                 mining.miners[slot].working = false;
                 ended.push(slot);
             }
@@ -372,10 +410,17 @@ impl Game {
                 .iter()
                 .filter(|r| {
                     r.minable()
+                        && r.available_contents(seed)
+                            .amounts()
+                            .any(|(m, _)| Material::MINERALS.contains(&m))
                         && r.active
                         && matches!(
                             r.rock,
-                            RockKind::Plain | RockKind::Ore | RockKind::Ice | RockKind::Planetoid
+                            RockKind::Plain
+                                | RockKind::Ore
+                                | RockKind::Ice
+                                | RockKind::Crystal
+                                | RockKind::Planetoid
                         )
                         && !taken.contains(&r.id)
                         && r.origin.is_some()

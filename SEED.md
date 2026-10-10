@@ -58,6 +58,8 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 
 ## Recently done
 
+- Asteroid contents (generator 35): uniform rocky shapes with material flecks, salted single/mixed/water/barren lodes and continuous crystal mining; brake + mine converts ship water to fuel using shield.
+
 - Narrow water extraction (generator 34): paid saved aquifer extractor, tank/Fabrication gates, 30M 10C for capped 1W/s local water while unloaded; dry sites refuse, HOME guaranteed.
 
 - Narrow water storage: paid saved pad tank, 20M for 300 local water capacity; stash previews/transfers respect the tank and fixed 30 ship reserve. Aquifer extraction is now built.
@@ -71,5 +73,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Shared resources: six Cargo balances and fixed HUD counters; atomic exchanges/transfers, manufactured fuel services, small water reserve, shared farming biomass, fuel-powered systems and biomass organ upkeep. Save format 3; generation unchanged.
 
 - Game-loop design and doc reconciliation (2026-10-09): target production, jobs, fleets/tankers and homestead milestones are recorded in `docs/GAME_LOOP.md`; first frontier implementation is complete.
-
-- Wild genetic carrier diversity (generator version 32): independently salted body/appearance variation and a rare compatible two/three-module tail; familiar primary identity retained, HOME and caller draws pinned. See `docs/BESTIARY.md`.
