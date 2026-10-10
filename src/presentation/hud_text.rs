@@ -1089,13 +1089,13 @@ mod bench_layout_tests {
     };
     fn game() -> Game {
         let mut game = Game::new(5460803);
-        crate::smoke_pads(&mut game, "bench");
+        crate::smoke::smoke_pads(&mut game, "bench");
         game
     }
     #[test]
     fn role_name_editor_fits_narrow_panel() {
         let mut game = game();
-        crate::smoke_bench(&mut game, "mining-fleet-name");
+        crate::smoke::smoke_bench(&mut game, "mining-fleet-name");
         let height = 480.0 - DETAILS_TOP - DETAILS_BOTTOM;
         let text = bench_lines(&game, 640.0 - 32.0, height)
             .into_iter()
@@ -1121,7 +1121,7 @@ mod bench_layout_tests {
     #[test]
     fn role_merge_terms_fit_narrow_preview_and_receipt() {
         let mut game = game();
-        crate::smoke_bench(&mut game, "mining-fleet-blueprint");
+        crate::smoke::smoke_bench(&mut game, "mining-fleet-blueprint");
         for receipt in [false, true] {
             if receipt {
                 game.bench_confirm();
@@ -1323,7 +1323,7 @@ mod bench_layout_tests {
             "repeated",
         ] {
             let mut game = game();
-            crate::smoke_bench(&mut game, mode);
+            crate::smoke::smoke_bench(&mut game, mode);
             if mode != "gate" {
                 game.cargo = Cargo {
                     metal: 200.0,
@@ -1359,7 +1359,7 @@ mod bench_layout_tests {
     #[test]
     fn dense_fitted_part_details_yield_room_to_the_complete_receipt_and_guidance() {
         let mut game = game();
-        crate::smoke_bench(&mut game, "unlock");
+        crate::smoke::smoke_bench(&mut game, "unlock");
         game.loadout.parts[0].effects = upgrades::Stat::ALL
             .into_iter()
             .map(|s| upgrades::Effect::Stat(s, 0.2))

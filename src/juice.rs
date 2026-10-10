@@ -146,7 +146,7 @@ mod tests {
 
     fn app(calm: bool) -> App {
         let mut session = Session::default();
-        crate::smoke_pads(&mut session.game, "bench");
+        crate::smoke::smoke_pads(&mut session.game, "bench");
         session.reduce_effects = calm;
         session.game.cargo = Cargo {
             metal: 200.0,
