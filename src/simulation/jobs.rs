@@ -57,6 +57,8 @@ struct Pest {
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Jobs {
+    #[serde(default)]
+    pub(super) agreements: BTreeMap<u64, super::agreement::Agreement>,
     records: BTreeMap<(u64, JobKind), Contract>,
     #[serde(default)]
     partnerships: BTreeSet<u64>,
@@ -77,6 +79,9 @@ impl Jobs {
             .collect()
     }
     pub(super) fn invalidate_world(&mut self) {
+        for agreement in self.agreements.values_mut() {
+            agreement.invalidate();
+        }
         self.partnerships.clear();
         for job in self
             .records

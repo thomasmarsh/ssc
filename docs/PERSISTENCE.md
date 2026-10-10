@@ -34,6 +34,8 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 | `ping`, `lure`, `feel`, `streak`, `notices`, `bench_feedback`, `unlock_*`, `cues`, `region`, `realms` | ephemeral | presentation and announcement state; announcements replay on load |
 | `loaded`, `active`, `focus`, `territory*`, `raid`, `civ_clock`, `food_clock`, `sanctuary`, `dev` | derived | recomputed on the first step |
 
+Recurring agreements are an additive defaulted map in `jobs`: supplier ID, capital, player PadKey, remaining finite lots, simulation cooldown, pause, and terminal outcome. Four open / 128 lifetime records; successful handoff pays/decrements once, pause and suspension stop cooldown, no wall-clock catch-up. Endpoint loss and generator mismatch close stock permanently without touching ship cargo. Generation/save versions stay unchanged; no migration code.
+
 ## Format and versioning
 
 RON text, `Save(version: N, generator: G, state: (...))`, human readable and diffable. `version` is this layout (`SAVE_VERSION`), `generator` is `GENERATOR_VERSION` when it was written.

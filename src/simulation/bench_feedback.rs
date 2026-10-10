@@ -124,6 +124,9 @@ impl Snapshot {
                 }
             }
             BenchAction::RawInput
+            | BenchAction::Agreement(_)
+            | BenchAction::PauseAgreement(_)
+            | BenchAction::CancelAgreement(_)
             | BenchAction::Stash(_)
             | BenchAction::Supply(_)
             | BenchAction::Outfit(_)

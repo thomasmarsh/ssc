@@ -43,6 +43,9 @@ pub enum BenchAction {
     Research(research::Tech),
     Grade,
     Partnership,
+    Agreement(u64),
+    PauseAgreement(u64),
+    CancelAgreement(u64),
     Outfit(Slot),
     Tithe,
     Job(u64, jobs::JobKind),
@@ -124,6 +127,7 @@ impl Game {
                 .chain(std::iter::once(BenchAction::RawInput))
                 .chain([Slot::Plating, Slot::Engine, Slot::Core].map(BenchAction::Outfit))
                 .chain(self.pad.contact.map(|_| BenchAction::Tithe))
+                .chain(self.agreement_actions())
                 .chain(
                     self.pad
                         .contact
@@ -220,6 +224,9 @@ impl Game {
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
             Some(BenchAction::Partnership) => self.buy_partnership(),
+            Some(BenchAction::Agreement(id)) => self.act_agreement(id),
+            Some(BenchAction::PauseAgreement(id)) => self.pause_agreement(id),
+            Some(BenchAction::CancelAgreement(id)) => self.cancel_agreement(id),
             Some(BenchAction::Grade) => self.buy_grade(),
             Some(BenchAction::Job(id, kind)) => self.act_job(id, kind),
             Some(BenchAction::CancelJob(id, kind)) => self.cancel_job(id, kind),
@@ -304,6 +311,9 @@ impl Game {
             ok: true,
         };
         match action {
+            BenchAction::Agreement(id)
+            | BenchAction::PauseAgreement(id)
+            | BenchAction::CancelAgreement(id) => return self.agreement_row(id, action, selected),
             BenchAction::Job(id, kind) => return self.job_row(id, kind, selected),
             BenchAction::CancelJob(id, kind) => {
                 row = self.job_row(id, kind, selected);

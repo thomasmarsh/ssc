@@ -64,6 +64,12 @@ Friendly CONTACT SKILLS offers NEGOTIATE RESEARCH PARTNERSHIP after settling any
 
 Partnership validation covers job/payment gates, save/reload, one-time payment, grade discount, hostility/capital loss and generator invalidation with retained knowledge. Compact CONTACT terms have a desktop layout regression and an inspected 640x480 Metal capture; human balance/controller checks remain pending.
 
+## Stock-backed agreement (built)
+
+CONTACT PARTS offers SIGN VOLATILE AGREEMENT for the last visited warehouse pad, shown in the selected terms. Visit the intended dock first; sign costs nothing. COLLECT pays 10M from the ship for 20V into the ship, ten saved lots per supplier, 60 simulation seconds between lots, no restock or rewards. Player hauls and deposits manually. Any pad/CONTACT lists saved state and PAUSE/RESUME/CANCEL; pause freezes the clock, cancel closes stock permanently and keeps cargo. Hostility suspends; supplier/player dock loss or generator change closes. See GAME_LOOP section 9 for bounds and policies.
+
+Agreement checks cover atomic payment/hold limits, finite stock, pause/relations, unloaded/save cooldown, permanent endpoint/cancel/world closure, and ledger bounds. Compact terms are tested and visually checked at 640x480 with `SSC_CONTACT_JOB=agreement`; human haul/refinery pacing remains untested.
+
 ## Validation and bounded galleries
 
 The added scenarios cover all three tabs and four groups, wrapping boundaries, every skill and weapon transaction mapping, part index mapping, RNG-free views and rejected purchases, partial repair, rarity/reforge, unlock gates, affordability, caps, graft/removal/replacement, free refitting, stash access, and stable selection. Desktop tests exercise keyboard/controller bindings, simultaneous confirmations, held inputs, stash confirmation versus alternate input, and selected details/costs/controls at both layout budgets.

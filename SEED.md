@@ -42,13 +42,12 @@ Decide per slice, and say which in one line.
 
 ## Queue (revised 2026-10-09: expand the game loop)
 
-The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; finite delivery/survey/pest jobs are built; further machine jobs, recurring agreements and later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
+The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; finite delivery/survey/pest jobs and a stock-backed player-haul agreement are built; further machine jobs, merchant transport and later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, working home: remaining E simple recurring agreement. Negotiated research access and a supplier grade-service boon are built. Finite delivery/survey/pest jobs with saved research credit, regard and chart leads are built. Paid saved local power, refinery, warehouse, water tank, aquifer extractor and finite HOME bought-input route are built; further D machine jobs remain open. Stock-backed barter first; no complete galactic market required.
-2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
-3. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
-4. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
+1. [L] NEXT, remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
+2. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
+3. Alongside: remaining D machine jobs, DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
 Creature backlog remains open: Foamback; Oozer small prey/nucleus/pinch/spit/gap/path and continuous perimeter/reach tuning; remaining organs and realm-discovery follow-ups; swarms/rally dispatch and herd map/sonar; elder weak points if needed. Builders still need visible gathering and player interaction. See BESTIARY/WORKSTREAMS for their built status. These do not block the first economy milestone.
 
@@ -58,18 +57,18 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 
 ## Recently done
 
-- Pest control: one saved designated hostile creature per supplier, amber target brackets, full removal by any actor, one-time Organ Support credit/regard/chart lead; unload/save and terminal-loss policies covered. Recurring agreement is next.
+- Recurring agreement: saved finite CONTACT 10M -> 20V lots, 60s cooldown, named last-visited warehouse dock, manual haul, pause/cancel and loss policies; no rewards/restock/merchant. Remote industry F is next.
 
-- Research partnership: one peaceful job then 10M 10B negotiates saved Frontier purchase access and 25% local grade-service discount; explicit service-loss/world-change terms, no alliance/upkeep. Recurring agreement remains open.
+- Pest control: one saved designated hostile creature per supplier, amber target brackets, full removal by any actor, one-time Organ Support credit/regard/chart lead; unload/save and terminal-loss policies covered.
 
-- Narrow peaceful jobs: friendly CONTACT offers saved finite 25F delivery and post-acceptance sector survey; one-time research credit/regard/chart leads, HOME cancellation, supplier-loss and generator invalidation. Further E relations remain open.
+- Research partnership: one peaceful job then 10M 10B negotiates saved Frontier purchase access and 25% local grade-service discount; explicit service-loss/world-change terms, no alliance/upkeep.
 
-- Local power: 30M 10C after Fabrication builds saved renewable supply for both pad machines; unpowered stocks/work pause, unloaded/save resume stays local. Remaining E relations are next.
+- Narrow peaceful jobs: friendly CONTACT offers saved finite 25F delivery and post-acceptance sector survey; one-time research credit/regard/chart leads, HOME cancellation, supplier-loss and generator invalidation. Broader relations remain open.
+
+- Local power: 30M 10C after Fabrication builds saved renewable supply for both pad machines; unpowered stocks/work pause, unloaded/save resume stays local. Further machine jobs remain open.
 
 - Narrow local warehouse: 30M builds saved 300-unit M/V/C/B/F site storage; stash previews/transfers and refinery output share caps. Water remains tank-backed.
 
 - Narrow bought-input route: HOME barters ten saved lots of 20V for 10M each; atomic hold/payment gates, visible remaining stock, stash-to-refinery fuel loop, no restock.
 
 - Asteroid contents (generator 35): uniform rocky shapes with material flecks, salted single/mixed/water/barren lodes and continuous crystal mining; brake + mine converts ship water to fuel using shield.
-
-- Narrow water extraction (generator 34): paid saved aquifer extractor, tank/Fabrication gates, 30M 10C for capped 1W/s local water while unloaded; dry sites refuse, HOME guaranteed.

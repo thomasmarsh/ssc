@@ -4922,6 +4922,33 @@ mod bench_layout_tests {
         }
     }
     #[test]
+    fn agreement_terms_fit_compact_contact() {
+        let mut game = game();
+        game.pose_frontier_contact();
+        game.pose_contact_agreement();
+        let text = bench_lines(&game, 600.0, 278.0)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<String>();
+        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 278.0, "{text}");
+        assert!(!text.contains("details shortened"), "{text}");
+        let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for required in [
+            "Player hauls",
+            "10M buys 20V",
+            "60s/lot",
+            "10 lots",
+            "no restock",
+            "No rewards/alliance",
+            "Dock loss closes",
+            "relations suspend",
+            "SIGN - NO PAYMENT",
+        ] {
+            assert!(terms.contains(required), "{required}: {text}");
+        }
+    }
+
+    #[test]
     fn partnership_terms_fit_compact_contact() {
         let mut game = game();
         game.pose_frontier_contact();

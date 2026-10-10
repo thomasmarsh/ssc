@@ -6,6 +6,7 @@
 //! frozen, and sectors far from the player are dropped and regenerated on return.
 
 mod adapt;
+mod agreement;
 mod apexes;
 mod arms;
 pub mod arsenal;
@@ -1009,6 +1010,7 @@ impl Game {
         self.cleanup_rifts();
         self.update_ping(dt);
         self.update_jobs();
+        self.update_agreements(dt);
         self.cue_player_damage(ship_before, sources);
         self.cue_heartbeat(dt);
     }
