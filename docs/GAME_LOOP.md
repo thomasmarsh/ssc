@@ -198,7 +198,9 @@ Build pad modules with connected local storage and power: extractor, refinery, f
 
 **Built narrow water extraction (generator 34):** PARTS automatically checks the landed planetoid for a renewable aquifer. HOME always has one; an independent salted source assigns aquifers to half of other planetoids, without altering ore composition or existing draws. A dry site explicitly refuses construction. Build a water tank and learn Fabrication, then commission one extractor for 30 metal + 10 crystal. Integral power supplies 1 water per simulation second directly to the local tank, capped at 300; full storage pauses output and retrieval permits more extraction. Installation and stocks persist, including unloaded production, without wall-clock catch-up. The ship still carries at most 30 water. Removing the pad loses its extractor under existing salvage rules. No water or maintenance requirement is added to crops. The generator bump invalidates old spawn-keyed deltas, including pads, while retaining player progress; HOME geometry and its golden remain unchanged. Save format stays 3 with a defaulted installation field.
 
-TODO: remaining D: bought raw-input supply, separate local power/storage modules, and more machine jobs. Refinery balance and its integral-power default need playtesting.
+**Built bought-input route:** HOME PARTS sells 20 volatiles for 10 metal per lot, from a finite 200V stock per run. Full holds, insufficient metal and purchases away from HOME refuse without payment or stock loss. Store purchased volatiles at any pad refinery, then retrieve its fuel. Settled orders persist independently of pad/generator resets; unloading and reloading never restock. NEW GAME restores stock. This starter barter grants no experience or knowledge; friendly-seat raw offers and replenishment remain deferred.
+
+TODO: remaining D: separate local power/storage modules and more machine jobs. Refinery balance and its integral-power default need playtesting.
 
 ### Mining drones and escorts
 

@@ -87,6 +87,8 @@ pub struct SaveState {
     ship: ShipSave,
     cargo: Cargo,
     loadout: Loadout,
+    #[serde(default)]
+    home_input_orders: u8,
     pad: PadState,
     chart: chart::ChartState,
     run: run::RunStats,
@@ -217,6 +219,7 @@ impl Game {
             ship,
             cargo: self.cargo,
             loadout: self.loadout.clone(),
+            home_input_orders: self.home_input_orders,
             pad: self.pad.clone(),
             chart: self.chart.clone(),
             run: self.run.clone(),
@@ -254,6 +257,7 @@ impl Game {
         game.lives = state.lives.max(1);
         game.cargo = state.cargo;
         game.loadout = state.loadout;
+        game.home_input_orders = state.home_input_orders;
         game.chart = state.chart;
         game.run = state.run;
         game.legacy = state.legacy;

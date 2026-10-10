@@ -34,6 +34,7 @@ pub struct Bench {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BenchAction {
     Repair,
+    RawInput,
     Refinery,
     WaterTank,
     WaterExtractor,
@@ -115,6 +116,7 @@ impl Game {
                         .flat_map(|i| [BenchAction::Reforge(i), BenchAction::Upgrade(i)]),
                 )
                 .chain([Material::Fuel, Material::Water].map(BenchAction::Supply))
+                .chain(std::iter::once(BenchAction::RawInput))
                 .chain([Slot::Plating, Slot::Engine, Slot::Core].map(BenchAction::Outfit))
                 .chain(self.pad.contact.map(|_| BenchAction::Tithe))
                 .chain(self.pad.landed.into_iter().flat_map(|_| {
@@ -189,6 +191,7 @@ impl Game {
         let before = super::bench_feedback::Snapshot::capture(self);
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
+            Some(BenchAction::RawInput) => self.buy_raw_input(),
             Some(BenchAction::Refinery) => self.buy_refinery(),
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
@@ -275,6 +278,17 @@ impl Game {
             ok: true,
         };
         match action {
+            BenchAction::RawInput => {
+                row.group = "RAW INPUTS";
+                row.text = "BUY VOLATILES +20".into();
+                row.detail = "HOME stock: ten lots per run, no restock. Ship hold pays 10M for 20V; store at a pad to supply its refinery.".into();
+                row.costs = procurement::RAW_INPUT_PRICE.to_vec();
+                row.ok = self.raw_input_block().is_none();
+                row.state = self.raw_input_block().map_or_else(
+                    || format!("STOCK {}V", self.home_input_stock()),
+                    str::to_owned,
+                );
+            }
             BenchAction::Supply(m) => {
                 row.group = "SHIP SERVICES";
                 row.text = format!("BUY {} +{:.0}", m.label(), supply_amount(m));

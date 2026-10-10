@@ -42,10 +42,10 @@ Decide per slice, and say which in one line.
 
 ## Queue (revised 2026-10-09: expand the game loop)
 
-The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and the narrow D fuel refinery are built; remaining local production and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
+The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D refinery, water and bought-input routes are built; remaining local production and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, working home: remaining D bought raw-input supply and local power/storage modules (paid saved refinery, water tank and aquifer extractor built); then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
+1. [L] NEXT, working home: remaining D local power/storage modules (paid saved refinery, water tank, aquifer extractor and finite HOME bought-input route built); then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
 2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk water delivery, fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 3. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 4. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
@@ -57,6 +57,8 @@ Other backlog: density/feeling view-model and measurements, weaver rock care, hy
 Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; bulk water via local tanks/tankers; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Narrow bought-input route: HOME barters ten saved lots of 20V for 10M each; atomic hold/payment gates, visible remaining stock, stash-to-refinery fuel loop, no restock.
 
 - Asteroid contents (generator 35): uniform rocky shapes with material flecks, salted single/mixed/water/barren lodes and continuous crystal mining; brake + mine converts ship water to fuel using shield.
 
@@ -71,5 +73,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Frontier procurement: HOME/friendly-seat peaceful basic equipment, support prerequisites and profile purchases; wild bodies/apex biological/raw rewards only, finite geological lodes without technological charges. CONTACT reuses bench/controller navigation.
 
 - Shared resources: six Cargo balances and fixed HUD counters; atomic exchanges/transfers, manufactured fuel services, small water reserve, shared farming biomass, fuel-powered systems and biomass organ upkeep. Save format 3; generation unchanged.
-
-- Game-loop design and doc reconciliation (2026-10-09): target production, jobs, fleets/tankers and homestead milestones are recorded in `docs/GAME_LOOP.md`; first frontier implementation is complete.

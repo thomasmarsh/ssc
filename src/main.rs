@@ -1677,7 +1677,7 @@ fn smoke_run(
     // A bounded receipt gallery confirms real actions near capture time.
     if run.frames + 20 == limit && std::env::var_os("SSC_BENCH_RESULT").is_some() {
         let mode = std::env::var("SSC_BENCH_VIEW").unwrap_or_default();
-        if !matches!(mode.as_str(), "gate" | "parts") {
+        if !matches!(mode.as_str(), "gate" | "parts" | "raw-input") {
             session.game.cargo = Cargo {
                 metal: 200.0,
                 volatiles: 200.0,
@@ -2082,6 +2082,10 @@ fn smoke_bench(game: &mut Game, mode: &str) {
             game.bench_select(BenchAction::WaterTank);
             game.bench_confirm();
             game.bench_select(BenchAction::WaterExtractor);
+        }
+        "raw-input" => {
+            game.cargo.volatiles = 0.0;
+            game.bench_select(BenchAction::RawInput);
         }
         "water-tank" => game.bench_select(BenchAction::WaterTank),
         "refinery" => {

@@ -462,6 +462,8 @@ pub struct Game {
     pub rift_traces: Vec<RiftTrace>,
     /// What is bolted to the ship, and the stats that follow from it.
     pub loadout: Loadout,
+    /// Finite HOME raw-input orders settled in this run.
+    home_input_orders: u8,
     pub stats: Stats,
     /// Recent things worth telling the player about (pickups, wrecks).
     pub notices: Vec<Notice>,
@@ -632,6 +634,7 @@ impl Game {
             switch_clock: 0.0,
             arsenal_flash: 0.0,
             loadout: Loadout::default(),
+            home_input_orders: 0,
             stats: Stats::BASE,
             notices: Vec::new(),
             bench_feedback: None,

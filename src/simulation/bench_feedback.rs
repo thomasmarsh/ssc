@@ -123,7 +123,8 @@ impl Snapshot {
                     )
                 }
             }
-            BenchAction::Stash(_)
+            BenchAction::RawInput
+            | BenchAction::Stash(_)
             | BenchAction::Supply(_)
             | BenchAction::Outfit(_)
             | BenchAction::Tithe

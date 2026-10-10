@@ -71,3 +71,7 @@ Generator version stays **19**: generated content, map compatibility, spawn indi
 ## Human playtest questions
 
 Are paired part action rows clearer than a separate action selector? Does wrapping from the last organ to mining feel natural? Are group headings and the selected action clear on a small physical display? Does the unowned weapon explanation set the right expectation about finding profiles? Are partial repair and full-slot organ replacement understandable before confirmation? Does Q/X stash withdrawal remain easy to discover? Are four seconds enough to read the receipt while buying repeatedly? Is the paid no-better-roll outcome clear and fair? Do the two changed stats plus the full current description provide enough detail? Does availability guidance clearly distinguish meeting the part gate from buying the skill? Is the shared chime and single ring noticeable without becoming intrusive?
+
+## Finite HOME raw inputs
+
+PARTS offers BUY VOLATILES +20 for 10M at HOME, with remaining stock or a precise refusal in the selected state. Ten lots per run are saved; there is no restock. Store the bought feedstock through the volatile stash row to run a refinery, then Q / X retrieves fuel. The `raw-input` gallery selects this offer; `SSC_BENCH_RESULT=1` confirms it.
