@@ -1756,6 +1756,9 @@ fn smoke_run(
                     session.game.bench_select(action);
                 }
             }
+            "mining-fleet-role" => session
+                .game
+                .bench_select(ssc::simulation::BenchAction::CycleDroneRole),
             "mining-fleet-blueprint" => session
                 .game
                 .bench_select(ssc::simulation::BenchAction::ApplyDroneBlueprint),
@@ -2188,6 +2191,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
         | "mining-fleet-status"
         | "mining-fleet-retrofit"
         | "mining-fleet-template"
+        | "mining-fleet-role"
         | "mining-fleet-blueprint"
         | "mining-fleet-deposit"
         | "mining-fleet-rock" => {
@@ -2201,7 +2205,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
             game.cargo.crystal = 30.0;
             game.bench_select(BenchAction::Warehouse);
             game.bench_confirm();
-            if mode == "mining-fleet-blueprint" {
+            if matches!(mode, "mining-fleet-blueprint" | "mining-fleet-role") {
                 game.stage_drone_blueprint_smoke();
             }
             game.bench_select(BenchAction::MiningDrone);
@@ -2218,6 +2222,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                     "mining-fleet-status"
                         | "mining-fleet-retrofit"
                         | "mining-fleet-template"
+                        | "mining-fleet-role"
                         | "mining-fleet-blueprint"
                         | "mining-fleet-deposit"
                         | "mining-fleet-rock"
@@ -2249,10 +2254,14 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                     {
                         game.bench_select(action);
                     }
-                    if mode == "mining-fleet-blueprint" {
+                    if matches!(mode, "mining-fleet-blueprint" | "mining-fleet-role") {
                         game.cargo.metal = 80.0;
                         game.cargo.crystal = 20.0;
-                        game.bench_select(BenchAction::ApplyDroneBlueprint);
+                        game.bench_select(if mode == "mining-fleet-role" {
+                            BenchAction::CycleDroneRole
+                        } else {
+                            BenchAction::ApplyDroneBlueprint
+                        });
                     }
                 }
             }

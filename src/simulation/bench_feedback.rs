@@ -139,6 +139,7 @@ impl Snapshot {
             | BenchAction::DroneDeposit(_)
             | BenchAction::DroneUpgrade(_, _)
             | BenchAction::DroneTemplate(_)
+            | BenchAction::CycleDroneRole
             | BenchAction::SaveDroneBlueprint
             | BenchAction::ApplyDroneBlueprint
             | BenchAction::WaterExtractor

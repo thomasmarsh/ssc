@@ -95,6 +95,51 @@ impl DroneModules {
     }
 }
 
+/// Three independent reusable configurations, selected through ordinary bench navigation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum DroneRole {
+    #[default]
+    A,
+    B,
+    C,
+}
+
+impl DroneRole {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::A => "ROLE A",
+            Self::B => "ROLE B",
+            Self::C => "ROLE C",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::C,
+            Self::C => Self::A,
+        }
+    }
+}
+
+impl pads::PadState {
+    pub(super) fn selected_blueprint(&self) -> Option<DroneModules> {
+        match self.drone_role {
+            DroneRole::A => self.drone_blueprint,
+            DroneRole::B => self.drone_other_blueprints[0],
+            DroneRole::C => self.drone_other_blueprints[1],
+        }
+    }
+
+    fn set_selected_blueprint(&mut self, modules: DroneModules) {
+        match self.drone_role {
+            DroneRole::A => self.drone_blueprint = Some(modules),
+            DroneRole::B => self.drone_other_blueprints[0] = Some(modules),
+            DroneRole::C => self.drone_other_blueprints[1] = Some(modules),
+        }
+    }
+}
+
 /// Presentation of a saved unit, never a second simulation body or cargo owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DronePhase {
@@ -466,9 +511,14 @@ impl Game {
 
     /// Bounded bench gallery: knowledge copied at another dock, without unit hardware.
     pub fn stage_drone_blueprint_smoke(&mut self) {
-        self.pad.drone_blueprint = Some(DroneModules {
+        self.pad.drone_role = DroneRole::B;
+        self.pad.set_selected_blueprint(DroneModules {
             cargo: true,
             mining: false,
+        });
+        self.pad.drone_blueprint = Some(DroneModules {
+            cargo: false,
+            mining: true,
         });
     }
 
@@ -636,7 +686,7 @@ impl Game {
 
     pub(super) fn drone_blueprint_price(&self) -> Vec<(Material, f32)> {
         let mut price = vec![(Material::Metal, 0.0), (Material::Crystal, 0.0)];
-        if let Some(modules) = self.pad.drone_blueprint {
+        if let Some(modules) = self.pad.selected_blueprint() {
             for upgrade in DroneUpgrade::ALL {
                 if modules.has(upgrade) {
                     for (entry, (_, amount)) in
@@ -667,13 +717,13 @@ impl Game {
         if saving {
             if pad.drone_template == DroneModules::default() {
                 Some("SET A TEMPLATE FIRST")
-            } else if self.pad.drone_blueprint == Some(pad.drone_template) {
+            } else if self.pad.selected_blueprint() == Some(pad.drone_template) {
                 Some("BLUEPRINT SAVED")
             } else {
                 None
             }
         } else {
-            match self.pad.drone_blueprint {
+            match self.pad.selected_blueprint() {
                 None => Some("SAVE A BLUEPRINT FIRST"),
                 Some(modules)
                     if DroneUpgrade::ALL.into_iter().all(|upgrade| {
@@ -687,12 +737,21 @@ impl Game {
         }
     }
 
+    pub(super) fn cycle_drone_role(&mut self) {
+        self.pad.drone_role = self.pad.drone_role.next();
+        self.bench_done(
+            format!("{} SELECTED", self.pad.drone_role.label()),
+            upgrades::Rarity::Common,
+        );
+    }
+
     pub(super) fn save_drone_blueprint(&mut self) {
         if let Some(why) = self.drone_blueprint_block(true) {
             self.bench_failed(why.into());
             return;
         }
-        self.pad.drone_blueprint = Some(self.landed_pad().unwrap().drone_template);
+        self.pad
+            .set_selected_blueprint(self.landed_pad().unwrap().drone_template);
         self.bench_done("FLEET BLUEPRINT SAVED".into(), upgrades::Rarity::Common);
     }
 
@@ -705,7 +764,7 @@ impl Game {
             self.bench_failed("NEEDS FLEET BLUEPRINT MATERIALS".into());
             return;
         }
-        let modules = self.pad.drone_blueprint.unwrap();
+        let modules = self.pad.selected_blueprint().unwrap();
         let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
         for upgrade in DroneUpgrade::ALL {
             if modules.has(upgrade) {
@@ -1315,8 +1374,104 @@ mod tests {
         game.bench_select(BenchAction::SaveDroneBlueprint);
         game.bench_confirm();
         assert_eq!(
-            game.pad.drone_blueprint.unwrap().label(),
+            game.pad.selected_blueprint().unwrap().label(),
             "CARGO POD + MINING HEAD"
+        );
+    }
+
+    #[test]
+    fn role_library_selects_overwrites_and_merges_independent_saved_configurations() {
+        let (mut game, source, _) = setup();
+        let configurations = [
+            DroneModules {
+                cargo: true,
+                mining: false,
+            },
+            DroneModules {
+                cargo: false,
+                mining: true,
+            },
+            DroneModules {
+                cargo: true,
+                mining: true,
+            },
+        ];
+        let goods = game.cargo;
+        for modules in configurations {
+            game.pad.pads.get_mut(&source).unwrap().drone_template = modules;
+            game.bench_select(BenchAction::SaveDroneBlueprint);
+            game.bench_confirm();
+            assert_eq!(game.pad.selected_blueprint(), Some(modules));
+            game.bench_select(BenchAction::CycleDroneRole);
+            game.bench_confirm();
+        }
+        assert_eq!(game.pad.drone_role, DroneRole::A);
+        assert_eq!(game.cargo, goods);
+        // Overwrite only role A; B and C remain independently reusable.
+        game.pad.pads.get_mut(&source).unwrap().drone_template = configurations[1];
+        game.bench_select(BenchAction::SaveDroneBlueprint);
+        game.bench_confirm();
+        game.bench_select(BenchAction::CycleDroneRole);
+        game.bench_confirm();
+        assert_eq!(game.pad.drone_role, DroneRole::B);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut game, _) = Game::from_save(state, generator);
+        assert_eq!(game.pad.drone_role, DroneRole::B);
+        assert_eq!(game.pad.drone_blueprint, Some(configurations[1]));
+        assert_eq!(
+            game.pad.drone_other_blueprints,
+            [Some(configurations[1]), Some(configurations[2])]
+        );
+        game.pad.pads.remove(&source);
+        let (mut game, report) = Game::from_save(game.save_state(), generator + 1);
+        assert!(!report.world_deltas_kept);
+        assert_eq!(game.pad.drone_role, DroneRole::B);
+        assert_eq!(
+            game.pad.drone_other_blueprints,
+            [Some(configurations[1]), Some(configurations[2])]
+        );
+        let target = game.pads().find(|p| p.home).unwrap().key;
+        game.pad.landed = Some(target);
+        game.bench_toggle();
+        let pad = game.pad.pads.get_mut(&target).unwrap();
+        pad.power = true;
+        pad.warehouse = true;
+        game.cargo.metal = 40.0;
+        game.cargo.crystal = 10.0;
+        game.bench_select(BenchAction::MiningDrone);
+        game.bench_confirm();
+        game.bench_select(BenchAction::ApplyDroneBlueprint);
+        game.cargo.metal = 20.0;
+        game.cargo.crystal = 4.0;
+        let before = game.cargo;
+        game.bench_confirm();
+        assert_eq!(game.cargo, before);
+        assert_eq!(
+            game.pad.pads[&target].drone_template,
+            DroneModules::default()
+        );
+        game.cargo.crystal = 5.0;
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&target].drones[0].fitted, configurations[1]);
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (0.0, 0.0));
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (0.0, 0.0));
+        game.bench_select(BenchAction::CycleDroneRole);
+        game.bench_confirm();
+        assert_eq!(game.pad.drone_role, DroneRole::C);
+        assert_eq!(game.pad.pads[&target].drone_template, configurations[1]);
+        game.cargo.metal = 20.0;
+        game.cargo.crystal = 5.0;
+        game.bench_select(BenchAction::ApplyDroneBlueprint);
+        assert_eq!(
+            game.drone_blueprint_price(),
+            vec![(Material::Metal, 20.0), (Material::Crystal, 5.0)]
+        );
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&target].drones[0].fitted, configurations[2]);
+        assert_eq!(
+            game.mining_drone_price(),
+            vec![(Material::Metal, 80.0), (Material::Crystal, 20.0)]
         );
     }
 
@@ -1421,6 +1576,14 @@ mod tests {
     #[test]
     fn overwritten_blueprint_merges_without_removal_and_waits_for_saved_blocked_cargo() {
         let (mut game, key, material) = setup();
+        game.bench_select(BenchAction::CycleDroneRole);
+        game.bench_confirm();
+        assert_eq!(
+            game.drone_blueprint_block(false),
+            Some("SAVE A BLUEPRINT FIRST")
+        );
+        game.bench_confirm();
+        assert_eq!(game.pad.drone_role, DroneRole::C);
         assert_eq!(
             game.drone_blueprint_block(false),
             Some("SAVE A BLUEPRINT FIRST")
@@ -1430,7 +1593,7 @@ mod tests {
             Some("SET A TEMPLATE FIRST")
         );
         save_blueprint(&mut game);
-        // A second pad can replace the shared copy with its narrower configuration.
+        // A second pad can replace the selected copy with its narrower configuration.
         let source = (SectorId { x: 30, y: 30 }, 0);
         let mut pad = game.pad.pads[&key].clone();
         pad.key = source;
@@ -1445,7 +1608,7 @@ mod tests {
         let before = game.cargo;
         game.bench_confirm();
         assert_eq!(game.cargo, before);
-        assert_eq!(game.pad.drone_blueprint.unwrap().label(), "CARGO POD");
+        assert_eq!(game.pad.selected_blueprint().unwrap().label(), "CARGO POD");
         game.pad.landed = Some(key);
         game.pad.pads.get_mut(&key).unwrap().drone_template = DroneModules::default();
         game.cargo.metal = 40.0;

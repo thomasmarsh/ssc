@@ -4,7 +4,7 @@ SSC is an arena shooter being rebuilt from its C++ prototype in Rust with Bevy 0
 
 Status: BUILT - a playable game with an endless procedural universe of sectors, a living ecosystem, civilizations and diplomacy, apex elders, realms, rare creature powers (Weaver, Slinger, Runekeeper and Seamer included), mining, parts, a three-tab bench, sonar and charting, a geometric HUD, procedural audio and developer toggles. BUILT - disk persistence with autosave history, explicit saves and CONTINUE / NEW GAME. TODO: human playtesting and balance, plus the items tagged `TODO:` across [docs/](docs/); nothing has been played by a human yet and all balance numbers are first guesses.
 
-Design direction: grow from a solo ship into a defended homestead and galactic supply/trade network. Six shared resources, peaceful suppliers, narrow research and continuing equipment grades are built; finite delivery/survey/pest jobs and stock-backed recurring player-haul agreements are built; Automation and up to four paid saved mining orders with nearby known-planetoid/free-lode designation per pad with paid cargo/mining retrofits and cross-pad blueprint reuse are built; the full technology graph, further jobs, further fleet modules/custom roles/combat/salvage, and tankers are planned in [docs/GAME_LOOP.md](docs/GAME_LOOP.md); [docs/ROADMAP.md](docs/ROADMAP.md) distinguishes that target from built behavior.
+Design direction: grow from a solo ship into a defended homestead and galactic supply/trade network. Six shared resources, peaceful suppliers, narrow research and continuing equipment grades are built; finite delivery/survey/pest jobs and stock-backed recurring player-haul agreements are built; Automation and up to four paid saved mining orders with nearby known-planetoid/free-lode designation per pad with paid cargo/mining retrofits and cross-pad blueprint reuse are built; the full technology graph, further jobs, further fleet modules/custom names/combat/salvage, and tankers are planned in [docs/GAME_LOOP.md](docs/GAME_LOOP.md); [docs/ROADMAP.md](docs/ROADMAP.md) distinguishes that target from built behavior.
 
 ## Build and run
 
@@ -95,7 +95,7 @@ Xbox controllers use the existing gilrs input path and its built-in mappings. Fo
 | Fullscreen | F11 | |
 | Title menu: continue / new game | Up, Down, Enter | D-pad, A |
 
-At a powered warehouse after Automation, SAVE FLEET BLUEPRINT copies the local template for reuse; MERGE FLEET BLUEPRINT pays only for missing modules at another pad. One shared copy is saved and can be overwritten; merges keep existing modules and wait for cargo unloading.
+At a powered warehouse after Automation, SAVE FLEET BLUEPRINT copies the local template for reuse; MERGE FLEET BLUEPRINT pays only for missing modules at another pad. SELECT FLEET ROLE cycles independent saved slots A/B/C. Saving overwrites only the selected slot; merges keep existing modules and wait for cargo unloading.
 
 PARTS also offers free fleet MINE orders for chart-known planetoids and free lodes within 6000 units. Old cargo unloads before switching. Free rocks supply one material per trip, skipping full local stores; travel adds distance / 300 seconds each way.
 

@@ -45,6 +45,7 @@ pub enum BenchAction {
     DroneDeposit(Option<(SectorId, i32, i32)>),
     DroneUpgrade(usize, fleet::DroneUpgrade),
     DroneTemplate(fleet::DroneUpgrade),
+    CycleDroneRole,
     SaveDroneBlueprint,
     ApplyDroneBlueprint,
     Research(research::Tech),
@@ -157,6 +158,7 @@ impl Game {
                         BenchAction::MiningDrone,
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Cargo),
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Mining),
+                        BenchAction::CycleDroneRole,
                         BenchAction::SaveDroneBlueprint,
                         BenchAction::ApplyDroneBlueprint,
                     ]
@@ -246,6 +248,7 @@ impl Game {
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
             Some(BenchAction::DroneDeposit(mark)) => self.designate_drone_deposit(mark),
             Some(BenchAction::DroneTemplate(upgrade)) => self.buy_drone_template(upgrade),
+            Some(BenchAction::CycleDroneRole) => self.cycle_drone_role(),
             Some(BenchAction::SaveDroneBlueprint) => self.save_drone_blueprint(),
             Some(BenchAction::ApplyDroneBlueprint) => self.apply_drone_blueprint(),
             Some(BenchAction::DroneUpgrade(slot, upgrade)) => self.buy_drone_upgrade(slot, upgrade),
@@ -768,6 +771,18 @@ impl Game {
                     }
                 }
             }
+            BenchAction::CycleDroneRole => {
+                row.group = "PAD FLEET";
+                row.text = "SELECT FLEET ROLE".into();
+                row.state = format!(
+                    "{} - {}",
+                    self.pad.drone_role.label(),
+                    self.pad
+                        .selected_blueprint()
+                        .map_or("EMPTY", fleet::DroneModules::label)
+                );
+                row.detail = "Cycle roles A, B, C. Each holds an independent custom module blueprint. Selection changes knowledge only; save or merge separately.".into();
+            }
             BenchAction::SaveDroneBlueprint | BenchAction::ApplyDroneBlueprint => {
                 let saving = action == BenchAction::SaveDroneBlueprint;
                 row.group = "PAD FLEET";
@@ -777,22 +792,32 @@ impl Game {
                     "MERGE FLEET BLUEPRINT"
                 }
                 .into();
-                row.state = self
-                    .pad
-                    .drone_blueprint
-                    .map_or("NO BLUEPRINT", fleet::DroneModules::label)
-                    .into();
+                row.state = format!(
+                    "{} - {}",
+                    self.pad.drone_role.label(),
+                    self.pad
+                        .selected_blueprint()
+                        .map_or("NO BLUEPRINT", fleet::DroneModules::label)
+                );
                 row.detail = if saving {
-                    "Copy this pad's template into one shared blueprint, replacing the previous copy. Free knowledge; retained if the source pad is lost."
+                    "Copy this pad's template into the selected role, replacing only that copy. Free knowledge; retained if the source pad is lost."
                 } else {
-                    "Add the saved blueprint modules here. Pay only for missing unit modules; fit after unloading. Future builds pay template prices. No removal or refund."
+                    "Merge role: pay for missing unit modules. Fit after unload; future builds pay module costs. No removal/refund."
                 }.into();
                 if !saving {
                     row.costs = self.drone_blueprint_price();
                 }
                 if let Some(why) = self.drone_blueprint_block(saving) {
                     row.ok = false;
-                    row.state = why.into();
+                    row.state = format!(
+                        "{} - {}",
+                        self.pad.drone_role.label(),
+                        if why == "BLUEPRINT ALREADY INCLUDED" {
+                            "ALREADY MERGED"
+                        } else {
+                            why
+                        }
+                    );
                 }
             }
             BenchAction::DroneUpgrade(slot, upgrade) => {

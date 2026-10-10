@@ -4940,6 +4940,40 @@ mod bench_layout_tests {
         game
     }
     #[test]
+    fn role_merge_terms_fit_narrow_preview_and_receipt() {
+        let mut game = game();
+        crate::smoke_bench(&mut game, "mining-fleet-blueprint");
+        for receipt in [false, true] {
+            if receipt {
+                game.bench_confirm();
+            }
+            let height = 480.0 - DETAILS_TOP - DETAILS_BOTTOM;
+            let text = bench_lines(&game, 640.0 - 32.0, height)
+                .into_iter()
+                .map(|(s, _)| s)
+                .collect::<String>();
+            assert!(
+                text.lines().count() as f32 * 18.0 + 24.0 <= height,
+                "{text}"
+            );
+            assert!(!text.contains("details shortened"), "{text}");
+            let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            for required in [
+                "ROLE B",
+                "missing unit modules",
+                "Fit after unload",
+                "future builds pay module costs",
+                "No removal/refund",
+            ] {
+                assert!(terms.contains(required), "missing {required}: {text}");
+            }
+            if receipt {
+                assert!(terms.contains("Spent: 80.0 METAL 20.0 CRYSTAL"), "{text}");
+            }
+        }
+    }
+
+    #[test]
     fn selected_action_costs_and_controls_survive_all_list_boundaries_at_supported_sizes() {
         let mut game = game();
         for (width, height) in [(680.0, 582.0), (680.0, 382.0)] {

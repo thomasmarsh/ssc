@@ -105,3 +105,5 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 
 - `SSC_CONTACT_JOB=delivery|survey|pest|pest-target|partnership|agreement`: bounded friendly outpost CONTACT pose selecting the real PARTS job offer or SKILLS partnership terms; pest poses use seed 42 for an eligible generated hostile; `pest-target` accepts pest control and centers the real marked creature; `agreement` stages the HOME warehouse as the last visited dock and selects real agreement terms; requires `SSC_SMOKE_FRAMES`.
 - `SSC_FRONTIER_CONTACT=1`: bounded smoke pose at the peaceful outpost, friendly CONTACT open on the real grade purchase with prerequisite knowledge and ship goods. `SSC_BENCH_VIEW=research` shows the real HOME frontier-research requirement row. Use `SSC_OFFSCREEN_SIZE=640x480` to verify compact layouts; both require `SSC_SMOKE_FRAMES`.
+
+- `SSC_BENCH_VIEW=mining-fleet-role`: powered four-unit warehouse with independent role A/B blueprints, selecting SELECT FLEET ROLE. `SSC_BENCH_RESULT=1` cycles B to empty C; the existing `mining-fleet-blueprint` gallery previews/merges selected B.
