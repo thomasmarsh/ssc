@@ -53,7 +53,7 @@ impl Game {
     }
     pub(super) fn friendly_supplier(&self) -> Option<Territory> {
         self.seat_in_reach()
-            .filter(|c| self.civ_tier(c.id) == Tier::Friendly)
+            .filter(|c| self.civilization_service_allowed(c.id))
     }
     pub(super) fn procurement_available(&self) -> bool {
         self.starter_workshop() || self.friendly_supplier().is_some()

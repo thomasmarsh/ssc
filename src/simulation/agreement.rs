@@ -103,7 +103,7 @@ impl Game {
             if a.paused {
                 return Some("PAUSED - RESUME BELOW".into());
             }
-            if self.civ_tier(id) != Tier::Friendly {
+            if !self.civilization_service_allowed(id) {
                 return Some("SUSPENDED - RELATIONS".into());
             }
             if !self.pad.pads[&a.dock].warehouse {
@@ -206,7 +206,7 @@ impl Game {
             let end = self.agreement_end(id, a);
             let running = a.open()
                 && !a.paused
-                && self.civ_tier(id) == Tier::Friendly
+                && self.civilization_service_allowed(id)
                 && self.pad.pads.get(&a.dock).is_some_and(|p| p.warehouse);
             let a = self.jobs.agreements.get_mut(&id).unwrap();
             a.end = end;

@@ -590,7 +590,7 @@ mod tests {
     fn stage(t: Territory) -> Game {
         let mut game = empty_game();
         game.player_invulnerability = 1e9;
-        game.civ_territories.insert(t.id, t);
+        game.register_territory(t);
         game.set_regard(t.id, 0.0);
         game
     }

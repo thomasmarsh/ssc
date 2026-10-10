@@ -214,7 +214,9 @@ Built loaded fleet recovery: hostile shots, blasts, sustained hostile creature c
 
 ## Independent diplomacy and trade (proposed E2/H checks, unbuilt)
 
-Do not judge these until GAME_LOOP section 9.1 lands. Verify hostile defensive trade, a trusted but tense border, opportunistic convoy skirmishes, and asymmetric dependence as distinct situations.
+Built narrow E2a: check that hostile opinion from claim mining holds PEACE, actual player harm opens SHIP DEFENSE for 30 simulation seconds, and wounded-by-wildlife members stay calm. Ship defense must leave pads and mining workers alone; tithe goodwill must not end an explicitly staged war. Territory details and encountered chart entries show engagement beside opinion. These checks have headless coverage; human feel remains unverified.
+
+Do not judge the remaining cases until broader GAME_LOOP section 9.1 lands. Verify hostile defensive trade, a trusted but tense border, opportunistic convoy skirmishes, and asymmetric dependence as distinct situations.
 
 - Can the contact/chart readout explain why a neighbor dislikes you, whether it will initiate force, what it may target, and which goods it will trade?
 - Does settling a grievance ease tension sooner than rebuilding lost trust? Can repeated gifts or circular trade cheaply erase betrayal?

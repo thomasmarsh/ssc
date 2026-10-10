@@ -73,7 +73,8 @@ impl Game {
                 .origin
                 .and_then(|o| self.civ_works.get(&o))
                 .is_none_or(|(tid, _)| {
-                    self.civ_standing(*tid) != Standing::Fallen && self.civ_hostile(*tid)
+                    self.civ_standing(*tid) != Standing::Fallen
+                        && self.civilization_may_attack(*tid, CivilTarget::Ship)
                 });
             let aggression = genes.aggression.max(0.3);
             // The barrel follows the ship inside its arc and rests facing out otherwise.
@@ -109,6 +110,10 @@ impl Game {
                 if self.clear_shot(origin, target) && !self.inside_wall(origin) {
                     let spin = self.bodies[index].spin;
                     let muzzle = Muzzle {
+                        civilization: self.bodies[index]
+                            .origin
+                            .and_then(|o| self.civ_works.get(&o))
+                            .map(|(id, _)| *id),
                         origin,
                         aim: direction,
                         velocity: Vec2::ZERO,

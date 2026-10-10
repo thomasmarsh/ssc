@@ -3,12 +3,48 @@ use super::*;
 use crate::culture::{self, Clock, Origin, Profile};
 use serde::{Deserialize, Serialize};
 
+const DEFENSE_SECONDS: f64 = 30.0;
+
+/// Saved permission, independent of sentiment. Only attributed player harm opens defense.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct Engagement {
+    war: bool,
+    defense: f64,
+}
+
+/// Targets must be authorized individually; ship defense does not authorize a pad or worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CivilTarget {
+    Ship,
+    Pad,
+    Fleet,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EngagementRule {
+    Peace,
+    SelfDefense,
+    TotalWar,
+}
+
+impl EngagementRule {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Peace => "PEACE",
+            Self::SelfDefense => "SHIP DEFENSE",
+            Self::TotalWar => "DECLARED WAR",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Actor {
     origin: Origin,
     epoch: u64,
     estimate: Option<Estimate>,
     reason: Option<String>,
+    #[serde(default)]
+    engagement: Engagement,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -30,10 +66,14 @@ impl Societies {
             epoch: 0,
             estimate: None,
             reason: None,
+            engagement: Engagement::default(),
         });
     }
     pub(super) fn advance(&mut self, dt: f32) {
         self.clock.advance(f64::from(dt));
+        for actor in self.actors.values_mut() {
+            actor.engagement.defense = (actor.engagement.defense - f64::from(dt)).max(0.0);
+        }
     }
     pub(super) fn restore(mut self, keep: bool) -> Self {
         if !self.clock.valid() {
@@ -41,6 +81,12 @@ impl Societies {
         }
         if !keep {
             self.actors.clear();
+        }
+        for actor in self.actors.values_mut() {
+            if !actor.engagement.defense.is_finite() {
+                actor.engagement.defense = 0.0;
+            }
+            actor.engagement.defense = actor.engagement.defense.clamp(0.0, DEFENSE_SECONDS);
         }
         self.actors.retain(|id, a| {
             a.origin.actor == *id
@@ -62,6 +108,76 @@ pub struct CultureReading {
 }
 
 impl Game {
+    /// Current service gate. Commerce and separately negotiated research terms remain distinct
+    /// consumers of this shared safety check until explicit commercial policy is modeled.
+    pub fn civilization_service_allowed(&self, actor: u64) -> bool {
+        self.civ_tier(actor) == Tier::Friendly
+            && self.civ_standing(actor) != crate::territory::Standing::Fallen
+            && self.civilization_engagement(actor) == EngagementRule::Peace
+    }
+
+    pub fn civilization_engagement(&self, actor: u64) -> EngagementRule {
+        let Some(record) = self.societies.actors.get(&actor) else {
+            return EngagementRule::Peace;
+        };
+        let territory = self.civ_territories.get(&actor).copied().or_else(|| {
+            world::territory(self.seed, record.origin.anchor).filter(|t| t.id == actor)
+        });
+        let Some(territory) = territory else {
+            return EngagementRule::Peace;
+        };
+        if territory.standing(self.civ_fall(actor)) == crate::territory::Standing::Fallen {
+            EngagementRule::Peace
+        } else if record.engagement.war && !territory.peaceful() {
+            EngagementRule::TotalWar
+        } else if record.engagement.defense > 0.0 {
+            EngagementRule::SelfDefense
+        } else {
+            EngagementRule::Peace
+        }
+    }
+
+    /// Authoritative target permission. Reach, sanctuary and capacity remain caller gates.
+    pub fn civilization_may_attack(&self, actor: u64, target: CivilTarget) -> bool {
+        match self.civilization_engagement(actor) {
+            EngagementRule::TotalWar => true,
+            EngagementRule::SelfDefense => target == CivilTarget::Ship,
+            EngagementRule::Peace => false,
+        }
+    }
+
+    /// Explicit headless scenario control; opinion changes never declare or end a war.
+    /// Autonomous declarations need modeled operations/capacity before becoming a consumer.
+    pub fn set_civilization_war(&mut self, actor: u64, war: bool) -> bool {
+        if !self.civ_territories.contains_key(&actor)
+            || self.civ_peaceful(actor)
+            || self.civ_standing(actor) == crate::territory::Standing::Fallen
+        {
+            return false;
+        }
+        let Some(record) = self.societies.actors.get_mut(&actor) else {
+            return false;
+        };
+        if record.engagement.war != war {
+            record.engagement.war = war;
+            let name = self.civ_territories[&actor].name(self.seed);
+            self.notify(
+                format!(
+                    "{name}  - {}",
+                    if war { "DECLARED WAR" } else { "WAR ENDED" }
+                ),
+                upgrades::Rarity::Rare,
+            );
+        }
+        true
+    }
+
+    pub(super) fn civil_player_harm(&mut self, actor: u64) {
+        if let Some(record) = self.societies.actors.get_mut(&actor) {
+            record.engagement.defense = DEFENSE_SECONDS;
+        }
+    }
+
     pub fn culture_clock(&self) -> &Clock {
         &self.societies.clock
     }
@@ -178,6 +294,152 @@ mod tests {
     use super::*;
     use crate::sectormap::GENERATOR_VERSION;
     use crate::territory::outpost;
+
+    fn ordinary() -> Territory {
+        (-40..=40)
+            .flat_map(|x| (-40..=40).map(move |y| SectorId { x, y }))
+            .filter_map(|sector| world::territory(crate::config::MASTER_SEED, sector))
+            .find(|t| !t.peaceful())
+            .unwrap()
+    }
+
+    #[test]
+    fn opinion_mining_and_wildlife_harm_cannot_authorize_player_attacks() {
+        let t = ordinary();
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        game.teleport(t.capital.center());
+        game.step(0.01, Input::default());
+        game.civ_mined(1000.0);
+        game.shift_regard(t.id, -100.0);
+        assert_eq!(game.civ_tier(t.id), Tier::Hostile);
+        for target in [CivilTarget::Ship, CivilTarget::Pad, CivilTarget::Fleet] {
+            assert!(!game.civilization_may_attack(t.id, target));
+        }
+        // Wounded and enraged bodies do not infer player guilt from their health.
+        let lineage = game
+            .civ_lineages
+            .iter()
+            .find(|(_, (id, _))| *id == t.id)
+            .map(|(lineage, _)| *lineage)
+            .unwrap();
+        for body in game
+            .bodies
+            .iter_mut()
+            .filter(|body| body.species == lineage)
+        {
+            body.health *= 0.2;
+            body.provoked = 100.0;
+        }
+        game.steer_creatures(0.01);
+        assert!(
+            game.bodies
+                .iter()
+                .filter(|body| game.civ_of(body).is_some_and(|(id, _)| id == t.id))
+                .all(|body| !body.alert)
+        );
+        game.update_civilizations(0.05);
+        assert!(game.territory_report().unwrap().next_in.is_none());
+        assert!(!game.civilization_may_attack(u64::MAX, CivilTarget::Ship));
+    }
+
+    #[test]
+    fn attributed_harm_authorizes_only_ship_defense_and_survives_reload_and_partitions() {
+        let t = ordinary();
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        game.teleport(t.capital.center());
+        game.step(0.01, Input::default());
+        let body = game
+            .bodies
+            .iter()
+            .find(|body| game.civ_of(body).is_some_and(|(id, _)| id == t.id))
+            .unwrap()
+            .id;
+        let at = game.bodies.iter().find(|b| b.id == body).unwrap().position;
+        game.bodies
+            .retain(|b| b.id == body || b.kind == BodyKind::Player);
+        let mut shot = Bullet::friendly(at, Vec2::ZERO, 1.0);
+        shot.damage = 1.0;
+        game.bullets.push(shot);
+        game.move_bullets(0.01);
+        assert!(
+            game.civ_hits
+                .iter()
+                .any(|(id, damage)| *id == body && *damage > 0.0)
+        );
+        game.update_diplomacy(0.01);
+        assert!(game.civilization_may_attack(t.id, CivilTarget::Ship));
+        assert!(!game.civilization_may_attack(t.id, CivilTarget::Pad));
+        assert!(!game.civilization_may_attack(t.id, CivilTarget::Fleet));
+        game.societies.advance(10.0);
+        let (state, generator) = save::SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        assert_eq!(
+            loaded.civilization_engagement(t.id),
+            EngagementRule::SelfDefense
+        );
+        game.societies.advance(19.0);
+        for _ in 0..76 {
+            loaded.societies.advance(0.25);
+        }
+        assert_eq!(
+            loaded.civilization_engagement(t.id),
+            game.civilization_engagement(t.id)
+        );
+        game.societies.advance(1.0);
+        loaded.societies.advance(1.0);
+        assert_eq!(loaded.civilization_engagement(t.id), EngagementRule::Peace);
+        assert_eq!(
+            loaded.civilization_engagement(t.id),
+            game.civilization_engagement(t.id)
+        );
+        let (reset, _) = Game::from_save(loaded.save_state(), GENERATOR_VERSION + 1);
+        assert_eq!(reset.civilization_engagement(t.id), EngagementRule::Peace);
+    }
+
+    #[test]
+    fn explicit_war_is_independent_of_friendship_saved_and_refused_for_settlers() {
+        let t = ordinary();
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        game.register_territory(t);
+        game.shift_regard(t.id, 100.0);
+        assert!(game.civilization_service_allowed(t.id));
+        assert!(game.set_civilization_war(t.id, true));
+        assert_eq!(game.civ_tier(t.id), Tier::Friendly);
+        for target in [CivilTarget::Ship, CivilTarget::Pad, CivilTarget::Fleet] {
+            assert!(game.civilization_may_attack(t.id, target));
+        }
+        assert!(!game.civilization_service_allowed(t.id));
+        let (state, generator) = save::SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        // The saved origin resolves an unloaded actor without reopening its sector.
+        loaded.civ_territories.remove(&t.id);
+        assert_eq!(
+            loaded.civilization_engagement(t.id),
+            EngagementRule::TotalWar
+        );
+        loaded.shift_regard(t.id, -20.0);
+        assert_eq!(
+            loaded.civilization_engagement(t.id),
+            EngagementRule::TotalWar
+        );
+        loaded.register_territory(t);
+        assert!(loaded.set_civilization_war(t.id, false));
+        game.civ_fall.insert(
+            t.id,
+            crate::territory::Fall {
+                capital: true,
+                elder: true,
+            },
+        );
+        game.civ_territories.remove(&t.id);
+        assert_eq!(game.civilization_engagement(t.id), EngagementRule::Peace);
+        let o = outpost(game.seed);
+        game.register_territory(o);
+        assert!(!game.set_civilization_war(o.id, true));
+        game.civil_player_harm(o.id);
+        assert!(game.civilization_may_attack(o.id, CivilTarget::Ship));
+        assert!(!game.civilization_may_attack(o.id, CivilTarget::Pad));
+    }
 
     #[test]
     fn culture_survives_contact_unload_save_and_rewarming_without_discovery_order_effects() {

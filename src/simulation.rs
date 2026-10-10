@@ -121,6 +121,7 @@ pub use root::{Root, STAND as ROOT_STAND};
 pub use rune::{Payload, RuneField, Sigil};
 pub use sling::SlingTell;
 pub use society::CultureReading;
+pub use society::{CivilTarget, EngagementRule};
 pub use song::SongRing;
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 pub use titles::{TitleFacts, title, title_case};
@@ -351,6 +352,8 @@ pub struct Body {
 
 #[derive(Clone, Debug)]
 pub struct Bullet {
+    /// Civilization responsible for a shot; None is wildlife or a player weapon.
+    pub civilization: Option<u64>,
     pub position: Vec2,
     pub velocity: Vec2,
     pub radius: f32,
@@ -405,6 +408,7 @@ impl Bullet {
             pith: 0.0,
             origin: position,
             profile: None,
+            civilization: None,
             struck: [0; 4],
             warped: 1.0,
             rolled: 0,
@@ -1681,8 +1685,8 @@ impl Game {
         let mut impacts = Vec::new();
         // Where the ship's shots hurt a creature or station: a white tick instead of a spark.
         let mut hits: Vec<Vec2> = Vec::new();
-        // (where, radius, damage, body already struck, from the ship's side)
-        let mut blasts: Vec<(Vec2, f32, f32, u64, bool)> = Vec::new();
+        // (where, radius, damage, body already struck, from the ship's side, civilization)
+        let mut blasts: Vec<(Vec2, f32, f32, u64, bool, Option<u64>)> = Vec::new();
         let cords = self.cord_segments();
         let ship = self.player().map(|p| p.position);
         let boost = self.damage_boost();
@@ -1717,6 +1721,18 @@ impl Game {
                     crate::power::cloud_density(&b.genome),
                 )
             })
+            .collect();
+        let permitted_ship: HashSet<_> = self
+            .civ_territories
+            .keys()
+            .copied()
+            .filter(|id| self.civilization_may_attack(*id, CivilTarget::Ship))
+            .collect();
+        let permitted_fleet: HashSet<_> = self
+            .civ_territories
+            .keys()
+            .copied()
+            .filter(|id| self.civilization_may_attack(*id, CivilTarget::Fleet))
             .collect();
         let seed = self.seed;
         let mut rift_events = Vec::new();
@@ -1806,6 +1822,10 @@ impl Game {
                             body.kind,
                             BodyKind::Player | BodyKind::Asteroid | BodyKind::BlackHole
                         ) && !body.phased
+                            && (body.kind != BodyKind::Player
+                                || bullet
+                                    .civilization
+                                    .is_none_or(|id| permitted_ship.contains(&id)))
                     };
                     if !target || body.health <= 0.0 || bullet.struck.contains(&body.id) {
                         continue;
@@ -1820,7 +1840,11 @@ impl Game {
                         hit = Some((index, fraction));
                     }
                 }
-                if !bullet.friendly {
+                if !bullet.friendly
+                    && bullet
+                        .civilization
+                        .is_none_or(|id| permitted_fleet.contains(&id))
+                {
                     let drone_hit = drones
                         .iter()
                         .filter(|d| {
@@ -2008,6 +2032,7 @@ impl Game {
                             bullet.damage * 0.5,
                             body.id,
                             true,
+                            bullet.civilization,
                         ));
                     }
                     if bullet.burst > 0.0 {
@@ -2017,6 +2042,7 @@ impl Game {
                             bullet.damage * 0.6,
                             body.id,
                             bullet.friendly,
+                            bullet.civilization,
                         ));
                         bullet.burst = 0.0;
                     }
@@ -2092,11 +2118,11 @@ impl Game {
                         })
                     {
                         let at = b.position;
-                        let (damage, burst) = (b.damage, b.burst);
+                        let (damage, burst, civilization) = (b.damage, b.burst, b.civilization);
                         self.bullets[target].remaining = 0.0;
                         self.bullets[target].burst = 0.0;
                         if burst > 0.0 {
-                            blasts.push((at, burst, damage * 0.6, 0, false));
+                            blasts.push((at, burst, damage * 0.6, 0, false, civilization));
                         }
                         self.bullets[shooter].remaining = 0.0;
                         impacts.push(at);
@@ -2114,6 +2140,7 @@ impl Game {
                     bullet.damage * 0.6,
                     0,
                     bullet.friendly,
+                    bullet.civilization,
                 ));
             }
         }
@@ -2126,8 +2153,8 @@ impl Game {
         }
         let invulnerability = self.guard_time();
         let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();
-        for (at, radius, amount, direct, friendly) in blasts {
-            if !friendly {
+        for (at, radius, amount, direct, friendly, civilization) in blasts {
+            if !friendly && civilization.is_none_or(|id| permitted_fleet.contains(&id)) {
                 self.damage_drone_blast(at, radius, amount);
             }
             for body in self.bodies.iter_mut().filter(|b| {
@@ -2153,7 +2180,10 @@ impl Game {
                     if dealt > 0.0 && diplomacy::civil_target(body) {
                         self.civ_hits.push((body.id, dealt));
                     }
-                } else if !friendly && body.kind == BodyKind::Player {
+                } else if !friendly
+                    && body.kind == BodyKind::Player
+                    && civilization.is_none_or(|id| permitted_ship.contains(&id))
+                {
                     damage(body, amount, invulnerability);
                 }
             }

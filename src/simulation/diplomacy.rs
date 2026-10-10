@@ -1,20 +1,7 @@
-//! Diplomacy: what each civilization thinks of the ship.
-//!
-//! A civilization's regard is one number per territory (`Regard`), kept for the run. It falls
-//! when the ship hurts its people or its works, kills them, or mines the rock inside its claim;
-//! it rises slowly while the ship lingers inside the claim doing none of that, and by a gift (the
-//! tithe: fly close to a seat and press the key). Read through `Tier` it is:
-//!
-//! - **Hostile**: the old behaviour. Members attack on sight, raids come, turrets and bastions
-//!   fire, learners drill their doctrine against the ship, pads are hunted.
-//! - **Wary**: nobody attacks first, but the beam is noticed: mining in the claim earns a warning
-//!   banner every few seconds, and each ore taken costs regard.
-//! - **Ignores**: the default of an ordinary civilization. Members, bases and turrets pay the
-//!   ship no mind unless it hurts them (a hurt member still fights back).
-//! - **Friendly**: as ignoring, and the civilization shares its charts once, and answers a tithe
-//!   with a trade or a repair.
-//!
-//! Numbers are in `tuning`. Nothing here draws; the HUD and the star map read `Game::civ_tier`.
+//! Directional opinion and contact exchanges. Sentiment never grants combat permission:
+//! `society` owns saved engagement rules and shared target/service authorization.
+//! Gifts, quiet visits, harm and claim mining still affect the legacy regard summary;
+//! independent trust/friction history remains to be modeled.
 
 use super::tuning as t;
 use super::*;
@@ -166,14 +153,14 @@ impl Game {
         }
     }
 
-    /// Whether a civilization's people, stations and turrets attack the ship on sight.
+    /// Hostile opinion only. Combat callers must query civilization_may_attack.
     pub fn civ_hostile(&self, territory: u64) -> bool {
         self.civ_tier(territory) == Tier::Hostile
     }
 
-    /// True while a civilization leaves the ship be: settlers, or anyone not hostile.
+    /// True while shared engagement rules deny attacks on the player ship.
     pub(super) fn civ_calm(&self, territory: u64) -> bool {
-        self.civ_peaceful(territory) || !self.civ_hostile(territory)
+        !self.civilization_may_attack(territory, CivilTarget::Ship)
     }
 
     pub(super) fn regard_mut(&mut self, territory: u64) -> Option<&mut Regard> {
@@ -185,7 +172,7 @@ impl Game {
         )
     }
 
-    /// Sets a civilization's regard outright (tests stage tiers with it).
+    /// Sets sentiment outright for scenario tests; engagement remains independent.
     #[cfg(test)]
     pub(super) fn set_regard(&mut self, territory: u64, value: f32) {
         if let Some(r) = self.regard_mut(territory) {
@@ -200,6 +187,7 @@ impl Game {
     pub(super) fn provoke_all(&mut self) {
         for id in self.civ_territories.keys().copied().collect::<Vec<_>>() {
             self.set_regard(id, -80.0);
+            self.set_civilization_war(id, true);
         }
     }
 
@@ -233,7 +221,7 @@ impl Game {
         let name = civ.name(self.seed);
         let (text, rarity) = match (tier, now) {
             (_, Tier::Hostile) => (
-                format!("{name}  - HOSTILE  they will hunt you"),
+                format!("{name}  - HOSTILE  opinion worsened"),
                 upgrades::Rarity::Epic,
             ),
             (_, Tier::Wary) if now < tier => (
@@ -241,7 +229,7 @@ impl Game {
                 upgrades::Rarity::Rare,
             ),
             (_, Tier::Wary) => (
-                format!("{name}  - the hunt is called off, but they are wary"),
+                format!("{name}  - WARY  opinion improved"),
                 upgrades::Rarity::Rare,
             ),
             (Tier::Friendly, Tier::Ignores) => (
@@ -253,7 +241,7 @@ impl Game {
                 upgrades::Rarity::Rare,
             ),
             (_, Tier::Friendly) => (
-                format!("{name}  - FRIENDLY  they will not attack you"),
+                format!("{name}  - FRIENDLY  opinion improved"),
                 upgrades::Rarity::Epic,
             ),
         };
@@ -311,6 +299,9 @@ impl Game {
                     .map(|(tid, _)| (*tid, t::HURT_STRUCTURE)),
             };
             if let Some((tid, per_point)) = owner {
+                if dealt > 0.0 {
+                    self.civil_player_harm(tid);
+                }
                 self.civ_struck.insert(id, self.time);
                 self.shift_regard(tid, -per_point * dealt);
             }
@@ -501,7 +492,7 @@ impl Game {
             );
             return Err(TitheError::Poor);
         };
-        let friendly = self.civ_tier(civ.id) == Tier::Friendly;
+        let friendly = self.civilization_service_allowed(civ.id);
         let given = self.cargo.take(kind, t::TITHE_AMOUNT);
         self.assess_culture(civ.id);
         self.run.tithes += 1;
@@ -836,7 +827,7 @@ mod tests {
         let wary_at = t::HOSTILE_AT + t::TIER_HYSTERESIS;
         let need = (wary_at - game.civ_regard(id)).max(0.0) / t::REST_RATE;
         let seconds = t::REST_DELAY + need + 5.0;
-        assert!(hold_saying(&mut game, spot, seconds, "hunt is called off"));
+        assert!(hold_saying(&mut game, spot, seconds, "opinion improved"));
         assert_eq!(game.civ_tier(id), Tier::Wary);
         game.notices.clear();
         game.set_regard(id, t::WARY_AT);
@@ -856,17 +847,19 @@ mod tests {
     }
 
     #[test]
-    fn a_hostile_civilization_hunts_and_raids_as_before_and_peace_calls_the_hunt_off() {
+    fn declared_war_hunts_and_raids_and_explicit_peace_calls_the_hunt_off() {
         let t = find(CivShape::Horde);
         let spot = t.capital.center() + Vec2::new(0.0, 2500.0);
         let mut game = visit(spot);
         game.set_regard(t.id, -80.0);
+        assert!(game.set_civilization_war(t.id, true));
         hold(&mut game, spot, 8.0);
         assert!(members(&game, t.id).iter().any(|b| b.alert), "they hunt");
         hold(&mut game, spot, crate::simulation::civ::WAR_AT);
         assert!(game.raid.as_ref().is_some_and(|r| r.waves >= 1));
-        // Peace (a tithe's worth of goodwill, staged): the raid clock stops and they stand down.
+        // Goodwill does not end a declared war. Explicit peace stops the raid clock.
         game.set_regard(t.id, 5.0);
+        assert!(game.set_civilization_war(t.id, false));
         hold(&mut game, spot, crate::simulation::civ::RAID_GRACE + 5.0);
         assert!(game.raid.is_none());
         assert!(members(&game, t.id).iter().all(|b| !b.alert));
@@ -1209,6 +1202,7 @@ mod tests {
         for regard in [-80.0, 70.0] {
             let mut game = visit(spot);
             game.set_regard(t.id, regard);
+            game.set_civilization_war(t.id, regard < 0.0);
             for _ in 0..12 {
                 hold(&mut game, spot, 50.0);
                 assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);

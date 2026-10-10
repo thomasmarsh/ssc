@@ -421,6 +421,7 @@ impl Game {
                 };
                 let shots = pick(t::BARRAGE_SHOTS, enraged);
                 let muzzle = weapons::Muzzle {
+                    civilization: None,
                     origin,
                     aim,
                     velocity: Vec2::ZERO,

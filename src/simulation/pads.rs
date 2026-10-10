@@ -1016,7 +1016,7 @@ impl Game {
     fn knows_pad(&self, body: &Body, key: PadKey) -> bool {
         match self.civ_of(body) {
             Some((territory, _)) => {
-                self.civ_hostile(territory)
+                self.civilization_may_attack(territory, CivilTarget::Pad)
                     && self
                         .pad
                         .known_civ
@@ -1047,7 +1047,7 @@ impl Game {
                 continue;
             }
             // Settlers, and anyone who is not at war with the ship, never learn to hunt a pad.
-            if civ.is_some_and(|t| self.civ_calm(t)) {
+            if civ.is_some_and(|t| !self.civilization_may_attack(t, CivilTarget::Pad)) {
                 continue;
             }
             let sight = body.genome.sight * body.genes.sensor_acuity;
@@ -2981,8 +2981,9 @@ mod tests {
         let mut game = empty_game();
         game.seed = seed;
         game.player_invulnerability = 1e9;
-        game.civ_territories.insert(t.id, t);
+        game.register_territory(t);
         game.set_regard(t.id, -80.0);
+        assert!(game.set_civilization_war(t.id, true));
         let species = t.member(seed);
         game.civ_lineages
             .insert(species.lineage, (t.id, CivRole::Member));
@@ -3025,7 +3026,7 @@ mod tests {
         let mut game = empty_game();
         game.seed = seed;
         game.player_invulnerability = 1e9;
-        game.civ_territories.insert(t.id, t);
+        game.register_territory(t);
         let member = t.member(seed);
         game.civ_lineages
             .insert(member.lineage, (t.id, CivRole::Member));

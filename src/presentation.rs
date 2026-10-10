@@ -494,7 +494,7 @@ fn territory_line(game: &Game) -> String {
 }
 
 fn territory_status(game: &Game) -> String {
-    use ssc::simulation::{RaidStage, Tier};
+    use ssc::simulation::RaidStage;
     use ssc::world::Standing;
     let Some(report) = game.territory_report() else {
         return String::new();
@@ -518,11 +518,12 @@ fn territory_status(game: &Game) -> String {
         None => String::new(),
     };
     let regard = format!(
-        "{} [{meter}] {:+.0}{tithe}",
+        "{} [{meter}] {:+.0}  {}{tithe}",
         report.tier.label(),
-        report.regard
+        report.regard,
+        report.engagement.label()
     );
-    if report.tier != Tier::Hostile {
+    if report.engagement != ssc::simulation::EngagementRule::TotalWar {
         return format!(
             "\n{}   {regard}   THREAT x{:.1}   {}{weakened}",
             report.name,
@@ -1580,6 +1581,9 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
                 ),
                 lifted(Some(c.tint)),
             ));
+            if let Some(rule) = c.engagement {
+                detail.push((format!("Engagement: {}\n", rule.label()), light));
+            }
             if let Some(culture) = c.culture {
                 detail.push((
                     format!("Tends toward {} (contact estimate)\n", culture.tendency),

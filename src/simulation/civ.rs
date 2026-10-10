@@ -98,6 +98,7 @@ pub struct TerritoryReport {
     /// What it thinks of the ship, as a tier and a number from -100 to 100.
     pub tier: Tier,
     pub regard: f32,
+    pub engagement: EngagementRule,
     /// The territory's threat: the depth's threat times the civilization's menace.
     pub threat: f32,
     pub stage: RaidStage,
@@ -128,7 +129,7 @@ pub(super) struct Snapshot {
     pub raid: Option<(u64, RaidStage)>,
     pub ended: Vec<u64>,
     /// Territories that do not hunt the ship (see `diplomacy`).
-    pub calm: Vec<u64>,
+    pub permitted: Vec<u64>,
     /// Alert members: (territory, id, position).
     pub alarms: Vec<(u64, u64, Vec2)>,
 }
@@ -157,9 +158,15 @@ impl Snapshot {
             rallied: false,
             calm: false,
         };
-        let Some((tid, role)) = civ.filter(|(t, _)| !self.ended.contains(t)) else {
+        let Some((tid, role)) = civ else {
             return neutral;
         };
+        if self.ended.contains(&tid) {
+            return Posture {
+                calm: true,
+                ..neutral
+            };
+        }
         let in_domain = self.domain == Some(tid);
         let comrades = in_domain
             && player_distance < lose * 1.2
@@ -175,7 +182,7 @@ impl Snapshot {
                     RaidStage::Raid => true,
                 }
         });
-        let calm = self.calm.contains(&tid);
+        let calm = !self.permitted.contains(&tid);
         Posture {
             reach: if in_domain { DOMAIN_SIGHT } else { 1.0 },
             rallied: !calm && (comrades || called),
@@ -266,7 +273,9 @@ impl Game {
             ),
             _ => (
                 RaidStage::Patrol,
-                (standing != Standing::Fallen && !t.peaceful() && self.civ_hostile(t.id))
+                (standing != Standing::Fallen
+                    && !t.peaceful()
+                    && self.civilization_engagement(t.id) == EngagementRule::TotalWar)
                     .then_some(WAR_AT),
             ),
         };
@@ -286,6 +295,7 @@ impl Game {
             standing,
             tier: self.civ_tier(t.id),
             regard: self.civ_regard(t.id),
+            engagement: self.civilization_engagement(t.id),
             threat: self.threat() * menace,
             stage,
             next_in,
@@ -305,11 +315,11 @@ impl Game {
                 .filter(|t| t.standing(self.civ_fall(t.id)) == Standing::Fallen)
                 .map(|t| t.id)
                 .collect(),
-            calm: self
+            permitted: self
                 .civ_territories
                 .keys()
                 .copied()
-                .filter(|t| self.civ_calm(*t))
+                .filter(|t| self.civilization_may_attack(*t, CivilTarget::Ship))
                 .collect(),
             alarms: self
                 .bodies
@@ -392,7 +402,9 @@ impl Game {
         let alive = self.player().is_some();
         // A peaceful settlement never raids, however long the ship lingers.
         let here = self.territory.filter(|t| {
-            !t.peaceful() && self.civ_standing(t.id) != Standing::Fallen && self.civ_hostile(t.id)
+            !t.peaceful()
+                && self.civ_standing(t.id) != Standing::Fallen
+                && self.civilization_engagement(t.id) == EngagementRule::TotalWar
         });
         match (here, self.raid.as_mut()) {
             (Some(t), Some(raid)) if raid.territory == t.id => {
@@ -747,8 +759,9 @@ mod tests {
         let run = |inside: bool| {
             let mut game = empty_game();
             game.player_invulnerability = 1e9;
-            game.civ_territories.insert(t.id, t);
+            game.register_territory(t);
             game.set_regard(t.id, -80.0);
+            assert!(game.set_civilization_war(t.id, true));
             game.civ_lineages.insert(t.id, (t.id, CivRole::Member));
             game.territory_sector = Some(SectorId::ORIGIN);
             game.territory = inside.then_some(t);
@@ -1000,7 +1013,7 @@ mod tests {
         let t = find(SEED, CivShape::Horde);
         let species = t.member(SEED);
         let mut game = empty_game();
-        game.civ_territories.insert(t.id, t);
+        game.register_territory(t);
         game.civ_lineages.insert(t.id, (t.id, CivRole::Member));
         let a = spawn(&mut game, &species, Vec2::new(0.0, 3000.0));
         let b = spawn(&mut game, &species, Vec2::new(300.0, 3000.0));

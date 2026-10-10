@@ -53,6 +53,7 @@ pub struct Mine {
 
 /// Where and how a pattern leaves its source.
 pub(super) struct Muzzle {
+    pub civilization: Option<u64>,
     pub origin: Vec2,
     pub aim: Vec2,
     pub velocity: Vec2,
@@ -83,10 +84,9 @@ impl Game {
         let sharp = m.sharpness;
         let first = self.bullets.len();
         let spin = self.fire_pattern(weapon, count, room, sharp, m, spin);
-        if m.pith > 0.0 {
-            for shot in &mut self.bullets[first..] {
-                shot.pith = m.pith;
-            }
+        for shot in &mut self.bullets[first..] {
+            shot.pith = m.pith;
+            shot.civilization = m.civilization;
         }
         spin
     }
@@ -447,6 +447,7 @@ mod tests {
     fn muzzle(game: &Game) -> Muzzle {
         let _ = game;
         Muzzle {
+            civilization: None,
             origin: Vec2::new(0.0, 600.0),
             aim: -Vec2::Y,
             velocity: Vec2::ZERO,

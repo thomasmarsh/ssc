@@ -135,6 +135,7 @@ pub struct CivReading {
     /// How it stands toward the ship, once the ship has dealt with it.
     pub regard: Option<super::Tier>,
     pub culture: Option<super::CultureReading>,
+    pub engagement: Option<super::EngagementRule>,
 }
 
 /// Everything known about one sector, for drawing and the detail panel.
@@ -479,6 +480,9 @@ impl Game {
             tint: t.color(self.seed),
             regard: self.civ_met(territory),
             culture: self.culture_reading(territory),
+            engagement: self
+                .civ_met(territory)
+                .map(|_| self.civilization_engagement(territory)),
         })
     }
 

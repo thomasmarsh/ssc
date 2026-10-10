@@ -793,7 +793,9 @@ impl Game {
                         && (body.alert
                             || (body.root.is_some()
                                 && body.genome.root_defense >= crate::genome::ROOT_ARMED))
-                        && self.civ_of(body).is_none_or(|(id, _)| self.civ_hostile(id))
+                        && self.civ_of(body).is_none_or(|(id, _)| {
+                            self.civilization_may_attack(id, CivilTarget::Fleet)
+                        })
                         && body.position.distance(drone.position) < hit_radius(body) + DRONE_RADIUS
                 })
                 .map(contact_damage)
@@ -836,7 +838,9 @@ impl Game {
                     || !(body.kind == BodyKind::Asteroid
                         || (body.kind == BodyKind::Creature
                             && body.alert
-                            && self.civ_of(body).is_none_or(|(id, _)| self.civ_hostile(id))))
+                            && self.civ_of(body).is_none_or(|(id, _)| {
+                                self.civilization_may_attack(id, CivilTarget::Fleet)
+                            })))
                 {
                     continue;
                 }
@@ -1730,11 +1734,14 @@ mod tests {
         body.position = view.position;
         body.kind = BodyKind::Creature;
         body.alert = true;
-        let civ = crate::territory::outpost(game.seed);
+        let lineage = body.species;
+        let mut civ = crate::territory::outpost(game.seed);
+        // A military society, rather than the protected starter settlement.
+        civ.shape = crate::territory::CivShape::Horde;
         let territory = civ.id;
-        game.civ_territories.insert(territory, civ);
+        game.register_territory(civ);
         game.civ_lineages
-            .insert(body.species, (territory, CivRole::Member));
+            .insert(lineage, (territory, CivRole::Member));
         let old = DroneView {
             position: view.position - Vec2::X * 200.0,
             ..view
@@ -1744,6 +1751,7 @@ mod tests {
         game.damage_drone_impacts(0.2, &[old], &before);
         assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
         game.set_regard(territory, -80.0);
+        assert!(game.set_civilization_war(territory, true));
         game.damage_drone_impacts(0.2, &[old], &before);
         assert!(game.pad.pads[&key].drones[0].health < DRONE_HEALTH);
         let health = game.pad.pads[&key].drones[0].health;
@@ -1821,9 +1829,11 @@ mod tests {
             game.damage_drone_contacts(0.65);
             assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
         }
-        let civ = crate::territory::outpost(game.seed);
+        let mut civ = crate::territory::outpost(game.seed);
+        // A military society, rather than the protected starter settlement.
+        civ.shape = crate::territory::CivShape::Horde;
         let territory = civ.id;
-        game.civ_territories.insert(territory, civ);
+        game.register_territory(civ);
         let at = game.mining_drone_views()[0].position;
         let body = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
         body.position = at;
@@ -1833,6 +1843,7 @@ mod tests {
         game.damage_drone_contacts(0.65);
         assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
         game.set_regard(territory, -80.0);
+        assert!(game.set_civilization_war(territory, true));
         game.damage_drone_contacts(0.65);
         let health = game.pad.pads[&key].drones[0].health;
         assert!(health < DRONE_HEALTH);
@@ -1869,6 +1880,41 @@ mod tests {
         whole.damage_drone_contacts(100.0);
         whole.damage_drone_contacts(100.0);
         assert_eq!(whole.drone_wrecks().len(), 1);
+    }
+
+    #[test]
+    fn civil_projectiles_and_bursts_obey_fleet_permission_at_impact() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        let mut civ = crate::territory::outpost(game.seed);
+        civ.shape = crate::territory::CivShape::Horde;
+        game.register_territory(civ);
+        game.civil_player_harm(civ.id);
+        let at = game.mining_drone_views()[0].position;
+        for burst in [false, true] {
+            let mut shot = Bullet::hostile(at, Vec2::ZERO, if burst { 0.001 } else { 1.0 }, 10.0);
+            shot.civilization = Some(civ.id);
+            if burst {
+                shot.burst = 50.0;
+            }
+            game.bullets.push(shot);
+            game.move_bullets(0.01);
+            game.bullets.clear();
+            assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        }
+        assert!(game.set_civilization_war(civ.id, true));
+        let mut shot = Bullet::hostile(at, Vec2::ZERO, 1.0, 10.0);
+        shot.civilization = Some(civ.id);
+        game.bullets.push(shot);
+        game.move_bullets(0.01);
+        assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH - 10.0);
+        let mut shot = Bullet::hostile(at, Vec2::ZERO, 0.001, 100.0);
+        shot.civilization = Some(civ.id);
+        shot.burst = 50.0;
+        game.bullets.push(shot);
+        assert!(game.set_civilization_war(civ.id, false));
+        game.move_bullets(0.01);
+        assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH - 10.0);
     }
 
     #[test]

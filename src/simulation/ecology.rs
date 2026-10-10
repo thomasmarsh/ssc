@@ -251,7 +251,7 @@ impl Game {
         if let Some(&(tid, _)) = self.bodies[index]
             .origin
             .and_then(|o| self.civ_bases.get(&o))
-            && !self.civ_hostile(tid)
+            && !self.civilization_may_attack(tid, CivilTarget::Ship)
         {
             return;
         }
@@ -292,6 +292,10 @@ impl Game {
         for (origin, weapon, spin) in shots {
             let aim = (target - origin).normalize_or_zero();
             let muzzle = weapons::Muzzle {
+                civilization: self.bodies[index]
+                    .origin
+                    .and_then(|o| self.civ_bases.get(&o))
+                    .map(|(id, _)| *id),
                 origin,
                 aim,
                 velocity: Vec2::ZERO,

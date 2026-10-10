@@ -341,7 +341,7 @@ impl Game {
             if sanctuary {
                 body.alert = provoked || is_hurt(body);
             }
-            if body.panic > 0.0 {
+            if (civ.is_some() && posture.calm) || body.panic > 0.0 {
                 body.alert = false;
             }
             // A rooted creature does not steer: it holds its place, turning to face a threat.
@@ -669,6 +669,7 @@ impl Game {
                     let range = g.weapon_range * if body.enraged { 1.1875 } else { 1.0 };
                     if distance < range && self.bullets.len() < MAX_BULLETS {
                         let muzzle = weapons::Muzzle {
+                            civilization: self.civ_of(body).map(|(id, _)| id),
                             origin: body.position + direction * (body.radius + 5.0),
                             aim: direction,
                             velocity: body.velocity,
