@@ -4,7 +4,8 @@
 //! **Hullworm.** A worm that touches the hull (ring 5 and out, not landed, not in grace, not in
 //! a dash) fastens on, at most three at once, and drains one resource a second by its diet:
 //! shield (siphon), metal (rocks), volatiles (graze) or, slowly, hull (hunt, never below a fifth
-//! of it). It sits on the hull, can be shot, and comes off by: a dash, a perfect parry, a solid
+//! of it). Every drain goes to the ship's biomass first (`latch_biomass_share`): organs sleep when
+//! it runs dry, so a worm is a tax on a symbiosis build, not a killer (CAPABILITIES K8, row 4). It sits on the hull, can be shot, and comes off by: a dash, a perfect parry, a solid
 //! hit at speed (the nearest worm is scraped off against the rock, so ramming a rock is a
 //! remedy), or landing on a pad (clean in two seconds). A shaken worm flies off and cannot fasten
 //! again for a few seconds.
@@ -177,7 +178,19 @@ impl Game {
             }
         }
         for (k, (diet, amount)) in drains.into_iter().enumerate() {
-            let taken = self.drain_ship(diet, amount, dt);
+            // Biomass first: organs fail when the pool runs dry, the diet's own resource only
+            // pays the part the pool could not.
+            let share = amount * self.tune.latch_biomass_share.clamp(0.0, 1.0);
+            let eaten = self.cargo.take(Material::Biomass, share);
+            let left = (amount - eaten).max(0.0);
+            let frac = if amount > 0.0 { left / amount } else { 0.0 };
+            let taken = eaten + self.drain_ship(diet, left, dt * frac);
+            if eaten > 0.0 && !self.loadout.organs.fitted().is_empty() {
+                self.notify_once(
+                    "HULLWORM EATS BIOMASS  ORGANS SLEEP WHEN IT RUNS DRY".into(),
+                    upgrades::Rarity::Rare,
+                );
+            }
             if let Some(latch) = self.parasites.latches.get_mut(k) {
                 latch.fed += taken;
             }
@@ -498,6 +511,76 @@ mod tests {
         worm(&mut feeding, Diet::Siphon, touch());
         tick(&mut feeding, 30.0);
         assert!(feeding.player().unwrap().shield < 1.0);
+    }
+
+    #[test]
+    fn a_worm_eats_biomass_first_and_the_diet_only_when_it_is_gone() {
+        let mut game = deep_game();
+        game.cargo.biomass = 8.0;
+        let id = worm(&mut game, Diet::Siphon, touch());
+        let rate = power::LATCH_DRAIN.0
+            + power::LATCH_DRAIN.1 * Power::Latch.strength(&game.body(id).unwrap().genome);
+        tick(&mut game, 1.0);
+        assert!(
+            (8.0 - game.cargo.biomass - rate).abs() < 0.3,
+            "biomass {}",
+            game.cargo.biomass
+        );
+        assert_eq!(
+            game.player().unwrap().shield,
+            60.0,
+            "shield untouched while biomass lasts"
+        );
+        assert!(
+            game.notices
+                .iter()
+                .all(|n| !n.text.contains("ORGANS SLEEP")),
+            "no organ is fitted, so no warning"
+        );
+        // Dry: the worm's own diet pays.
+        tick(&mut game, 5.0);
+        assert_eq!(game.cargo.biomass, 0.0);
+        assert!(game.player().unwrap().shield < 60.0);
+    }
+
+    #[test]
+    fn eating_biomass_puts_a_fitted_organ_to_sleep_and_says_so() {
+        use crate::simulation::organs::Strain;
+        let mut game = deep_game();
+        game.cargo.biomass = 3.0;
+        game.cargo.fuel = 100.0;
+        game.loadout.skills.raise(Skill::Symbiosis);
+        game.loadout.organs.acquire(
+            Strain {
+                organ: Organ::Remora,
+                level: 1,
+                magnitude: 1.0,
+            },
+            &DEFAULT_TUNING,
+        );
+        game.bench_organ(Organ::Remora).unwrap();
+        worm(&mut game, Diet::Siphon, touch());
+        for _ in 0..(3.0 / DT) as usize {
+            game.update_parasites(DT, false);
+            game.update_organs(DT);
+        }
+        assert!(game.loadout.organs.dormant, "the pool ran dry");
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.starts_with("HULLWORM EATS BIOMASS"))
+        );
+    }
+
+    #[test]
+    fn biomass_share_zero_restores_the_old_drain() {
+        let mut game = deep_game();
+        game.tune_set("latch_biomass_share", 0.0).unwrap();
+        game.cargo.biomass = 8.0;
+        worm(&mut game, Diet::Siphon, touch());
+        tick(&mut game, 1.0);
+        assert_eq!(game.cargo.biomass, 8.0);
+        assert!(game.player().unwrap().shield < 60.0);
     }
 
     #[test]

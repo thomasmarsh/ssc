@@ -616,6 +616,15 @@ impl Game {
         })
     }
 
+    /// Posts `text` unless the same notice is already on screen (a status that holds for seconds
+    /// must not stack its message).
+    pub(super) fn notify_once(&mut self, text: String, rarity: upgrades::Rarity) {
+        if self.notices.iter().any(|n| n.text == text) {
+            return;
+        }
+        self.notify(text, rarity);
+    }
+
     /// Whether killing this body pays the carrier's bonus (a built power above its gate), and
     /// the bounty multiplier for its tier.
     pub(super) fn carrier_bonus(&self, body: &Body) -> Option<f32> {
@@ -995,6 +1004,51 @@ mod tests {
                 assert!(game.bullets.iter().any(|b| b.friendly), "and flew on");
             } else {
                 assert!(after < before, "a solid body is hit");
+            }
+        }
+    }
+
+    #[test]
+    fn the_veil_window_lets_shots_find_a_phased_body_and_says_so() {
+        for sight in [false, true] {
+            let g = hunter(Genome {
+                weapon: crate::genome::Weapon::None,
+                hull: 100.0,
+                shield: 0.0,
+                speed: 30.0,
+                cruise: 10.0,
+                ..Genome::veilwing()
+            });
+            let (mut game, id) = arena(g, Vec2::new(400.0, 0.0));
+            let (phased_at, _) = windows(&g, id);
+            game.time = phased_at;
+            game.step(0.001, Input::default());
+            assert!(creature(&game, id).phased);
+            // The shot is a ship's, and the veil is up only in the second run.
+            game.veil = if sight { 5.0 } else { 0.0 };
+            let at = creature(&game, id).position;
+            game.bullets.push(Bullet::friendly(
+                at - Vec2::new(26.0, 0.0),
+                Vec2::new(500.0, 0.0),
+                1.0,
+            ));
+            let before = creature(&game, id).health;
+            game.step(0.02, Input::default());
+            let after = creature(&game, id).health;
+            if sight {
+                assert!(after < before, "phase sight: the shot lands");
+                assert!(
+                    game.notices
+                        .iter()
+                        .any(|n| n.text.starts_with("VEIL SIGHT"))
+                );
+            } else {
+                assert_eq!(before, after, "without the veil it passes through");
+                assert!(
+                    game.notices
+                        .iter()
+                        .all(|n| !n.text.starts_with("VEIL SIGHT"))
+                );
             }
         }
     }

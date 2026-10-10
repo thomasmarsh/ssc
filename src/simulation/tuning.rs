@@ -260,6 +260,28 @@ tuning_life::groups! {
         price_symbiosis_crystal: f32 = 20.0, 0.0, 100_000.0, Amount;
     }
 
+    // ---- buffed powers (CAPABILITIES K8; see `jam`, `parasite`, `mimic`, `fields`, `powers`) ----
+    group "buffs" {
+        /// Seconds a landed glare also cancels the stealth a dim field gives the ship (the sonar is refused for the glare's own length).
+        glare_dim_cancel: f32 = 2.0, 0.0, 30.0, Seconds;
+        /// Share of a glare's glitch for which the sonar ping is refused (zero leaves the sonar alone).
+        glare_sonar_share: f32 = 1.0, 0.0, 1.0, Ratio;
+        /// Faraday organ level from which a jam never takes the HUD (1 to 3).
+        faraday_hud_level: u64 = 2, 1.0, 3.0, Count;
+        /// Share of a hullworm's drain taken from the ship's biomass first (organs sleep at zero); the rest comes from its diet.
+        latch_biomass_share: f32 = 1.0, 0.0, 1.0, Ratio;
+        /// Metal a cracked rock mimic leaves, at threat 1 (grows with the square root of threat).
+        mimic_rock_yield: f32 = 10.0, 0.0, 1000.0, Amount;
+        /// Luck of the part a cracked lure mimic leaves (the bait it posed as).
+        mimic_lure_luck: f32 = 0.25, 0.0, 1.0, Ratio;
+        /// A swarm swallows a needle this many times as often as another shot (the chance caps at 95 percent).
+        cloud_needle_density: f32 = 1.5, 1.0, 4.0, Multiplier;
+        /// Speed a pushwhale's shove gives hostile mines and sigils in reach, toward the ship's route.
+        repel_fling_speed: f32 = 260.0, 0.0, 2000.0, Speed;
+        /// Share of a power's role term the threat model adds for a new verb it gained in K8 (glare sonar, latch biomass, repel fling).
+        buff_extra_flair: f32 = 0.5, 0.0, 2.0, Ratio;
+    }
+
     // ---- the mining beam -------------------------------------------------------------------------
     group "mining" {
         /// Beam reach, from the ship's center to the rock's surface, before range upgrades.

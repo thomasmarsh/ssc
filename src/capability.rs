@@ -211,10 +211,18 @@ pub fn organ_covers(organ: Organ) -> &'static [Cover] {
     match organ {
         Organ::Remora => &[cover!(Drain, 2, "mends the hull while quiet")],
         Organ::Faraday => &[
-            cover!(Jam, 3, "shortens jams, immune at level 3"),
-            cover!(Info, 1, "dulls glitch and glare"),
+            cover!(
+                Jam,
+                3,
+                "shortens jams, no HUD jam from level 2, immune at level 3"
+            ),
+            cover!(Info, 1, "shortens a glare's blind sonar and lit stealth"),
         ],
-        Organ::Veil => &[cover!(Phase, 2, "keeps the ship intangible after a dash")],
+        Organ::Veil => &[cover!(
+            Phase,
+            2,
+            "keeps the ship intangible after a dash and lets shots hit phased bodies"
+        )],
         Organ::Skipjack => &[
             cover!(Cord, 2, "hops over cords"),
             cover!(Close, 1, "hops clear of a charge"),

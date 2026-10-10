@@ -153,6 +153,11 @@ pub struct Organism {
     /// second and the channel it feeds (the gun, the bite, a lunge, a charge, a cord, a
     /// drain). `core` is priced from their sum, so the channel shares are honest.
     pub sources: Vec<(Option<Channel>, f32)>,
+    /// A swarm's flair term and its channel (needle shots snag in it more: `power_for`).
+    pub cloud: Option<(Option<Channel>, f32)>,
+    /// A haste time bubble's strength (zero for none): armed kin in the sector fire faster
+    /// (`pair_partners`, CAPABILITIES K8 row 7).
+    pub haste: f32,
 }
 
 /// A power that does not hurt but takes a capability away (docs/CAPABILITIES.md 2.1).
@@ -208,6 +213,15 @@ impl Organism {
         for &(channel, term) in &self.flair {
             let k = channel.map_or(1.0, |c| 1.0 - f32::from(tier.cover[c.index()]) / 3.0);
             flair *= 1.0 + term * k;
+        }
+        // A needle gun in a swarm: the cloud swallows needles `cloud_needle_density` times as
+        // often, so its term is that much larger against a needle kit (K8, row 8).
+        if tier.needle
+            && let Some((channel, term)) = self.cloud
+        {
+            let k = channel.map_or(1.0, |c| 1.0 - f32::from(tier.cover[c.index()]) / 3.0);
+            let more = (term * DEFAULT.cloud_needle_density * k).min(1.0);
+            flair *= (1.0 + more) / (1.0 + term * k);
         }
         self.core * flair
     }
@@ -297,6 +311,8 @@ pub struct Tier {
     /// Trained share of the parry and dash skills, 0 to 1.
     pub parry: f32,
     pub dash: f32,
+    /// The active gun fires needles (a swarm swallows them more often).
+    pub needle: bool,
 }
 
 impl Tier {
@@ -344,6 +360,14 @@ impl Tier {
     }
 
     /// The same kit with parry and dash fully trained.
+    /// The same kit with a needle gun in hand (a cloud swallows it more often).
+    pub fn needled(&self) -> Tier {
+        let mut t = self.clone();
+        t.needle = true;
+        t.label = format!("{}+needles", self.label);
+        t
+    }
+
     pub fn skilled(&self) -> Tier {
         let mut t = self.clone();
         t.parry = 1.0;
@@ -363,6 +387,7 @@ pub fn tier_bare() -> Tier {
         cover: [0; CHANNELS],
         parry: 0.0,
         dash: 0.0,
+        needle: false,
     }
 }
 
@@ -398,6 +423,7 @@ pub fn tier_at(seed: u64, depth: f32, maxed: bool, graded: bool) -> Tier {
         cover: cover_of(&loadout),
         parry: skill_fraction(&loadout, Skill::Parry),
         dash: skill_fraction(&loadout, Skill::Dash),
+        needle: false,
     }
 }
 
@@ -512,6 +538,7 @@ fn assess_genome(
     let size = (SHIP_RADIUS / g.radius.max(4.0)).clamp(0.5, 2.0);
     let mut powers = Vec::new();
     let (mut blink, mut phase, mut flair) = (0.0, 0.0, 1.0);
+    let (mut cloud, mut haste): (Option<(Option<Channel>, f32)>, f32) = (None, 0.0);
     let mut terms = Vec::new();
     let mut edges = Vec::new();
     // The sources of sustained damage to the ship, expected, calm.
@@ -567,6 +594,14 @@ fn assess_genome(
                     _ => crate::power::LATCH_DRAIN.0 + crate::power::LATCH_DRAIN.1 * c.strength,
                 };
                 sources.push((capability::power::channel(c.power), rate * CONTACT_DUTY));
+                // It also eats the ship's biomass first (K8): a tax on a symbiosis build that
+                // the Remora answers, priced as a Drain term the cover cuts.
+                let term = role(c.power).weight()
+                    * c.strength
+                    * tune.buff_extra_flair
+                    * tune.latch_biomass_share;
+                flair *= 1.0 + term;
+                terms.push((capability::power::channel(c.power), term));
                 continue;
             }
             Power::Engulf => {
@@ -579,6 +614,23 @@ fn assess_genome(
         let term = role(c.power).weight() * c.strength;
         flair *= 1.0 + term;
         terms.push((capability::power::channel(c.power), term));
+        // The verbs K8 added to glare (a blind sonar) and repel (flung mines) are priced as a
+        // second term on the same channel, so a cover cuts both.
+        let verb = match c.power {
+            Power::Glare => tune.glare_sonar_share,
+            Power::Repel => 1.0,
+            _ => 0.0,
+        };
+        if verb > 0.0 {
+            let extra = term * tune.buff_extra_flair * verb;
+            flair *= 1.0 + extra;
+            terms.push((capability::power::channel(c.power), extra));
+        }
+        match c.power {
+            Power::Cloud => cloud = Some((capability::power::channel(c.power), term)),
+            Power::Warp if g.warp > 0.0 => haste = c.strength,
+            _ => {}
+        }
         let (parry, dash) = disables(c.power);
         if parry || dash {
             let params = g.power_params(c.power);
@@ -652,6 +704,8 @@ fn assess_genome(
         weapon_channel: capability::weapon::channel(g.weapon),
         disables: edges,
         sources,
+        cloud,
+        haste,
     }
 }
 
@@ -798,6 +852,8 @@ fn assess_structure(spawn: &Spawn, tune: &Tunables) -> Option<Organism> {
         flair: Vec::new(),
         weapon_channel: capability::weapon::channel(weapon),
         disables: Vec::new(),
+        cloud: None,
+        haste: 0.0,
         sources: vec![(capability::weapon::channel(weapon), dps)],
     })
 }
@@ -1009,6 +1065,7 @@ pub fn assess_sector(seed: u64, id: SectorId) -> SectorReport {
     for spawn in &spawns {
         organisms.extend(assess_spawn_in(spawn, archetype, &DEFAULT));
     }
+    pair_partners(&mut organisms);
     let hazards = hazards_of(seed, id, &spawns, &DEFAULT);
     let tier = tier_bare();
     let danger = (organisms
@@ -1033,6 +1090,42 @@ pub fn assess_sector(seed: u64, id: SectorId) -> SectorReport {
     report.share = report.share_for(&tier);
     report.gate_burst = gate_bursts(&report.organisms);
     report
+}
+
+/// A haste time bubble is a support power (CAPABILITIES K8, row 7): it adds nothing alone and
+/// speeds the fire of every armed organism in its sector by `1 + WARP_HASTE * strength`.
+/// Priced as a partner term: the gun's source and the burst scale by that rate, `ttk_ship`
+/// shrinks by the total damage gain, and the power index grows by its square root (the
+/// `core = sqrt(ttk / ttk_ship)` law). A sector without a bubble is untouched.
+pub fn pair_partners(organisms: &mut [Organism]) {
+    let haste = organisms.iter().map(|o| o.haste).fold(0.0f32, f32::max);
+    if haste <= 0.0 {
+        return;
+    }
+    let rate = 1.0 + crate::power::WARP_HASTE * haste;
+    for o in organisms
+        .iter_mut()
+        .filter(|o| o.haste <= 0.0 && o.dps > 0.0)
+    {
+        let total: f32 = o.sources.iter().map(|&(_, d)| d).sum();
+        let Some(gun) = o.sources.first().map(|&(_, d)| d) else {
+            continue;
+        };
+        if total <= 0.0 || gun <= 0.0 {
+            continue;
+        }
+        let gain = (total + gun * (rate - 1.0)) / total;
+        o.sources[0].1 = gun * rate;
+        o.dps *= rate;
+        o.burst_potential *= rate;
+        o.burst_expected *= rate;
+        o.period /= rate;
+        o.period_enraged /= rate;
+        o.ttk_ship /= gain;
+        o.core *= gain.sqrt();
+        // The same product `power_for` forms at cover zero, so the two stay bit-identical.
+        o.power = o.power_for(&tier_bare());
+    }
 }
 
 /// `SectorReport::gate_burst`: for each channel some organism carries a power of, the worst
@@ -1609,5 +1702,96 @@ mod tests {
             fast >= 0.10,
             "only {fast:.2} of hostile wild organisms reach 0.75 of ship speed"
         );
+    }
+
+    // ---- the K8 buffs (docs/CAPABILITIES.md section 6) ---------------------------------
+
+    fn lone(genome: crate::genome::Genome) -> Organism {
+        let mut species = Species::bogey();
+        species.genome = genome;
+        let mut spawn = Spawn::creature(species, Vec2::ZERO);
+        spawn.index = 1;
+        assess_spawn(&spawn, &DEFAULT).remove(0)
+    }
+
+    #[test]
+    fn glare_repel_and_latch_price_their_new_verb_as_a_second_term_on_the_same_channel() {
+        use crate::genome::Genome;
+        for (genome, power) in [
+            (Genome::argus(), Power::Glare),
+            (Genome::pushwhale(), Power::Repel),
+            (Genome::hullworm(), Power::Latch),
+        ] {
+            let o = lone(genome);
+            let channel = capability::power::channel(power);
+            let on: Vec<f32> = o
+                .flair
+                .iter()
+                .filter(|(c, _)| *c == channel)
+                .map(|&(_, t)| t)
+                .collect();
+            assert!(!on.is_empty(), "{power:?} has a term on its channel");
+            assert!(o.power > o.core, "{power:?} carries flair");
+            let mut off = DEFAULT;
+            off.buff_extra_flair = 0.0;
+            let mut species = Species::bogey();
+            species.genome = genome;
+            let mut spawn = Spawn::creature(species, Vec2::ZERO);
+            spawn.index = 1;
+            let plain = assess_spawn(&spawn, &off).remove(0);
+            assert!(
+                o.power > plain.power,
+                "{power:?}: {} > {}",
+                o.power,
+                plain.power
+            );
+            // A ward at degree 3 on the channel removes both terms.
+            let mut tier = tier_bare();
+            tier.cover[channel.unwrap().index()] = 3;
+            assert!(o.power_for(&tier) < o.power);
+        }
+    }
+
+    #[test]
+    fn a_cloud_prices_higher_against_a_needle_kit_and_nothing_else_moves() {
+        let o = lone(crate::genome::Genome::murmur());
+        assert!(o.cloud.is_some());
+        let bare = tier_bare();
+        assert_eq!(o.power_for(&bare), o.power);
+        let needles = bare.needled();
+        assert!(o.power_for(&needles) > o.power_for(&bare));
+        // A kit that covers the channel cuts the extra with the rest.
+        let mut warded = needles.clone();
+        warded.cover = [3; CHANNELS];
+        assert!(o.power_for(&warded) <= o.power_for(&needles));
+        let plain = lone(crate::genome::Genome::bogey());
+        assert_eq!(plain.power_for(&needles), plain.power_for(&bare));
+    }
+
+    #[test]
+    fn a_haste_bubble_is_a_partner_term_that_speeds_armed_kin_and_a_slow_one_is_not() {
+        use crate::genome::Genome;
+        let hasty = lone(Genome {
+            warp: 0.8,
+            ..Genome::tarbloom()
+        });
+        assert!(hasty.haste > 0.0);
+        let slow = lone(Genome::tarbloom());
+        assert_eq!(slow.haste, 0.0);
+        let gunner = lone(Genome::bogey());
+        assert!(gunner.dps > 0.0);
+        let mut kin = vec![gunner.clone(), hasty.clone()];
+        pair_partners(&mut kin);
+        let rate = 1.0 + crate::power::WARP_HASTE * hasty.haste;
+        assert!((kin[0].dps / gunner.dps - rate).abs() < 1e-4);
+        assert!(kin[0].power > gunner.power);
+        assert!(kin[0].burst_expected > gunner.burst_expected);
+        assert!(kin[0].period < gunner.period);
+        assert_eq!(kin[1].power, hasty.power, "the carrier itself is unchanged");
+        assert_eq!(kin[0].power, kin[0].power_for(&tier_bare()));
+        let mut calm = vec![gunner.clone(), slow];
+        pair_partners(&mut calm);
+        assert_eq!(calm[0].power, gunner.power);
+        assert_eq!(calm[0].dps, gunner.dps);
     }
 }

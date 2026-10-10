@@ -10,7 +10,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 60,
         parts: [
             0x3698001b46c309a5,
-            0x4453f2eef8be0c01,
+            0x6596254096408e4d,
             0xf61329a6eaf47a91,
             0xe7ceeba4aa206d67,
             0xa8fe252a89f8e013,
@@ -23,7 +23,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 600,
         parts: [
             0x7ffc440cc7935e96,
-            0x7b1c6b690435fc3d,
+            0x619084bd7bb38f49,
             0x4c2ef76dee81e72c,
             0xef018dac263ec0c0,
             0x95c4ea988b7bec70,
@@ -36,7 +36,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 1200,
         parts: [
             0x4d12285337d162f4,
-            0x3a6dbc6c66a4c5c8,
+            0xa18f8a0f6ace2ac8,
             0xa79d9cf54a6286fe,
             0xbb367ffb2fbf08f9,
             0x45da5d1ee4d6d7ed,
@@ -49,7 +49,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 1800,
         parts: [
             0x4724f2ada4300a4e,
-            0x8bbc941785972358,
+            0x69e4999666bfd00c,
             0xcbb4b34ce4bc669b,
             0xa8fe120114c82867,
             0x8e8aa49de4e2b61e,
@@ -62,7 +62,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 60,
         parts: [
             0xe594267dd5baa6b2,
-            0xe4c20cfe5b2f58f9,
+            0x38ea80dc81408dcd,
             0x99b579b6c8705f34,
             0x6fe9bfdd5a11da20,
             0x0f55abfa4f76ded3,
@@ -75,7 +75,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 600,
         parts: [
             0xa838916e3c12b3f1,
-            0xf3bcd709391d4382,
+            0xb3aa44b84b2f3202,
             0xbd648cd08deaef5e,
             0xd3f762b4db3a4b78,
             0x53022284abd3565e,
@@ -88,7 +88,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 1800,
         parts: [
             0x8382ba40901ba2c6,
-            0x8140b4f1643f7d03,
+            0x1d187ff3c451a9c3,
             0xabe70a83b720114b,
             0xced26bba515b8259,
             0x99af6a9977e37e28,
@@ -101,7 +101,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 3600,
         parts: [
             0xe71f6f078fc9884b,
-            0xec5fc5527447d320,
+            0xd381b081f80508a0,
             0x82aff767a5e739d1,
             0x4b547fc139f46a9d,
             0x2ecead7af157f969,
@@ -114,7 +114,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 60,
         parts: [
             0x9a9bf4ff22170591,
-            0x39b47031621a4f02,
+            0xf886e1b50161f76e,
             0xb526af80c38b7696,
             0x450a29a2545a9814,
             0x2af6d2403461898f,
@@ -127,7 +127,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 600,
         parts: [
             0xa226ce0b12e9d67b,
-            0x0c1dc62b92db0578,
+            0x7ca7334130cd577c,
             0xe24c5832c2508bb6,
             0xc7377e3b2cc046b9,
             0x116d5bc778174dfd,
@@ -140,7 +140,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 1800,
         parts: [
             0x58ee1cc03108ce68,
-            0xb2c38309e2bdaa56,
+            0xa9e80c43e8806136,
             0xec1fa6641f84f861,
             0x09757887ccbbeb19,
             0x18834b3508674510,
@@ -153,7 +153,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 3600,
         parts: [
             0x16dbf84c57974a8a,
-            0x500c1631a65acdf6,
+            0x2a1bda2189790256,
             0x1654e53f92e0fcf7,
             0x3e326b053decf26d,
             0x747c767f659cd42f,
@@ -166,7 +166,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 600,
         parts: [
             0x4f70f34a89e00c92,
-            0x662a880ef039ec4c,
+            0x4a43f6421a31efc8,
             0xbd888945490c4323,
             0x97d0fe30d4f9d293,
             0x2dea44a68ba60ff1,
@@ -179,7 +179,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 3000,
         parts: [
             0xa752d539aef7bec9,
-            0x60c5669f6aa24e46,
+            0x89eeef0618a9544a,
             0x7b4e9bdaacad69c5,
             0x2aed16918ce67e13,
             0x039ca4e9d218248c,
@@ -192,7 +192,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 9000,
         parts: [
             0xf81575a3e1420545,
-            0x86dfbc36b57988f6,
+            0x2dabd937355e4f12,
             0xa86fc528eadfb32b,
             0xd96c3723b67f37a2,
             0x632fa0f3e051fc06,
@@ -205,7 +205,7 @@ pub const GOLDENS: &[Golden] = &[
         tick: 18000,
         parts: [
             0x7eb67bbe2f6dbab8,
-            0xdc7c6f9587305171,
+            0x7694ac304fc7acc5,
             0x33da1b0af751d954,
             0xfbf79ea92ee6a91e,
             0xfe87ccbe25731435,

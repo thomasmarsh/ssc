@@ -209,9 +209,23 @@ Hazards join `danger` (`sqrt(organisms + hazards)`) and `share`; they are not or
 
 Facts:
 - `gate_burst` is below one in every sampled sector, so no area is lethal in a window even with the ward and the parry and dash answers removed. That is the burst budget (5.4) holding, and it means a gate has to come from the realm environment (CAPABILITIES 3.1, K3) or from sustained pressure, not from a single volley.
-- `+wards` (degree 2 on JAM, FIELD, ARMOR, INFO) moves median danger by under 0.01 at every sampled ring, because wards only cut flair. The wards matter once K8 buys the underpowered powers back (K2 closed the damage channels and left the powers' share at 1 to 5 percent).
+- `+wards` (degree 2 on JAM, FIELD, ARMOR, INFO) moves median danger by under 0.01 at every sampled ring, because wards only cut flair. The wards matter once K8 buys the underpowered powers back (K2 closed the damage channels and left the powers' share at 1 to 5 percent); K8 is built (3.9) and moves the power share by a few tenths of a percent, so the weight is still carried by the guns.
 - Parry and dash fully trained cut the worst window burst ratio p90 by 30 to 40 percent (ring 14 typical: 2.22 to 1.41); an Emp carrier gives part of it back for `hold / period`, about 23 percent of the time at the typical 1.4 s over 6 s.
 - `typical` cover comes from the sampled parts (CLOSE, FIELD, RAM, SWARM and CORD at degree 1 to 3); skills are not part of `roll_part`, so `typical+skills` is a separate row.
+
+### 3.9 The K8 buffs (CAPABILITIES section 6; tunables group `buffs`)
+
+Five powers gained a verb with a counter and the model prices each one. The extra terms are small by design (the powers are 1 to 5 percent of the danger weight, 3.8), so `threat_baseline.txt` is byte-identical at its rounding and was not blessed.
+
+| Buff | Price in `threat.rs` | Counter |
+| --- | --- | --- |
+| Glare: blind sonar and lit stealth | second term `buff_extra_flair * glare_sonar_share` of the Control role term on INFO | Faraday, hardening casing, wait |
+| Latch: biomass first | Drain term `weight * s * buff_extra_flair * latch_biomass_share` beside the existing drain source | dash, scrape, pad, Remora |
+| Repel: flung mines and sigils, worms thrown off | second FIELD term `buff_extra_flair` of the role term | shoot or dash the mine, sidestep, Ballast |
+| Cloud: needles snag 1.5 times | `Organism::power_for` raises the cloud term by `cloud_needle_density` against `Tier::needle` | nova, blast, family switch |
+| Warp haste: partner term | `pair_partners`: gun source, burst and period by `1 + WARP_HASTE * s`, power by the square root of the gain | fight outside the rim, kill the gunner |
+
+Goldens: the four scenario goldens were re-pinned and only the `bodies` sub-digest moved in every row. The reason is `JamState` (hashed by `Debug` into `bodies`) gained two timers, `glare_sonar` and `glare_dim`; every other sub-digest (bullets, mines, pickups, rune fields, world) is identical, so the busy scenarios did not change behavior.
 
 ## 4. Diagnosis: why it swings between trivial and lethal
 

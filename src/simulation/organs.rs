@@ -144,10 +144,14 @@ impl Organ {
         match self {
             Self::Remora => format!("mends {:.1} hull a second when quiet", tune.remora_regen),
             Self::Faraday => format!(
-                "jams and glitches {:.0}% shorter, none at level 3",
-                tune.faraday_cut * 100.0
+                "jams and glitches {:.0}% shorter, no HUD jam from level {}, none at level 3",
+                tune.faraday_cut * 100.0,
+                tune.faraday_hud_level
             ),
-            Self::Veil => format!("intangible {:.2}s after a dash", tune.veil_time),
+            Self::Veil => format!(
+                "intangible {:.2}s after a dash, shots hit phased bodies meanwhile",
+                tune.veil_time
+            ),
             Self::Skipjack => format!("a dash hops walls under {:.0} thick", tune.skip_thick),
         }
     }

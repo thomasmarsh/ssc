@@ -1463,6 +1463,9 @@ impl Game {
             .collect();
         let seed = self.seed;
         let mut rift_events = Vec::new();
+        let mut needles_snagged = false;
+        let mut veil_sighted = false;
+        let veil_sight = self.veil > 0.0;
         let mut egg_losses = Vec::new();
         let mut shot_paths: Vec<Vec<(Vec2, Vec2)>> = self
             .bullets
@@ -1482,9 +1485,21 @@ impl Game {
                     let roll = (world::hash2(seed ^ 0xC10D, (id & 0x7FFF_FFFF) as i32, key) >> 40)
                         as f32
                         / 16_777_216.0;
+                    // A needle swarm is a swarm: thin shots snag in the cloud more often.
+                    let needle = bullet
+                        .profile
+                        .is_some_and(|p| p.family() == arsenal::Family::Needle);
+                    let density = if needle {
+                        (density * self.tune.cloud_needle_density).min(0.95)
+                    } else {
+                        density
+                    };
                     if roll < density {
                         bullet.remaining = 0.0;
                         impacts.push(bullet.position);
+                        if needle {
+                            needles_snagged = true;
+                        }
                         break;
                     }
                 }
@@ -1549,7 +1564,7 @@ impl Game {
                 for (index, body) in self.bodies.iter().enumerate().filter(|(_, b)| b.active) {
                     let target = if bullet.friendly {
                         body.kind != BodyKind::Player
-                            && !body.phased
+                            && (!body.phased || veil_sight)
                             && body.adrift <= 0.0
                             && !apexes::is_part(&self.apexes.info, body)
                     } else {
@@ -1574,6 +1589,11 @@ impl Game {
                     {
                         hit = Some((index, fraction));
                     }
+                }
+                // Phase sight: the Veil's window lets the ship's shots find a phased body.
+                if veil_sight && bullet.friendly && hit.is_some_and(|(i, _)| self.bodies[i].phased)
+                {
+                    veil_sighted = true;
                 }
                 if !bullet.friendly {
                     // A civilization's shot reaches only the fleets it is authorized against.
@@ -1834,6 +1854,18 @@ impl Game {
         }
         for (id, amount) in bubble_hits {
             self.bubble_hit(id, amount);
+        }
+        if needles_snagged {
+            self.notify_once(
+                "NEEDLES SNAG IN THE SWARM  A NOVA OR BLAST CLEARS IT".into(),
+                upgrades::Rarity::Common,
+            );
+        }
+        if veil_sighted {
+            self.notify_once(
+                "VEIL SIGHT  SHOTS FIND PHASED BODIES WHILE THE VEIL LASTS".into(),
+                upgrades::Rarity::Rare,
+            );
         }
         // Fragile shots (missiles) are destroyed by any friendly shot that reaches them.
         let fragile: Vec<usize> = self

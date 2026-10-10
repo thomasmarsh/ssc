@@ -9,7 +9,11 @@
 //!   never all; the HUD may be jammed besides when it is rolled;
 //! - confusion rotates aim and movement by a bounded, swaying angle and may invert the turn for
 //!   `CONFUSE_FLIP` seconds at most; it never touches the world, only the input;
-//! - the glitch is presentation only: nothing in the rules reads it, and it has its own gap.
+//! - the glitch is a screen treatment with its own gap. A glare also blinds the sonar for the
+//!   glitch's length (`glare_sonar_share`) and cancels a dim field's stealth for
+//!   `glare_dim_cancel` seconds (CAPABILITIES K8, row 3); Faraday and a hardened casing shorten
+//!   both because they shorten the glitch, and level 3 refuses the glare outright;
+//! - a Faraday organ of `faraday_hud_level` or more keeps every jam off the HUD.
 
 use super::skills::Skill;
 use super::*;
@@ -45,6 +49,9 @@ pub struct JamState {
     glitch_seed: u32,
     /// Seconds the ship counts as shooting (for the dark).
     shooting: f32,
+    /// Seconds a glare still blinds the sonar, and cancels a dim field's stealth.
+    glare_sonar: f32,
+    glare_dim: f32,
 }
 
 /// What the adapter draws of the status.
@@ -213,7 +220,9 @@ impl Game {
         let mut chosen: Vec<System> = Vec::new();
         for &s in systems {
             if s == System::Hud {
-                chosen.push(s);
+                if !self.hud_jam_proof() {
+                    chosen.push(s);
+                }
                 continue;
             }
             let real = chosen.iter().filter(|c| **c != System::Hud).count();
@@ -235,6 +244,19 @@ impl Game {
         // A jam shakes the picture a moment too (presentation only).
         self.add_glitch(0.4, 0x4A41);
         true
+    }
+
+    /// Whether a fitted, working Faraday organ is high enough that no jam takes the HUD.
+    pub fn hud_jam_proof(&self) -> bool {
+        self.loadout
+            .organs
+            .active(super::organs::Organ::Faraday)
+            .is_some_and(|strain| u64::from(strain.level) >= self.tune.faraday_hud_level)
+    }
+
+    /// Whether a glare is blinding the sonar now.
+    pub fn sonar_blinded(&self) -> bool {
+        self.jam.glare_sonar > 0.0
     }
 
     /// Confuses the controls for `seconds` with a sway of `amp` radians and, if `flip`, a
@@ -282,7 +304,17 @@ impl Game {
         if scale <= 0.0 {
             return false;
         }
-        self.add_glitch(seconds * scale, seed);
+        let seconds = (seconds * scale).clamp(0.1, power::GLITCH_MAX);
+        self.add_glitch(seconds, seed);
+        // The glare's rules half (K8): the sonar is refused for the glitch, a dim field's stealth
+        // is cancelled for a moment.
+        let sonar = seconds * self.tune.glare_sonar_share;
+        self.jam.glare_sonar = self.jam.glare_sonar.max(sonar);
+        self.jam.glare_dim = self.jam.glare_dim.max(self.tune.glare_dim_cancel);
+        self.notify_once(
+            format!("GLARE  SONAR BLIND {sonar:.1} S  STEALTH LIT"),
+            upgrades::Rarity::Rare,
+        );
         true
     }
 
@@ -318,6 +350,8 @@ impl Game {
         }
         j.confuse = (j.confuse - dt).max(0.0);
         j.glitch = (j.glitch - dt).max(0.0);
+        j.glare_sonar = (j.glare_sonar - dt).max(0.0);
+        j.glare_dim = (j.glare_dim - dt).max(0.0);
         if j.glitch <= 0.0 {
             j.glitch_gap = (j.glitch_gap - dt).max(0.0);
         }
@@ -405,7 +439,7 @@ impl Game {
 
     /// How much farther away a creature thinks a quiet ship in the dark is (1 = no change).
     pub(super) fn dim_notice(&self) -> f32 {
-        if self.jam.shooting > 0.0 {
+        if self.jam.shooting > 0.0 || self.jam.glare_dim > 0.0 {
             return 1.0;
         }
         let Some(ship) = self.player().map(|p| p.position) else {
@@ -825,5 +859,131 @@ mod tests {
             out
         };
         assert_eq!(trace(), trace());
+    }
+}
+
+#[cfg(test)]
+mod glare_buff_tests {
+    use super::*;
+    use crate::genome::{Genome, Species};
+    use crate::simulation::organs::{Organ, Strain};
+    use crate::simulation::tests::{DT, empty_game, spawn};
+
+    fn ready() -> Game {
+        let mut game = empty_game();
+        game.player_invulnerability = 0.0;
+        game.cargo = Cargo {
+            metal: 1000.0,
+            volatiles: 1000.0,
+            crystal: 1000.0,
+            fuel: 1000.0,
+            biomass: 100.0,
+            ..Default::default()
+        };
+        game.loadout.skills.raise(Skill::Symbiosis);
+        game
+    }
+
+    fn faraday(game: &mut Game, level: u8) {
+        for _ in 0..level {
+            game.loadout.organs.acquire(
+                Strain {
+                    organ: Organ::Faraday,
+                    level: 1,
+                    magnitude: 1.0,
+                },
+                &DEFAULT_TUNING,
+            );
+        }
+        game.bench_organ(Organ::Faraday).unwrap();
+    }
+
+    fn texts(game: &Game) -> Vec<String> {
+        game.notices.iter().map(|n| n.text.clone()).collect()
+    }
+
+    #[test]
+    fn a_glare_blinds_the_sonar_for_its_glitch_and_says_so() {
+        let mut game = ready();
+        assert!(!game.sonar_blinded());
+        assert!(game.apply_glitch(1.5, 3));
+        assert!(game.sonar_blinded());
+        assert!(
+            texts(&game)
+                .iter()
+                .any(|t| t.starts_with("GLARE  SONAR BLIND"))
+        );
+        assert!(!game.ping(), "the ring will not go out");
+        assert!(texts(&game).iter().any(|t| t.starts_with("SONAR BLIND")));
+        for _ in 0..(1.6 / DT) as usize {
+            game.step(DT, Input::default());
+        }
+        assert!(!game.sonar_blinded());
+        assert!(game.ping(), "and it comes back when the flash fades");
+    }
+
+    #[test]
+    fn a_sonar_share_of_zero_leaves_the_ping_alone() {
+        let mut game = ready();
+        game.tune_set("glare_sonar_share", 0.0).unwrap();
+        assert!(game.apply_glitch(1.5, 3));
+        assert!(!game.sonar_blinded());
+        assert!(game.ping());
+    }
+
+    #[test]
+    fn faraday_shortens_the_blind_and_level_three_refuses_the_glare() {
+        let mut bare = ready();
+        bare.apply_glitch(2.0, 1);
+        let full = bare.jam.glare_sonar;
+        let mut one = ready();
+        faraday(&mut one, 1);
+        one.apply_glitch(2.0, 1);
+        assert!(
+            one.jam.glare_sonar < full,
+            "{} < {full}",
+            one.jam.glare_sonar
+        );
+        let mut three = ready();
+        faraday(&mut three, 3);
+        assert!(!three.apply_glitch(2.0, 1));
+        assert!(!three.sonar_blinded());
+    }
+
+    #[test]
+    fn a_glare_lights_a_stealthy_ship_in_a_dim_field_for_a_moment() {
+        let dim = Genome {
+            power_params: crate::power::params_for(crate::power::Power::Dim, 5.0, 450.0, 1.0),
+            dim: 0.9,
+            speed: 0.0,
+            cruise: 0.0,
+            ..Genome::default()
+        };
+        let mut game = ready();
+        spawn(&mut game, &Species::of(dim), Vec2::new(0.0, 100.0));
+        assert!(game.dim_notice() > 1.0);
+        assert!(game.apply_glitch(1.0, 2));
+        assert_eq!(game.dim_notice(), 1.0, "the stealth is cancelled");
+        let cancel = game.tune.glare_dim_cancel;
+        for _ in 0..((cancel + 0.2) / DT) as usize {
+            game.update_jam(DT, false);
+        }
+        assert!(game.dim_notice() > 1.0, "and it comes back");
+    }
+
+    #[test]
+    fn faraday_level_two_keeps_every_jam_off_the_hud() {
+        let jam = |level: u8| {
+            let mut game = ready();
+            if level > 0 {
+                faraday(&mut game, level);
+            }
+            game.apply_jam(&[System::Weapons, System::Hud], 1.0);
+            (game.jammed(System::Weapons), game.jammed(System::Hud))
+        };
+        assert_eq!(jam(0), (true, true));
+        assert_eq!(jam(1), (true, true), "level 1 only shortens");
+        assert_eq!(jam(2), (true, false), "level 2 saves the HUD");
+        assert!(!ready().hud_jam_proof());
     }
 }

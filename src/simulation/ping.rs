@@ -311,6 +311,14 @@ impl Game {
         if self.game_over || self.ping.cooldown > 0.0 {
             return false;
         }
+        if self.sonar_blinded() {
+            // A glare's flash: the ring will not go out until it fades (Faraday shortens it).
+            self.notify_once(
+                "SONAR BLIND  A GLARE HAS IT  WAIT, OR FARADAY SHORTENS IT".into(),
+                super::upgrades::Rarity::Common,
+            );
+            return false;
+        }
         self.send_ping(false)
     }
 

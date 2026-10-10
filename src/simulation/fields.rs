@@ -4,11 +4,15 @@
 //! it, and none does damage by itself (a shove is dangerous only beside a hazard).
 //!
 //! - **Repel** (Pushwhale): an outward field out to `reach`; every `period` it
-//!   inhales for `REPEL_INHALE` s (the field reverses mildly: the telegraph) and shoves.
+//!   inhales for `REPEL_INHALE` s (the field reverses mildly: the telegraph) and shoves. The
+//!   shove also flings hostile mines and sigils along the ship's route and throws off worms
+//!   (`repel_fling`).
 //! - **Warp** (Tarbloom): a bubble of radius `reach`. Slow (negative gene) settles bodies
 //!   and shots inside to `1 - WARP_SLOW * s` of their speed, never under `WARP_FLOOR`, and
 //!   stretches creatures' fire cooldowns; haste (positive) runs hostile shots and creatures'
-//!   fire faster. One bubble acts per sector (the lowest id).
+//!   fire faster. One bubble acts per sector (the lowest id). A haste bubble is a support
+//!   power: it is worth something only beside armed kin (the threat model prices that as a
+//!   partner term, `threat::pair_partners`), and it says so when it speeds a gunner.
 //! - **Lens** (Lenswyrm): a pocket well at its head and a bend on shots passing it. The radar
 //!   draws its blip off the truth (`lens_blip`, display only).
 //! - **Devour** (Tidegorger): eats free rocks it touches and grows; strong ones also eat weak
@@ -190,6 +194,43 @@ impl Game {
             state.shove_age = 0.0;
             cues.push(Cue::Shove { at });
             let _ = shoved;
+            self.repel_fling(at, reach, s);
+        }
+    }
+
+    /// A shove's second half (K8, CAPABILITIES row 9): hostile mines and rune sigils inside the
+    /// field are flung along the ship's route, and any worm on a ship inside it is thrown off.
+    /// Nothing here damages by itself: a flung mine still has to arm and be reached, so a dash,
+    /// a shot or a sidestep answers it, and a stock repel in an empty sector is as harmless as
+    /// before. In a maw realm the mines are the delivery.
+    fn repel_fling(&mut self, at: Vec2, reach: f32, s: f32) {
+        let Some((ship, velocity)) = self.player().map(|p| (p.position, p.velocity)) else {
+            return;
+        };
+        let route = ship + velocity * 0.8;
+        let speed = self.tune.repel_fling_speed * s;
+        let mut flung = 0usize;
+        for mine in self.mines.iter_mut().filter(|m| !m.friendly) {
+            let d = mine.position.distance(at);
+            if d >= reach {
+                continue;
+            }
+            let dir = (route - mine.position).normalize_or_zero();
+            mine.velocity += dir * speed * (1.0 - d / reach).sqrt();
+            flung += 1;
+        }
+        if flung > 0 && speed > 0.0 {
+            self.notify_once(
+                "PUSHWHALE FLINGS MINES AT YOUR ROUTE  SHOOT, DASH OR SIDESTEP".into(),
+                upgrades::Rarity::Rare,
+            );
+        }
+        if ship.distance(at) < reach && !self.parasites.latches.is_empty() {
+            self.release_all(power::LATCH_FLING);
+            self.notify_once(
+                "THE SHOVE THREW OFF YOUR HULLWORMS".into(),
+                upgrades::Rarity::Rare,
+            );
         }
     }
 
@@ -246,13 +287,25 @@ impl Game {
             }
         } else {
             let factor = 1.0 + power::WARP_HASTE * s;
+            let mut armed = false;
             for body in self.bodies.iter_mut().filter(|b| b.active && b.id != id) {
                 if body.kind == BodyKind::Creature
                     && !is_fixed(body)
                     && body.position.distance(at) < reach
                 {
                     body.fire_cooldown = (body.fire_cooldown - dt * (factor - 1.0)).max(0.0);
+                    armed |= body.alert && body.genome.weapon != crate::genome::Weapon::None;
                 }
+            }
+            if armed {
+                // The gunner is the point of a haste bubble: say so, once.
+                self.notify_once(
+                    format!(
+                        "TIME BUBBLE  ARMED KIN FIRE {:.0} PERCENT FASTER  FIGHT OUTSIDE THE RIM",
+                        (factor - 1.0) * 100.0
+                    ),
+                    upgrades::Rarity::Common,
+                );
             }
             for bullet in &mut self.bullets {
                 let inside = bullet.position.distance(at) < reach && !bullet.friendly;
@@ -524,6 +577,153 @@ mod tests {
             game.player().unwrap().health >= hull,
             "a shove is not damage"
         );
+    }
+
+    fn hostile_mine(at: Vec2) -> crate::simulation::weapons::Mine {
+        crate::simulation::weapons::Mine {
+            sigil: None,
+            position: at,
+            velocity: Vec2::ZERO,
+            friendly: false,
+            age: 0.0,
+            fuse: None,
+            damage: 20.0,
+            blast: 60.0,
+        }
+    }
+
+    #[test]
+    fn a_shove_flings_hostile_mines_along_the_ships_route_and_leaves_friendly_ones() {
+        let mut game = empty_game();
+        set_player(&mut game, Vec2::new(0.0, 900.0), Vec2::new(60.0, 0.0));
+        let whale = Vec2::new(0.0, 0.0);
+        game.mines.push(hostile_mine(Vec2::new(0.0, 200.0)));
+        let mut own = hostile_mine(Vec2::new(0.0, -200.0));
+        own.friendly = true;
+        game.mines.push(own);
+        game.mines.push(hostile_mine(Vec2::new(0.0, 5000.0)));
+        game.repel_fling(whale, 420.0, 1.0);
+        let flung = &game.mines[0];
+        assert!(
+            flung.velocity.y > 0.0,
+            "toward the ship: {:?}",
+            flung.velocity
+        );
+        assert_eq!(game.mines[1].velocity, Vec2::ZERO, "the ship's own mine");
+        assert_eq!(game.mines[2].velocity, Vec2::ZERO, "out of reach");
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.starts_with("PUSHWHALE FLINGS MINES"))
+        );
+    }
+
+    #[test]
+    fn a_shove_moves_rune_sigils_and_a_stock_whale_in_an_empty_sector_changes_nothing() {
+        let mut game = empty_game();
+        set_player(&mut game, Vec2::new(0.0, 900.0), Vec2::ZERO);
+        let owner = spawn(
+            &mut game,
+            &Species::of(Genome::runekeeper()),
+            Vec2::new(450.0, 0.0),
+        );
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == owner)
+            .unwrap()
+            .pinned = true;
+        let mut sigil = hostile_mine(Vec2::new(0.0, 100.0));
+        sigil.sigil = Some(crate::simulation::rune::Sigil {
+            owner,
+            payload: crate::simulation::rune::Payload::Blast,
+            shot: false,
+            fresh: false,
+        });
+        game.mines.push(sigil);
+        game.repel_fling(Vec2::ZERO, 420.0, 1.0);
+        assert!(game.mines[0].velocity.y > 0.0);
+        let before = game.mines[0].position;
+        game.update_rune_mines(DT);
+        assert!(game.mines[0].position.y > before.y, "the sigil travels");
+        // No mines, no worms: nothing to say and nothing to move.
+        let mut quiet = empty_game();
+        quiet.repel_fling(Vec2::ZERO, 420.0, 1.0);
+        assert!(quiet.notices.is_empty());
+    }
+
+    #[test]
+    fn a_shove_throws_off_worms_on_a_ship_inside_the_field() {
+        let mut game = empty_game();
+        set_player(&mut game, Vec2::new(0.0, 100.0), Vec2::ZERO);
+        let ship = game.player().unwrap().id;
+        let worm = spawn(
+            &mut game,
+            &Species::of(Genome::hullworm()),
+            Vec2::new(0.0, 120.0),
+        );
+        game.bodies.iter_mut().find(|b| b.id == worm).unwrap().latch = Some(ship);
+        game.parasites
+            .latches
+            .push(crate::simulation::parasite::Latch {
+                worm,
+                angle: 0.0,
+                fed: 0.0,
+            });
+        game.repel_fling(Vec2::ZERO, 420.0, 1.0);
+        assert!(game.parasites.latches.is_empty());
+        assert_eq!(game.body(worm).unwrap().latch, None);
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.starts_with("THE SHOVE THREW OFF"))
+        );
+        // A ship outside the field keeps its worm.
+        let mut far = empty_game();
+        set_player(&mut far, Vec2::new(0.0, 2000.0), Vec2::ZERO);
+        let ship = far.player().unwrap().id;
+        let worm = spawn(
+            &mut far,
+            &Species::of(Genome::hullworm()),
+            Vec2::new(0.0, 2020.0),
+        );
+        far.bodies.iter_mut().find(|b| b.id == worm).unwrap().latch = Some(ship);
+        far.parasites
+            .latches
+            .push(crate::simulation::parasite::Latch {
+                worm,
+                angle: 0.0,
+                fed: 0.0,
+            });
+        far.repel_fling(Vec2::ZERO, 420.0, 1.0);
+        assert_eq!(far.parasites.latches.len(), 1);
+    }
+
+    #[test]
+    fn a_haste_bubble_says_so_when_it_speeds_an_armed_gunner_and_a_slow_one_does_not() {
+        for (warp, expect) in [(0.8, true), (-0.8, false)] {
+            let mut game = empty_game();
+            let bubble = Genome {
+                warp,
+                ..still(Genome::tarbloom())
+            };
+            let a = spawn(&mut game, &Species::of(bubble), Vec2::new(0.0, 1000.0));
+            let gunner = Genome {
+                speed: 0.0,
+                cruise: 0.0,
+                weapon: crate::genome::Weapon::Projectile,
+                trigger: crate::genome::Trigger::Sight,
+                sight: 3000.0,
+                lose: 4000.0,
+                ..Genome::default()
+            };
+            let b = spawn(&mut game, &Species::of(gunner), Vec2::new(60.0, 1000.0));
+            run(&mut game, &[a, b], 0.5, |_| {});
+            let said = game
+                .notices
+                .iter()
+                .any(|n| n.text.starts_with("TIME BUBBLE  ARMED KIN"));
+            assert_eq!(said, expect, "warp {warp}");
+        }
     }
 
     #[test]
@@ -860,6 +1060,51 @@ mod swarm_tests {
         assert!((share - density).abs() < 0.12, "{share} vs {density}");
         let hull = game.bodies.iter().find(|b| b.id == id).unwrap().health;
         assert_eq!(hull, g.hull, "shots off the core never hurt the hull");
+    }
+
+    #[test]
+    fn a_swarm_swallows_needles_more_often_than_pellets() {
+        let share_of = |profile: Option<crate::simulation::arsenal::Profile>| {
+            let mut game = empty_game();
+            let id = spawn(&mut game, &Species::of(murmur()), Vec2::new(0.0, 1000.0));
+            let mut absorbed = 0;
+            for k in 0..300 {
+                game.bodies
+                    .retain(|b| b.kind == BodyKind::Player || b.id == id);
+                game.bullets.clear();
+                let y = 1030.0 + (k % 7) as f32 * 0.37;
+                let mut bullet = Bullet::friendly(
+                    Vec2::new(-90.0 + (k % 5) as f32 * 0.21, y),
+                    Vec2::new(900.0, 0.0),
+                    1.0,
+                );
+                bullet.profile = profile;
+                game.bullets.push(bullet);
+                for _ in 0..12 {
+                    game.step(DT, Input::default());
+                }
+                if !game
+                    .bullets
+                    .iter()
+                    .any(|b| b.friendly && b.position.x > 80.0)
+                {
+                    absorbed += 1;
+                }
+            }
+            (absorbed as f32 / 300.0, game)
+        };
+        let density = power::cloud_density(&murmur());
+        let (stock, _) = share_of(Some(crate::simulation::arsenal::Profile::Stock));
+        let (needles, game) = share_of(Some(crate::simulation::arsenal::Profile::Needles));
+        let want = (density * game.tune.cloud_needle_density).min(0.95);
+        assert!((stock - density).abs() < 0.12, "{stock} vs {density}");
+        assert!((needles - want).abs() < 0.12, "{needles} vs {want}");
+        assert!(needles > stock + 0.1, "{needles} against {stock}");
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.starts_with("NEEDLES SNAG IN THE SWARM"))
+        );
     }
 
     #[test]

@@ -504,6 +504,7 @@ pub fn ship_tier(loadout: &Loadout, power: f32) -> Tier {
         cover,
         parry: share(Skill::Parry),
         dash: share(Skill::Dash),
+        needle: loadout.arsenal.active.family() == crate::simulation::arsenal::Family::Needle,
     }
 }
 

@@ -3,7 +3,10 @@
 //! is not alert, fires nothing, and is left off the guide arrows, the radar and the pressure
 //! count. It shows itself (a crack and a `MIMIC_TELL` second tell, then it hunts) when the ship
 //! comes within `MIMIC_REVEAL` of its reach, when it is hurt, or when the ship has idled near
-//! it for `MIMIC_IDLE` seconds. Nothing about the disguise persists: it is a state of the
+//! it for `MIMIC_IDLE` seconds. A cracked mimic that dies leaves the bait it posed as (K8,
+//! CAPABILITIES row 5): a lure pays a part of luck `mimic_lure_luck`, a rock pays its metal
+//! (`mimic_rock_yield`), so learning to read the bait is worth a detour, and the guide arrows,
+//! radar and sonar lodes (which are only ever real stone) stay honest. Nothing about the disguise persists: it is a state of the
 //! live body, and a body that unloads is a fresh disguise.
 
 use super::powers::PowerState;
@@ -36,6 +39,34 @@ impl Game {
         } else {
             Disguise::Rock
         })
+    }
+
+    /// What a dead mimic leaves besides its ordinary drops: the bait it posed as. Drawn from
+    /// `rng` last, so no other drop of the body moves. None for anything but a mimic.
+    pub(super) fn mimic_bait(
+        &mut self,
+        body: &Body,
+        rng: &mut Rng,
+        params: crate::world::SectorParams,
+    ) -> Option<Item> {
+        if body.kind != BodyKind::Creature || !Power::Mimic.active(&body.genome) || body.follower {
+            return None;
+        }
+        let item = if body.genome.mimic >= power::MIMIC_LURE {
+            let mut source = upgrades::Source::of_creature(&body.genome, body.genes.threat, params);
+            source.bias = self.tune.mimic_lure_luck;
+            Item::Part(upgrades::roll_part(rng, &source))
+        } else {
+            Item::Material(
+                Material::Metal,
+                self.tune.mimic_rock_yield * body.genes.threat.max(1.0).sqrt(),
+            )
+        };
+        self.notify_once(
+            "THE BAIT WAS REAL  A LUREFISH LEAVES WHAT IT POSED AS".into(),
+            upgrades::Rarity::Rare,
+        );
+        Some(item)
     }
 
     /// A cracking mimic: 0 to 1 over the tell (zero when not revealing).
@@ -271,5 +302,51 @@ mod tests {
         );
         run(&mut game, &[lure], 1.5, |_| {});
         assert!(game.body(lure).unwrap().velocity.length() <= power::MIMIC_LURE_DRIFT + 1e-3);
+    }
+
+    #[test]
+    fn a_dead_mimic_leaves_the_bait_it_posed_as_and_says_so() {
+        for (mimic, lure) in [(0.5, false), (0.8, true)] {
+            let mut game = empty_game();
+            let id = spawn(
+                &mut game,
+                &Species::of(lurefish(mimic)),
+                Vec2::new(0.0, 700.0),
+            );
+            let body = game.body(id).unwrap().clone();
+            game.pickups.clear();
+            game.drop_loot(&body);
+            let items: Vec<&Item> = game.pickups.iter().map(|p| &p.item).collect();
+            if lure {
+                assert!(
+                    items.iter().any(|i| matches!(i, Item::Part(_))),
+                    "a lure pays a part: {items:?}"
+                );
+            } else {
+                assert!(
+                    items
+                        .iter()
+                        .any(|i| matches!(i, Item::Material(Material::Metal, a) if *a >= game.tune.mimic_rock_yield)),
+                    "a rock pays its metal: {items:?}"
+                );
+            }
+            assert!(
+                game.notices
+                    .iter()
+                    .any(|n| n.text.starts_with("THE BAIT WAS REAL"))
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_but_a_mimic_leaves_bait() {
+        let mut game = empty_game();
+        let mut plain = lurefish(0.5);
+        plain.mimic = 0.0;
+        let id = spawn(&mut game, &Species::of(plain), Vec2::new(0.0, 700.0));
+        let body = game.body(id).unwrap().clone();
+        let mut rng = Rng::new(1);
+        let params = world::latent(game.seed(), SectorId::containing(body.position));
+        assert!(game.mimic_bait(&body, &mut rng, params).is_none());
     }
 }

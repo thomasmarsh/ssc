@@ -207,6 +207,9 @@ impl Game {
                 mine.sigil.as_mut().unwrap().fresh = false;
                 continue;
             }
+            // A sigil sits still unless something throws it (a pushwhale's shove).
+            mine.velocity *= (-1.4 * dt).exp();
+            mine.position += mine.velocity * dt;
             mine.age += dt;
             mine.fuse =
                 (mine.age < self.tune.rune_arm).then_some((self.tune.rune_arm - mine.age).max(0.0));

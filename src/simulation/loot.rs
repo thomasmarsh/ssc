@@ -339,6 +339,8 @@ impl Game {
                 // A grazer's gut may hold seeds of what it eats (drawn after everything else,
                 // so no other drop of this body moves).
                 drops.extend(self.gut_seed(body, &mut rng));
+                // A mimic leaves the bait it posed as (drawn last: no other drop moves).
+                drops.extend(self.mimic_bait(body, &mut rng, params));
             }
             // Geological rocks pay only their finite remaining lode through shattering/mining.
             // They never contain technological charges or bonus material beyond that budget.
