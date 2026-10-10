@@ -407,6 +407,7 @@ The design behind it is [FLOW.md](FLOW.md); the bindings are the README's table.
 ## Charting, renewables and beacons (built)
 
 - Which planetoids regrow is a pure hash of the spawn key (`mining::renewable`, about a third); the sonar's lode tier and the star map mark them, so a place worth returning to is readable from generation alone. Regrowth is game-time driven and persists through unloading (`Game::mined` plus a timestamp).
+- The in-game chart uses a zoomable visual sector grid with geometric markers, click selection, and a scrolling detail sidebar. Its sector tints come from `backdrop_at`, sharing the nebula and sector-map ecology palette. Planetoids/lodes and discovered civilization centers, wall segments and turrets use actual world positions and radii, with equal scale on both axes. Only learned sites expose geometry; destroyed pieces are omitted. Text uses the shared panel sizes and colors. Six scales span 1×1 to 25×19 sectors; mouse wheel, +/− buttons/keys, and controller L2/R2 zoom, arrows/stick pan, and Z recenters on the ship. Uncharted sectors stay dark, and only remembered sites are marked. Travel and supply-network expansion can build on this view; inter-pad route management remains TODO.
 - The chart keeps what the ship has learned (a visit reveals everything but the predator count, a ping reveals what answered); beacons are the player's own persistent points and the only fast-travel targets. Neither changes generation.
 
 ## Legacy and wrecks (retained data)

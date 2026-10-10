@@ -64,15 +64,10 @@ pub struct SummaryPanel;
 pub struct SummaryLine(usize);
 const SUMMARY_LINES: usize = 30;
 
-/// The star map: a panel with a title, a grid of sectors (one span each) and a detail block.
+/// Selected-sector details used by the visual chart's sidebar.
 #[derive(Component)]
-pub struct ChartPanel;
-#[derive(Component)]
-pub struct ChartSpan(usize);
-const CHART_COLS: i32 = 11;
-const CHART_ROWS: i32 = 9;
-const CHART_DETAIL: usize = 12;
-const CHART_SPANS: usize = 1 + (CHART_COLS * CHART_ROWS) as usize + CHART_DETAIL;
+pub struct ChartSpan(pub(crate) usize);
+const CHART_DETAIL: usize = 16;
 pub(crate) const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
 const FEED_LINES: usize = 5;
@@ -381,43 +376,6 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                         SummaryLine(line),
                         TextSpan::new(""),
                         TextFont::from_font_size(14.0),
-                        TextColor(MUTED),
-                    ));
-                }
-            });
-        });
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(70),
-                justify_content: JustifyContent::Center,
-                display: Display::None,
-                ..default()
-            },
-            ChartPanel,
-            GlobalZIndex(20),
-        ))
-        .with_children(|row| {
-            row.spawn((
-                Node {
-                    padding: UiRect::axes(px(26), px(16)),
-                    border: UiRect::all(px(1)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.012, 0.022, 0.045)),
-                BorderColor::all(Color::srgba(0.28, 0.94, 0.92, 0.45)),
-                Text::new(""),
-                TextFont::from_font_size(15.0),
-            ))
-            .with_children(|panel| {
-                for n in 0..CHART_SPANS {
-                    panel.spawn((
-                        ChartSpan(n),
-                        TextSpan::new(""),
-                        TextFont::from_font_size(15.0),
                         TextColor(MUTED),
                     ));
                 }
@@ -1554,8 +1512,7 @@ pub fn update_summary(
     }
 }
 
-/// The star map's lines: a title, the grid (a span per sector, a line break after each row's
-/// last) and the details of the cursor's sector.
+/// Details for the selected sector; the map itself is drawn by `chartview`.
 fn chart_lines(session: &Session) -> Vec<(String, Color)> {
     let game = &session.game;
     let Some(cursor) = session.chart else {
@@ -1563,64 +1520,7 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
     };
     let entries = game.chart_entries();
     let find = |id: SectorId| entries.iter().find(|e| e.sector == id);
-    let here = game.sector();
     let light = Color::srgb(0.82, 0.88, 0.95);
-    let mut out: Vec<(String, Color)> = Vec::with_capacity(CHART_SPANS);
-    out.push((
-        format!(
-            "STAR MAP   sector ({}, {})   north is up\n\n",
-            cursor.sector.x, cursor.sector.y
-        ),
-        CYAN,
-    ));
-    let half = (CHART_COLS / 2, CHART_ROWS / 2);
-    for row in 0..CHART_ROWS {
-        for col in 0..CHART_COLS {
-            let id = SectorId {
-                x: cursor.sector.x + col - half.0,
-                y: cursor.sector.y + half.1 - row,
-            };
-            let entry = find(id);
-            let ship = id == here;
-            let glyphs = match entry {
-                Some(e) => {
-                    let g = e.glyphs(ship);
-                    if g.trim().is_empty() {
-                        "  :  ".to_string()
-                    } else {
-                        g
-                    }
-                }
-                None if ship => "    @".to_string(),
-                None => "  .  ".to_string(),
-            };
-            let at_cursor = id == cursor.sector;
-            let text = if at_cursor {
-                format!("[{glyphs}]")
-            } else {
-                format!(" {glyphs} ")
-            };
-            let color = if at_cursor {
-                CYAN
-            } else if let Some(c) = entry.and_then(|e| e.civ) {
-                lifted(Some(c.tint))
-            } else if entry.is_some_and(|e| e.wreck) {
-                DRY_RED
-            } else if entry.is_some_and(|e| e.pin.is_some()) {
-                AMBER
-            } else if entry.is_some_and(|e| e.renewable > 0 || e.lodes > 0) {
-                Color::srgb(0.95, 0.8, 0.5)
-            } else if ship {
-                PAD_GREEN
-            } else if entry.is_some() {
-                light
-            } else {
-                MUTED
-            };
-            let tail = if col == CHART_COLS - 1 { "\n" } else { "" };
-            out.push((format!("{text}{tail}"), color));
-        }
-    }
     let mut detail: Vec<(String, Color)> = Vec::new();
     let depth = ssc::world::latent(game.seed(), cursor.sector).depth;
     let entry = find(cursor.sector);
@@ -1675,7 +1575,7 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
             };
             detail.push((
                 format!(
-                    "C/F civilization {what}  threat {}{regard}{fallen}\n",
+                    "Civilization {what}  threat {}{regard}{fallen}\n",
                     c.threat.label()
                 ),
                 lifted(Some(c.tint)),
@@ -1684,7 +1584,7 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
         if e.relics > 0 || e.dynamic_wells > 0 {
             let mut discoveries = Vec::new();
             if e.relics > 0 {
-                discoveries.push(format!("h sealed organs {}", e.relics));
+                discoveries.push(format!("Sealed organs {}", e.relics));
             }
             if e.dynamic_wells > 0 {
                 let modes = e
@@ -1694,7 +1594,7 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 discoveries.push(format!(
-                    "~ well anchors {} ({modes}); positions change, rescan nearby",
+                    "Well anchors {} ({modes}); positions change, rescan nearby",
                     e.dynamic_wells
                 ));
             }
@@ -1702,13 +1602,13 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
         }
         let mut res = Vec::new();
         if e.planetoids > 0 {
-            res.push(format!("o planetoids {}", e.planetoids));
+            res.push(format!("Planetoids {}", e.planetoids));
         }
         if e.renewable > 0 {
-            res.push(format!("R regrowing {}", e.renewable));
+            res.push(format!("Renewable {}", e.renewable));
         }
         if e.lodes > 0 {
-            res.push(format!("* rich lodes {}", e.lodes));
+            res.push(format!("Rich lodes {}", e.lodes));
         }
         if !res.is_empty() {
             detail.push((
@@ -1718,29 +1618,29 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
         }
         let mut life = Vec::new();
         if let Some(n) = e.predators {
-            life.push(format!("1-9 predators {n}"));
+            life.push(format!("Predators {n}"));
         }
         if e.nests > 0 {
-            life.push(format!("n nests {}", e.nests));
+            life.push(format!("Nests {}", e.nests));
         }
         if e.eggs > 0 {
-            life.push(format!("e eggs {}", e.eggs));
+            life.push(format!("Eggs {}", e.eggs));
         }
         if !life.is_empty() {
             detail.push((format!("{}\n", life.join("   ")), DRY_RED));
         }
         let mut works = Vec::new();
         if e.pads > 0 {
-            works.push(format!("^ pads {}", e.pads));
+            works.push(format!("Pads {}", e.pads));
         }
         if e.beacons > 0 {
-            works.push(format!("B beacons {}", e.beacons));
+            works.push(format!("Beacons {}", e.beacons));
         }
         if e.wreck {
-            works.push("W your wreck".to_string());
+            works.push("Your wreck".to_string());
         }
         if let Some(pin) = e.pin {
-            works.push(format!("! {}", pin.label()));
+            works.push(format!("Pin: {}", pin.label()));
         }
         if !works.is_empty() {
             detail.push((format!("{}\n", works.join("   ")), PAD_GREEN));
@@ -1794,33 +1694,16 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
         "Z ship   R recall beacon   H deploy beacon   J jump   G closes\n".into(),
         MUTED,
     ));
-    detail.push((
-        "C civ  o planetoid  R regrowing  * lode  h sealed organ  ~ well anchor\n n nest  e eggs  1-9 predators\n".into(),
-        MUTED,
-    ));
-    detail.push((
-        "^ pad  B beacon  ! pin  W wreck  @ ship  . unknown  : empty\n".into(),
-        MUTED,
-    ));
+
     detail.truncate(CHART_DETAIL);
-    out.extend(detail);
-    out
+    detail
 }
 
 pub fn update_chart(
     session: Res<Session>,
-    mut panel: Single<&mut Node, With<ChartPanel>>,
     mut spans: Query<(&mut TextSpan, &mut TextColor, &ChartSpan)>,
 ) {
     let lines = chart_lines(&session);
-    let display = if lines.is_empty() {
-        Display::None
-    } else {
-        Display::Flex
-    };
-    if panel.display != display {
-        panel.display = display;
-    }
     for (mut span, mut color, line) in &mut spans {
         match lines.get(line.0) {
             Some((text, tint)) => {

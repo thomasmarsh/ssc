@@ -37,7 +37,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 - `SSC_ABILITIES=1`: unlock parry and dash and use the dash, so the rings are cooling.
 - `SSC_JAM=emp|confuse|glitch|hud`: jam the ship just before capture (dash and parry owned so their rings show).
 - `SSC_PING=1`: ping once at frame 20 (ring and echo markers).
-- `SSC_CHART=1`: buy sonar tiers and a beacon, drop a beacon and a pin, ping, and open the star map at frame 90.
+- `SSC_CHART=1`: buy sonar tiers and a beacon, drop a beacon and a pin, ping, and open the star map at frame 90. `SSC_CHART_ZOOM=0|1|2|3|4|5` selects a visual-map scale for layout checks (default 3; 0 is a single sector). `SSC_CHART_FOCUS=home|civ` selects HOME or a discovered capital for geometry checks.
 - `SSC_SUMMARY=over|death`: stage a run with a few extirpations and show its summary panel.
 - `SSC_KILL=1`: destroy the nearest three creatures just before capture (floating scores, kill rings).
 - `SSC_ELECTROLYSIS=1`: stage 20 ship water and empty fuel, then hold the real brake + mine input; conversion status appears above the ship.

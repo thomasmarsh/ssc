@@ -86,7 +86,8 @@ pub use brain::Brain;
 pub use breakup::Pool;
 pub use chain::{Chain, Part};
 pub use chart::{
-    Beacon, BeaconError, ChartEntry, CivReading, PinLabel, Threat, Travel, TravelError, TravelQuote,
+    Beacon, BeaconError, ChartEntry, ChartGeometry, ChartGeometryKind, CivReading, PinLabel,
+    Threat, Travel, TravelError, TravelQuote,
 };
 pub use civ::{CIV_CAP, Raid, RaidStage, TerritoryReport, verdict};
 pub use civmine::Cache;

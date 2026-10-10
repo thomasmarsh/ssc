@@ -161,6 +161,26 @@ pub struct ChartEntry {
     pub wreck: bool,
 }
 
+/// Discovered fixed geometry for a spatial chart. Coordinates and radii are world units.
+/// No generation is exposed until its particular site has been learned.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChartGeometry {
+    pub position: Vec2,
+    pub radius: f32,
+    pub kind: ChartGeometryKind,
+    pub tint: [f32; 3],
+    pub renewable: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChartGeometryKind {
+    Planetoid,
+    Lode,
+    Center,
+    Wall,
+    Turret,
+}
+
 impl ChartEntry {
     /// Five characters that sum the sector up for the chart: a civilization (C outpost, F
     /// capital, x fallen), the best resource (h sealed organ, R renewable, * lode, o planetoid),
@@ -544,6 +564,105 @@ impl Game {
         out.into_values().collect()
     }
 
+    /// Literal geometry of remembered planetoids, lodes and civilization sites. A known
+    /// seat reveals its surrounding fixed defenses, but never a different undiscovered seat.
+    /// Destroyed pieces are omitted; loaded geometry uses the body's current position/size.
+    pub fn chart_geometry(&self, id: SectorId) -> Vec<ChartGeometry> {
+        let Some(known) = self.chart.known.get(&id) else {
+            return Vec::new();
+        };
+        let spawns = world::generate(self.seed, id);
+        let seats: Vec<_> = spawns
+            .iter()
+            .filter(|s| {
+                s.civ.is_some_and(|c| {
+                    matches!(
+                        c.role,
+                        crate::territory::CivRole::Capital | crate::territory::CivRole::Outpost
+                    )
+                })
+            })
+            .collect();
+        let remembered = |kind, at| known.marks.contains_key(&key_of(kind, at));
+        let seat_known = |s: &world::Spawn| {
+            remembered(EchoKind::Civilization, s.position)
+                || remembered(EchoKind::Fortress, s.position)
+        };
+        spawns
+            .iter()
+            .filter_map(|spawn| {
+                if self
+                    .fallen
+                    .get(&id)
+                    .is_some_and(|f| f.contains(&spawn.index))
+                {
+                    return None;
+                }
+                let (kind, tint, renewable) = if spawn.rock == world::RockKind::Planetoid {
+                    if !remembered(EchoKind::Planetoid, spawn.position)
+                        && !remembered(EchoKind::Lode, spawn.position)
+                    {
+                        return None;
+                    }
+                    (
+                        ChartGeometryKind::Planetoid,
+                        crate::backdrop::ROCK,
+                        renewable(self.seed, (id, spawn.index)),
+                    )
+                } else if let Some(civ) = spawn.civ {
+                    let kind = match civ.role {
+                        crate::territory::CivRole::Capital | crate::territory::CivRole::Outpost => {
+                            ChartGeometryKind::Center
+                        }
+                        crate::territory::CivRole::Wall => ChartGeometryKind::Wall,
+                        crate::territory::CivRole::Turret => ChartGeometryKind::Turret,
+                        _ => return None,
+                    };
+                    let seat = seats
+                        .iter()
+                        .filter(|s| s.civ.is_some_and(|c| c.territory == civ.territory))
+                        .min_by(|a, b| {
+                            a.position
+                                .distance_squared(spawn.position)
+                                .total_cmp(&b.position.distance_squared(spawn.position))
+                        })?;
+                    if !seat_known(seat) {
+                        return None;
+                    }
+                    (
+                        kind,
+                        world::territory(self.seed, id)?.color(self.seed),
+                        false,
+                    )
+                } else if spawn.kind == BodyKind::Asteroid
+                    && remembered(EchoKind::Lode, spawn.position)
+                {
+                    (ChartGeometryKind::Lode, crate::backdrop::ROCK, false)
+                } else {
+                    return None;
+                };
+                let live = self
+                    .bodies
+                    .iter()
+                    .find(|b| b.origin == Some((id, spawn.index)));
+                Some(ChartGeometry {
+                    kind,
+                    tint,
+                    renewable,
+                    position: live.map_or(spawn.position, |b| b.position),
+                    radius: live.map_or(
+                        spawn.radius.unwrap_or(if spawn.kind == BodyKind::Base {
+                            crate::fortress::BASE_RADIUS
+                        } else {
+                            35.0
+                        }),
+                        |b| b.radius,
+                    ),
+                })
+            })
+            .collect()
+    }
+
     // ---- pins ------------------------------------------------------------------------------
 
     /// Pins a sector with a preset note, replacing any note there. Refused at the pin cap.
@@ -830,6 +949,81 @@ impl Game {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chart_geometry_requires_the_particular_site_and_preserves_planetoid_dimensions() {
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        let id = SectorId::ORIGIN;
+        game.chart.known.clear();
+        game.chart_pin(id, PinLabel::Camp);
+        assert!(
+            game.chart_geometry(id).is_empty(),
+            "pins cannot reveal geometry"
+        );
+        let planet = world::generate(game.seed, id)
+            .into_iter()
+            .find(|s| s.rock == world::RockKind::Planetoid)
+            .unwrap();
+        game.learn(Mark {
+            kind: EchoKind::Planetoid,
+            position: planet.position,
+            weight: 0,
+            renewable: false,
+            territory: None,
+            well_mode: None,
+        });
+        let sites = game.chart_geometry(id);
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].position, planet.position);
+        assert_eq!(sites[0].radius, planet.radius.unwrap());
+        assert_eq!(sites[0].kind, ChartGeometryKind::Planetoid);
+    }
+
+    #[test]
+    fn chart_geometry_shows_discovered_fortress_pieces_and_omits_destroyed_ones() {
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        let t = (-30..30)
+            .flat_map(|x| (-30..30).map(move |y| SectorId { x, y }))
+            .filter_map(|id| world::territory(game.seed, id).filter(|t| t.capital == id))
+            .find(|t| t.capital != crate::territory::outpost(game.seed).capital)
+            .unwrap();
+        let spawns = world::generate(game.seed, t.capital);
+        let walls: Vec<_> = spawns
+            .iter()
+            .filter(|s| {
+                s.civ
+                    .is_some_and(|c| c.role == crate::territory::CivRole::Wall)
+            })
+            .collect();
+        assert!(!walls.is_empty());
+        assert!(game.chart_geometry(t.capital).is_empty());
+        game.chart_reveal(t.capital, true);
+        let sites = game.chart_geometry(t.capital);
+        assert_eq!(
+            sites
+                .iter()
+                .filter(|s| s.kind == ChartGeometryKind::Wall)
+                .count(),
+            walls.len()
+        );
+        for wall in &walls {
+            assert!(
+                sites
+                    .iter()
+                    .any(|s| s.position == wall.position && s.radius == wall.radius.unwrap())
+            );
+        }
+        game.fallen
+            .entry(t.capital)
+            .or_default()
+            .insert(walls[0].index);
+        assert!(
+            !game
+                .chart_geometry(t.capital)
+                .iter()
+                .any(|s| s.kind == ChartGeometryKind::Wall && s.position == walls[0].position)
+        );
+    }
+
     #[test]
     fn fleet_destinations_deduplicate_echo_kinds_and_require_local_known_planetoids() {
         let mut game = Game::new(crate::config::MASTER_SEED);

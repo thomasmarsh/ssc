@@ -1,6 +1,7 @@
 mod audio;
 mod autosave;
 mod bestiaryview;
+mod chartview;
 mod devpanel;
 mod flockview;
 mod glitchview;
@@ -155,6 +156,8 @@ impl RenderStyle {
 pub struct ChartCursor {
     pub sector: SectorId,
     pub label: PinLabel,
+    pub center: SectorId,
+    pub zoom: usize,
 }
 
 #[derive(Resource)]
@@ -307,6 +310,7 @@ fn main() {
                 titlemenu::setup,
                 devpanel::setup,
                 nebula::setup,
+                chartview::setup,
                 bestiaryview::setup,
                 audio::setup,
             ),
@@ -336,7 +340,12 @@ fn main() {
                 titlemenu::update,
                 devpanel::update,
                 presentation::update_summary,
-                presentation::update_chart,
+                (
+                    chartview::update,
+                    chartview::update_geometry,
+                    presentation::update_chart,
+                )
+                    .chain(),
                 smoke_run,
             )
                 .chain(),
@@ -470,6 +479,8 @@ fn controls(
             None => Some(ChartCursor {
                 sector: session.game.sector(),
                 label: PinLabel::Danger,
+                center: session.game.sector(),
+                zoom: 3,
             }),
         };
     }
@@ -859,8 +870,12 @@ fn chart_controls(
     }
     cursor.sector.x += dx;
     cursor.sector.y += dy;
+    if dx != 0 || dy != 0 {
+        cursor.center = cursor.sector;
+    }
     if keys.just_pressed(KeyCode::KeyZ) {
         cursor.sector = session.game.sector();
+        cursor.center = cursor.sector;
     }
     if keys.just_pressed(KeyCode::BracketRight) || pad(GamepadButton::RightTrigger) {
         cursor.label = cursor.label.step(1);
@@ -2000,15 +2015,38 @@ fn smoke_chart(session: &mut Session, frame: u32) {
             let _ = game.deploy_beacon();
             game.chart_pin(ssc::world::SectorId { x: 1, y: 1 }, PinLabel::Camp);
             game.chart_pin(ssc::world::SectorId { x: -2, y: 0 }, PinLabel::Danger);
-            game.teleport(Vec2::new(4.0 * SECTOR_SIZE, 2.0 * SECTOR_SIZE));
+            let focus = std::env::var("SSC_CHART_FOCUS").unwrap_or_default();
+            let target = if focus == "civ" {
+                (-30..30)
+                    .flat_map(|x| (-30..30).map(move |y| SectorId { x, y }))
+                    .filter_map(|id| {
+                        ssc::world::territory(game.seed(), id).filter(|t| t.capital == id)
+                    })
+                    .find(|t| t.capital != ssc::territory::outpost(game.seed()).capital)
+                    .map_or(Vec2::ZERO, |t| t.capital.center())
+            } else {
+                Vec2::new(4.0 * SECTOR_SIZE, 2.0 * SECTOR_SIZE)
+            };
+            game.teleport(target);
         }
         20 => {
             game.ping();
         }
         90 => {
+            let focus = match std::env::var("SSC_CHART_FOCUS").as_deref() {
+                Ok("home") => SectorId::ORIGIN,
+                Ok("civ") => game.sector(),
+                _ => SectorId { x: 2, y: 1 },
+            };
             session.chart = Some(ChartCursor {
-                sector: ssc::world::SectorId { x: 2, y: 1 },
+                sector: focus,
                 label: PinLabel::Camp,
+                center: focus,
+                zoom: std::env::var("SSC_CHART_ZOOM")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(3)
+                    .min(5),
             });
         }
         _ => {}
