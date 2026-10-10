@@ -1,8 +1,20 @@
 # Playtest checklist
 
-What a human needs to check, with the knob behind each question. Nothing here has been played; every number is a first guess. Answer in terms of feel ("too many", "too fast"), not values; the knob column says what to change. Add a section per feature as it lands. When DEVTOOLS phase B/C exist, register these knobs there first.
+What a human needs to check, with the knob behind each question. The combat observations below are player reports; the other checks remain pending unless explicitly recorded. Balance numbers remain provisional. Answer in terms of feel ("too many", "too fast"), not values; the knob column says what to change. Add a section per feature as it lands. When DEVTOOLS phase B/C exist, register these knobs there first.
 
 How to get there: elders are rare and deep (past ring 3). Fly out with `SSC_DEV=1`, or use `SSC_TELEPORT` (world units, 6000 per sector). `TODO:` the sector map does not mark hosted elders yet; adding that would save the search.
+
+## Combat observations (2026-10-10)
+
+Reported by the player; these have not yet been reproduced or resolved through balance changes. Future combat ideas and follow-ups live in [ROADMAP.md](ROADMAP.md#future-combat-ideas-2026-10-10-todo).
+
+- **Nails and spread shots feel too powerful.** One option is to nerf their starting strength and let upgrades earn that power over time. Another is to keep them powerful but too expensive for extended use. They already consume resources quickly, which may make the current strength acceptable. Follow-up: compare early and upgraded performance over a whole expedition, including resource depletion, rather than judging damage alone.
+- **Red nails/flechettes appear too early.** Some enemies within seven rings of HOME have devastating red nail/flechette attacks. That is too soon for this kind of enemy threat. Follow-up: record encounter depth and attack pattern, then revisit introduction depth and/or early attack strength against starter defenses.
+- **Apex elders are too easy to kite.** Their attacks do not vary enough in the reported fights: drift backward while firing the stock gun and the elder follows, slowly losing health. It is slow but effective. Follow-up: repeat that strategy against different elders and check whether attack changes or closing moves require the player to react instead of merely extending the fight.
+- **Enemies behave like dumb arcade enemies.** More capable enemies should be aware of projectiles and attacks and start dodging. This should be selective, with especially simple wildlife remaining dumb. Follow-up: check whether aware enemies make readable evasive choices while leaving attacks possible to land.
+- **Wildlife attacks should feel naturalistic.** Wildlife probably should not have high technology attacks. Follow-up: review attack behavior and visuals for biological/physical explanations, with high technology reserved for civilizations and engineered actors.
+
+The multi-weapon controls, dash variants, decoys/flares, proximity risk, and possible lasers in the roadmap are future proposals, not built features ready to check here.
 
 ## Nested creatures (workstream 7)
 

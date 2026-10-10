@@ -46,6 +46,20 @@ The older proposals for three permanent materials, universal raw-only advanced p
 
 Current priority is E2a authorization/history after the built E2p foundation, before remaining F/G. Broader fleet targeting reuses that authorization; routes and later trade reuse the same actor/profile rules. E2b/E2c need the foundation but may advance before G; full H1 requires G and actual demand. Implement a narrow complete loop before adding every recipe, organ, mission template, or market rule. GAME_LOOP section 13 lists each slice's dependencies and acceptance gate. Human playtesting follows each milestone; numbers remain first guesses.
 
+## Future combat ideas (2026-10-10, TODO)
+
+These are eventual ideas to explore, not implemented behavior or the next ordered milestone. [PLAYTEST.md](PLAYTEST.md#combat-observations-2026-10-10) records the player observations behind the balance work. Costs, unlocks, combinations, and tuning remain open.
+
+- TODO: **Independently enable/disable weapons.** Allow several weapons to be active at once, with greater combined resource drain. Explore synergistic effects between active weapons so combinations offer interesting choices alongside their costs.
+- TODO: **Dash consequences, as separate options.** Explore a dash that pushes enemies on contact; a dash that creates a shockwave; a dash that leaves a harmful remnant trail; and a dash that produces an EMP blast. Treat these as separate candidate variants/upgrades, rather than giving every dash all effects. Decide their resource costs, duration/reach, and interactions through playtesting.
+- TODO: **Decoys and flares.** Explore deploying decoys or flares while being chased or targeted to divert pursuit or incoming attacks. Which threats each can fool, and for how long, remain design questions.
+- TODO: **Proximity-based damage with personal risk.** Some weapons/attacks should hurt enemies more at close range while also hurting the player more. Make distance a deliberate risk/reward choice; the damage curve and self-damage behavior remain open.
+- TODO: **Lasers?** Explore whether a laser weapon adds a useful distinct attack style. Beam behavior, resource cost, and interactions are undecided.
+- TODO: **Nails/spread-shot balance and early threat pacing.** Compare weaker starting profiles that gain strength through upgrades with powerful profiles whose resource costs prevent extended use. Current high drain may already justify their strength; do not assume a damage nerf is the only answer. Revisit devastating red nail/flechette enemy attacks encountered within seven rings of HOME, which appear too early for that threat.
+- TODO: **Apex elder attack variety.** Address the reported stock-gun/backward-drift strategy that slowly but safely wears down a following elder. Review attack variety and responses to sustained kiting; existing closers/barrages do not establish that the fight works by feel.
+- TODO: **Selective attack awareness and dodging.** More capable enemies should notice projectiles and attacks and evade them, rather than all behaving like simple arcade pursuers. Do not give every enemy this awareness; especially simple wildlife can remain dumb. This does not change the rule that learning belongs to civilizations alone.
+- TODO: **Naturalistic wildlife attacks.** Wildlife should use biologically or physically grounded attacks rather than high technology weapons. Review current attack mechanics and presentation against that direction; engineered high technology attacks belong to civilizations and engineered actors.
+
 ## Existing backlog alongside the loop
 
 - TODO: human playtests of early progression, civilization contact, realm counters, and deep-space combat; [PLAYTEST.md](PLAYTEST.md).
