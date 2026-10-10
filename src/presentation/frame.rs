@@ -1,5 +1,19 @@
 //! Per-frame gizmo draw system.
-use super::*;
+use super::draw_overlay::{draw_backdrop, draw_guides, draw_radar};
+use super::draw_ship::{
+    draw_beam, draw_boost, draw_dash, draw_echoes, draw_parry, draw_rig, draw_sigil,
+};
+use super::draw_world::{
+    PlantCache, body_color, body_draw_extent, draw_beacons, draw_cache, draw_creature, draw_pad,
+    draw_pickup, draw_plants, draw_resistance, draw_rock, draw_roots, draw_station, draw_symbiosis,
+    draw_turret, draw_walls, draw_wrecks,
+};
+use super::{APEX_ENRAGED, APEX_GOLD, CYAN, MUTED, PAD_AMBER, PAD_GREEN, RADAR_RADIUS, lifted};
+use crate::Session;
+use bevy::prelude::*;
+use ssc::simulation::upgrades::Item;
+use ssc::simulation::{BodyKind, EffectKind, Game, Pickup, Shape, TetherKind};
+use ssc::world::RockKind;
 
 /// Everything the layer functions read from the frame setup.
 #[derive(Clone, Copy)]
@@ -13,7 +27,7 @@ struct Frame<'a> {
     window: Vec2,
 }
 
-pub fn draw(
+pub(crate) fn draw(
     session: Res<Session>,
     view: Single<(&Transform, &Projection, &Camera), With<Camera2d>>,
     ui_scale: Res<UiScale>,

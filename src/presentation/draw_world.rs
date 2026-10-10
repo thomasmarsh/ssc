@@ -1,5 +1,11 @@
 //! Gizmo art for world bodies: stations, rocks, creatures, plants, pickups.
-use super::*;
+use super::{CYAN, DRY_RED, PAD_AMBER, PAD_GREEN, lifted};
+use bevy::prelude::*;
+use ssc::fortress::{Archetype, FortPart, PartKind, SEG_SPACING};
+use ssc::genome::{Trigger, Weapon};
+use ssc::simulation::upgrades::{Item, Rarity, Slot};
+use ssc::simulation::{Body, BodyKind, Cache, Game, Material, Pad, Pickup, Tunables, fertility};
+use ssc::world::{BaseKind, RockKind};
 
 pub(super) fn draw_station(
     gizmos: &mut Gizmos,
@@ -1128,7 +1134,7 @@ pub(super) fn draw_symbiosis(gizmos: &mut Gizmos, game: &Game) {
 /// as the burst nears).
 /// Plans of plants already derived, by plant and growth step, so a frame derives nothing new.
 #[derive(Default)]
-pub struct PlantCache(std::collections::HashMap<(u32, u16), ssc::grammar::Plan>);
+pub(crate) struct PlantCache(std::collections::HashMap<(u32, u16), ssc::grammar::Plan>);
 
 /// Plants on planetoids: the species' own grammar at the plant's growth, swaying a little,
 /// leaves tinted by chemistry. A ripe crop wears a small pip above it so a harvest reads at a

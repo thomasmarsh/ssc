@@ -1,5 +1,11 @@
 //! Gizmo art for the player ship and its effects.
-use super::*;
+use super::draw_overlay::draw_discovery_glyph;
+use super::{
+    AMBER, CYAN, DRY_RED, PAD_AMBER, PAD_GREEN, VIEW_HEIGHT, lifted, material_color, rarity_color,
+};
+use bevy::prelude::*;
+use ssc::simulation::upgrades::{Rarity, Slot};
+use ssc::simulation::{Beam, Body, EchoKind, Game};
 
 pub(super) fn echo_color(kind: EchoKind, tint: Option<[f32; 3]>) -> Color {
     match kind {

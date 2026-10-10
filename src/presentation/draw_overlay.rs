@@ -1,5 +1,13 @@
 //! Gizmo overlays: backdrop, guides and radar.
-use super::*;
+use super::draw_ship::echo_color;
+use super::draw_world::body_color;
+use super::{
+    APEX_GOLD, CYAN, DRY_RED, MUTED, PAD_AMBER, PAD_GREEN, RADAR_RADIUS, RADAR_RANGE, VIEW_HEIGHT,
+    lifted, material_color,
+};
+use bevy::prelude::*;
+use ssc::simulation::{BodyKind, EchoKind, Game, GuideKind};
+use ssc::world::{SECTOR_SIZE, hash2};
 
 /// Edge arrows toward the nearest offscreen threats and minerals (see `Game::guide_bearings`).
 /// They sit just inside the screen edge at a constant on-screen size, fade with distance and
