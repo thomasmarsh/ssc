@@ -6,6 +6,29 @@ pub const MAX_DRONES: usize = 4;
 const CARGO_CAP: f32 = 10.0;
 const WORK_SECONDS: f32 = 10.0;
 const RETURN_SECONDS: f32 = 5.0;
+const DRONE_SPEED: f32 = 300.0;
+
+/// Generated fixed anchor; dropped with its owning pad on generator changes.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DroneDeposit {
+    key: PadKey,
+    center: Vec2,
+    radius: f32,
+}
+
+impl DroneDeposit {
+    fn mark(self) -> (SectorId, i32, i32) {
+        (
+            self.key.0,
+            self.center.x.round() as i32,
+            self.center.y.round() as i32,
+        )
+    }
+
+    fn travel(self, home: Vec2) -> f32 {
+        self.center.distance(home) / DRONE_SPEED
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DroneUpgrade {
@@ -92,11 +115,13 @@ pub struct DroneView {
     pub mining_head: bool,
 }
 
-/// A fixed home-planetoid order. Stable identity is (pad key, append-only fleet slot).
+/// A saved deposit trip. Stable identity is (pad key, append-only fleet slot).
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MiningDrone {
     cargo: f32,
     remaining: f32,
+    #[serde(default)]
+    deposit: Option<DroneDeposit>,
     exhausted: bool,
     #[serde(default)]
     ordered: DroneModules,
@@ -117,7 +142,7 @@ impl MiningDrone {
 
     pub(super) fn trip_detail(&self) -> String {
         format!(
-            "Home deposit: {:.0} local F, up to {:.0} ore, {:.0}s work + 5s return. Cargo waits for stash room. Visible local flight; no combat yet.",
+            "Deposit trip: {:.0} local F, up to {:.0} ore, {:.0}s work + 5s return. Cargo waits for stash room. Visible local flight; no combat yet.",
             self.fitted.fuel(),
             self.fitted.capacity(),
             self.fitted.work()
@@ -125,14 +150,16 @@ impl MiningDrone {
     }
 
     pub(super) fn status(&self, pad: &Pad, material: Material) -> String {
+        let travel = self.deposit.map_or(0.0, |d| d.travel(pad.center));
+        let returning = RETURN_SECONDS + travel;
         if !pad.power {
             "NEEDS LOCAL POWER".into()
-        } else if self.remaining > self.fitted.work() + RETURN_SECONDS - 2.0 {
+        } else if self.remaining > self.fitted.work() + RETURN_SECONDS + travel - 2.0 {
             format!("LAUNCHING - {:.1} CARGO", self.cargo)
-        } else if self.remaining > RETURN_SECONDS {
+        } else if self.remaining > returning {
             format!(
                 "MINING {:.1}s - {:.1} CARGO",
-                self.remaining - RETURN_SECONDS,
+                self.remaining - returning,
                 self.cargo
             )
         } else if self.remaining > 0.0 {
@@ -146,12 +173,135 @@ impl MiningDrone {
         } else if pad.stash.amount(material) >= pad.stash_cap(material) {
             "STASH FULL".into()
         } else {
-            "READY - HOME DEPOSIT".into()
+            "READY - DESIGNATED DEPOSIT".into()
         }
     }
 }
 
 impl Game {
+    pub fn drone_deposit_actions(&self) -> Vec<BenchAction> {
+        let Some(pad) = self.landed_pad() else {
+            return Vec::new();
+        };
+        std::iter::once(BenchAction::DroneDeposit(None))
+            .chain(
+                self.fleet_deposit_marks(pad.center)
+                    .into_iter()
+                    .map(|mark| BenchAction::DroneDeposit(Some(mark))),
+            )
+            .collect()
+    }
+
+    pub(super) fn drone_deposit_block(
+        &self,
+        mark: Option<(SectorId, i32, i32)>,
+    ) -> Option<&'static str> {
+        let Some(pad) = self.landed_pad() else {
+            return Some("LAND AT A PAD");
+        };
+        if !self.loadout.research.active(research::Tech::Automation) {
+            return Some("NEEDS AUTOMATION RESEARCH");
+        }
+        if !pad.power {
+            return Some("NEEDS LOCAL POWER");
+        }
+        if !pad.warehouse {
+            return Some("NEEDS WAREHOUSE");
+        }
+        if let Some(mark) = mark
+            && !self.fleet_deposit_marks(pad.center).contains(&mark)
+        {
+            return Some("DEPOSIT UNKNOWN OR TOO FAR");
+        }
+        if pad.drone_deposit.map(DroneDeposit::mark) == mark {
+            return Some("DEPOSIT ALREADY DESIGNATED");
+        }
+        None
+    }
+
+    pub(super) fn designate_drone_deposit(&mut self, mark: Option<(SectorId, i32, i32)>) {
+        if let Some(why) = self.drone_deposit_block(mark) {
+            self.bench_failed(why.into());
+            return;
+        }
+        let deposit = if let Some((sector, x, y)) = mark {
+            let Some(spawn) = world::generate(self.seed, sector).into_iter().find(|s| {
+                s.rock == RockKind::Planetoid
+                    && s.position.x.round() as i32 == x
+                    && s.position.y.round() as i32 == y
+            }) else {
+                self.bench_failed("DEPOSIT UNAVAILABLE".into());
+                return;
+            };
+            Some(DroneDeposit {
+                key: (sector, spawn.index),
+                center: spawn.position,
+                radius: spawn.radius.unwrap(),
+            })
+        } else {
+            None
+        };
+        let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
+        pad.drone_deposit = deposit;
+        for drone in &mut pad.drones {
+            if drone.remaining <= 0.0 && drone.cargo <= 0.0 {
+                drone.deposit = deposit;
+                drone.exhausted = false;
+            }
+        }
+        self.bench_done("FLEET DEPOSIT DESIGNATED".into(), upgrades::Rarity::Common);
+    }
+
+    pub(super) fn drone_deposit_detail(
+        &self,
+        deposit: Option<DroneDeposit>,
+        home: PadKey,
+    ) -> String {
+        let key = deposit.map_or(home, |d| d.key);
+        let material = mining::material_of(self.seed, RockKind::Planetoid, Some(key));
+        format!("{} at ({}, {})", material.label(), key.0.x, key.0.y)
+    }
+
+    pub(super) fn drone_status_detail(&self, pad: &Pad, slot: usize) -> (Material, String) {
+        let drone = &pad.drones[slot];
+        let key = drone.deposit.map_or(pad.key, |d| d.key);
+        let material = mining::material_of(self.seed, RockKind::Planetoid, Some(key));
+        let travel = drone.deposit.map_or(0.0, |d| d.travel(pad.center));
+        (
+            material,
+            format!(
+                "{} Current: {}. Travel +{:.1}s each way. Next: {}. Status only.",
+                drone.trip_detail(),
+                self.drone_deposit_detail(drone.deposit, pad.key),
+                travel,
+                self.drone_deposit_detail(pad.drone_deposit, pad.key)
+            ),
+        )
+    }
+
+    /// Teach one real nearby generated deposit for the bounded designation gallery.
+    pub fn stage_drone_deposit_smoke(&mut self) -> Option<BenchAction> {
+        let home = self.landed_pad()?.center;
+        let sector = SectorId::containing(home);
+        for y in sector.y - 1..=sector.y + 1 {
+            for x in sector.x - 1..=sector.x + 1 {
+                let id = SectorId { x, y };
+                if world::generate(self.seed, id).iter().any(|s| {
+                    s.rock == RockKind::Planetoid
+                        && s.position.distance(home) > 1.0
+                        && s.position.distance(home) <= world::SECTOR_SIZE
+                }) {
+                    self.chart_reveal(id, false);
+                    return self
+                        .drone_deposit_actions()
+                        .into_iter()
+                        .find(|a| matches!(a, BenchAction::DroneDeposit(Some(_))));
+                }
+            }
+        }
+        None
+    }
+
     /// Bounded bench gallery: knowledge copied at another dock, without unit hardware.
     pub fn stage_drone_blueprint_smoke(&mut self) {
         self.pad.drone_blueprint = Some(DroneModules {
@@ -174,13 +324,16 @@ impl Game {
             };
             for (slot, drone) in pad.drones.iter().enumerate() {
                 let work = drone.fitted.work();
-                let elapsed = work + RETURN_SECONDS - drone.remaining;
+                let travel = drone.deposit.map_or(0.0, |d| d.travel(pad.center));
+                let returning = RETURN_SECONDS + travel;
+                let outbound = 2.0 + travel;
+                let elapsed = work + RETURN_SECONDS + 2.0 * travel - drone.remaining;
                 let (phase, flight) = if drone.remaining <= 0.0 {
                     (DronePhase::Docked, 0.0)
-                } else if drone.remaining <= RETURN_SECONDS {
-                    (DronePhase::Returning, drone.remaining / RETURN_SECONDS)
-                } else if elapsed < 2.0 {
-                    (DronePhase::Launching, elapsed / 2.0)
+                } else if drone.remaining <= returning {
+                    (DronePhase::Returning, drone.remaining / returning)
+                } else if elapsed < outbound {
+                    (DronePhase::Launching, elapsed / outbound)
                 } else {
                     (DronePhase::Mining, 1.0)
                 };
@@ -188,13 +341,42 @@ impl Game {
                     host.angle + pad.anchor - 0.22 - slot as f32 * 26.0 / (host.radius + 30.0);
                 let sweep = -(0.22 + slot as f32 * 0.13);
                 let direction = Vec2::from_angle(dock_angle + sweep * flight);
-                let position = host.position + direction * (host.radius + 30.0 + 55.0 * flight);
+                let local_position =
+                    host.position + direction * (host.radius + 30.0 + 55.0 * flight);
+                let (position, deposit_point) = if let Some(target) = drone.deposit {
+                    let direction = (host.position - target.center).normalize_or_zero();
+                    let spread = direction.perp() * slot as f32 * 30.0;
+                    let point = target.center + direction * target.radius + spread;
+                    let work_point = point + direction * 50.0;
+                    // Leave along the surface before crossing open space, so paths never
+                    // cut through the home planetoid when its pad faces away from the target.
+                    let outward = -direction;
+                    let facing = outward.to_angle() - slot as f32 * 26.0 / (host.radius + 30.0);
+                    let turn = facing - dock_angle;
+                    let turn = turn.sin().atan2(turn.cos());
+                    let launch = 2.0 / outbound;
+                    let position = if flight < launch {
+                        host.position
+                            + Vec2::from_angle(dock_angle + turn * flight / launch)
+                                * (host.radius + 30.0)
+                    } else {
+                        let departure =
+                            host.position + Vec2::from_angle(facing) * (host.radius + 30.0);
+                        departure.lerp(work_point, (flight - launch) / (1.0 - launch))
+                    };
+                    (position, point)
+                } else {
+                    (local_position, host.position + direction * host.radius)
+                };
                 let tangent = (direction * 55.0
                     + direction.perp() * (host.radius + 30.0 + 55.0 * flight) * sweep)
                     .normalize_or_zero();
+                let tangent = drone.deposit.map_or(tangent, |target| {
+                    (target.center - host.position).normalize_or_zero()
+                });
                 let heading = match phase {
                     DronePhase::Returning => -tangent,
-                    DronePhase::Mining => -direction,
+                    DronePhase::Mining => (deposit_point - position).normalize_or_zero(),
                     _ => tangent,
                 };
                 views.push(DroneView {
@@ -202,7 +384,7 @@ impl Game {
                     slot,
                     position,
                     heading,
-                    deposit: host.position + direction * host.radius,
+                    deposit: deposit_point,
                     phase,
                     powered: pad.power,
                     cargo: drone.cargo,
@@ -243,6 +425,7 @@ impl Game {
         pad.drones.push(MiningDrone {
             ordered: pad.drone_template,
             fitted: pad.drone_template,
+            deposit: pad.drone_deposit,
             ..Default::default()
         });
         self.bench_done("MINING DRONE BUILT".into(), upgrades::Rarity::Common);
@@ -255,7 +438,14 @@ impl Game {
                 .map_or(DroneModules::default(), |p| p.drone_template),
             ..Default::default()
         };
-        drone.trip_detail() + " Build includes this pad's template modules and their price."
+        let target = self.landed_pad().map_or_else(String::new, |p| {
+            format!(
+                " Target: {}. Travel +{:.1}s each way.",
+                self.drone_deposit_detail(p.drone_deposit, p.key),
+                p.drone_deposit.map_or(0.0, |d| d.travel(p.center))
+            )
+        });
+        drone.trip_detail() + &target + " Build includes template modules and their price."
     }
 
     pub(super) fn mining_drone_price(&self) -> Vec<(Material, f32)> {
@@ -491,7 +681,6 @@ impl Game {
             .collect();
         for key in keys {
             let mut drones = std::mem::take(&mut self.pad.pads.get_mut(&key).unwrap().drones);
-            let material = mining::material_of(self.seed, RockKind::Planetoid, Some(key));
             let mut budget = dt;
             loop {
                 // Settle and dispatch every unit before advancing to the next shared event.
@@ -501,6 +690,9 @@ impl Game {
                         continue;
                     }
                     let pad = self.pad.pads.get_mut(&key).unwrap();
+                    let trip_key = drone.deposit.map_or(key, |d| d.key);
+                    let material =
+                        mining::material_of(self.seed, RockKind::Planetoid, Some(trip_key));
                     let cap = pad.stash_cap(material);
                     if drone.cargo > 0.0 {
                         let delivered = pad.stash.add_capped(material, drone.cargo, cap);
@@ -512,6 +704,15 @@ impl Game {
                     }
                     // Paid modules fit only after all old cargo is delivered at the dock.
                     drone.fitted = drone.ordered;
+                    if drone.deposit != pad.drone_deposit {
+                        drone.exhausted = false;
+                    }
+                    drone.deposit = pad.drone_deposit;
+                    let target = drone.deposit.map_or(key, |d| d.key);
+                    let material =
+                        mining::material_of(self.seed, RockKind::Planetoid, Some(target));
+                    let cap = pad.stash_cap(material);
+                    let travel = drone.deposit.map_or(0.0, |d| d.travel(pad.center));
                     if budget <= 0.0
                         || pad.stash.fuel < drone.fitted.fuel()
                         || pad.stash.amount(material) >= cap
@@ -519,7 +720,7 @@ impl Game {
                         continue;
                     }
                     let room = cap - pad.stash.amount(material);
-                    let amount = self.reserve_drone_ore(key, drone.fitted.capacity().min(room));
+                    let amount = self.reserve_drone_ore(target, drone.fitted.capacity().min(room));
                     drone.exhausted = amount == 0.0;
                     if drone.exhausted {
                         continue;
@@ -531,7 +732,7 @@ impl Game {
                         .stash
                         .take(Material::Fuel, drone.fitted.fuel());
                     drone.cargo = amount;
-                    drone.remaining = drone.fitted.work() + RETURN_SECONDS;
+                    drone.remaining = drone.fitted.work() + RETURN_SECONDS + 2.0 * travel;
                 }
                 let next = drones
                     .iter()
@@ -576,6 +777,172 @@ mod tests {
         game.bench_select(BenchAction::MiningDrone);
         let material = mining::material_of(game.seed, RockKind::Planetoid, Some(key));
         (game, key, material)
+    }
+
+    fn designate_nearby(game: &mut Game, key: PadKey) -> DroneDeposit {
+        let action = game
+            .stage_drone_deposit_smoke()
+            .expect("HOME has a nearby generated planetoid");
+        game.bench_select(action);
+        let before = game.cargo;
+        game.bench_confirm();
+        assert_eq!(game.cargo, before);
+        game.pad.pads[&key].drone_deposit.unwrap()
+    }
+
+    #[test]
+    fn designation_is_known_local_gated_and_prices_no_hardware() {
+        let (mut game, key, _) = setup();
+        assert_eq!(
+            game.drone_deposit_actions(),
+            vec![BenchAction::DroneDeposit(None)]
+        );
+        let action = game.stage_drone_deposit_smoke().unwrap();
+        let BenchAction::DroneDeposit(mark) = action else {
+            panic!("deposit action")
+        };
+        let before = game.cargo;
+        for (power, warehouse, automation) in [
+            (false, true, true),
+            (true, false, true),
+            (true, true, false),
+        ] {
+            let pad = game.pad.pads.get_mut(&key).unwrap();
+            pad.power = power;
+            pad.warehouse = warehouse;
+            game.loadout
+                .research
+                .known
+                .remove(&research::Tech::Automation);
+            if automation {
+                game.loadout
+                    .research
+                    .known
+                    .insert(research::Tech::Automation);
+            }
+            game.bench_select(action);
+            game.bench_confirm();
+            assert_eq!(game.pad.pads[&key].drone_deposit, None);
+            assert_eq!(game.cargo, before);
+        }
+        game.loadout
+            .research
+            .known
+            .insert(research::Tech::Automation);
+        assert_eq!(
+            game.drone_deposit_block(Some((SectorId { x: 99, y: 99 }, 0, 0))),
+            Some("DEPOSIT UNKNOWN OR TOO FAR")
+        );
+        let target = designate_nearby(&mut game, key);
+        assert_eq!(
+            game.drone_deposit_block(mark),
+            Some("DEPOSIT ALREADY DESIGNATED")
+        );
+        game.bench_select(BenchAction::MiningDrone);
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&key].drones[0].deposit, Some(target));
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 0.0);
+        assert!(!game.mined.contains_key(&target.key));
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (restored, _) = Game::from_save(state, generator);
+        assert_eq!(restored.pad.pads[&key].drone_deposit, Some(target));
+        let (reset, _) = Game::from_save(game.save_state(), generator + 1);
+        assert!(
+            reset
+                .pad
+                .pads
+                .values()
+                .all(|p| p.drone_deposit.is_none() && p.drones.is_empty())
+        );
+    }
+
+    #[test]
+    fn new_order_waits_for_saved_blocked_old_cargo_and_uses_shared_target_ore() {
+        let (mut game, key, home_material) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(1.0);
+        let target = designate_nearby(&mut game, key);
+        assert_eq!(game.pad.pads[&key].drones[0].deposit, None);
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .add_capped(home_material, 300.0, 300.0);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut game, _) = Game::from_save(state, generator);
+        game.bodies
+            .retain(|b| b.origin != Some(key) && b.origin != Some(target.key));
+        game.update_mining_drones(14.0);
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 10.0);
+        assert_eq!(game.pad.pads[&key].drones[0].deposit, None);
+        assert!(!game.mined.contains_key(&target.key));
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .take(home_material, 30.0);
+        game.update_mining_drones(1.0);
+        let drone = &game.pad.pads[&key].drones[0];
+        assert_eq!(drone.deposit, Some(target));
+        assert_eq!(drone.cargo, 10.0);
+        assert_eq!(game.mined[&key], 10.0);
+        assert_eq!(game.mined[&target.key], 10.0);
+        assert_eq!(game.pad.pads[&key].stash.amount(home_material), 280.0);
+        assert_eq!(game.pad.pads[&key].stash.fuel, 1.0);
+        let remaining = drone.remaining;
+        assert!(
+            (remaining - (14.0 + 2.0 * target.travel(game.pad.pads[&key].center))).abs() < 1e-4
+        );
+        game.pad.landed = Some(key);
+        game.bench_toggle();
+        game.bench_select(BenchAction::DroneDeposit(None));
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&key].drone_deposit, None);
+        assert_eq!(game.pad.pads[&key].drones[0].deposit, Some(target));
+        let remote_material = mining::material_of(game.seed, RockKind::Planetoid, Some(target.key));
+        let before = game.pad.pads[&key].stash.amount(remote_material);
+        game.update_mining_drones(remaining);
+        assert_eq!(
+            game.pad.pads[&key].stash.amount(remote_material),
+            before + 10.0
+        );
+        assert_eq!(game.pad.pads[&key].drones[0].deposit, None);
+    }
+
+    #[test]
+    fn designated_fleet_partition_conservation_exhaustion_and_flight() {
+        let (mut whole, key, _) = setup();
+        build_fleet(&mut whole);
+        let target = designate_nearby(&mut whole, key);
+        whole.mined.insert(target.key, 385.0);
+        whole.bodies.retain(|b| b.origin != Some(target.key));
+        whole.pad.pads.get_mut(&key).unwrap().stash.fuel = 4.0;
+        let state = whole.save_state();
+        let (mut split, _) = Game::from_save(state, crate::sectormap::GENERATOR_VERSION);
+        split.bodies.retain(|b| b.origin != Some(target.key));
+        whole.update_mining_drones(1.0);
+        let views = whole.mining_drone_views();
+        assert_eq!(views.len(), MAX_DRONES);
+        let host = whole.pad.pads[&key].center;
+        assert!(
+            views
+                .iter()
+                .all(|v| v.position.distance(host) >= whole.pad.pads[&key].radius + 29.9)
+        );
+        whole.update_mining_drones(199.0);
+        for _ in 0..200 {
+            split.update_mining_drones(1.0);
+        }
+        let material = mining::material_of(whole.seed, RockKind::Planetoid, Some(target.key));
+        assert_eq!(whole.pad.pads[&key].stash.amount(material), 15.0);
+        assert_eq!(whole.pad.pads[&key].stash.fuel, 2.0);
+        assert_eq!(whole.mined[&target.key], 400.0);
+        assert_eq!(whole.pad.pads[&key].stash, split.pad.pads[&key].stash);
+        assert_eq!(whole.pad.pads[&key].drones, split.pad.pads[&key].drones);
+        assert_eq!(whole.mined[&target.key], split.mined[&target.key]);
+        assert!(whole.pad.pads[&key].drones.iter().all(|d| d.exhausted));
     }
 
     fn retrofit(game: &mut Game, slot: usize, upgrade: DroneUpgrade) {

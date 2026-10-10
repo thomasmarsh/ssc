@@ -1525,18 +1525,26 @@ fn smoke_run(
         game.pad_action();
         game.bench_toggle();
         smoke_bench(game, "mining-fleet-status");
+        let designated = std::env::var("SSC_FLEET_DEPOSIT").as_deref() == Ok("1");
+        if designated && let Some(action) = game.stage_drone_deposit_smoke() {
+            game.bench_select(action);
+            game.bench_confirm();
+        }
         game.cargo.fuel = 4.0;
         game.bench_select(ssc::simulation::BenchAction::Stash(
             ssc::simulation::Material::Fuel,
         ));
         game.bench_confirm();
         game.bench_toggle();
-        let seconds = seconds.parse::<f32>().unwrap_or(5.0).clamp(0.0, 15.0);
+        let seconds = seconds
+            .parse::<f32>()
+            .unwrap_or(5.0)
+            .clamp(0.0, if designated { 60.0 } else { 15.0 });
         for _ in 0..(seconds * 60.0) as usize {
             game.step(1.0 / 60.0, Input::default());
         }
         // Settle the endpoint despite accumulated fixed-step rounding.
-        if seconds >= 15.0 {
+        if !designated && seconds >= 15.0 {
             game.step(1.0 / 60.0, Input::default());
         }
         run.hold = true;
@@ -1737,6 +1745,16 @@ fn smoke_run(
                     .bench_select(ssc::simulation::BenchAction::DroneTemplate(
                         ssc::simulation::fleet::DroneUpgrade::Cargo,
                     ));
+            }
+            "mining-fleet-deposit" => {
+                if let Some(action) = session
+                    .game
+                    .drone_deposit_actions()
+                    .into_iter()
+                    .find(|a| matches!(a, ssc::simulation::BenchAction::DroneDeposit(Some(_))))
+                {
+                    session.game.bench_select(action);
+                }
             }
             "mining-fleet-blueprint" => session
                 .game
@@ -2170,7 +2188,8 @@ fn smoke_bench(game: &mut Game, mode: &str) {
         | "mining-fleet-status"
         | "mining-fleet-retrofit"
         | "mining-fleet-template"
-        | "mining-fleet-blueprint" => {
+        | "mining-fleet-blueprint"
+        | "mining-fleet-deposit" => {
             game.loadout.research.known.extend([
                 ssc::simulation::research::Tech::Fabrication,
                 ssc::simulation::research::Tech::Automation,
@@ -2199,6 +2218,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                         | "mining-fleet-retrofit"
                         | "mining-fleet-template"
                         | "mining-fleet-blueprint"
+                        | "mining-fleet-deposit"
                 ) {
                     game.bench_confirm();
                     game.bench_select(BenchAction::MiningDroneStatus(
@@ -2218,6 +2238,11 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                         ));
                     }
                     game.bench_feedback = None;
+                    if mode == "mining-fleet-deposit"
+                        && let Some(action) = game.stage_drone_deposit_smoke()
+                    {
+                        game.bench_select(action);
+                    }
                     if mode == "mining-fleet-blueprint" {
                         game.cargo.metal = 80.0;
                         game.cargo.crystal = 20.0;

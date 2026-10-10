@@ -416,6 +416,35 @@ impl Game {
         }
     }
 
+    /// Known planetoid centers, bounded to the fleet's local working radius.
+    pub(super) fn fleet_deposit_marks(&self, center: Vec2) -> Vec<(SectorId, i32, i32)> {
+        let sector = SectorId::containing(center);
+        self.chart
+            .known
+            .iter()
+            .filter(|(id, _)| (id.x - sector.x).abs() <= 1 && (id.y - sector.y).abs() <= 1)
+            .flat_map(|(&id, known)| {
+                known
+                    .marks
+                    .values()
+                    .filter(move |mark| {
+                        (mark.kind == EchoKind::Planetoid || mark.renewable)
+                            && mark.position.distance(center) <= SECTOR_SIZE
+                            && mark.position.distance(center) > 1.0
+                    })
+                    .map(move |mark| {
+                        (
+                            id,
+                            mark.position.x.round() as i32,
+                            mark.position.y.round() as i32,
+                        )
+                    })
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     // ---- reading ---------------------------------------------------------------------------
 
     fn civ_reading(&self, territory: u64, sector: SectorId, capital: bool) -> Option<CivReading> {
@@ -801,6 +830,44 @@ impl Game {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fleet_destinations_deduplicate_echo_kinds_and_require_local_known_planetoids() {
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        game.chart.known.clear();
+        let center = Vec2::ZERO;
+        let mark = Mark {
+            kind: EchoKind::Planetoid,
+            position: Vec2::new(1000.0, 0.0),
+            weight: 400,
+            renewable: false,
+            territory: None,
+            well_mode: None,
+        };
+        game.learn(mark);
+        game.learn(Mark {
+            kind: EchoKind::Lode,
+            renewable: true,
+            ..mark
+        });
+        game.learn(Mark {
+            position: Vec2::new(6100.0, 0.0),
+            ..mark
+        });
+        game.learn(Mark {
+            position: center,
+            ..mark
+        });
+        game.learn(Mark {
+            kind: EchoKind::Lode,
+            position: Vec2::new(2000.0, 0.0),
+            ..mark
+        });
+        assert_eq!(
+            game.fleet_deposit_marks(center),
+            vec![(SectorId::ORIGIN, 1000, 0)]
+        );
+    }
+
     use super::super::skills::Skill;
     use super::super::tests::{DT, empty_game};
     use super::*;

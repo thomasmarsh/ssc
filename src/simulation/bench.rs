@@ -42,6 +42,7 @@ pub enum BenchAction {
     WaterExtractor,
     MiningDrone,
     MiningDroneStatus(usize),
+    DroneDeposit(Option<(SectorId, i32, i32)>),
     DroneUpgrade(usize, fleet::DroneUpgrade),
     DroneTemplate(fleet::DroneUpgrade),
     SaveDroneBlueprint,
@@ -160,6 +161,7 @@ impl Game {
                         BenchAction::ApplyDroneBlueprint,
                     ]
                 }))
+                .chain(self.drone_deposit_actions())
                 .chain(
                     (0..self.landed_pad().map_or(0, |p| p.drones.len())).flat_map(|slot| {
                         std::iter::once(BenchAction::MiningDroneStatus(slot)).chain(
@@ -242,6 +244,7 @@ impl Game {
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
+            Some(BenchAction::DroneDeposit(mark)) => self.designate_drone_deposit(mark),
             Some(BenchAction::DroneTemplate(upgrade)) => self.buy_drone_template(upgrade),
             Some(BenchAction::SaveDroneBlueprint) => self.save_drone_blueprint(),
             Some(BenchAction::ApplyDroneBlueprint) => self.apply_drone_blueprint(),
@@ -735,11 +738,21 @@ impl Game {
                 if let Some(pad) = self.landed_pad()
                     && let Some(drone) = pad.drones.get(slot)
                 {
-                    let material =
-                        mining::material_of(self.seed, RockKind::Planetoid, Some(pad.key));
+                    let (material, detail) = self.drone_status_detail(pad, slot);
                     row.state = drone.status(pad, material);
-                    row.detail = drone.trip_detail();
-                    row.detail += &format!(" Output: {}. Status only.", material.label());
+                    row.detail = detail;
+                }
+            }
+            BenchAction::DroneDeposit(mark) => {
+                row.group = "PAD FLEET";
+                row.text = match mark {
+                    None => "MINE HOME DEPOSIT".into(),
+                    Some((id, x, y)) => format!("MINE ({}, {}) AT {}, {}", id.x, id.y, x, y),
+                };
+                row.detail = "Known planets <=6000 units. Unload old cargo first. Travel +distance/300s each way; same fuel. No combat.".into();
+                if let Some(why) = self.drone_deposit_block(mark) {
+                    row.ok = false;
+                    row.state = why.into();
                 }
             }
             BenchAction::DroneTemplate(upgrade) => {
