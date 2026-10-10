@@ -22,6 +22,7 @@
 
 use crate::genome::{Diet, Genome, Social, Trigger, Weapon};
 use crate::range::{Ecology, SpeciesKey, regional_noise};
+use crate::simulation::tuning_gen::active;
 use crate::territory::Territory;
 use crate::world::{SectorId, hash2};
 use bevy::prelude::Vec2;
@@ -31,41 +32,10 @@ pub const AFFINITY_SALT: u64 = 0xAF71_2417_0000_0057;
 const REGION_CHANNEL: u64 = 0xAF71;
 
 // ---- tuning --------------------------------------------------------------------------------
-
-/// Weight of the (lineage, civilization) hash, in -1..1 before weighting.
-pub const HASH_WEIGHT: f32 = 0.45;
-/// Weight of the regional noise (centred, so its swing is about half this either way), and its
-/// frequency in features per sector. Territories are two to three sectors in radius, so the
-/// field turns over within one claim.
-pub const REGION_WEIGHT: f32 = 1.0;
-pub const REGION_FREQUENCY: f32 = 0.3;
-/// Gene bias: diets (hunters eat people of this size, rock eaters compete for the rocks the
-/// civilization mines, grazers share pasture peacefully).
-pub const BIAS_HUNT: f32 = -0.40;
-pub const BIAS_ROCKS: f32 = -0.20;
-pub const BIAS_GRAZE: f32 = 0.25;
-pub const BIAS_DUST: f32 = 0.05;
-/// Temperament: harm-triggered creatures leave others be; sight-triggered ones are touchy.
-pub const BIAS_HARM: f32 = 0.20;
-pub const BIAS_SIGHT: f32 = -0.10;
-pub const BIAS_SCHOOL: f32 = 0.15;
-pub const BIAS_PACK: f32 = -0.05;
-/// Weapons: cord throwers, and any other gun.
-pub const BIAS_TETHER: f32 = -0.25;
-pub const BIAS_ARMED: f32 = -0.10;
-/// Flingers (per unit of the fling gene, up to two), negative mass, and rage (per unit).
-pub const BIAS_FLING: f32 = -0.20;
-pub const BIAS_NEGATIVE_MASS: f32 = -0.15;
-pub const BIAS_RAGE: f32 = -0.30;
-/// The genes never push a pairing further than this on their own.
-pub const GENE_CAP: f32 = 0.8;
-/// Added to every pairing: most creatures would rather be left alone, so the genes' lean toward
-/// trouble (touchy, armed) starts from a warmer middle.
-pub const BASE_SHIFT: f32 = 0.2;
-/// A peaceful settlement is easier to live beside.
-pub const PEACEFUL_SHIFT: f32 = 0.25;
-/// At or beyond this a pairing is hostile (negative) or friendly (positive); between is neutral.
-pub const DISPOSITION_AT: f32 = 0.3;
+//
+// The weights and biases are the `gen_affinity_*` entries of the tunables registry
+// (`simulation/tuning_gen.rs`), read through `tuning_gen::active()`; a former const `NAME` is the
+// entry `gen_affinity_<name in lower case>`.
 
 /// How a species stands toward a civilization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,9 +47,10 @@ pub enum Disposition {
 
 impl Disposition {
     pub fn of(affinity: f32) -> Self {
-        if affinity <= -DISPOSITION_AT {
+        let tg = active();
+        if affinity <= -tg.gen_affinity_disposition_at {
             Self::Hostile
-        } else if affinity >= DISPOSITION_AT {
+        } else if affinity >= tg.gen_affinity_disposition_at {
             Self::Friendly
         } else {
             Self::Neutral
@@ -96,42 +67,45 @@ impl Disposition {
 }
 
 /// What the genome alone says about getting along with a civilization's people (members graze,
-/// are small, and are armed), in -`GENE_CAP`..`GENE_CAP`.
+/// are small, and are armed), in -`gen_affinity_gene_cap`..`gen_affinity_gene_cap`.
 pub fn gene_bias(g: &Genome) -> f32 {
+    let tg = active();
     let diet = match g.diet {
-        Diet::Hunt => BIAS_HUNT,
-        Diet::Rocks => BIAS_ROCKS,
-        Diet::Graze => BIAS_GRAZE,
-        Diet::Dust => BIAS_DUST,
+        Diet::Hunt => tg.gen_affinity_bias_hunt,
+        Diet::Rocks => tg.gen_affinity_bias_rocks,
+        Diet::Graze => tg.gen_affinity_bias_graze,
+        Diet::Dust => tg.gen_affinity_bias_dust,
         _ => 0.0,
     };
     let trigger = match g.trigger {
-        Trigger::Harm => BIAS_HARM,
-        Trigger::Sight => BIAS_SIGHT,
+        Trigger::Harm => tg.gen_affinity_bias_harm,
+        Trigger::Sight => tg.gen_affinity_bias_sight,
         Trigger::Proximity => 0.0,
     };
     let social = match g.social {
-        Social::School => BIAS_SCHOOL,
-        Social::Pack => BIAS_PACK,
+        Social::School => tg.gen_affinity_bias_school,
+        Social::Pack => tg.gen_affinity_bias_pack,
         _ => 0.0,
     };
     let weapon = match g.weapon {
         Weapon::None => 0.0,
-        Weapon::Tether => BIAS_TETHER,
-        _ => BIAS_ARMED,
+        Weapon::Tether => tg.gen_affinity_bias_tether,
+        _ => tg.gen_affinity_bias_armed,
     };
-    let fling = BIAS_FLING * g.fling.clamp(0.0, 2.0)
+    let fling = tg.gen_affinity_bias_fling * g.fling.clamp(0.0, 2.0)
         + if g.mass < 0.0 {
-            BIAS_NEGATIVE_MASS
+            tg.gen_affinity_bias_negative_mass
         } else {
             0.0
         };
-    (diet + trigger + social + weapon + fling + BIAS_RAGE * g.rage).clamp(-GENE_CAP, GENE_CAP)
+    (diet + trigger + social + weapon + fling + tg.gen_affinity_bias_rage * g.rage)
+        .clamp(-tg.gen_affinity_gene_cap, tg.gen_affinity_gene_cap)
 }
 
 /// The affinity of a species (its lineage key and genome) for a civilization, with the wildlife
 /// at `at` in sector units, in -1 (hostile) to 1 (friendly).
 pub fn affinity(seed: u64, key: SpeciesKey, genome: &Genome, civ: &Territory, at: Vec2) -> f32 {
+    let tg = active();
     let h = hash2(
         seed ^ AFFINITY_SALT ^ key,
         civ.id as i32,
@@ -139,10 +113,20 @@ pub fn affinity(seed: u64, key: SpeciesKey, genome: &Genome, civ: &Territory, at
     );
     let unit = (h >> 40) as f32 / 16_777_216.0 * 2.0 - 1.0;
     let channel = REGION_CHANNEL ^ (civ.id & 0xFFFF_FFFF);
-    let region =
-        (regional_noise(seed, key, channel, at, REGION_FREQUENCY) * 2.0 - 1.0) * REGION_WEIGHT;
-    let shift = if civ.peaceful() { PEACEFUL_SHIFT } else { 0.0 };
-    (BASE_SHIFT + HASH_WEIGHT * unit + gene_bias(genome) + region + shift).clamp(-1.0, 1.0)
+    let region = (regional_noise(seed, key, channel, at, tg.gen_affinity_region_frequency) * 2.0
+        - 1.0)
+        * tg.gen_affinity_region_weight;
+    let shift = if civ.peaceful() {
+        tg.gen_affinity_peaceful_shift
+    } else {
+        0.0
+    };
+    (tg.gen_affinity_base_shift
+        + tg.gen_affinity_hash_weight * unit
+        + gene_bias(genome)
+        + region
+        + shift)
+        .clamp(-1.0, 1.0)
 }
 
 /// How the wildlife of one sector stands toward a civilization, by abundance.
@@ -155,20 +139,17 @@ pub struct Mood {
     pub friendly: f32,
 }
 
-/// Share of a sector's life that must be of a disposition to count it, and the share both must
-/// reach for the place to read as mixed.
-pub const MOOD_MAJORITY: f32 = 0.5;
-pub const MOOD_MIXED: f32 = 0.25;
-
 impl Mood {
     /// The overall read of the sector: friendly or hostile when that side holds a majority,
     /// mixed when both sides are substantial, else neutral.
     pub fn read(&self) -> Option<&'static str> {
-        if self.hostile >= MOOD_MIXED && self.friendly >= MOOD_MIXED {
+        let tg = active();
+        if self.hostile >= tg.gen_affinity_mood_mixed && self.friendly >= tg.gen_affinity_mood_mixed
+        {
             Some("mixed")
-        } else if self.friendly >= MOOD_MAJORITY {
+        } else if self.friendly >= tg.gen_affinity_mood_majority {
             Some("friendly")
-        } else if self.hostile >= MOOD_MAJORITY {
+        } else if self.hostile >= tg.gen_affinity_mood_majority {
             Some("hostile")
         } else if self.hostile + self.friendly > 0.0 {
             Some("mixed")
@@ -245,6 +226,7 @@ mod tests {
 
     #[test]
     fn genes_lean_the_expected_way() {
+        let tg = active();
         let hunter = Genome {
             diet: Diet::Hunt,
             weapon: Weapon::Tether,
@@ -259,7 +241,10 @@ mod tests {
         };
         assert!(gene_bias(&hunter) < -0.5);
         assert!(gene_bias(&docile) > 0.4);
-        assert!(gene_bias(&hunter) >= -GENE_CAP && gene_bias(&docile) <= GENE_CAP);
+        assert!(
+            gene_bias(&hunter) >= -tg.gen_affinity_gene_cap
+                && gene_bias(&docile) <= tg.gen_affinity_gene_cap
+        );
         // On average over many pairings, docile grazers are warmer than hunters.
         let mean = |g: &Genome| {
             (0..300u64)

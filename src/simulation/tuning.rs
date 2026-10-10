@@ -973,7 +973,7 @@ fn validate(t: &Tunables) -> Result<(), String> {
         t.world_fling_max_speed,
         t.world_fling_hard_cap
     );
-    Ok(())
+    super::tuning_gen::validate(t)
 }
 
 // ---- structural constants (not in the registry) ---------------------------------------------------

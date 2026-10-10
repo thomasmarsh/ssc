@@ -132,6 +132,7 @@ impl Game {
     /// Re-derives what is cached from the tunables and records a pending regeneration.
     fn tune_changed(&mut self, regen: bool) {
         self.tune_regen |= regen;
+        super::tuning_gen::install(&self.tune);
         self.apply_culture_tuning();
         self.cargo.extra = self.loadout.skills.cargo_bonus(&self.tune);
     }

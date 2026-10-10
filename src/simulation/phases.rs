@@ -133,6 +133,8 @@ impl Game {
             return;
         }
         let dt = dt.min(0.05);
+        // Generation reads this game's tuning (see `tuning_gen`).
+        super::tuning_gen::install(&self.tune);
         self.profile_start();
         let Some(mut tick) = self.phase_begin(dt, input) else {
             return;

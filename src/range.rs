@@ -19,12 +19,13 @@
 //! multiply life toward zero, and a planetoid inside one restores a small oasis. See `docs/UNIVERSE.md`, "Niches and the
 //! ecology field".
 //!
-//! The species catalog is endless: depth is cut into tiers of `TIER` rings and every tier
-//! rolls `SLOTS_PER_TIER` species (a few generalists, some regional, most endemic) whose
+//! The species catalog is endless: depth is cut into tiers of `gen_range_tier` rings and every tier
+//! rolls `gen_range_slots_per_tier` species (a few generalists, some regional, most endemic) whose
 //! depth centre falls in it. The four wild classics are fixed entries beside them.
 
 use crate::biome::{Biome, BiomeKind, biome};
 use crate::genome::{Diet, GenePool, Genome, PoolEntry, Species, Weapon};
+use crate::simulation::tuning_gen::active;
 use crate::world::{Rng, SectorId, hash2, latent_base, value_noise};
 use bevy::prelude::Vec2;
 use std::cell::RefCell;
@@ -34,174 +35,58 @@ use std::f32::consts::TAU;
 /// Separates every niche stream from the rest of generation.
 pub const NICHE_SALT: u64 = 0x2A9E_5EED_0000_0031;
 
-// ---- tuning: the species catalog ----------------------------------------------------
+// ---- tuning -------------------------------------------------------------------------
+//
+// The numbers of generation here are the `gen_range_*` entries of the tunables registry
+// (`simulation/tuning_gen.rs`), read through `tuning_gen::active()`; a former const `NAME` is the
+// entry `gen_range_<name in lower case>`. Only `MAX_SPECIES` (it sizes arrays) stays a const.
 
-/// Rings of depth per catalog tier.
-pub const TIER: f32 = 6.0;
-/// Species rolled per tier.
-pub const SLOTS_PER_TIER: u32 = 8;
-/// Share of rolled species that are generalists, then regional; the rest are endemic.
-pub const GENERALIST_SHARE: f32 = 0.07;
-pub const REGIONAL_SHARE: f32 = 0.30;
-/// (half-width of the full-strength depth band, shoulder out, shoulder in, breadth) ranges
-/// per spread, all in rings except breadth.
-pub const GENERALIST: SpreadSpec = SpreadSpec {
-    half: (14.0, 30.0),
-    fall: (10.0, 18.0),
-    rise: (4.0, 8.0),
-    breadth: (0.8, 0.95),
-};
-pub const REGIONAL: SpreadSpec = SpreadSpec {
-    half: (7.0, 14.0),
-    fall: (4.0, 8.0),
-    rise: (3.0, 6.0),
-    breadth: (0.45, 0.7),
-};
-pub const ENDEMIC: SpreadSpec = SpreadSpec {
-    half: (3.0, 7.0),
-    fall: (2.0, 5.0),
-    rise: (2.0, 4.0),
-    breadth: (0.04, 0.2),
-};
-/// Farthest a depth centre can lie behind and ahead of a sector it still reaches.
-const REACH_BEHIND: f32 = 50.0;
-const REACH_AHEAD: f32 = 32.0;
+/// The ranges a spread rolls its niche from: the `gen_range_<spread>_*` entries (half-width of
+/// the full-strength depth band, shoulder out, shoulder in, in rings; and breadth).
+fn spread_spec(spread: Spread) -> SpreadSpec {
+    let tg = active();
+    match spread {
+        Spread::Generalist => SpreadSpec {
+            half: (
+                tg.gen_range_generalist_half_lo,
+                tg.gen_range_generalist_half_hi,
+            ),
+            fall: (
+                tg.gen_range_generalist_fall_lo,
+                tg.gen_range_generalist_fall_hi,
+            ),
+            rise: (
+                tg.gen_range_generalist_rise_lo,
+                tg.gen_range_generalist_rise_hi,
+            ),
+            breadth: (
+                tg.gen_range_generalist_breadth_lo,
+                tg.gen_range_generalist_breadth_hi,
+            ),
+        },
+        Spread::Regional => SpreadSpec {
+            half: (tg.gen_range_regional_half_lo, tg.gen_range_regional_half_hi),
+            fall: (tg.gen_range_regional_fall_lo, tg.gen_range_regional_fall_hi),
+            rise: (tg.gen_range_regional_rise_lo, tg.gen_range_regional_rise_hi),
+            breadth: (
+                tg.gen_range_regional_breadth_lo,
+                tg.gen_range_regional_breadth_hi,
+            ),
+        },
+        Spread::Endemic => SpreadSpec {
+            half: (tg.gen_range_endemic_half_lo, tg.gen_range_endemic_half_hi),
+            fall: (tg.gen_range_endemic_fall_lo, tg.gen_range_endemic_fall_hi),
+            rise: (tg.gen_range_endemic_rise_lo, tg.gen_range_endemic_rise_hi),
+            breadth: (
+                tg.gen_range_endemic_breadth_lo,
+                tg.gen_range_endemic_breadth_hi,
+            ),
+        },
+    }
+}
 
-// ---- tuning: the patch mask ---------------------------------------------------------
-
-/// Patch noise frequency per sector for an endemic and a broad species (islands are small,
-/// the pockets in a broad range larger).
-pub const PATCH_FREQUENCY: (f32, f32) = (0.28, 0.09);
-/// The share of its depth band a species' mask covers, for an endemic (breadth 0) and a
-/// broad (breadth 1) species, and the softness of the cut in quantile units.
-pub const MASK_COVER: (f32, f32) = (0.03, 1.0);
-pub const MASK_SOFT: f32 = 0.1;
-/// Standard deviation of the patch noise (value noise has one near 0.21), used to turn a
-/// noise reading into a quantile so `MASK_COVER` is an area share.
-pub const MASK_NOISE_SD: f32 = 0.21;
-/// A species' own fine noise (a pocket or two inside its range) and how deep it cuts.
-pub const POCKET_FREQUENCY: f32 = 0.45;
-pub const POCKET_DEPTH: (f32, f32) = (0.05, 0.5);
-
-// ---- tuning: the diversity cap ------------------------------------------------------
-
-/// Frequency of the diversity field per sector (features about 20 sectors across).
-pub const DIVERSITY_FREQUENCY: f32 = 0.05;
-/// `K = DIVERSITY_FLOOR + DIVERSITY_SPAN * u ^ DIVERSITY_CURVE` for the stretched field `u`
-/// in [0, 1]: usually 2 to 4, rarely up to 6.
-pub const DIVERSITY_FLOOR: f32 = 0.8;
-pub const DIVERSITY_SPAN: f32 = 4.4;
-pub const DIVERSITY_CURVE: f32 = 1.3;
-/// The band of the (two-octave) noise that `u` stretches over (its 1st to 99th percentile).
-pub const DIVERSITY_NOISE: (f32, f32) = (0.2, 0.82);
-/// Abundance gap over which two species swap places in the ranking (a tie ranks each half
-/// way, so the cap never flips a species on or off at a swap).
-pub const RANK_SOFTNESS: f32 = 0.06;
-/// A species thinner than `PRESENCE_FADE.0` at a sector is not there at all, and one up to
-/// `PRESENCE_FADE.1` is eased in, so a species thinning out never ends in a step.
-pub const PRESENCE_FADE: (f32, f32) = (0.03, 0.12);
-/// What the sector's species list drops after the fade.
-pub const MIN_PRESENCE: f32 = 0.01;
-/// The Lunatic's debut on ring 3 (see `Distribution::debut`): its strength, how many more
-/// rings it lasts, the noise frequency and the noise band that switches it on. Learners
-/// (Smarties and any brain-driven species) are not part of the wild at all: only
-/// civilizations think.
-pub const LUNATIC_DEBUT: f32 = 0.6;
-pub const DEBUT_RINGS: u32 = 3;
-pub const DEBUT_FREQUENCY: f32 = 0.5;
-pub const DEBUT_NOISE: (f32, f32) = (0.3, 0.5);
-
-/// The classics' afterlife (see `Distribution::relic`): beyond their intro span they live on as
-/// endemic-like pockets. Strength of a pocket, the noise frequency per sector (small islands)
-/// and how many rings the pockets take to rise as the intro span fades.
-pub const RELIC_PEAK: f32 = 0.8;
-pub const RELIC_FREQUENCY: f32 = 0.3;
-pub const RELIC_RISE: f32 = 3.0;
-
-/// Rings at which the classics' intro span ends at full strength: Fatsos, then Bogeys and
-/// Bogeys, then Lunatics and Leeches. Each fades out over the next five rings.
-pub const CLASSIC_END: (f32, f32, f32) = (7.0, 9.0, 10.0);
-
-/// Ring 3, where blending begins, may hold this many species at least; the floor slides
-/// down by `OPENING_SLOPE` per ring beyond it.
-pub const OPENING_DIVERSITY: f32 = 3.0;
-pub const OPENING_SLOPE: f32 = 0.5;
-/// How strongly a species' favourite biome pulls the character its genome is sampled from.
-pub const FOUNDER_PULL: f32 = 0.4;
-/// How picky the four classics are about country (they stay broad).
-pub const CLASSIC_PICKY: f32 = 0.3;
-/// An oasis (a planetoid inside a belt) restores life to this share of an unmasked sector,
-/// and holds at most `OASIS_CAPACITY` species.
-pub const OASIS_RESTORE: f32 = 0.25;
-pub const OASIS_CAPACITY: f32 = 2.2;
-/// A belt this deep or more can hold an oasis, and only this share of its planetoids do
-/// (a planetoid's own roll), so belts stay mostly bare.
-pub const OASIS_BELT: f32 = 0.3;
-pub const OASIS_SHARE: f32 = 0.4;
 /// The most species any sector may hold.
 pub const MAX_SPECIES: usize = 6;
-
-// ---- tuning: clines and isolation ---------------------------------------------------
-
-/// A cline is smooth per-gene noise across space, small in amplitude: its frequency per
-/// sector and its strength for a classic and for a sampled species (the `Genome::drifted`
-/// amplitude, a share of 0.3 of a gene's span at 1).
-pub const CLINE_FREQUENCY: f32 = 0.05;
-pub const CLINE_AMPLITUDE: (f32, f32) = (0.06, 0.22);
-/// How far a separate population drifts from the rest: the offset amplitude at full
-/// isolation for a classic and for a sampled species, scaled by the isolation distance.
-pub const PATCH_AMPLITUDE: (f32, f32) = (0.1, 0.5);
-/// Sectors between a population's heart and its species' anchor at which isolation is full.
-pub const ISOLATION_SCALE: f32 = 40.0;
-/// A connected population of more vertices than this (of its mask lattice) is a continent,
-/// not an isolate, and is not offset.
-pub const PATCH_CAP: usize = 60;
-/// A belt this deep cuts a population in two.
-pub const PATCH_BELT: f32 = 0.6;
-/// Classics keep their type-specimen look on the start rings and drift in over this many
-/// rings beyond.
-pub const CLASSIC_DRIFT_RINGS: f32 = 4.0;
-
-/// Rock belts: ridges (the contour where a slow noise field crosses its middle, features
-/// about 50 sectors across). Within `BELT_CORE` sectors of the ridge line a belt is at full
-/// depth, thinning to nothing by `BELT_EDGE`, whatever the slope of the field there; inside
-/// one life is multiplied toward zero (`1 - BELT_KILL`): quiet mining zones and natural
-/// barriers between populations. `BELT_FLAT` bounds the slope used to turn a noise offset
-/// into a distance, so a flat stretch cannot swallow a whole region.
-pub const BELT_FREQUENCY: f32 = 0.017;
-pub const BELT_CORE: f32 = 0.6;
-pub const BELT_EDGE: f32 = 3.6;
-pub const BELT_FLAT: f32 = 0.012;
-
-/// How much of a sector's rock richness is the belt it sits in (and how much the faster
-/// `band` noise gives): `FLOOR + BAND * band + BELT * belt + GAP * (1 - life)`.
-pub const MATTER_BELT: f32 = 0.35;
-pub const BELT_KILL: f32 = 0.95;
-
-/// How quickly the species' abundance turns into life: `life = 1 - exp(-LIFE_GAIN * sum)`.
-pub const LIFE_GAIN: f32 = 0.8;
-
-// ---- tuning: the matter field -------------------------------------------------------
-
-/// Spatial frequency of the rock bands per sector (a band about 8 sectors long).
-pub const MATTER_FREQUENCY: f32 = 0.12;
-/// Matter is `FLOOR + BAND * band + GAP * (1 - life)`, clamped to [0.04, 1].
-pub const MATTER_FLOOR: f32 = 0.1;
-pub const MATTER_BAND: f32 = 0.35;
-pub const MATTER_GAP: f32 = 0.3;
-
-/// Near HOME there is always enough rock to mine.
-pub const MATTER_START_FLOOR: f32 = 0.45;
-
-// ---- tuning: the start rings --------------------------------------------------------
-
-/// Abundance of Fatsos on ring 1, and of Fatsos and Bogeys on ring 2.
-pub const RING_ONE_FATSOS: f32 = 0.9;
-pub const RING_TWO_FATSOS: f32 = 0.45;
-pub const RING_TWO_BOGEYS: f32 = 1.0;
-
-/// Noise frequency of the shared blob edge, per sector (territories use it).
-pub const BLOB_NOISE_SCALE: f32 = 0.45;
 
 const MATTER_SALT: u64 = 0x3A77_E500_0000_0033;
 const GENOME_SALT: u64 = 0x6E40_E000_0000_0035;
@@ -223,7 +108,8 @@ fn smooth(t: f32) -> f32 {
 /// The noisy reach of a blob of nominal `radius` at `at` (in sector units): the technique
 /// civilization territories use for their ragged discs.
 pub fn blob_reach(seed: u64, channel: u64, radius: f32, edge: f32, at: Vec2) -> f32 {
-    radius * (1.0 + edge * (value_noise(seed, channel, at * BLOB_NOISE_SCALE) - 0.5))
+    let tg = active();
+    radius * (1.0 + edge * (value_noise(seed, channel, at * tg.gen_range_blob_noise_scale) - 0.5))
 }
 
 /// Sectors from HOME by Moore (Chebyshev) distance: ring 0 is HOME, ring 1 its eight
@@ -351,7 +237,7 @@ pub struct Distribution {
     /// Where the lineage began, in sector units (a classic begins at HOME).
     pub anchor: Vec2,
     /// A ring-3 debut: the abundance a species is given by its own fine noise on ring 3,
-    /// fading to nothing over `DEBUT_RINGS` more (zero for everyone but the Lunatic).
+    /// fading to nothing over `gen_range_debut_rings` more (zero for everyone but the Lunatic).
     pub debut: f32,
     /// The share of sectors beyond the intro span that still hold the species, as endemic-like
     /// pockets (zero for sampled species, which have no afterlife to speak of).
@@ -361,13 +247,46 @@ pub struct Distribution {
 impl Distribution {
     /// One of the four classics: fixed, hand-placed niches.
     pub fn classic(family: Family) -> Self {
+        let tg = active();
         // The intro span: full strength until `end`, gone `fall` rings later; `relic` is the
         // share of sectors that keep the species afterwards (see `relic_at`).
         let (start, rise, end, fall, breadth, spread, relic) = match family {
-            Family::Fatso => (0.0, 1.5, CLASSIC_END.0, 5.0, 0.9, Spread::Generalist, 0.12),
-            Family::Bogey => (1.0, 3.0, CLASSIC_END.1, 5.0, 0.92, Spread::Generalist, 0.14),
-            Family::Lunatic => (2.5, 5.0, CLASSIC_END.2, 5.0, 0.5, Spread::Regional, 0.12),
-            Family::Leech => (3.5, 6.0, CLASSIC_END.2, 5.0, 0.42, Spread::Regional, 0.12),
+            Family::Fatso => (
+                0.0,
+                1.5,
+                tg.gen_range_classic_end_fatso,
+                5.0,
+                0.9,
+                Spread::Generalist,
+                0.12,
+            ),
+            Family::Bogey => (
+                1.0,
+                3.0,
+                tg.gen_range_classic_end_bogey,
+                5.0,
+                0.92,
+                Spread::Generalist,
+                0.14,
+            ),
+            Family::Lunatic => (
+                2.5,
+                5.0,
+                tg.gen_range_classic_end_lunatic,
+                5.0,
+                0.5,
+                Spread::Regional,
+                0.12,
+            ),
+            Family::Leech => (
+                3.5,
+                6.0,
+                tg.gen_range_classic_end_lunatic,
+                5.0,
+                0.42,
+                Spread::Regional,
+                0.12,
+            ),
 
             Family::Wild => unreachable!("wild species are rolled, not placed"),
         };
@@ -381,7 +300,11 @@ impl Distribution {
             end,
             fall,
             breadth,
-            patch_frequency: lerp(PATCH_FREQUENCY.0, PATCH_FREQUENCY.1, breadth),
+            patch_frequency: lerp(
+                tg.gen_range_patch_frequency_endemic,
+                tg.gen_range_patch_frequency_broad,
+                breadth,
+            ),
             pocket: 0.15,
             peak: 1.0,
             favourite: match family {
@@ -390,10 +313,10 @@ impl Distribution {
                 Family::Lunatic => BiomeKind::Brutish,
                 _ => BiomeKind::Predator,
             },
-            picky: CLASSIC_PICKY,
+            picky: tg.gen_range_classic_picky,
             anchor: Vec2::ZERO,
             debut: if family == Family::Lunatic {
-                LUNATIC_DEBUT
+                tg.gen_range_lunatic_debut
             } else {
                 0.0
             },
@@ -403,25 +326,26 @@ impl Distribution {
 
     /// The `slot`th species of catalog tier `tier`.
     pub fn wild(seed: u64, tier: u32, slot: u32) -> Self {
+        let tg = active();
         let mut rng = Rng::new(hash2(
             seed ^ NICHE_SALT ^ KEY_SALT ^ u64::from(slot + 1).wrapping_mul(0x9E37_79B9),
             tier as i32,
             0,
         ));
-        let centre = (tier as f32 + rng.f32()) * TIER;
+        let centre = (tier as f32 + rng.f32()) * tg.gen_range_tier;
         let roll = rng.f32();
-        let (spread, spec) = if roll < GENERALIST_SHARE {
-            (Spread::Generalist, GENERALIST)
-        } else if roll < GENERALIST_SHARE + REGIONAL_SHARE {
-            (Spread::Regional, REGIONAL)
+        let (spread, spec) = if roll < tg.gen_range_generalist_share {
+            (Spread::Generalist, spread_spec(Spread::Generalist))
+        } else if roll < tg.gen_range_generalist_share + tg.gen_range_regional_share {
+            (Spread::Regional, spread_spec(Spread::Regional))
         } else {
-            (Spread::Endemic, ENDEMIC)
+            (Spread::Endemic, spread_spec(Spread::Endemic))
         };
         let half = rng.range(spec.half.0, spec.half.1);
         let fall = rng.range(spec.fall.0, spec.fall.1);
         let rise = rng.range(spec.rise.0, spec.rise.1);
         let breadth = rng.range(spec.breadth.0, spec.breadth.1);
-        let pocket = rng.range(POCKET_DEPTH.0, POCKET_DEPTH.1);
+        let pocket = rng.range(tg.gen_range_pocket_depth_lo, tg.gen_range_pocket_depth_hi);
         let peak = rng.range(0.65, 1.0);
         let angle = rng.range(0.0, TAU);
         let key = (rng.next_u64() | 1) & !(1 << 63) | (1 << 62);
@@ -440,7 +364,11 @@ impl Distribution {
             end: centre + half,
             fall,
             breadth,
-            patch_frequency: lerp(PATCH_FREQUENCY.0, PATCH_FREQUENCY.1, breadth),
+            patch_frequency: lerp(
+                tg.gen_range_patch_frequency_endemic,
+                tg.gen_range_patch_frequency_broad,
+                breadth,
+            ),
             pocket,
             peak,
             favourite,
@@ -466,13 +394,18 @@ impl Distribution {
     /// The patch mask at depth `d`: its noise channel, frequency and the share of the band it
     /// covers. A classic past its intro span has the small islands of its afterlife instead.
     fn mask_spec(&self, d: f32) -> (u64, f32, f32) {
+        let tg = active();
         if self.in_afterlife(d) {
-            (RELIC_CHANNEL, RELIC_FREQUENCY, self.relic)
+            (RELIC_CHANNEL, tg.gen_range_relic_frequency, self.relic)
         } else {
             (
                 MASK_CHANNEL,
                 self.patch_frequency,
-                lerp(MASK_COVER.0, MASK_COVER.1, self.breadth),
+                lerp(
+                    tg.gen_range_mask_cover_lo,
+                    tg.gen_range_mask_cover_hi,
+                    self.breadth,
+                ),
             )
         }
     }
@@ -485,29 +418,47 @@ impl Distribution {
 
     /// The species' noise `channel` cut so that it covers a share `cover` of the plane.
     fn cut(&self, seed: u64, channel: u64, frequency: f32, cover: f32, at: Vec2) -> f32 {
+        let tg = active();
         let n = regional_noise(seed, self.key, channel, at, frequency);
         // A logistic stand-in for the normal CDF: `quantile` is roughly uniform in [0, 1].
-        let quantile = 1.0 / (1.0 + (-1.702 * (n - 0.5) / MASK_NOISE_SD).exp());
-        smooth(((quantile - (1.0 - cover)) / MASK_SOFT).clamp(0.0, 1.0))
+        let quantile = 1.0 / (1.0 + (-1.702 * (n - 0.5) / tg.gen_range_mask_noise_sd).exp());
+        smooth(((quantile - (1.0 - cover)) / tg.gen_range_mask_soft).clamp(0.0, 1.0))
     }
 
     /// What is left of a classic beyond its intro span: endemic-like pockets (a few percent of
     /// sectors) that rise as the intro fades and never end.
     fn relic_at(&self, seed: u64, at: Vec2) -> f32 {
+        let tg = active();
         if self.relic <= 0.0 {
             return 0.0;
         }
-        let rise =
-            smooth(((at.length() - self.end - self.fall * 0.5) / RELIC_RISE).clamp(0.0, 1.0));
+        let rise = smooth(
+            ((at.length() - self.end - self.fall * 0.5) / tg.gen_range_relic_rise).clamp(0.0, 1.0),
+        );
         if rise <= 0.0 {
             return 0.0;
         }
-        RELIC_PEAK * rise * self.cut(seed, RELIC_CHANNEL, RELIC_FREQUENCY, self.relic, at)
+        tg.gen_range_relic_peak
+            * rise
+            * self.cut(
+                seed,
+                RELIC_CHANNEL,
+                tg.gen_range_relic_frequency,
+                self.relic,
+                at,
+            )
     }
 
     /// The species' own fine pockets: a multiplier in [1 - pocket, 1].
     pub fn pockets(&self, seed: u64, at: Vec2) -> f32 {
-        let n = regional_noise(seed, self.key, POCKET_CHANNEL, at, POCKET_FREQUENCY);
+        let tg = active();
+        let n = regional_noise(
+            seed,
+            self.key,
+            POCKET_CHANNEL,
+            at,
+            tg.gen_range_pocket_frequency,
+        );
         1.0 - self.pocket * smooth(1.0 - ((n - 0.5) * 2.0 + 0.5).clamp(0.0, 1.0))
     }
 
@@ -528,15 +479,26 @@ impl Distribution {
 
     /// The ring-3 debut of a species that has one.
     fn debut_at(&self, seed: u64, id: SectorId, at: Vec2) -> f32 {
+        let tg = active();
         let ring = ring(id);
-        if self.debut <= 0.0 || !(3..3 + DEBUT_RINGS).contains(&ring) {
+        if self.debut <= 0.0 || !(3..3 + tg.gen_range_debut_rings).contains(&ring) {
             return 0.0;
         }
-        let fade = 1.0 - (ring - 3) as f32 / DEBUT_RINGS as f32;
-        let n = regional_noise(seed, self.key, DEBUT_CHANNEL, at, DEBUT_FREQUENCY);
+        let fade = 1.0 - (ring - 3) as f32 / tg.gen_range_debut_rings as f32;
+        let n = regional_noise(
+            seed,
+            self.key,
+            DEBUT_CHANNEL,
+            at,
+            tg.gen_range_debut_frequency,
+        );
         self.debut
             * fade
-            * smooth(((n - DEBUT_NOISE.0) / (DEBUT_NOISE.1 - DEBUT_NOISE.0)).clamp(0.0, 1.0))
+            * smooth(
+                ((n - tg.gen_range_debut_noise_lo)
+                    / (tg.gen_range_debut_noise_hi - tg.gen_range_debut_noise_lo))
+                    .clamp(0.0, 1.0),
+            )
     }
 
     /// The population sector `id` belongs to: the connected group of mask-lattice vertices
@@ -544,6 +506,7 @@ impl Distribution {
     /// large to be an isolate is the species' continent (patch 0, no isolation). The id is
     /// that of the group's highest vertex, so every sector of one population agrees.
     pub fn patch(&self, seed: u64, id: SectorId) -> Patch {
+        let tg = active();
         const CONTINENT: Patch = Patch {
             id: 0,
             isolation: 0.0,
@@ -552,7 +515,7 @@ impl Distribution {
         let p = at_of(id) * f;
         let cover = cover.clamp(0.001, 0.999);
         let q = 1.0 - cover;
-        let threshold = 0.5 + MASK_NOISE_SD / 1.702 * (q / (1.0 - q)).ln();
+        let threshold = 0.5 + tg.gen_range_mask_noise_sd / 1.702 * (q / (1.0 - q)).ln();
         let value = |v: (i32, i32)| {
             regional_noise(
                 seed,
@@ -571,8 +534,9 @@ impl Distribution {
         if value(start) < threshold {
             return CONTINENT;
         }
-        let blocked =
-            |v: (i32, i32)| belt(seed, Vec2::new(v.0 as f32, v.1 as f32) / f) >= PATCH_BELT;
+        let blocked = |v: (i32, i32)| {
+            belt(seed, Vec2::new(v.0 as f32, v.1 as f32) / f) >= tg.gen_range_patch_belt
+        };
         let mut seen = vec![start];
         let mut next = 0;
         let mut peak = start;
@@ -585,7 +549,7 @@ impl Distribution {
             for step in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                 let to = (at.0 + step.0, at.1 + step.1);
                 if !seen.contains(&to) && value(to) >= threshold && !blocked(to) {
-                    if seen.len() >= PATCH_CAP {
+                    if seen.len() >= tg.gen_range_patch_cap {
                         return CONTINENT;
                     }
                     seen.push(to);
@@ -595,7 +559,7 @@ impl Distribution {
         let heart = Vec2::new(peak.0 as f32, peak.1 as f32) / f;
         Patch {
             id: hash2(seed ^ self.key ^ PATCH_SALT, peak.0, peak.1) | 1,
-            isolation: (heart.distance(self.anchor) / ISOLATION_SCALE).clamp(0.0, 1.0),
+            isolation: (heart.distance(self.anchor) / tg.gen_range_isolation_scale).clamp(0.0, 1.0),
         }
     }
 
@@ -604,13 +568,22 @@ impl Distribution {
     /// and the patch, scaled by how far the population is from the species' anchor.
     /// Classics stay type specimens on the start rings and drift only a little after.
     pub fn genome_at(&self, seed: u64, id: SectorId, patch: &Patch) -> Genome {
+        let tg = active();
         let founder = self.founder(seed);
         let ring = ring(id);
         let (cline, offset) = match self.family {
-            Family::Wild => (CLINE_AMPLITUDE.1, PATCH_AMPLITUDE.1),
+            Family::Wild => (
+                tg.gen_range_cline_amplitude_hi,
+                tg.gen_range_patch_amplitude_hi,
+            ),
             _ => {
-                let ramp = smooth(((ring as f32 - 2.0) / CLASSIC_DRIFT_RINGS).clamp(0.0, 1.0));
-                (CLINE_AMPLITUDE.0 * ramp, PATCH_AMPLITUDE.0 * ramp)
+                let ramp = smooth(
+                    ((ring as f32 - 2.0) / tg.gen_range_classic_drift_rings).clamp(0.0, 1.0),
+                );
+                (
+                    tg.gen_range_cline_amplitude_lo * ramp,
+                    tg.gen_range_patch_amplitude_lo * ramp,
+                )
             }
         };
         let offset = offset * patch.isolation;
@@ -625,7 +598,7 @@ impl Distribution {
                 self.key,
                 CLINE_CHANNEL + gene as u64,
                 at,
-                CLINE_FREQUENCY,
+                tg.gen_range_cline_frequency,
             ) - 0.5)
                 * 2.0;
             let apart = if patch.id == 0 {
@@ -647,6 +620,7 @@ impl Distribution {
 
     /// The species' founding genome, before the sector's expression of it.
     pub fn founder(&self, seed: u64) -> Genome {
+        let tg = active();
         if let Some(species) = self.family.species() {
             return species.genome;
         }
@@ -655,35 +629,37 @@ impl Distribution {
             if cache.len() > 4096 {
                 cache.clear();
             }
-            *cache.entry((seed, self.key)).or_insert_with(|| {
-                let mut rng = Rng::new(seed ^ GENOME_SALT ^ self.key);
-                let node = SectorId {
-                    x: self.anchor.x.round() as i32,
-                    y: self.anchor.y.round() as i32,
-                };
-                // The founding place is the species' favourite country: its character
-                // pulls the sampled parameters.
-                let mut params = latent_base(seed, node);
-                let c = self.favourite.character();
-                let pull = |v: f32, to: f32| v + (to - v) * FOUNDER_PULL;
-                params.aggression = pull(params.aggression, c.aggression);
-                params.swarm = pull(params.swarm, c.swarm);
-                params.tech = pull(params.tech, c.tech);
-                params.distortion = pull(params.distortion, c.distortion);
-                let sampled = Genome::sample(&mut rng, &params);
-                // A share of species are nest builders, chosen by their own hash so no
-                // draw of the sampling stream moves (see `builder`).
-                let h = hash2(
-                    seed ^ NICHE_SALT ^ crate::builder::SPECIES_SALT,
-                    self.key as i32,
-                    (self.key >> 32) as i32,
-                );
-                if ((h >> 40) as f32 / 16_777_216.0) < crate::builder::SPECIES_SHARE {
-                    sampled.nest_builder(h).unwrap_or(sampled)
-                } else {
-                    sampled
-                }
-            })
+            *cache
+                .entry((seed, self.key, crate::simulation::tuning_gen::key()))
+                .or_insert_with(|| {
+                    let mut rng = Rng::new(seed ^ GENOME_SALT ^ self.key);
+                    let node = SectorId {
+                        x: self.anchor.x.round() as i32,
+                        y: self.anchor.y.round() as i32,
+                    };
+                    // The founding place is the species' favourite country: its character
+                    // pulls the sampled parameters.
+                    let mut params = latent_base(seed, node);
+                    let c = self.favourite.character();
+                    let pull = |v: f32, to: f32| v + (to - v) * tg.gen_range_founder_pull;
+                    params.aggression = pull(params.aggression, c.aggression);
+                    params.swarm = pull(params.swarm, c.swarm);
+                    params.tech = pull(params.tech, c.tech);
+                    params.distortion = pull(params.distortion, c.distortion);
+                    let sampled = Genome::sample(&mut rng, &params);
+                    // A share of species are nest builders, chosen by their own hash so no
+                    // draw of the sampling stream moves (see `builder`).
+                    let h = hash2(
+                        seed ^ NICHE_SALT ^ crate::builder::SPECIES_SALT,
+                        self.key as i32,
+                        (self.key >> 32) as i32,
+                    );
+                    if ((h >> 40) as f32 / 16_777_216.0) < crate::builder::SPECIES_SHARE {
+                        sampled.nest_builder(h).unwrap_or(sampled)
+                    } else {
+                        sampled
+                    }
+                })
         })
     }
 
@@ -697,8 +673,9 @@ impl Distribution {
 }
 
 thread_local! {
-    /// Memo of sampled founding genomes: a pure function of seed and species.
-    static FOUNDERS: RefCell<HashMap<(u64, u64), Genome>> = RefCell::new(HashMap::new());
+    /// Memo of sampled founding genomes: a pure function of seed, species and the generation
+    /// tuning (its fingerprint is part of the key).
+    static FOUNDERS: RefCell<HashMap<(u64, u64, u64), Genome>> = RefCell::new(HashMap::new());
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
@@ -707,15 +684,16 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 
 /// Every catalog species whose depth profile reaches sector `id` (more than zero).
 fn candidates(seed: u64, id: SectorId) -> Vec<Distribution> {
+    let tg = active();
     let d = at_of(id).length();
-    let first = ((d - REACH_BEHIND).max(0.0) / TIER) as u32;
-    let last = ((d + REACH_AHEAD) / TIER) as u32;
+    let first = ((d - tg.gen_range_reach_behind).max(0.0) / tg.gen_range_tier) as u32;
+    let last = ((d + tg.gen_range_reach_ahead) / tg.gen_range_tier) as u32;
     let mut out: Vec<Distribution> = Family::CLASSICS
         .iter()
         .map(|f| Distribution::classic(*f))
         .collect();
     for tier in first..=last {
-        for slot in 0..SLOTS_PER_TIER {
+        for slot in 0..tg.gen_range_slots_per_tier {
             out.push(Distribution::wild(seed, tier, slot));
         }
     }
@@ -726,18 +704,24 @@ fn candidates(seed: u64, id: SectorId) -> Vec<Distribution> {
 /// How many species the sector may hold, as a real number: the low-frequency diversity
 /// field mapped so that 2 to 4 is usual and 5 or 6 rare.
 pub fn diversity(seed: u64, id: SectorId) -> f32 {
-    let at = at_of(id) * DIVERSITY_FREQUENCY;
+    let tg = active();
+    let at = at_of(id) * tg.gen_range_diversity_frequency;
     let n = (value_noise(seed ^ DIVERSITY_SALT, 1, at)
         + 0.5 * value_noise(seed ^ DIVERSITY_SALT, 2, at * 2.3))
         / 1.5;
-    let u = ((n - DIVERSITY_NOISE.0) / (DIVERSITY_NOISE.1 - DIVERSITY_NOISE.0)).clamp(0.0, 1.0);
-    DIVERSITY_FLOOR + DIVERSITY_SPAN * u.powf(DIVERSITY_CURVE)
+    let u = ((n - tg.gen_range_diversity_noise_lo)
+        / (tg.gen_range_diversity_noise_hi - tg.gen_range_diversity_noise_lo))
+        .clamp(0.0, 1.0);
+    tg.gen_range_diversity_floor
+        + tg.gen_range_diversity_span * u.powf(tg.gen_range_diversity_curve)
 }
 
 /// How many species the sector may hold, as a real number: the diversity field, raised
 /// near the start where blending begins.
 pub fn capacity(seed: u64, id: SectorId) -> f32 {
-    let opening = OPENING_DIVERSITY - OPENING_SLOPE * ring(id).saturating_sub(3) as f32;
+    let tg = active();
+    let opening = tg.gen_range_opening_diversity
+        - tg.gen_range_opening_slope * ring(id).saturating_sub(3) as f32;
     diversity(seed, id).max(opening)
 }
 
@@ -746,10 +730,13 @@ pub fn capacity(seed: u64, id: SectorId) -> f32 {
 /// while that is below `k - 1` and fades out as it passes `k`, so the weakest survivor is
 /// always the one fading and everything is continuous in the abundances and in `k`.
 fn cap(abundance: Vec<(Distribution, f32)>, k: f32) -> Vec<(Distribution, f32)> {
+    let tg = active();
     let soft_rank = |a: f32| -> f32 {
         abundance
             .iter()
-            .map(|(_, b)| smooth(((b - a) / RANK_SOFTNESS * 0.5 + 0.5).clamp(0.0, 1.0)))
+            .map(|(_, b)| {
+                smooth(((b - a) / tg.gen_range_rank_softness * 0.5 + 0.5).clamp(0.0, 1.0))
+            })
             .sum::<f32>()
             - 0.5
     };
@@ -759,9 +746,11 @@ fn cap(abundance: Vec<(Distribution, f32)>, k: f32) -> Vec<(Distribution, f32)> 
             // The sum counts the species itself as half (a tie with itself), hence the 0.5.
             let w = a * smooth((k - soft_rank(*a)).clamp(0.0, 1.0));
             let w = w * smooth(
-                ((w - PRESENCE_FADE.0) / (PRESENCE_FADE.1 - PRESENCE_FADE.0)).clamp(0.0, 1.0),
+                ((w - tg.gen_range_presence_fade_lo)
+                    / (tg.gen_range_presence_fade_hi - tg.gen_range_presence_fade_lo))
+                    .clamp(0.0, 1.0),
             );
-            (w >= MIN_PRESENCE).then_some((*d, w))
+            (w >= tg.gen_range_min_presence).then_some((*d, w))
         })
         .collect();
     kept.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.key.cmp(&b.0.key)));
@@ -771,18 +760,28 @@ fn cap(abundance: Vec<(Distribution, f32)>, k: f32) -> Vec<(Distribution, f32)> 
 
 /// Who lives at a sector and how abundant each is, after the depth ramp and the cap.
 fn weights(seed: u64, id: SectorId, oasis: bool) -> Vec<(Distribution, f32)> {
+    let tg = active();
     match ring(id) {
         0 => Vec::new(),
-        1 => vec![(Distribution::classic(Family::Fatso), RING_ONE_FATSOS)],
+        1 => vec![(
+            Distribution::classic(Family::Fatso),
+            tg.gen_range_ring_one_fatsos,
+        )],
         2 => vec![
-            (Distribution::classic(Family::Bogey), RING_TWO_BOGEYS),
-            (Distribution::classic(Family::Fatso), RING_TWO_FATSOS),
+            (
+                Distribution::classic(Family::Bogey),
+                tg.gen_range_ring_two_bogeys,
+            ),
+            (
+                Distribution::classic(Family::Fatso),
+                tg.gen_range_ring_two_fatsos,
+            ),
         ],
         r => {
-            let kill = BELT_KILL * belt(seed, at_of(id));
+            let kill = tg.gen_range_belt_kill * belt(seed, at_of(id));
             let barren = 1.0
                 - if oasis {
-                    kill * (1.0 - OASIS_RESTORE)
+                    kill * (1.0 - tg.gen_range_oasis_restore)
                 } else {
                     kill
                 };
@@ -809,7 +808,14 @@ fn weights(seed: u64, id: SectorId, oasis: bool) -> Vec<(Distribution, f32)> {
                 .filter(|(c, _)| r >= c.floor(seed))
                 .collect();
             let k = capacity(seed, id);
-            cap(all, if oasis { k.min(OASIS_CAPACITY) } else { k })
+            cap(
+                all,
+                if oasis {
+                    k.min(tg.gen_range_oasis_capacity)
+                } else {
+                    k
+                },
+            )
         }
     }
 }
@@ -874,12 +880,14 @@ impl Ecology {
 }
 
 fn life_of(weights: &[(Distribution, f32)]) -> f32 {
+    let tg = active();
     let total: f32 = weights.iter().map(|(_, w)| *w).sum();
-    1.0 - (-LIFE_GAIN * total).exp()
+    1.0 - (-tg.gen_range_life_gain * total).exp()
 }
 
 fn band(seed: u64, at: Vec2) -> f32 {
-    let p = at * MATTER_FREQUENCY;
+    let tg = active();
+    let p = at * tg.gen_range_matter_frequency;
     let n = (value_noise(seed ^ MATTER_SALT, 1, p)
         + 0.5 * value_noise(seed ^ MATTER_SALT, 2, p * 2.0))
         / 1.5;
@@ -891,24 +899,29 @@ fn band(seed: u64, at: Vec2) -> f32 {
 /// How deep inside a rock belt a sector is, in [0, 1]: a ridge of a slow noise field, so
 /// belts are long, a few sectors wide and fade over a sector or two.
 pub fn belt(seed: u64, at: Vec2) -> f32 {
-    let field = |p: Vec2| value_noise(seed ^ BELT_SALT, 1, p * BELT_FREQUENCY) - 0.5;
+    let tg = active();
+    let field = |p: Vec2| value_noise(seed ^ BELT_SALT, 1, p * tg.gen_range_belt_frequency) - 0.5;
     let here = field(at);
     // Distance to the ridge line is about the offset over the slope (per sector).
     let slope = Vec2::new(field(at + Vec2::X) - here, field(at + Vec2::Y) - here).length();
-    let distance = here.abs() / slope.max(BELT_FLAT);
-    1.0 - smooth(((distance - BELT_CORE) / (BELT_EDGE - BELT_CORE)).clamp(0.0, 1.0))
+    let distance = here.abs() / slope.max(tg.gen_range_belt_flat);
+    1.0 - smooth(
+        ((distance - tg.gen_range_belt_core) / (tg.gen_range_belt_edge - tg.gen_range_belt_core))
+            .clamp(0.0, 1.0),
+    )
 }
 
 /// The rock-richness field in [0.04, 1]: low-frequency ridge noise, pushed up where little
 /// lives.
 pub fn matter(seed: u64, id: SectorId, life: f32) -> f32 {
+    let tg = active();
     let at = at_of(id);
-    let m = MATTER_FLOOR
-        + MATTER_BAND * band(seed, at)
-        + MATTER_BELT * belt(seed, at)
-        + MATTER_GAP * (1.0 - life);
+    let m = tg.gen_range_matter_floor
+        + tg.gen_range_matter_band * band(seed, at)
+        + tg.gen_range_matter_belt * belt(seed, at)
+        + tg.gen_range_matter_gap * (1.0 - life);
     let m = if ring(id) <= 2 {
-        m.max(MATTER_START_FLOOR)
+        m.max(tg.gen_range_matter_start_floor)
     } else {
         m
     };
@@ -928,12 +941,14 @@ pub fn fields(seed: u64, id: SectorId) -> (f32, f32) {
 
 /// The full ecology of a sector. HOME holds no creatures.
 pub fn ecology(seed: u64, id: SectorId) -> Ecology {
+    let tg = active();
     let at = at_of(id);
     let ring = ring(id);
     // A planetoid inside a belt is an oasis: a small patch of life in the quiet.
     let oasis = ring >= 3
-        && belt(seed, at) >= OASIS_BELT
-        && (hash2(seed ^ BELT_SALT, id.x, id.y) >> 40) as f32 / 16_777_216.0 < OASIS_SHARE
+        && belt(seed, at) >= tg.gen_range_oasis_belt
+        && (hash2(seed ^ BELT_SALT, id.x, id.y) >> 40) as f32 / 16_777_216.0
+            < tg.gen_range_oasis_share
         && crate::world::has_planetoid(seed, id);
     let weights = weights(seed, id, oasis);
     // `life` is the belt's own (it feeds the sector's parameters, which decide the
@@ -1099,6 +1114,7 @@ mod tests {
     /// No sector holds more than `MAX_SPECIES`, nor more than the diversity field allows.
     #[test]
     fn a_sector_never_holds_more_species_than_its_cap() {
+        let tg = active();
         for seed in SEEDS {
             for id in sectors(45) {
                 let eco = ecology(seed, id);
@@ -1111,7 +1127,11 @@ mod tests {
                         eco.diversity
                     );
                 }
-                assert!(eco.presence.iter().all(|p| p.weight >= MIN_PRESENCE));
+                assert!(
+                    eco.presence
+                        .iter()
+                        .all(|p| p.weight >= tg.gen_range_min_presence)
+                );
             }
         }
     }
@@ -1217,6 +1237,7 @@ mod tests {
     /// Broad species live in nearly all of their depth band, with the odd pocket of absence.
     #[test]
     fn broad_species_are_nearly_everywhere_with_pockets() {
+        let tg = active();
         let bogey = Distribution::classic(Family::Bogey);
         for seed in SEEDS {
             let land = habitat(seed, &bogey);
@@ -1228,7 +1249,7 @@ mod tests {
         // Every generalist of the catalog behaves so.
         let (mut checked, mut pockets) = (0, 0);
         for tier in 3..9 {
-            for slot in 0..SLOTS_PER_TIER {
+            for slot in 0..tg.gen_range_slots_per_tier {
                 let d = Distribution::wild(SEED, tier, slot);
                 if d.spread != Spread::Generalist || d.end - d.start - d.rise < 14.0 {
                     continue;
@@ -1254,9 +1275,10 @@ mod tests {
     /// islands rather than one continent.
     #[test]
     fn endemic_species_are_isolated_islands() {
+        let tg = active();
         let (mut checked, mut islands_total, mut share_total) = (0, 0, 0.0);
         for tier in 4..12 {
-            for slot in 0..SLOTS_PER_TIER {
+            for slot in 0..tg.gen_range_slots_per_tier {
                 let d = Distribution::wild(SEED, tier, slot);
                 if d.spread != Spread::Endemic {
                     continue;
@@ -1442,12 +1464,13 @@ mod tests {
     /// A planetoid inside a belt restores a small local patch of life (an oasis).
     #[test]
     fn planetoids_in_belts_hold_oases() {
+        let tg = active();
         let (mut oases, mut populated, mut candidates) = (0, 0, 0);
         for seed in SEEDS {
             for id in sectors(60).filter(|id| ring(*id) >= 6) {
                 let eco = ecology(seed, id);
-                let candidate =
-                    belt(seed, at_of(id)) >= OASIS_BELT && crate::world::has_planetoid(seed, id);
+                let candidate = belt(seed, at_of(id)) >= tg.gen_range_oasis_belt
+                    && crate::world::has_planetoid(seed, id);
                 candidates += usize::from(candidate);
                 if eco.oasis {
                     // Only a planetoid in a belt makes one, and it is small.
@@ -1473,10 +1496,11 @@ mod tests {
     /// A picky species takes to its favourite country and shuns the one least like it.
     #[test]
     fn species_prefer_their_favourite_biome() {
+        let tg = active();
         use crate::biome::BiomeKind;
         let mut checked = 0;
         for tier in 3..10 {
-            for slot in 0..SLOTS_PER_TIER {
+            for slot in 0..tg.gen_range_slots_per_tier {
                 let d = Distribution::wild(SEED, tier, slot);
                 if d.picky < 0.6 || d.breadth < 0.4 {
                     continue;
@@ -1536,10 +1560,11 @@ mod tests {
     /// genome drifts further the further apart two sectors lie.
     #[test]
     fn clines_are_smooth_and_accumulate_with_distance() {
+        let tg = active();
         let (mut near, mut far, mut n_near, mut n_far) = (0.0, 0.0, 0, 0);
         let mut worst = 0.0_f32;
         for tier in 3..9 {
-            for slot in 0..SLOTS_PER_TIER {
+            for slot in 0..tg.gen_range_slots_per_tier {
                 let d = Distribution::wild(SEED, tier, slot);
                 if d.spread != Spread::Generalist {
                     continue;
@@ -1575,10 +1600,11 @@ mod tests {
     /// same distances, and the further the isolate from its species' anchor the more.
     #[test]
     fn split_populations_differ_more_than_connected_ones() {
+        let tg = active();
         let (mut same, mut apart, mut n_same, mut n_apart) = (0.0, 0.0, 0, 0);
         let (mut low, mut high, mut n_low, mut n_high) = (0.0, 0.0, 0, 0);
         for tier in 4..12 {
-            for slot in 0..SLOTS_PER_TIER {
+            for slot in 0..tg.gen_range_slots_per_tier {
                 let d = Distribution::wild(SEED, tier, slot);
                 if d.spread == Spread::Generalist {
                     continue;
@@ -1694,10 +1720,11 @@ mod tests {
     /// are calm and unlearning, and turn up in real sectors.
     #[test]
     fn nest_builders_are_a_calm_share_of_the_catalog_and_live_in_niches() {
+        let tg = active();
         let (mut species, mut builders) = (0, 0);
         for seed in SEEDS {
             for tier in 0..12 {
-                for slot in 0..SLOTS_PER_TIER {
+                for slot in 0..tg.gen_range_slots_per_tier {
                     let d = Distribution::wild(seed, tier, slot);
                     species += 1;
                     let g = d.founder(seed);

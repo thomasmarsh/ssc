@@ -6,10 +6,7 @@
 
 macro_rules! groups {
     ($($acc:tt)*) => {
-        $crate::simulation::tunables::tunables! {
-            /// Every tunable gameplay number, resolved. `Game::tune` holds one; the defaults are the
-            /// shipped values (`Tunables::DEFAULT`, also usable in const contexts and tests).
-            pub struct Tunables, table TUNABLES, validate validate;
+        $crate::simulation::tuning_gen::groups! {
             $($acc)*
         group "world" {
             /// Hard ceiling on loaded bodies; shattering and breeding stop short of it.

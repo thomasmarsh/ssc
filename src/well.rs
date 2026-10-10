@@ -11,6 +11,7 @@
 //! See `docs/BESTIARY.md`, section 6, for the design and the fairness rules.
 
 use crate::simulation::BodyKind;
+use crate::simulation::tuning_gen::active;
 use crate::world::{Rng, SECTOR_SIZE, SectorId, Spawn, hash2};
 use bevy::prelude::Vec2;
 use std::f32::consts::TAU;
@@ -19,76 +20,25 @@ use std::f32::consts::TAU;
 pub const WELL_SALT: u64 = 0x3E11_D1A5_0000_0047;
 
 // ---- tuning --------------------------------------------------------------------------
+//
+// The ranges, modes and placement numbers are the `gen_well_*` entries of the tunables registry
+// (`simulation/tuning_gen.rs`), read through `tuning_gen::active()`; a former const `NAME` is the
+// entry `gen_well_<name in lower case>` (the first rings and shares per mode are
+// `gen_well_first_ring_<mode>` and `gen_well_share_<mode>`). The consts below stay because
+// gameplay modules outside generation read them directly.
 
 /// What a well was before it had a genome: the pull's base, its reach, core and damage.
 pub const BASE_PULL: f32 = 7_000_000.0;
 pub const BASE_REACH: f32 = 550.0;
 pub const BASE_CORE: f32 = 28.0;
 pub const BASE_DPS: f32 = 35.0;
-/// An ordinary well's ranges (Static, and the common part of every dynamic mode).
-pub const PULL: (f32, f32) = (0.8, 1.4);
-pub const REACH: (f32, f32) = (450.0, 700.0);
-pub const CORE: (f32, f32) = (24.0, 40.0);
-pub const DPS: (f32, f32) = (35.0, 50.0);
-/// A Maw: bigger, deadlier.
-pub const MAW_PULL: (f32, f32) = (2.5, 3.0);
-pub const MAW_REACH: (f32, f32) = (1000.0, 1400.0);
-pub const MAW_CORE: (f32, f32) = (70.0, 90.0);
-pub const MAW_DPS: (f32, f32) = (60.0, 90.0);
-/// Mode parameters: seconds per cycle and the swing (orbit radius, hop distance or separation).
-pub const DRIFT_PERIOD: (f32, f32) = (40.0, 120.0);
-pub const DRIFT_SWING: (f32, f32) = (200.0, 900.0);
-pub const PULSE_PERIOD: (f32, f32) = (6.0, 14.0);
-/// Pull breathes between this share of its base and the whole of it.
-pub const PULSE_LOW: f32 = 0.3;
-pub const HOP_PERIOD: (f32, f32) = (20.0, 45.0);
-pub const HOP_SWING: (f32, f32) = (300.0, 900.0);
-pub const REVERSE_PERIOD: (f32, f32) = (10.0, 24.0);
-/// Seconds either side of a sign change over which a Reverse well's pull passes through zero.
-pub const REVERSE_NEUTRAL: f32 = 0.5;
-pub const BINARY_PERIOD: (f32, f32) = (12.0, 30.0);
-pub const BINARY_SWING: (f32, f32) = (250.0, 700.0);
-/// No well moves faster than this on its own (the cap is 90; periods are lengthened to keep
-/// a margin).
-pub const SPEED_LIMIT: f32 = 90.0;
-pub const SPEED_TARGET: f32 = 80.0;
-/// A hop shows its destination this long before and collapses the old well over `HOP_COLLAPSE`;
-/// the new one swells over `HOP_FORM`.
-pub const HOP_GHOST: f32 = 3.0;
-pub const HOP_COLLAPSE: f32 = 2.0;
+/// A hop swells the new well over this long (the shown destination and the collapse of the old
+/// one are `gen_well_hop_ghost` and `gen_well_hop_collapse`).
 pub const HOP_FORM: f32 = 1.0;
 /// A hop never lands within this of the ship; it holds collapsed and tries again.
 pub const HOP_CLEAR_SHIP: f32 = 800.0;
 /// A pad's landing is refused while a well this close is mid-hop.
 pub const HOP_PAD_REFUSE: f32 = 600.0;
-/// A dynamic well keeps this far from a planetoid's surface (pads sit on it), and from any
-/// other fixed piece (nest stones, fort pieces, bases), at every point it can reach.
-pub const KEEP_PLANETOID: f32 = 450.0;
-pub const KEEP_FIXED: f32 = 450.0;
-/// And this far inside the sector's border, so it never leaves its own sector.
-pub const KEEP_BORDER: f32 = 100.0;
-/// A mode whose room (the largest swing the clearances allow) is under this stays Static.
-pub const SWING_MIN: f32 = 150.0;
-/// First ring of each mode. Rings 3 and 4 hold only Static wells, as before.
-pub const FIRST_RING: [(Mode, u32); 6] = [
-    (Mode::Maw, 9),
-    (Mode::Drift, 5),
-    (Mode::Pulse, 5),
-    (Mode::Hop, 6),
-    (Mode::Reverse, 8),
-    (Mode::Binary, 7),
-];
-/// The share of a far sector's dynamic slot each mode takes, in the order they are rolled
-/// (the rest is Static: about 60 percent).
-pub const SHARES: [(Mode, f32); 6] = [
-    (Mode::Maw, 0.04),
-    (Mode::Drift, 0.10),
-    (Mode::Pulse, 0.08),
-    (Mode::Hop, 0.06),
-    (Mode::Reverse, 0.04),
-    (Mode::Binary, 0.08),
-];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     Static,
@@ -139,11 +89,31 @@ impl Mode {
 
     /// The nearest ring a well of this mode may appear at.
     pub fn first_ring(self) -> u32 {
-        FIRST_RING
-            .iter()
-            .find(|(m, _)| *m == self)
-            .map_or(3, |(_, r)| *r)
+        let tg = active();
+        match self {
+            Self::Maw => tg.gen_well_first_ring_maw,
+            Self::Drift => tg.gen_well_first_ring_drift,
+            Self::Pulse => tg.gen_well_first_ring_pulse,
+            Self::Hop => tg.gen_well_first_ring_hop,
+            Self::Reverse => tg.gen_well_first_ring_reverse,
+            Self::Binary => tg.gen_well_first_ring_binary,
+            Self::Static => 3,
+        }
     }
+}
+
+/// The share of a far sector's dynamic slot each mode takes, in the order they are rolled
+/// (the rest is Static: about 60 percent).
+fn shares() -> [(Mode, f32); 6] {
+    let tg = active();
+    [
+        (Mode::Maw, tg.gen_well_share_maw),
+        (Mode::Drift, tg.gen_well_share_drift),
+        (Mode::Pulse, tg.gen_well_share_pulse),
+        (Mode::Hop, tg.gen_well_share_hop),
+        (Mode::Reverse, tg.gen_well_share_reverse),
+        (Mode::Binary, tg.gen_well_share_binary),
+    ]
 }
 
 /// Everything about a well that does not change.
@@ -194,7 +164,7 @@ pub struct WellPose {
     /// Core damage radius and damage per second right now (zero while collapsed or pushing).
     pub core: f32,
     pub dps: f32,
-    /// A hop's destination while it is shown (the last `HOP_GHOST` seconds), and how far along
+    /// A hop's destination while it is shown (the last `gen_well_hop_ghost` seconds), and how far along
     /// that warning is, from 0 to 1.
     pub ghost: Option<Vec2>,
     pub tell: f32,
@@ -250,6 +220,7 @@ pub fn hop_epoch(g: &WellGenome, time: f32) -> (i64, f32) {
 /// The pose of a well at `time`. Pure: the same genome, anchor and time give the same pose.
 /// `anchor` is the generated position (a Binary pair's anchor is its barycentre).
 pub fn pose(g: &WellGenome, anchor: Vec2, time: f32) -> WellPose {
+    let tg = active();
     let cycle = |period: f32| f64::from(time) / f64::from(period) + f64::from(g.phase);
     let turn = |period: f32| (cycle(period).fract() as f32) * TAU;
     match g.mode {
@@ -257,7 +228,7 @@ pub fn pose(g: &WellGenome, anchor: Vec2, time: f32) -> WellPose {
         Mode::Pulse => {
             let wave = 0.5 + 0.5 * turn(g.period).sin();
             let mut p = WellPose::fixed(g, anchor);
-            p.strength = g.pull * (PULSE_LOW + (1.0 - PULSE_LOW) * wave);
+            p.strength = g.pull * (tg.gen_well_pulse_low + (1.0 - tg.gen_well_pulse_low) * wave);
             p
         }
         Mode::Drift => {
@@ -275,9 +246,9 @@ pub fn pose(g: &WellGenome, anchor: Vec2, time: f32) -> WellPose {
             let at = (cycle(g.period).fract() as f32) * g.period;
             let half = 0.5 * g.period;
             let sign = if at < half {
-                (at.min(half - at) / REVERSE_NEUTRAL).min(1.0)
+                (at.min(half - at) / tg.gen_well_reverse_neutral).min(1.0)
             } else {
-                -((at - half).min(g.period - at) / REVERSE_NEUTRAL).min(1.0)
+                -((at - half).min(g.period - at) / tg.gen_well_reverse_neutral).min(1.0)
             };
             let mut p = WellPose::fixed(g, anchor);
             p.strength = g.pull * sign;
@@ -292,12 +263,12 @@ pub fn pose(g: &WellGenome, anchor: Vec2, time: f32) -> WellPose {
             let (epoch, at) = hop_epoch(g, time);
             let remaining = g.period - at;
             let mut p = WellPose::fixed(g, hop_point(g, anchor, epoch));
-            if remaining < HOP_GHOST {
+            if remaining < tg.gen_well_hop_ghost {
                 p.ghost = Some(hop_point(g, anchor, epoch + 1));
-                p.tell = 1.0 - remaining / HOP_GHOST;
+                p.tell = 1.0 - remaining / tg.gen_well_hop_ghost;
             }
-            if remaining < HOP_COLLAPSE {
-                p.collapse = 1.0 - remaining / HOP_COLLAPSE;
+            if remaining < tg.gen_well_hop_collapse {
+                p.collapse = 1.0 - remaining / tg.gen_well_hop_collapse;
             }
             if at < HOP_FORM {
                 p.collapse = 1.0 - at / HOP_FORM;
@@ -366,6 +337,7 @@ pub fn genome(
     room: f32,
     partner_exists: bool,
 ) -> WellGenome {
+    let tg = active();
     let mut rng = Rng::new(hash2(
         seed ^ WELL_SALT,
         id.x.wrapping_mul(4099).wrapping_add(index as i32),
@@ -376,7 +348,7 @@ pub fn genome(
     let mut mode = Mode::Static;
     if ordinal == 0 {
         let mut start = 0.0;
-        for (m, share) in SHARES {
+        for (m, share) in shares() {
             if mode_roll < start + share {
                 mode = m;
                 break;
@@ -403,27 +375,63 @@ pub fn genome(
         partner: false,
     };
     let mut g = match mode {
-        Mode::Maw => plain(mode, MAW_PULL, MAW_REACH, MAW_CORE, MAW_DPS),
-        _ => plain(mode, PULL, REACH, CORE, DPS),
+        Mode::Maw => plain(
+            mode,
+            (tg.gen_well_maw_pull_lo, tg.gen_well_maw_pull_hi),
+            (tg.gen_well_maw_reach_lo, tg.gen_well_maw_reach_hi),
+            (tg.gen_well_maw_core_lo, tg.gen_well_maw_core_hi),
+            (tg.gen_well_maw_dps_lo, tg.gen_well_maw_dps_hi),
+        ),
+        _ => plain(
+            mode,
+            (tg.gen_well_pull_lo, tg.gen_well_pull_hi),
+            (tg.gen_well_reach_lo, tg.gen_well_reach_hi),
+            (tg.gen_well_core_lo, tg.gen_well_core_hi),
+            (tg.gen_well_dps_lo, tg.gen_well_dps_hi),
+        ),
     };
     let swing_of = |range: (f32, f32)| lerp(range, (a * 7.0 + b * 3.0).fract()).min(room);
     match mode {
         Mode::Drift => {
-            g.swing = swing_of(DRIFT_SWING);
-            g.period = lerp(DRIFT_PERIOD, (c * 11.0).fract()).max(TAU * g.swing / SPEED_TARGET);
+            g.swing = swing_of((tg.gen_well_drift_swing_lo, tg.gen_well_drift_swing_hi));
+            g.period = lerp(
+                (tg.gen_well_drift_period_lo, tg.gen_well_drift_period_hi),
+                (c * 11.0).fract(),
+            )
+            .max(TAU * g.swing / tg.gen_well_speed_target);
         }
         Mode::Hop => {
-            g.swing = swing_of(HOP_SWING);
-            g.period = lerp(HOP_PERIOD, (c * 11.0).fract());
+            g.swing = swing_of((tg.gen_well_hop_swing_lo, tg.gen_well_hop_swing_hi));
+            g.period = lerp(
+                (tg.gen_well_hop_period_lo, tg.gen_well_hop_period_hi),
+                (c * 11.0).fract(),
+            );
         }
         Mode::Binary => {
             // The separation is twice the orbit radius, and the radius is what the room limits.
-            g.swing = lerp(BINARY_SWING, (a * 7.0 + b * 3.0).fract()).min(2.0 * room);
-            g.period =
-                lerp(BINARY_PERIOD, (c * 11.0).fract()).max(TAU * 0.5 * g.swing / SPEED_TARGET);
+            g.swing = lerp(
+                (tg.gen_well_binary_swing_lo, tg.gen_well_binary_swing_hi),
+                (a * 7.0 + b * 3.0).fract(),
+            )
+            .min(2.0 * room);
+            g.period = lerp(
+                (tg.gen_well_binary_period_lo, tg.gen_well_binary_period_hi),
+                (c * 11.0).fract(),
+            )
+            .max(TAU * 0.5 * g.swing / tg.gen_well_speed_target);
         }
-        Mode::Pulse => g.period = lerp(PULSE_PERIOD, (c * 11.0).fract()),
-        Mode::Reverse => g.period = lerp(REVERSE_PERIOD, (c * 11.0).fract()),
+        Mode::Pulse => {
+            g.period = lerp(
+                (tg.gen_well_pulse_period_lo, tg.gen_well_pulse_period_hi),
+                (c * 11.0).fract(),
+            )
+        }
+        Mode::Reverse => {
+            g.period = lerp(
+                (tg.gen_well_reverse_period_lo, tg.gen_well_reverse_period_hi),
+                (c * 11.0).fract(),
+            )
+        }
         _ => {}
     }
     // Anything but a plain well must clear the fixed pieces where it stands.
@@ -435,7 +443,7 @@ pub fn genome(
     }
     // Not enough room to roam: it stays where it was generated.
     let needs_room = matches!(mode, Mode::Drift | Mode::Hop | Mode::Binary);
-    if needs_room && g.swing < SWING_MIN {
+    if needs_room && g.swing < tg.gen_well_swing_min {
         g.mode = Mode::Static;
         g.swing = 0.0;
         g.period = 0.0;
@@ -450,15 +458,16 @@ fn rng_angle(a: f32, b: f32, c: f32) -> f32 {
 /// The pieces a moving well must keep clear of: planetoids (with a pad's clearance) and every
 /// other fixed piece of the sector (nest stones, fort pieces, bases).
 fn keep_clear(spawns: &[Spawn]) -> Vec<(Vec2, f32)> {
+    let tg = active();
     spawns
         .iter()
         .filter(|s| s.pinned || s.kind == BodyKind::Base)
         .map(|s| {
             let radius = s.radius.unwrap_or(40.0);
             let keep = if s.rock == crate::world::RockKind::Planetoid {
-                KEEP_PLANETOID
+                tg.gen_well_keep_planetoid
             } else {
-                KEEP_FIXED
+                tg.gen_well_keep_fixed
             };
             (s.position, radius + keep)
         })
@@ -468,9 +477,10 @@ fn keep_clear(spawns: &[Spawn]) -> Vec<(Vec2, f32)> {
 /// How far a well generated at `anchor` may stray: its distance to the nearest keep-clear
 /// circle and to the sector's border.
 fn room(id: SectorId, anchor: Vec2, clear: &[(Vec2, f32)]) -> f32 {
+    let tg = active();
     let to_border = {
         let d = (anchor - id.center()).abs();
-        SECTOR_SIZE / 2.0 - KEEP_BORDER - d.x.max(d.y)
+        SECTOR_SIZE / 2.0 - tg.gen_well_keep_border - d.x.max(d.y)
     };
     clear
         .iter()
@@ -560,8 +570,9 @@ mod tests {
 
     #[test]
     fn drift_orbits_within_its_swing_and_never_outruns_the_cap() {
+        let tg = active();
         let swing = 900.0;
-        let period = TAU * swing / SPEED_TARGET;
+        let period = TAU * swing / tg.gen_well_speed_target;
         let g = sample(Mode::Drift, swing, period);
         let anchor = Vec2::new(100.0, -50.0);
         let mut far: f32 = 0.0;
@@ -571,7 +582,7 @@ mod tests {
             far = far.max(p.position.distance(anchor));
             assert!(p.position.distance(anchor) <= swing + 0.01);
             assert!(
-                speed(&g, anchor, t) <= SPEED_LIMIT,
+                speed(&g, anchor, t) <= tg.gen_well_speed_limit,
                 "{}",
                 speed(&g, anchor, t)
             );
@@ -581,6 +592,7 @@ mod tests {
 
     #[test]
     fn pulse_breathes_between_a_third_and_the_whole() {
+        let tg = active();
         let g = sample(Mode::Pulse, 0.0, 10.0);
         let (mut lo, mut hi) = (f32::MAX, f32::MIN);
         for i in 0..400 {
@@ -589,13 +601,14 @@ mod tests {
             hi = hi.max(s);
         }
         assert!(
-            (lo - PULSE_LOW).abs() < 0.02 && (hi - 1.0).abs() < 0.02,
+            (lo - tg.gen_well_pulse_low).abs() < 0.02 && (hi - 1.0).abs() < 0.02,
             "{lo} {hi}"
         );
     }
 
     #[test]
     fn reverse_flips_through_a_neutral_window_and_does_no_damage_while_pushing() {
+        let tg = active();
         let g = WellGenome {
             phase: 0.0,
             ..sample(Mode::Reverse, 0.0, 16.0)
@@ -621,15 +634,16 @@ mod tests {
         assert!(pulled > 400 && pushed > 400);
         // Two neutral windows of about a second each (ramps are linear).
         assert!(
-            (neutral - 2.0 * 2.0 * REVERSE_NEUTRAL).abs() < 0.2,
+            (neutral - 2.0 * 2.0 * tg.gen_well_reverse_neutral).abs() < 0.2,
             "{neutral}"
         );
     }
 
     #[test]
     fn binary_pairs_share_a_barycentre_and_a_separation() {
+        let tg = active();
         let swing = 600.0;
-        let period = TAU * 0.5 * swing / SPEED_TARGET;
+        let period = TAU * 0.5 * swing / tg.gen_well_speed_target;
         let a = sample(Mode::Binary, swing, period);
         let b = WellGenome { partner: true, ..a };
         let anchor = Vec2::new(40.0, 40.0);
@@ -638,7 +652,7 @@ mod tests {
             let (pa, pb) = (pose(&a, anchor, t).position, pose(&b, anchor, t).position);
             assert!((pa.distance(pb) - swing).abs() < 0.1);
             assert!(((pa + pb) * 0.5).distance(anchor) < 0.1);
-            assert!(speed(&a, anchor, t) <= SPEED_LIMIT);
+            assert!(speed(&a, anchor, t) <= tg.gen_well_speed_limit);
         }
     }
 
@@ -705,7 +719,7 @@ mod tests {
             "{}",
             share(Mode::Static)
         );
-        for (mode, want) in SHARES {
+        for (mode, want) in shares() {
             assert!(
                 (share(mode) - want).abs() < 0.015,
                 "{mode:?} {}",
@@ -729,6 +743,7 @@ mod tests {
 
     #[test]
     fn generated_wells_keep_clear_of_pads_planetoids_nests_and_the_border_at_every_pose() {
+        let tg = active();
         let mut dynamic = 0;
         let mut by_mode = std::collections::HashMap::new();
         for (id, spawns, wells) in sectors() {
@@ -759,9 +774,9 @@ mod tests {
                             );
                         }
                         let d = (point - id.center()).abs();
-                        assert!(d.x.max(d.y) <= SECTOR_SIZE / 2.0 - KEEP_BORDER + 0.5);
+                        assert!(d.x.max(d.y) <= SECTOR_SIZE / 2.0 - tg.gen_well_keep_border + 0.5);
                     }
-                    assert!(speed(&w.genome, w.anchor, t) <= SPEED_LIMIT);
+                    assert!(speed(&w.genome, w.anchor, t) <= tg.gen_well_speed_limit);
                 }
             }
         }

@@ -14,7 +14,7 @@
 //!
 //! Everything is a pure function of the master seed and a sector. HOME and everything near it
 //! always lie in the starter realm (the Cradle), which applies nothing; a realm's effects also
-//! fade in over the sectors next to a border (`EDGE_RAMP`) and past the starter (`FAR_RAMP`), so
+//! fade in over the sectors next to a border (`gen_realm_edge_ramp`) and past the starter (`gen_realm_far_ramp`), so
 //! crossing one is a slope and a modifier never steps. See `docs/UNIVERSE.md`, "Realms".
 
 use crate::apex::Archetype;
@@ -22,38 +22,21 @@ use crate::biome::BiomeKind;
 use crate::genome::{Diet, Genome, Social};
 use crate::power::Power;
 use crate::region::{harsh_name, soft_name};
+use crate::simulation::tuning_gen::active;
 use crate::world::{SectorId, hash2, value_noise};
 use bevy::prelude::Vec2;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-// ---- tuning: the layer ---------------------------------------------------------------------
+// ---- tuning --------------------------------------------------------------------------------
+//
+// The layer's numbers are the `gen_realm_*` entries of the tunables registry
+// (`simulation/tuning_gen.rs`), read through `tuning_gen::active()`; a former const `NAME` is the
+// entry `gen_realm_<name in lower case>`. `MAX_FIZZLE` stays a const because `simulation::realms`
+// clamps the ability fizzle chance with it.
 
-/// Sectors on a side of the lattice that places one realm point each.
-pub const REALM_CELL: f32 = 80.0;
-/// The most a point's additive weight can add, in sectors: realms run about 40 to 120 across.
-pub const REALM_WEIGHT: f32 = 22.0;
-/// The warp of the realm edges: noise frequency per sector and amplitude in sectors.
-pub const REALM_WARP_FREQUENCY: f32 = 0.03;
-pub const REALM_WARP: f32 = 5.0;
-/// The starter realm's point sits at HOME with this additive weight (a realm of its own).
-pub const STARTER_WEIGHT: f32 = 50.0;
-/// Rings inside which HOME's neighbourhood is the starter realm whatever the lattice says.
-pub const STARTER_RINGS: f32 = 14.0;
-/// Sectors of distance score over which a realm's effects rise from nothing at a border.
-pub const EDGE_RAMP: f32 = 10.0;
-/// A realm's effects also rise with depth: nothing up to `FAR_FROM` rings, full `FAR_RAMP` later.
-pub const FAR_FROM: f32 = 16.0;
-pub const FAR_RAMP: f32 = 12.0;
-/// Bounds every multiplier stays inside, whatever a table row says.
-pub const MIN_MULT: f32 = 0.1;
-pub const MAX_MULT: f32 = 5.0;
-/// The most any additive effect (flat armour, ability fizzle chance) can reach; a use site
-/// clamps the fizzle chance to `MAX_FIZZLE` besides.
-pub const MAX_PLATING: f32 = 12.0;
+/// The most any ability fizzle chance can reach.
 pub const MAX_FIZZLE: f32 = 0.6;
-/// An effect smaller than this share does not make the details line.
-pub const SHOWN_AT: f32 = 0.04;
 
 const REALM_SALT: u64 = 0x5EA1_3000_0000_0061;
 const NAME_SALT: u64 = 0x5EA1_4E41_0000_0063;
@@ -242,6 +225,7 @@ impl Effects {
 
     /// The effects at `intensity` (0 is neutral, 1 is the table row), held inside the bounds.
     pub fn scaled(&self, intensity: f32) -> Self {
+        let tg = active();
         let t = intensity.clamp(0.0, 1.0);
         self.map(|v, neutral| {
             let v = if t >= 1.0 {
@@ -250,9 +234,9 @@ impl Effects {
                 neutral + (v - neutral) * t
             };
             if neutral == 0.0 {
-                v.clamp(0.0, MAX_PLATING)
+                v.clamp(0.0, tg.gen_realm_max_plating)
             } else {
-                v.clamp(MIN_MULT, MAX_MULT)
+                v.clamp(tg.gen_realm_min_mult, tg.gen_realm_max_mult)
             }
         })
     }
@@ -613,13 +597,14 @@ impl RealmKind {
 // ---- the layer --------------------------------------------------------------------------------
 
 fn cell_point(seed: u64, cx: i32, cy: i32) -> (Vec2, f32, u64) {
+    let tg = active();
     let h = hash2(seed ^ REALM_SALT, cx, cy);
     let unit = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
     let at = Vec2::new(
         cx as f32 + unit(0) * 0.8 + 0.1,
         cy as f32 + unit(16) * 0.8 + 0.1,
-    ) * REALM_CELL;
-    (at, unit(32) * REALM_WEIGHT, h)
+    ) * tg.gen_realm_realm_cell;
+    (at, unit(32) * tg.gen_realm_realm_weight, h)
 }
 
 /// The kind a cell rolls, by the lottery weights of the catalog.
@@ -650,12 +635,13 @@ struct Core {
 }
 
 thread_local! {
-    /// Memo of the layer: it is a pure function of seed and sector.
-    static CORES: RefCell<HashMap<(u64, i32, i32), Core>> = RefCell::new(HashMap::new());
+    /// Memo of the layer: a pure function of seed, sector and the generation tuning (its
+    /// fingerprint is part of the key).
+    static CORES: RefCell<HashMap<(u64, i32, i32, u64), Core>> = RefCell::new(HashMap::new());
 }
 
 fn core(seed: u64, id: SectorId) -> Core {
-    let memo = (seed, id.x, id.y);
+    let memo = (seed, id.x, id.y, crate::simulation::tuning_gen::key());
     if let Some(hit) = CORES.with(|c| c.borrow().get(&memo).copied()) {
         return hit;
     }
@@ -671,20 +657,29 @@ fn core(seed: u64, id: SectorId) -> Core {
 }
 
 fn compute(seed: u64, id: SectorId) -> Core {
+    let tg = active();
     let raw = Vec2::new(id.x as f32, id.y as f32);
     let warp = Vec2::new(
-        value_noise(seed ^ REALM_SALT, 1, raw * REALM_WARP_FREQUENCY) - 0.5,
-        value_noise(seed ^ REALM_SALT, 2, raw * REALM_WARP_FREQUENCY) - 0.5,
-    ) * (2.0 * REALM_WARP);
+        value_noise(
+            seed ^ REALM_SALT,
+            1,
+            raw * tg.gen_realm_realm_warp_frequency,
+        ) - 0.5,
+        value_noise(
+            seed ^ REALM_SALT,
+            2,
+            raw * tg.gen_realm_realm_warp_frequency,
+        ) - 0.5,
+    ) * (2.0 * tg.gen_realm_realm_warp);
     let at = raw + warp;
     let (cx, cy) = (
-        (at.x / REALM_CELL).floor() as i32,
-        (at.y / REALM_CELL).floor() as i32,
+        (at.x / tg.gen_realm_realm_cell).floor() as i32,
+        (at.y / tg.gen_realm_realm_cell).floor() as i32,
     );
     let ring = crate::range::ring(id) as f32;
     // The starter realm is a point at HOME; it also holds the whole neighbourhood outright.
     let mut scores: Vec<(f32, u64)> = Vec::with_capacity(26);
-    scores.push((at.length() - STARTER_WEIGHT, STARTER_KEY));
+    scores.push((at.length() - tg.gen_realm_starter_weight, STARTER_KEY));
     for dx in -2..=2 {
         for dy in -2..=2 {
             let (point, weight, h) = cell_point(seed, cx + dx, cy + dy);
@@ -693,15 +688,15 @@ fn compute(seed: u64, id: SectorId) -> Core {
     }
     scores.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     let (best, next) = (scores[0], scores[1]);
-    if best.1 == STARTER_KEY || ring <= STARTER_RINGS {
+    if best.1 == STARTER_KEY || ring <= tg.gen_realm_starter_rings {
         return Core {
             key: STARTER_KEY,
             kind: RealmKind::CRADLE,
             intensity: 0.0,
         };
     }
-    let edge = smooth((next.0 - best.0) / EDGE_RAMP);
-    let far = smooth((ring - FAR_FROM) / FAR_RAMP);
+    let edge = smooth((next.0 - best.0) / tg.gen_realm_edge_ramp);
+    let far = smooth((ring - tg.gen_realm_far_from) / tg.gen_realm_far_ramp);
     Core {
         key: best.1,
         kind: kind_of(best.1),
@@ -793,15 +788,16 @@ impl Realm {
 
     /// What the realm changes here, as (label, change) pairs, biggest first: the details panel's
     /// lines. A multiplier reads as a signed percent, flat armour as points knocked off each
-    /// hit, the fizzle chance as a percent chance. Empty where nothing differs by `SHOWN_AT`.
+    /// hit, the fizzle chance as a percent chance. Empty where nothing differs by `gen_realm_shown_at`.
     pub fn changes(&self) -> Vec<(&'static str, String)> {
+        let tg = active();
         let mut out: Vec<(&'static str, f32, String)> = self
             .effects
             .fields()
             .into_iter()
             .filter_map(|(label, v, neutral)| {
                 let delta = v - neutral;
-                if delta.abs() < SHOWN_AT {
+                if delta.abs() < tg.gen_realm_shown_at {
                     return None;
                 }
                 let text = match label {
@@ -1080,6 +1076,7 @@ mod tests {
     /// stays inside its bounds along the way and across the whole map.
     #[test]
     fn modifiers_are_monotonic_and_bounded() {
+        let tg = active();
         for spec in &CATALOG {
             let mut last = Effects::NEUTRAL.scaled(0.0);
             assert!(last.is_neutral());
@@ -1093,10 +1090,14 @@ mod tests {
                         spec.id
                     );
                     if neutral == 0.0 {
-                        assert!((0.0..=MAX_PLATING).contains(&b), "{} {label} {b}", spec.id);
+                        assert!(
+                            (0.0..=tg.gen_realm_max_plating).contains(&b),
+                            "{} {label} {b}",
+                            spec.id
+                        );
                     } else {
                         assert!(
-                            (MIN_MULT..=MAX_MULT).contains(&b),
+                            (tg.gen_realm_min_mult..=tg.gen_realm_max_mult).contains(&b),
                             "{} {label} {b}",
                             spec.id
                         );
@@ -1113,7 +1114,7 @@ mod tests {
                 if neutral == 0.0 {
                     assert!(v >= 0.0);
                 } else {
-                    assert!((MIN_MULT..=MAX_MULT).contains(&v));
+                    assert!((tg.gen_realm_min_mult..=tg.gen_realm_max_mult).contains(&v));
                 }
             }
         }

@@ -1,6 +1,6 @@
 //! Civilizations: rare, deterministic regions of the universe held by a learner lineage.
 //!
-//! Territories live on their own coarse lattice (`TERRITORY_CELL` sectors a side, own
+//! Territories live on their own coarse lattice (`gen_territory_territory_cell` sectors a side, own
 //! salted stream), so nothing on the sector generator's streams moves. Each cell may hold
 //! one territory: a capital sector and a ragged disc of sectors around it. A territory
 //! never reaches the start (members are at least `TERRITORY_MIN_DEPTH` sectors from HOME).
@@ -15,6 +15,7 @@ use crate::fortress::{self, Archetype, FortRole, Layout, PartKind};
 use crate::genome::{Diet, Fear, Genome, Nest, Social, Species, Trigger, Weapon};
 use crate::range::{blob_reach, fields, ring};
 use crate::simulation::BodyKind;
+use crate::simulation::tuning_gen::active;
 use crate::world::{
     BaseKind, Phenotype, Rng, RockKind, SECTOR_BODY_BUDGET, SECTOR_SIZE, SectorId, SectorParams,
     Spawn, hash2, latent_base,
@@ -24,55 +25,18 @@ use std::f32::consts::TAU;
 
 /// Separates every territory stream from the rest of generation.
 pub const TERRITORY_SALT: u64 = 0xC1B1_7E55_0000_0021;
-/// Sectors on a side of one territory cell: at most one territory per cell.
-pub const TERRITORY_CELL: i32 = 10;
 /// Ordinary territories keep at least this many sectors from HOME. The opening is a gentle
 /// ramp (see `range`): the only civilization nearer is the weak outpost below, so the first
-/// strong ones sit at depth 6 to 8 (threat 2.8 to 3.4) and are scaled by `STRENGTH_PER_DEPTH`.
+/// strong ones sit at depth 6 to 8 (threat 2.8 to 3.4) and are scaled by `gen_territory_strength_per_depth`.
 pub const TERRITORY_MIN_DEPTH: f32 = 6.0;
-/// Share of cells that may hold a territory, before life and rock bias them.
-pub const TERRITORY_CHANCE: f32 = 0.5;
-/// Radius of a territory, in sectors, before the noisy edge reshapes it.
-const RADIUS_RANGE: (f32, f32) = (2.0, 3.0);
-/// How far the noise pushes the edge in or out, as a share of the radius.
-const EDGE_NOISE: f32 = 0.7;
 const SHAPE_NOISE_CHANNEL: u64 = 0x7E22;
-/// A territory's strength is capped by depth: `STRENGTH_BASE + STRENGTH_PER_DEPTH * depth`.
-const STRENGTH_BASE: f32 = 0.45;
-const STRENGTH_PER_DEPTH: f32 = 0.1;
-/// Territories prefer medium-high life (`LIFE_TARGET`) beside rock-rich land (they mine): a
-/// cell's acceptance is `ACCEPT_FLOOR + (1 - ACCEPT_FLOOR) * fit`, `fit` being how close the
-/// capital's life is to the target times how rich its neighbourhood's rock is (up to
-/// `ROCK_WANTED`).
-const LIFE_TARGET: f32 = 0.7;
-const ROCK_WANTED: f32 = 0.55;
-const ACCEPT_FLOOR: f32 = 0.2;
 
-/// The early outpost: a small, weak and peaceful settlement guaranteed within reach of HOME,
-/// so the first civilization is findable. Its seat is `OUTPOST_DEPTH` sectors out (and at
-/// least ring 3), its blob `OUTPOST_RADIUS` across, its strength `OUTPOST_STRENGTH`.
-pub const OUTPOST_DEPTH: (f32, f32) = (3.4, 4.6);
-const OUTPOST_RADIUS: (f32, f32) = (1.1, 1.7);
-const OUTPOST_STRENGTH: f32 = 0.35;
-
-// ---- tuning: the density gradient ---------------------------------------------------
-
-/// How far beyond a territory's nominal radius the gradient reaches zero, in sectors.
-pub const GRADIENT_PAD: f32 = 0.6;
-/// Closeness (0 at the rim, 1 at the capital) below which a sector is the fringe (scouts
-/// only, no stations) and above which it is the core (outposts may be warded, fortified).
-pub const FRINGE_BELOW: f32 = 0.3;
-pub const CORE_ABOVE: f32 = 0.6;
-/// How far toward the capital (or outward at the rim) a sector's groups lean, as a share
-/// of the sector's room.
-const LEAN: f32 = 1.0;
-/// A scout party at the fringe, then (at closeness 0 and 1) a patrol and an outlying
-/// post's garrison, in members before the strength factor.
-pub const SCOUT_MEMBERS: f32 = 2.0;
-pub const PATROL_MEMBERS: (f32, f32) = (2.0, 3.5);
-pub const POST_MEMBERS: (f32, f32) = (2.0, 3.0);
-/// Chance that a sector past the fringe holds an outlying post, at closeness 0 and 1.
-pub const POST_CHANCE: (f32, f32) = (0.1, 0.5);
+// ---- tuning --------------------------------------------------------------------------------
+//
+// The numbers of territory generation are the `gen_territory_*` entries of the tunables registry
+// (`simulation/tuning_gen.rs`), read through `tuning_gen::active()`; a former const `NAME` is the
+// entry `gen_territory_<name in lower case>`. `TERRITORY_MIN_DEPTH`, `TILLAGE_FARMS` and
+// `SEARCH_CELLS` stay consts because gameplay modules outside generation read them directly.
 
 /// What a civilization fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,15 +118,17 @@ pub struct Territory {
 }
 
 fn cell_of(id: SectorId) -> SectorId {
+    let tg = active();
     SectorId {
-        x: id.x.div_euclid(TERRITORY_CELL),
-        y: id.y.div_euclid(TERRITORY_CELL),
+        x: id.x.div_euclid(tg.gen_territory_territory_cell),
+        y: id.y.div_euclid(tg.gen_territory_territory_cell),
     }
 }
 
 /// How well a capital suits a civilization, in [0, 1]: medium-high life in the sector, and
 /// rock-rich ground around it for the workers to mine.
 fn fit(seed: u64, capital: SectorId) -> f32 {
+    let tg = active();
     let (life, _) = fields(seed, capital);
     let mut rock = 0.0;
     for dx in -1..=1 {
@@ -177,8 +143,10 @@ fn fit(seed: u64, capital: SectorId) -> f32 {
             .1;
         }
     }
-    let life_fit = (1.0 - (life - LIFE_TARGET).abs() / LIFE_TARGET).clamp(0.0, 1.0);
-    life_fit * (rock / 9.0 / ROCK_WANTED).clamp(0.0, 1.0)
+    let life_fit = (1.0
+        - (life - tg.gen_territory_life_target).abs() / tg.gen_territory_life_target)
+        .clamp(0.0, 1.0);
+    life_fit * (rock / 9.0 / tg.gen_territory_rock_wanted).clamp(0.0, 1.0)
 }
 
 /// The territory a lattice cell holds, if any. The capital sits near the middle of the cell
@@ -186,13 +154,17 @@ fn fit(seed: u64, capital: SectorId) -> f32 {
 /// capital's life and rock decide whether the cell takes a territory at all (the caller
 /// judges the returned acceptance roll against `fit`, which is dear, only when needed).
 fn in_cell(seed: u64, cell: SectorId) -> Option<(Territory, f32)> {
+    let tg = active();
     let mut rng = Rng::new(hash2(seed ^ TERRITORY_SALT, cell.x, cell.y));
-    let present = rng.chance(TERRITORY_CHANCE);
+    let present = rng.chance(tg.gen_territory_territory_chance);
     let capital = SectorId {
-        x: cell.x * TERRITORY_CELL + rng.int(4, 5) as i32,
-        y: cell.y * TERRITORY_CELL + rng.int(4, 5) as i32,
+        x: cell.x * tg.gen_territory_territory_cell + rng.int(4, 5) as i32,
+        y: cell.y * tg.gen_territory_territory_cell + rng.int(4, 5) as i32,
     };
-    let radius = rng.range(RADIUS_RANGE.0, RADIUS_RANGE.1);
+    let radius = rng.range(
+        tg.gen_territory_radius_range_lo,
+        tg.gen_territory_radius_range_hi,
+    );
     let strength = rng.range(0.7, 1.4);
     let roll = rng.f32();
     let shape = if roll < 0.4 {
@@ -209,7 +181,8 @@ fn in_cell(seed: u64, cell: SectorId) -> Option<(Territory, f32)> {
     }
     // Deeper means stronger: the nearest ones are held to what the ramp allows.
     let depth = Vec2::new(capital.x as f32, capital.y as f32).length();
-    let strength = strength.min(STRENGTH_BASE + STRENGTH_PER_DEPTH * depth);
+    let strength =
+        strength.min(tg.gen_territory_strength_base + tg.gen_territory_strength_per_depth * depth);
     let t = Territory {
         id,
         capital,
@@ -220,11 +193,15 @@ fn in_cell(seed: u64, cell: SectorId) -> Option<(Territory, f32)> {
     Some((t, accept))
 }
 
-/// The seed's early outpost (see `OUTPOST_DEPTH`): where it is is a pure function of the seed.
+/// The seed's early outpost (see `gen_territory_outpost_depth_*`): where it is is a pure function of the seed.
 pub fn outpost(seed: u64) -> Territory {
+    let tg = active();
     let mut rng = Rng::new(hash2(seed ^ TERRITORY_SALT ^ 0x0A57, 0, 0));
     let angle = rng.range(0.0, TAU);
-    let mut depth = rng.range(OUTPOST_DEPTH.0, OUTPOST_DEPTH.1);
+    let mut depth = rng.range(
+        tg.gen_territory_outpost_depth_lo,
+        tg.gen_territory_outpost_depth_hi,
+    );
     let capital = loop {
         let at = Vec2::from_angle(angle) * depth;
         let capital = SectorId {
@@ -239,21 +216,25 @@ pub fn outpost(seed: u64) -> Territory {
     Territory {
         id: rng.next_u64() | 1,
         capital,
-        strength: OUTPOST_STRENGTH,
+        strength: tg.gen_territory_outpost_strength,
         shape: CivShape::Outpost,
-        radius: rng.range(OUTPOST_RADIUS.0, OUTPOST_RADIUS.1),
+        radius: rng.range(
+            tg.gen_territory_outpost_radius_lo,
+            tg.gen_territory_outpost_radius_hi,
+        ),
     }
 }
 
 /// Whether the blob of `t` covers `sector`: a ragged disc (shared with species ranges).
 fn covers(seed: u64, t: &Territory, sector: SectorId) -> bool {
+    let tg = active();
     let at = Vec2::new(sector.x as f32, sector.y as f32);
     let capital = Vec2::new(t.capital.x as f32, t.capital.y as f32);
     let reach = blob_reach(
         seed ^ TERRITORY_SALT,
         SHAPE_NOISE_CHANNEL,
         t.radius,
-        EDGE_NOISE,
+        tg.gen_territory_edge_noise,
         at,
     );
     at.distance(capital) <= reach
@@ -264,6 +245,7 @@ fn covers(seed: u64, t: &Territory, sector: SectorId) -> bool {
 /// ragged, contiguous-ish, never within `TERRITORY_MIN_DEPTH` of HOME and cluster where life
 /// is medium-high beside rock-rich land.
 pub fn territory(seed: u64, sector: SectorId) -> Option<Territory> {
+    let tg = active();
     // HOME and its two rings of neighbours are the gentle opening: no civilization reaches in.
     if ring(sector) <= 2 {
         return None;
@@ -279,7 +261,9 @@ pub fn territory(seed: u64, sector: SectorId) -> Option<Territory> {
     let (t, accept) = in_cell(seed, cell_of(sector))?;
     // A territory's whole disc is cheap to test; the life and rock fit is judged last.
     if !covers(seed, &t, sector)
-        || accept >= ACCEPT_FLOOR + (1.0 - ACCEPT_FLOOR) * fit(seed, t.capital)
+        || accept
+            >= tg.gen_territory_accept_floor
+                + (1.0 - tg.gen_territory_accept_floor) * fit(seed, t.capital)
     {
         return None;
     }
@@ -316,7 +300,8 @@ type Held = (Territory, Vec<SectorId>);
 
 /// The sectors a territory holds, scanned over its bounding box.
 fn sectors_of(seed: u64, t: &Territory) -> Vec<SectorId> {
-    let reach = (t.radius * (1.0 + EDGE_NOISE * 0.5)).ceil() as i32 + 1;
+    let tg = active();
+    let reach = (t.radius * (1.0 + tg.gen_territory_edge_noise * 0.5)).ceil() as i32 + 1;
     let mut out = Vec::new();
     for dx in -reach..=reach {
         for dy in -reach..=reach {
@@ -349,6 +334,7 @@ pub fn nearest_civilization(
     cache: &mut SeatCache,
     skip: &dyn Fn(&Territory) -> bool,
 ) -> Option<Nearest> {
+    let tg = active();
     let mut best: Option<Nearest> = None;
     let consider = |best: &mut Option<Nearest>, t: &Territory, sectors: &[SectorId]| {
         if skip(t) {
@@ -384,7 +370,7 @@ pub fn nearest_civilization(
         consider(&mut best, t, sectors);
     }
     let own = cell_of(SectorId::containing(from));
-    let cell_size = (TERRITORY_CELL as f32) * SECTOR_SIZE;
+    let cell_size = (tg.gen_territory_territory_cell as f32) * SECTOR_SIZE;
     for k in 0..=SEARCH_CELLS {
         // A cell k rings out is at least k - 1 cells away.
         if let Some(b) = best
@@ -408,7 +394,9 @@ pub fn nearest_civilization(
                     let kept = t.capital.chebyshev_distance(SectorId::ORIGIN) > 2
                         && Vec2::new(t.capital.x as f32, t.capital.y as f32).length()
                             >= TERRITORY_MIN_DEPTH
-                        && accept < ACCEPT_FLOOR + (1.0 - ACCEPT_FLOOR) * fit(seed, t.capital)
+                        && accept
+                            < tg.gen_territory_accept_floor
+                                + (1.0 - tg.gen_territory_accept_floor) * fit(seed, t.capital)
                         && !covers(seed, &early, t.capital);
                     kept.then(|| (t, sectors_of(seed, &t)))
                 });
@@ -534,12 +522,13 @@ impl Territory {
     }
 
     /// How close to the heart of the civilization `sector` is, in [0, 1]: 1 at the capital,
-    /// falling smoothly to 0 `GRADIENT_PAD` sectors past the nominal radius. People, posts and
+    /// falling smoothly to 0 `gen_territory_gradient_pad` sectors past the nominal radius. People, posts and
     /// walls thicken with it, so the rim is scouts and the middle is a city.
     pub fn closeness(&self, sector: SectorId) -> f32 {
+        let tg = active();
         let (dx, dy) = (sector.x - self.capital.x, sector.y - self.capital.y);
         let d = Vec2::new(dx as f32, dy as f32).length();
-        let t = (1.0 - d / (self.radius + GRADIENT_PAD)).clamp(0.0, 1.0);
+        let t = (1.0 - d / (self.radius + tg.gen_territory_gradient_pad)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
     }
 
@@ -758,6 +747,7 @@ pub fn civ_spawns(
     genes: &Phenotype,
     out: &mut Vec<Spawn>,
 ) {
+    let tg = active();
     let Some(t) = territory(seed, id) else {
         return;
     };
@@ -905,42 +895,51 @@ pub fn civ_spawns(
     let c = t.closeness(id);
     let lerp = |range: (f32, f32)| range.0 + (range.1 - range.0) * c;
     let toward = (t.capital.center() - center).normalize_or_zero();
-    let lean = (c - FRINGE_BELOW) * extent * LEAN;
+    let lean = (c - tg.gen_territory_fringe_below) * extent * tg.gen_territory_lean;
     let place = |rng: &mut Rng| {
         let at = place(rng) + toward * lean;
         let limit = SECTOR_SIZE / 2.0 - 200.0;
         center + (at - center).clamp(Vec2::splat(-limit), Vec2::splat(limit))
     };
-    let outpost = if t.peaceful() || c < FRINGE_BELOW {
+    let outpost = if t.peaceful() || c < tg.gen_territory_fringe_below {
         0.0
     } else {
-        lerp(POST_CHANCE)
+        lerp((
+            tg.gen_territory_post_chance_lo,
+            tg.gen_territory_post_chance_hi,
+        ))
     };
     let mut fortify = None;
     if rng.chance(outpost) {
         let seat = place(&mut rng);
         station(out, &mut rng, CivRole::Outpost, seat);
-        for _ in 0..share(lerp(POST_MEMBERS)) {
+        for _ in 0..share(lerp((
+            tg.gen_territory_post_members_lo,
+            tg.gen_territory_post_members_hi,
+        ))) {
             let at = scatter(&mut rng, seat, 380.0);
             add(out, member, CivRole::Member, at);
         }
-        if t.shape != CivShape::Horde && c >= CORE_ABOVE {
+        if t.shape != CivShape::Horde && c >= tg.gen_territory_core_above {
             let at = scatter(&mut rng, seat, 260.0);
             add(out, warrior, CivRole::Warrior, at);
         }
         fortify = Some(seat);
     }
-    let patrols = if c < FRINGE_BELOW {
+    let patrols = if c < tg.gen_territory_fringe_below {
         1
     } else {
         rng.int(1, 1 + (c * 2.0).round() as u32)
     };
     for _ in 0..patrols {
         let heart = place(&mut rng);
-        let size = if c < FRINGE_BELOW {
-            SCOUT_MEMBERS
+        let size = if c < tg.gen_territory_fringe_below {
+            tg.gen_territory_scout_members
         } else {
-            lerp(PATROL_MEMBERS)
+            lerp((
+                tg.gen_territory_patrol_members_lo,
+                tg.gen_territory_patrol_members_hi,
+            ))
         };
         for _ in 0..share(size) {
             let at = scatter(&mut rng, heart, 200.0);
@@ -1260,6 +1259,7 @@ mod tests {
     /// Ordinary territories prefer medium-high life beside rock-rich land.
     #[test]
     fn territories_cluster_where_life_is_medium_high_beside_rock() {
+        let tg = active();
         let (mut chosen, mut all) = (Vec::new(), Vec::new());
         for seed in [SEED, 1, 42, 99] {
             for cx in -5..5 {
@@ -1275,7 +1275,9 @@ mod tests {
                     }
                     let f = fit(seed, t.capital);
                     all.push(f);
-                    if accept < ACCEPT_FLOOR + (1.0 - ACCEPT_FLOOR) * f {
+                    if accept
+                        < tg.gen_territory_accept_floor + (1.0 - tg.gen_territory_accept_floor) * f
+                    {
                         chosen.push(f);
                     }
                 }
@@ -1293,6 +1295,7 @@ mod tests {
 
     #[test]
     fn strength_follows_the_depth_ramp() {
+        let tg = active();
         for seed in [SEED, 1, 42, 99] {
             for (id, t) in all_territories(seed, 40) {
                 if t.id == outpost(seed).id {
@@ -1300,7 +1303,10 @@ mod tests {
                 }
                 let depth = Vec2::new(t.capital.x as f32, t.capital.y as f32).length();
                 assert!(
-                    t.strength <= STRENGTH_BASE + STRENGTH_PER_DEPTH * depth + 1e-4,
+                    t.strength
+                        <= tg.gen_territory_strength_base
+                            + tg.gen_territory_strength_per_depth * depth
+                            + 1e-4,
                     "{id:?} strength {} at depth {depth}",
                     t.strength
                 );
@@ -1356,6 +1362,7 @@ mod tests {
 
     #[test]
     fn people_thicken_toward_the_heart_and_the_fringe_holds_only_scouts() {
+        let tg = active();
         let census = census();
         let mean = |lo: f32, hi: f32| {
             let band: Vec<f32> = census
@@ -1367,9 +1374,9 @@ mod tests {
             band.iter().sum::<f32>() / band.len() as f32
         };
         let (fringe, mid, core) = (
-            mean(0.0, FRINGE_BELOW),
-            mean(FRINGE_BELOW, CORE_ABOVE),
-            mean(CORE_ABOVE, 1.0),
+            mean(0.0, tg.gen_territory_fringe_below),
+            mean(tg.gen_territory_fringe_below, tg.gen_territory_core_above),
+            mean(tg.gen_territory_core_above, 1.0),
         );
         let capitals: Vec<f32> = census.iter().filter(|c| c.4).map(|c| c.1 as f32).collect();
         let capital = capitals.iter().sum::<f32>() / capitals.len() as f32;
@@ -1383,7 +1390,7 @@ mod tests {
         );
         // The fringe is scouts (a party, never stations or walls); the rest is the city.
         for (c, people, stations, walls, capital, room) in &census {
-            if *c < FRINGE_BELOW {
+            if *c < tg.gen_territory_fringe_below {
                 // (A sector the wildlife has already filled to its body budget has no room.)
                 assert!(*people >= 1 || !*room, "no scouts at closeness {c}");
                 assert!(*stations == 0 && *walls == 0, "buildings at the rim {c}");
@@ -1395,7 +1402,7 @@ mod tests {
         assert!(
             census
                 .iter()
-                .any(|c| c.0 >= FRINGE_BELOW && c.0 < 1.0 && c.2 > 0),
+                .any(|c| c.0 >= tg.gen_territory_fringe_below && c.0 < 1.0 && c.2 > 0),
             "outlying posts exist past the fringe"
         );
     }
@@ -1465,10 +1472,14 @@ mod tests {
 
     #[test]
     fn the_search_reaches_far_skips_the_fallen_and_goes_nearest_first() {
+        let tg = active();
         // Far from HOME the search still finds a civilization within the cap.
         let far = Vec2::new(800.0, -800.0) * SECTOR_SIZE;
         let near = nearest_from(SEED, far).expect("a far civilization");
-        assert!(near.distance < SEARCH_CELLS as f32 * TERRITORY_CELL as f32 * SECTOR_SIZE);
+        assert!(
+            near.distance
+                < SEARCH_CELLS as f32 * tg.gen_territory_territory_cell as f32 * SECTOR_SIZE
+        );
         // Ruling the nearest out gives the next one, never a nearer one.
         let mut cache = SeatCache::default();
         let skip_it = |t: &Territory| t.id == near.territory.id;

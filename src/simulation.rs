@@ -81,6 +81,7 @@ pub mod tunables;
 pub mod tune;
 pub mod tuning;
 mod tuning_civ;
+pub(crate) mod tuning_gen;
 mod tuning_life;
 mod tuning_play;
 pub mod upgrades;
@@ -737,6 +738,7 @@ impl Game {
     /// Loads sectors the player can reach, unloads distant ones, and flags which
     /// bodies take part in this tick.
     fn stream_sectors(&mut self) {
+        tuning_gen::install(&self.tune);
         if let Some(player) = self.player() {
             self.focus = player.position;
         }
