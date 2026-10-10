@@ -136,6 +136,7 @@ impl Snapshot {
             | BenchAction::Research(_)
             | BenchAction::MiningDrone
             | BenchAction::MiningDroneStatus(_)
+            | BenchAction::DroneUpgrade(_, _)
             | BenchAction::WaterExtractor
             | BenchAction::Warehouse
             | BenchAction::WaterTank

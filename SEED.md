@@ -42,10 +42,10 @@ Decide per slice, and say which in one line.
 
 ## Queue (revised 2026-10-09: expand the game loop)
 
-The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; finite delivery/survey/pest jobs and a stock-backed player-haul agreement, Automation, and four-unit home-planetoid fleets are built; further machine jobs, merchant transport and later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
+The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; finite delivery/survey/pest jobs and a stock-backed player-haul agreement, Automation, and four-unit home-planetoid fleets with cargo/mining dock retrofits are built; further machine jobs, merchant transport and later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit home-planetoid fleet - deposit designation, visible flight, upgrades/templates, combat and losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
+1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit home-planetoid fleet - deposit designation, visible flight, shared templates/further modules, combat and losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 2. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 3. Alongside: remaining D machine jobs, DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
@@ -56,6 +56,8 @@ Other backlog: density/feeling view-model and measurements, weaver rock care, hy
 Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; tankers for any material with compatible local storage; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Drone dock retrofits: one paid 20M 5C cargo pod and mining head per unit, saved queued/fitted modules, install after old cargo unloads; mixed-fleet conservation and compact bench verified. Designation/flight/templates/combat remain next.
 
 - Bounded mining fleet: saved Automation (20M 8C after Fabrication), four paid units per powered warehouse, per-unit status/cargo, deterministic shared handoffs; save format 4 refuses older layouts. Designation/flight/upgrades/combat remain next.
 
@@ -70,5 +72,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Local power: 30M 10C after Fabrication builds saved renewable supply for both pad machines; unpowered stocks/work pause, unloaded/save resume stays local. Further machine jobs remain open.
 
 - Narrow local warehouse: 30M builds saved 300-unit M/V/C/B/F site storage; stash previews/transfers and refinery output share caps. Water remains tank-backed.
-
-- Narrow bought-input route: HOME barters ten saved lots of 20V for 10M each; atomic hold/payment gates, visible remaining stock, stash-to-refinery fuel loop, no restock.

@@ -7,15 +7,91 @@ const CARGO_CAP: f32 = 10.0;
 const WORK_SECONDS: f32 = 10.0;
 const RETURN_SECONDS: f32 = 5.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DroneUpgrade {
+    Cargo,
+    Mining,
+}
+
+impl DroneUpgrade {
+    pub const ALL: [Self; 2] = [Self::Cargo, Self::Mining];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cargo => "CARGO POD",
+            Self::Mining => "MINING HEAD",
+        }
+    }
+
+    pub fn price(self) -> [(Material, f32); 2] {
+        [(Material::Metal, 20.0), (Material::Crystal, 5.0)]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+struct DroneModules {
+    cargo: bool,
+    mining: bool,
+}
+
+impl DroneModules {
+    fn has(self, upgrade: DroneUpgrade) -> bool {
+        match upgrade {
+            DroneUpgrade::Cargo => self.cargo,
+            DroneUpgrade::Mining => self.mining,
+        }
+    }
+
+    fn add(&mut self, upgrade: DroneUpgrade) {
+        match upgrade {
+            DroneUpgrade::Cargo => self.cargo = true,
+            DroneUpgrade::Mining => self.mining = true,
+        }
+    }
+
+    fn capacity(self) -> f32 {
+        CARGO_CAP * if self.cargo { 2.0 } else { 1.0 }
+    }
+    fn fuel(self) -> f32 {
+        if self.cargo { 2.0 } else { 1.0 }
+    }
+    fn work(self) -> f32 {
+        WORK_SECONDS * if self.cargo { 2.0 } else { 1.0 } * if self.mining { 0.5 } else { 1.0 }
+    }
+}
+
 /// A fixed home-planetoid order. Stable identity is (pad key, append-only fleet slot).
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MiningDrone {
     cargo: f32,
     remaining: f32,
     exhausted: bool,
+    #[serde(default)]
+    ordered: DroneModules,
+    #[serde(default)]
+    fitted: DroneModules,
 }
 
 impl MiningDrone {
+    pub(super) fn upgrade_state(&self, upgrade: DroneUpgrade) -> &'static str {
+        if self.fitted.has(upgrade) {
+            "FITTED"
+        } else if self.ordered.has(upgrade) {
+            "PAID - QUEUED AT DOCK"
+        } else {
+            "AVAILABLE"
+        }
+    }
+
+    pub(super) fn trip_detail(&self) -> String {
+        format!(
+            "Home deposit: {:.0} local F, up to {:.0} ore, {:.0}s work + 5s return. Cargo waits for stash room. No flight/combat yet.",
+            self.fitted.fuel(),
+            self.fitted.capacity(),
+            self.fitted.work()
+        )
+    }
+
     pub(super) fn status(&self, pad: &Pad, material: Material) -> String {
         if !pad.power {
             "NEEDS LOCAL POWER".into()
@@ -31,8 +107,8 @@ impl MiningDrone {
             "CARGO WAITING - STASH FULL".into()
         } else if self.exhausted {
             "DEPOSIT EMPTY - WAITING".into()
-        } else if pad.stash.fuel < 1.0 {
-            "NEEDS 1F IN STASH".into()
+        } else if pad.stash.fuel < self.fitted.fuel() {
+            format!("NEEDS {:.0}F IN STASH", self.fitted.fuel())
         } else if pad.stash.amount(material) >= pad.stash_cap(material) {
             "STASH FULL".into()
         } else {
@@ -74,6 +150,54 @@ impl Game {
             .drones
             .push(MiningDrone::default());
         self.bench_done("MINING DRONE BUILT".into(), upgrades::Rarity::Common);
+    }
+
+    pub(super) fn drone_upgrade_block(
+        &self,
+        slot: usize,
+        upgrade: DroneUpgrade,
+    ) -> Option<&'static str> {
+        match self.landed_pad() {
+            None => Some("LAND AT A PAD"),
+            Some(p) if p.drones.get(slot).is_none() => Some("UNIT LOST"),
+            Some(p) if p.drones[slot].ordered.has(upgrade) => {
+                Some(p.drones[slot].upgrade_state(upgrade))
+            }
+            Some(p) if !p.power => Some("NEEDS LOCAL POWER"),
+            Some(p) if !p.warehouse => Some("NEEDS WAREHOUSE"),
+            Some(_) => None,
+        }
+    }
+
+    pub(super) fn buy_drone_upgrade(&mut self, slot: usize, upgrade: DroneUpgrade) {
+        if let Some(why) = self.drone_upgrade_block(slot, upgrade) {
+            self.bench_failed(why.into());
+            return;
+        }
+        if !self.cargo.spend(&upgrade.price()) {
+            self.bench_failed("NEEDS 20M 5C".into());
+            return;
+        }
+        let drone = &mut self
+            .pad
+            .pads
+            .get_mut(&self.pad.landed.unwrap())
+            .unwrap()
+            .drones[slot];
+        drone.ordered.add(upgrade);
+        let queued = drone.remaining > 0.0 || drone.cargo > 0.0;
+        if !queued {
+            drone.fitted = drone.ordered;
+        }
+        self.bench_done(
+            format!(
+                "DRONE #{} {} {}",
+                slot + 1,
+                upgrade.label(),
+                if queued { "QUEUED" } else { "FITTED" }
+            ),
+            upgrades::Rarity::Common,
+        );
     }
 
     /// Reserve real ore exactly once at dispatch. Loaded beams and remote orders see the
@@ -135,11 +259,16 @@ impl Game {
                         }
                         drone.cargo = 0.0;
                     }
-                    if budget <= 0.0 || pad.stash.fuel < 1.0 || pad.stash.amount(material) >= cap {
+                    // Paid modules fit only after all old cargo is delivered at the dock.
+                    drone.fitted = drone.ordered;
+                    if budget <= 0.0
+                        || pad.stash.fuel < drone.fitted.fuel()
+                        || pad.stash.amount(material) >= cap
+                    {
                         continue;
                     }
                     let room = cap - pad.stash.amount(material);
-                    let amount = self.reserve_drone_ore(key, CARGO_CAP.min(room));
+                    let amount = self.reserve_drone_ore(key, drone.fitted.capacity().min(room));
                     drone.exhausted = amount == 0.0;
                     if drone.exhausted {
                         continue;
@@ -149,9 +278,9 @@ impl Game {
                         .get_mut(&key)
                         .unwrap()
                         .stash
-                        .take(Material::Fuel, 1.0);
+                        .take(Material::Fuel, drone.fitted.fuel());
                     drone.cargo = amount;
-                    drone.remaining = WORK_SECONDS + RETURN_SECONDS;
+                    drone.remaining = drone.fitted.work() + RETURN_SECONDS;
                 }
                 let next = drones
                     .iter()
@@ -196,6 +325,140 @@ mod tests {
         game.bench_select(BenchAction::MiningDrone);
         let material = mining::material_of(game.seed, RockKind::Planetoid, Some(key));
         (game, key, material)
+    }
+
+    fn retrofit(game: &mut Game, slot: usize, upgrade: DroneUpgrade) {
+        game.cargo.metal = 20.0;
+        game.cargo.crystal = 5.0;
+        game.bench_select(BenchAction::DroneUpgrade(slot, upgrade));
+        game.bench_confirm();
+    }
+
+    #[test]
+    fn retrofits_pay_once_and_require_a_powered_home_warehouse() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        game.cargo.metal = 20.0;
+        game.cargo.crystal = 4.0;
+        game.bench_select(BenchAction::DroneUpgrade(0, DroneUpgrade::Cargo));
+        game.bench_confirm();
+        assert_eq!(game.cargo.metal, 20.0);
+        assert_eq!(
+            game.pad.pads[&key].drones[0].ordered,
+            DroneModules::default()
+        );
+        game.cargo.crystal = 5.0;
+        for power in [false, true] {
+            let pad = game.pad.pads.get_mut(&key).unwrap();
+            pad.power = power;
+            pad.warehouse = !power;
+            game.bench_confirm();
+            assert_eq!((game.cargo.metal, game.cargo.crystal), (20.0, 5.0));
+        }
+        game.pad.pads.get_mut(&key).unwrap().warehouse = true;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (0.0, 0.0));
+        assert_eq!(
+            game.pad.pads[&key].drones[0].upgrade_state(DroneUpgrade::Cargo),
+            "FITTED"
+        );
+        game.cargo.metal = 20.0;
+        game.cargo.crystal = 5.0;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (20.0, 5.0));
+        assert_eq!(
+            game.drone_upgrade_block(4, DroneUpgrade::Cargo),
+            Some("UNIT LOST")
+        );
+        game.pad.landed = None;
+        assert_eq!(
+            game.drone_upgrade_block(0, DroneUpgrade::Mining),
+            Some("LAND AT A PAD")
+        );
+    }
+
+    #[test]
+    fn queued_retrofits_survive_save_and_wait_for_every_unit_of_old_cargo() {
+        let (mut game, key, material) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        retrofit(&mut game, 0, DroneUpgrade::Cargo);
+        retrofit(&mut game, 0, DroneUpgrade::Mining);
+        let drone = &game.pad.pads[&key].drones[0];
+        assert_eq!((drone.cargo, drone.remaining), (10.0, 10.0));
+        assert_eq!(drone.fitted, DroneModules::default());
+        assert_eq!(
+            drone.upgrade_state(DroneUpgrade::Mining),
+            "PAID - QUEUED AT DOCK"
+        );
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut game, _) = Game::from_save(state, generator);
+        game.bodies.retain(|b| b.origin != Some(key));
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .add_capped(material, 300.0, 300.0);
+        game.update_mining_drones(10.0);
+        assert_eq!(
+            game.pad.pads[&key].drones[0].fitted,
+            DroneModules::default()
+        );
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .take(material, 5.0);
+        game.update_mining_drones(1.0);
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 5.0);
+        assert_eq!(
+            game.pad.pads[&key].drones[0].fitted,
+            DroneModules::default()
+        );
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .take(material, 25.0);
+        game.update_mining_drones(1.0);
+        let drone = &game.pad.pads[&key].drones[0];
+        assert_eq!(drone.ordered, drone.fitted);
+        assert_eq!((drone.cargo, drone.remaining), (20.0, 14.0));
+        assert_eq!(game.pad.pads[&key].stash.fuel, 0.0);
+        assert_eq!(game.mined[&key], 30.0);
+        game.update_mining_drones(14.0);
+        assert_eq!(game.pad.pads[&key].stash.amount(material), 300.0);
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 0.0);
+    }
+
+    #[test]
+    fn mixed_modules_conserve_fuel_ore_and_partitioned_handoffs() {
+        let (mut whole, key, material) = setup();
+        let (mut split, _, _) = setup();
+        for game in [&mut whole, &mut split] {
+            build_fleet(game);
+            retrofit(game, 1, DroneUpgrade::Cargo);
+            retrofit(game, 2, DroneUpgrade::Mining);
+            retrofit(game, 3, DroneUpgrade::Cargo);
+            retrofit(game, 3, DroneUpgrade::Mining);
+            game.pad.pads.get_mut(&key).unwrap().stash.fuel = 6.0;
+        }
+        whole.update_mining_drones(25.0);
+        for _ in 0..25 {
+            split.update_mining_drones(1.0);
+        }
+        assert_eq!(whole.pad.pads[&key].stash.amount(material), 60.0);
+        assert_eq!(whole.pad.pads[&key].stash.fuel, 0.0);
+        assert_eq!(whole.mined[&key], 60.0);
+        assert_eq!(whole.pad.pads[&key].stash, split.pad.pads[&key].stash);
+        assert_eq!(whole.pad.pads[&key].drones, split.pad.pads[&key].drones);
+        assert_eq!(whole.mined[&key], split.mined[&key]);
+        assert_eq!(whole.pad.pads[&key].drones[1].fitted.work(), 20.0);
+        assert_eq!(whole.pad.pads[&key].drones[2].fitted.work(), 5.0);
+        assert_eq!(whole.pad.pads[&key].drones[3].fitted.work(), 10.0);
     }
 
     #[test]

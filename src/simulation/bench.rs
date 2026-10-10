@@ -42,6 +42,7 @@ pub enum BenchAction {
     WaterExtractor,
     MiningDrone,
     MiningDroneStatus(usize),
+    DroneUpgrade(usize, fleet::DroneUpgrade),
     Research(research::Tech),
     Grade,
     Partnership,
@@ -153,8 +154,12 @@ impl Game {
                     ]
                 }))
                 .chain(
-                    (0..self.landed_pad().map_or(0, |p| p.drones.len()))
-                        .map(BenchAction::MiningDroneStatus),
+                    (0..self.landed_pad().map_or(0, |p| p.drones.len())).flat_map(|slot| {
+                        std::iter::once(BenchAction::MiningDroneStatus(slot)).chain(
+                            fleet::DroneUpgrade::ALL
+                                .map(|upgrade| BenchAction::DroneUpgrade(slot, upgrade)),
+                        )
+                    }),
                 )
                 .chain(Material::ALL.map(BenchAction::Stash))
                 .collect(),
@@ -230,6 +235,7 @@ impl Game {
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
+            Some(BenchAction::DroneUpgrade(slot, upgrade)) => self.buy_drone_upgrade(slot, upgrade),
             Some(BenchAction::MiningDroneStatus(_)) => self.bench_failed("STATUS ONLY".into()),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
             Some(BenchAction::Partnership) => self.buy_partnership(),
@@ -721,7 +727,34 @@ impl Game {
                     let material =
                         mining::material_of(self.seed, RockKind::Planetoid, Some(pad.key));
                     row.state = drone.status(pad, material);
+                    row.detail = drone.trip_detail();
                     row.detail += &format!(" Output: {}. Status only.", material.label());
+                }
+            }
+            BenchAction::DroneUpgrade(slot, upgrade) => {
+                row.group = "PAD FLEET";
+                row.text = format!("DRONE #{} {}", slot + 1, upgrade.label());
+                row.costs = upgrade.price().to_vec();
+                row.detail = match upgrade {
+                    fleet::DroneUpgrade::Cargo => {
+                        "20 ore, 2 local F, 20s work (10s with head) + 5s return."
+                    }
+                    fleet::DroneUpgrade::Mining => {
+                        "Work 5s (10s with pod) + 5s return; fuel unchanged."
+                    }
+                }
+                .into();
+                row.detail += " Fits after cargo unloads; pad loss loses payment.";
+                if let Some(why) = self.drone_upgrade_block(slot, upgrade) {
+                    row.ok = false;
+                    row.state = why.into();
+                    if self
+                        .landed_pad()
+                        .and_then(|p| p.drones.get(slot))
+                        .is_some_and(|d| d.upgrade_state(upgrade) != "AVAILABLE")
+                    {
+                        row.costs.clear();
+                    }
                 }
             }
             BenchAction::Warehouse => {

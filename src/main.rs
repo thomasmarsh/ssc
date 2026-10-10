@@ -1702,6 +1702,14 @@ fn smoke_run(
             "mining-fleet" => session
                 .game
                 .bench_select(ssc::simulation::BenchAction::MiningDrone),
+            "mining-fleet-retrofit" => {
+                session
+                    .game
+                    .bench_select(ssc::simulation::BenchAction::DroneUpgrade(
+                        ssc::simulation::fleet::MAX_DRONES - 1,
+                        ssc::simulation::fleet::DroneUpgrade::Cargo,
+                    ))
+            }
             "mining-fleet-status" => {
                 session
                     .game
@@ -2118,7 +2126,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 .insert(ssc::simulation::research::Tech::Fabrication);
             game.bench_select(BenchAction::Power);
         }
-        "mining-drone" | "mining-fleet" | "mining-fleet-status" => {
+        "mining-drone" | "mining-fleet" | "mining-fleet-status" | "mining-fleet-retrofit" => {
             game.loadout.research.known.extend([
                 ssc::simulation::research::Tech::Fabrication,
                 ssc::simulation::research::Tech::Automation,
@@ -2138,11 +2146,23 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 }
                 game.cargo.metal = 40.0;
                 game.cargo.crystal = 10.0;
-                if mode == "mining-fleet-status" {
+                if matches!(mode, "mining-fleet-status" | "mining-fleet-retrofit") {
                     game.bench_confirm();
                     game.bench_select(BenchAction::MiningDroneStatus(
                         ssc::simulation::fleet::MAX_DRONES - 1,
                     ));
+                    if mode == "mining-fleet-retrofit" {
+                        game.cargo.fuel = 4.0;
+                        game.bench_select(BenchAction::Stash(Material::Fuel));
+                        game.bench_confirm();
+                        game.step(1.0 / 60.0, Input::default());
+                        game.cargo.metal = 20.0;
+                        game.cargo.crystal = 5.0;
+                        game.bench_select(BenchAction::DroneUpgrade(
+                            ssc::simulation::fleet::MAX_DRONES - 1,
+                            ssc::simulation::fleet::DroneUpgrade::Cargo,
+                        ));
+                    }
                     game.bench_feedback = None;
                 }
             }
