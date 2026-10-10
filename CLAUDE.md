@@ -14,6 +14,7 @@ A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (pr
 - `cargo clippy --all-targets -- -D warnings` and `cargo fmt`; keep all three clean
 - `cargo run --no-default-features --bin sectormap -- --seed N --cols C --rows R --out map.html` writes an offline HTML map of the generated universe (see `docs/UNIVERSE.md`).
 - `cargo run --release --no-default-features --bin simperf` times four pinned headless scenarios and checks their digests; `SSC_BLESS=1 cargo test --no-default-features golden` regenerates goldens (deliberate behavior changes only; see `docs/PERF.md`).
+- `cargo run --release --no-default-features --bin threat` is the difficulty and threat model (`src/threat.rs`, baseline `src/threat_baseline.txt`, bless with `SSC_BLESS=1 cargo test --no-default-features threat_baseline`). Any new attack, ability, cloak or effect must be covered by it: follow the checklist in `docs/BALANCE.md` section 0 (a coverage test fails until you do).
 - `cargo run --bin ssc` to play (two binaries, so `--bin ssc` is required). For a bounded renderer check: `SSC_TELEPORT="x,y" SSC_SMOKE_FRAMES=200 SSC_SCREENSHOT=<path> cargo run --bin ssc`. The first screenshot after a fresh build may come out black; re-run it.
 
 ## Decisions and invariants
