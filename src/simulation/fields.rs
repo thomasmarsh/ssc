@@ -338,7 +338,7 @@ impl Game {
         for rock in self
             .bodies
             .iter()
-            .filter(|b| b.active && ecology::edible(b))
+            .filter(|b| b.active && ecology::edible(b, &self.tune))
         {
             if body.root.is_some_and(|r| r.host == rock.id) {
                 continue;

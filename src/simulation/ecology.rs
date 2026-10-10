@@ -7,28 +7,6 @@ use super::*;
 use crate::genome::{Social, Weapon};
 use crate::world::BaseKind;
 
-/// Most creatures of the brood species a base keeps alive near itself.
-pub const BROOD_CAP: usize = 10;
-/// Guardians a base will sustain nearby.
-const GUARDIAN_CAP: usize = 3;
-/// Stock needed to build one guardian.
-pub const GUARDIAN_COST: f32 = 90.0;
-/// Dust and scraps trickling in without any rock being hauled.
-const PASSIVE_STOCK: f32 = 1.2;
-/// Rocks up to this size are tractored in and consumed.
-const HARVEST_MAX_RADIUS: f32 = 36.0;
-const HARVEST_RANGE: f32 = 450.0;
-const HARVEST_PULL: f32 = 110.0;
-/// Creatures count as local to a base within this distance.
-const LOCAL_RANGE: f32 = 1100.0;
-/// Seconds between births at neutral aggression.
-const BIRTH_PERIOD: f32 = 10.0;
-/// Seconds between a brooding parent's litters, and the juveniles it tends at once.
-const LITTER_PERIOD: f32 = 14.0;
-const LITTER_CAP: usize = 3;
-/// A grazer heals this much per unit of rock radius eaten.
-const GRAZE_HEAL: f32 = 0.8;
-
 #[derive(Clone, Debug)]
 pub struct BaseState {
     pub kind: BaseKind,
@@ -89,13 +67,12 @@ pub const TURRET_ANGLES: [f32; 4] = [
     5.0 * std::f32::consts::FRAC_PI_4,
     7.0 * std::f32::consts::FRAC_PI_4,
 ];
-const TURRET_REACH: f32 = 1250.0;
-const DEPOT_SIGHT: f32 = 2000.0;
-const DEPOT_NOVA_RANGE: f32 = 1000.0;
 
 /// A free, small rock: food for bases and grazers alike.
-pub(super) fn edible(body: &Body) -> bool {
-    body.kind == BodyKind::Asteroid && !body.pinned && body.radius <= HARVEST_MAX_RADIUS
+pub(super) fn edible(body: &Body, tune: &Tunables) -> bool {
+    body.kind == BodyKind::Asteroid
+        && !body.pinned
+        && body.radius <= tune.ecology_harvest_max_radius
 }
 
 impl Game {
@@ -123,13 +100,25 @@ impl Game {
                 .map_or(BaseKind::Hive, |b| b.kind);
             // Foundries haul rock in from afar; bastions and depots do not bother.
             let (harvest_range, harvest_pull, haul) = match kind {
-                BaseKind::Hive => (HARVEST_RANGE, HARVEST_PULL, 1.0),
-                BaseKind::Foundry => (HARVEST_RANGE * 1.7, HARVEST_PULL * 1.4, 1.8),
+                BaseKind::Hive => (
+                    self.tune.ecology_harvest_range,
+                    self.tune.ecology_harvest_pull,
+                    1.0,
+                ),
+                BaseKind::Foundry => (
+                    self.tune.ecology_harvest_range * 1.7,
+                    self.tune.ecology_harvest_pull * 1.4,
+                    1.8,
+                ),
                 BaseKind::Bastion | BaseKind::Depot | BaseKind::Turret => (0.0, 0.0, 0.0),
             };
             let mut absorbed = 0.0;
             let mut taken = Vec::new();
-            for rock in self.bodies.iter_mut().filter(|b| b.active && edible(b)) {
+            for rock in self
+                .bodies
+                .iter_mut()
+                .filter(|b| b.active && edible(b, &self.tune))
+            {
                 let offset = center - rock.position;
                 let distance = offset.length();
                 if distance > harvest_range {
@@ -158,9 +147,9 @@ impl Game {
             let can_build = match (capital, self.bodies[index].base.as_ref()) {
                 (Some(_), Some(state)) => {
                     let cap = if kind == BaseKind::Foundry {
-                        GUARDIAN_CAP + 2
+                        self.tune.ecology_guardian_cap + 2
                     } else {
-                        GUARDIAN_CAP
+                        self.tune.ecology_guardian_cap
                     };
                     self.bodies
                         .iter()
@@ -168,7 +157,7 @@ impl Game {
                             b.kind == BodyKind::Creature
                                 && !b.follower
                                 && b.species == state.guardian.lineage
-                                && (b.position.distance(center) < LOCAL_RANGE
+                                && (b.position.distance(center) < self.tune.ecology_local_range
                                     || b.home == Some(center))
                         })
                         .count()
@@ -180,7 +169,11 @@ impl Game {
                 Some(mining) if can_build => mining.withdraw(civmine::FEED_RATE * dt),
                 _ => 0.0,
             };
-            let trickle = if mining_on { 0.0 } else { PASSIVE_STOCK * dt };
+            let trickle = if mining_on {
+                0.0
+            } else {
+                self.tune.ecology_passive_stock * dt
+            };
             let Some(state) = self.bodies[index].base.as_mut() else {
                 continue;
             };
@@ -194,14 +187,16 @@ impl Game {
                 BaseKind::Bastion | BaseKind::Turret => 0.0,
             };
             let birth = state.timer <= 0.0 && breeds > 0.0;
-            let build = state.stock >= GUARDIAN_COST;
+            let build = state.stock >= self.tune.ecology_guardian_cost;
             if state.timer <= 0.0 {
-                state.timer = BIRTH_PERIOD / (genes.aggression.max(0.3) * breeds.max(0.2))
+                state.timer = self.tune.ecology_birth_period
+                    / (genes.aggression.max(0.3) * breeds.max(0.2))
                     * self.rng.range(0.8, 1.2);
             }
             if build {
-                state.stock -= GUARDIAN_COST;
+                state.stock -= self.tune.ecology_guardian_cost;
             }
+            let local_range = self.tune.ecology_local_range;
             let local = |game: &Game, species: &Species| {
                 game.bodies
                     .iter()
@@ -211,18 +206,18 @@ impl Game {
                             && b.species == species.lineage
                             // Creatures the base raised count while they roam far from it too,
                             // or a school that follows the ship would be replaced endlessly.
-                            && (b.position.distance(center) < LOCAL_RANGE
+                            && (b.position.distance(center) < local_range
                                 || b.home == Some(center))
                     })
                     .count()
             };
-            if birth && local(self, &brood) < BROOD_CAP {
+            if birth && local(self, &brood) < self.tune.ecology_brood_cap {
                 self.spawn_creature(&brood, center, genes);
             }
             let guardians = if kind == BaseKind::Foundry {
-                GUARDIAN_CAP + 2
+                self.tune.ecology_guardian_cap + 2
             } else {
-                GUARDIAN_CAP
+                self.tune.ecology_guardian_cap
             };
             if build && local(self, &guardian) < guardians {
                 self.spawn_creature(&guardian, center, genes);
@@ -267,7 +262,7 @@ impl Game {
             BaseKind::Bastion => {
                 for (turret, angle) in state.turrets.iter_mut().zip(TURRET_ANGLES) {
                     *turret -= dt;
-                    if *turret <= 0.0 && distance < TURRET_REACH {
+                    if *turret <= 0.0 && distance < self.tune.ecology_turret_reach {
                         let origin = center + Vec2::from_angle(angle) * radius * 0.95;
                         *turret = 2.4 * weapons::pace(weapon) / aggression;
                         shots.push((origin, weapon, state.spin));
@@ -278,11 +273,11 @@ impl Game {
             BaseKind::Depot => {
                 state.seeding -= dt;
                 state.turrets[0] -= dt;
-                if state.seeding <= 0.0 && distance < DEPOT_SIGHT {
+                if state.seeding <= 0.0 && distance < self.tune.ecology_depot_sight {
                     state.seeding = 7.0 / aggression;
                     shots.push((center, Weapon::Mine, 0.0));
                 }
-                if state.turrets[0] <= 0.0 && distance < DEPOT_NOVA_RANGE {
+                if state.turrets[0] <= 0.0 && distance < self.tune.ecology_depot_nova_range {
                     state.turrets[0] = 4.5 / aggression;
                     shots.push((center, weapon, 0.0));
                 }
@@ -299,7 +294,7 @@ impl Game {
                 origin,
                 aim,
                 velocity: Vec2::ZERO,
-                reach: TURRET_REACH,
+                reach: self.tune.ecology_turret_reach,
                 shot_speed: 380.0,
                 sharpness,
                 pith: 0.0,
@@ -376,7 +371,11 @@ impl Game {
             .iter()
             .filter(|b| b.active && b.kind == BodyKind::Creature && b.genome.diet == Diet::Rocks)
         {
-            for rock in self.bodies.iter().filter(|b| b.active && edible(b)) {
+            for rock in self
+                .bodies
+                .iter()
+                .filter(|b| b.active && edible(b, &self.tune))
+            {
                 // A creature never eats the rock it clings to.
                 if creature.root.is_some_and(|r| r.host == rock.id)
                     || self.tethers.iter().any(|t| {
@@ -416,8 +415,9 @@ impl Game {
                         .total_cmp(&b.position.distance_squared(rock.position))
                 })
             {
-                eater.health = (eater.health + rock.radius * GRAZE_HEAL).min(eater.max_health);
-                eater.feed(rock.radius * food::ROCK_NUTRITION);
+                eater.health = (eater.health + rock.radius * self.tune.ecology_graze_heal)
+                    .min(eater.max_health);
+                eater.feed(rock.radius * self.tune.food_rock_nutrition);
             }
         }
         self.consume(&taken);
@@ -462,8 +462,9 @@ impl Game {
                 continue;
             }
             let parent = self.bodies[index].clone();
-            self.bodies[index].brood_timer =
-                LITTER_PERIOD / parent.genes.aggression.max(0.3) * self.rng.range(0.8, 1.2);
+            self.bodies[index].brood_timer = self.tune.ecology_litter_period
+                / parent.genes.aggression.max(0.3)
+                * self.rng.range(0.8, 1.2);
             let tended = self
                 .bodies
                 .iter()
@@ -472,17 +473,17 @@ impl Game {
             // Litters follow the same rules as any other reproduction: calm parents with
             // energy to spare, in places that are not already crowded.
             let pays = parent.genome.forages() && !parent.provisioned;
-            if tended >= LITTER_CAP
+            if tended >= self.tune.ecology_litter_cap
                 || parent.alert
                 || parent.enraged
                 || parent.panic > 0.0
-                || (pays && parent.energy_fraction() < growth::BREED_ENERGY * 0.75)
+                || (pays && parent.energy_fraction() < self.tune.growth_breed_energy * 0.75)
                 || !self.room_to_breed(&parent, 1)
             {
                 continue;
             }
             if pays {
-                self.bodies[index].energy -= parent.max_energy * growth::LITTER_COST;
+                self.bodies[index].energy -= parent.max_energy * self.tune.growth_litter_cost;
             }
             let adult = parent.genome.mutate(&mut self.variation);
             let brain = self.inherited_brain(&adult, &parent, None);
@@ -701,7 +702,7 @@ mod tests {
         assert!(near(&game, Species::bogey()) >= 1, "nothing was born");
         for _ in 0..60 * 240 {
             game.step(DT, Input::default());
-            assert!(near(&game, Species::bogey()) <= BROOD_CAP);
+            assert!(near(&game, Species::bogey()) <= DEFAULT_TUNING.ecology_brood_cap);
             assert!(game.bodies.len() < MAX_BODIES);
             assert!(game.bodies.iter().all(|b| b.position.is_finite()));
         }
@@ -733,7 +734,7 @@ mod tests {
             .base
             .as_mut()
             .unwrap()
-            .stock = GUARDIAN_COST - 10.0;
+            .stock = DEFAULT_TUNING.ecology_guardian_cost - 10.0;
         let rock = add(&mut game, BodyKind::Asteroid, Vec2::new(250.0, 2000.0));
         game.bodies
             .iter_mut()
@@ -752,7 +753,9 @@ mod tests {
         );
         assert!(game.bodies.iter().any(|b| b.id == big));
         assert_eq!(near(&game, Species::fatso()), 1);
-        assert!(body(&game, base).base.as_ref().unwrap().stock < GUARDIAN_COST);
+        assert!(
+            body(&game, base).base.as_ref().unwrap().stock < DEFAULT_TUNING.ecology_guardian_cost
+        );
     }
 
     #[test]

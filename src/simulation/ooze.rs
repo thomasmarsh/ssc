@@ -386,7 +386,7 @@ impl Game {
                 .iter()
                 .filter(|b| {
                     b.active
-                        && ecology::edible(b)
+                        && ecology::edible(b, &self.tune)
                         && !self.bodies[index].root.is_some_and(|r| r.host == b.id)
                         && b.position.distance(at) <= radius + lmax + b.radius
                 })
@@ -463,7 +463,7 @@ impl Game {
         for rock in self
             .bodies
             .iter()
-            .filter(|b| b.active && ecology::edible(b))
+            .filter(|b| b.active && ecology::edible(b, &self.tune))
         {
             if taken.len() >= 2 {
                 break;

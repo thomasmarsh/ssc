@@ -13,51 +13,8 @@
 use super::*;
 use crate::genome::{Birth, Social};
 
-/// Most grazers (including the parent) within sight per speck of plankton there for it to
-/// breed. Food, not just the caps, limits a flock.
-const MOUTHS_PER_SPECK: usize = 1;
-
 /// Separates breeding randomness from every other stream.
 pub const BREED_SALT: u64 = 0xB12D_0E66_0000_0017;
-/// An adult reproduces only at or above this fraction of its energy, and pays this much
-/// of its capacity per birth (a litter of a brooding parent costs less).
-pub const BREED_ENERGY: f32 = 0.8;
-pub const BIRTH_COST: f32 = 0.3;
-pub const LITTER_COST: f32 = 0.12;
-/// How near a same-lineage adult must be to mate; the two split the birth cost.
-pub const MATE_RANGE: f32 = 400.0;
-/// Fraction of its own capacity a newborn starts with.
-pub const NEWBORN_ENERGY: f32 = 0.7;
-/// Growth proceeds fully at or above `GROW_FULL` of energy, not at all at or below
-/// `GROW_STALLED`, and in proportion between.
-const GROW_STALLED: f32 = 0.2;
-const GROW_FULL: f32 = 0.6;
-/// No more than this many of a lineage (creatures and eggs) within `LINEAGE_AREA` of a
-/// would-be parent, so booms damp themselves.
-pub const LINEAGE_CAP: usize = 12;
-pub const LINEAGE_AREA: f32 = 1300.0;
-/// No more than this many of a lineage (creatures and eggs) in the whole simulated world.
-/// The local cap above only looks around the would-be parent, so a straggler at the edge of
-/// the crowd keeps breeding, clusters seed new clusters, and a lineage that eats nothing (a
-/// brooder with no food to run short of) grows until it fills every loaded sector's creature
-/// budget and then piles into one. Generated flocks of a lineage rarely top 25 a sector, so
-/// they merely stop growing; fewer than this and the local cap rules.
-pub const LINEAGE_WORLD_CAP: usize = 60;
-/// Reproduction waits while anything is alert, enraged or panicking this close.
-const CALM_RANGE: f32 = 1400.0;
-/// Nothing is born closer to the ship than this.
-const SHIP_CLEARANCE: f32 = 260.0;
-/// Seconds before a parent that could not breed tries again.
-const RETRY: f32 = 8.0;
-/// Chance a birth flips the offspring's birth mode (live or egg).
-const MODE_FLIP: f32 = 0.03;
-/// Most eggs of one lineage tolerated as hatched creatures; hatching waits above it, and
-/// an egg that waits three incubations spoils.
-const HATCH_SLACK: usize = 4;
-const SPOIL_FACTOR: f32 = 3.0;
-const EGG_DRAG: f32 = 0.8;
-/// How near a rooting parent must be to a rock's surface to bear its young onto it.
-const ROOT_BIRTH_REACH: f32 = 120.0;
 
 /// A drifting egg: a small, shootable bundle that hatches into a juvenile.
 #[derive(Clone, Debug)]
@@ -165,7 +122,7 @@ impl Game {
         let mut body = self.make_creature(&species, position);
         body.adult = Some(adult);
         body.genes = genes;
-        body.energy = body.max_energy * NEWBORN_ENERGY;
+        body.energy = body.max_energy * self.tune.growth_newborn_energy;
         body.breed_clock = adult.breeding_period() * 0.5;
         if brain.is_some() && adult.learner > 0.0 {
             body.brain = brain;
@@ -212,7 +169,7 @@ impl Game {
 
     /// Creatures and eggs of a lineage near `at`.
     fn lineage_load(&self, lineage: u64, at: Vec2) -> usize {
-        self.lineage_within(lineage, at, LINEAGE_AREA)
+        self.lineage_within(lineage, at, self.tune.growth_lineage_area)
     }
 
     /// Creatures and eggs of a lineage anywhere in the loaded world.
@@ -256,8 +213,8 @@ impl Game {
                 .filter(|e| SectorId::containing(e.position) == sector)
                 .count();
         here + parts < world::SECTOR_BODY_BUDGET as usize
-            && self.lineage_load(parent.species, parent.position) < LINEAGE_CAP
-            && self.lineage_world_load(parent.species) < LINEAGE_WORLD_CAP
+            && self.lineage_load(parent.species, parent.position) < self.tune.growth_lineage_cap
+            && self.lineage_world_load(parent.species) < self.tune.growth_lineage_world_cap
     }
 
     /// Whether there is something nearby for this forager's offspring to live on.
@@ -275,8 +232,9 @@ impl Game {
                     .food
                     .iter()
                     .filter(|f| {
-                        f.grown() > 0.5
-                            && f.position.distance_squared(at) < food::FOOD_SIGHT * food::FOOD_SIGHT
+                        f.grown(&self.tune) > 0.5
+                            && f.position.distance_squared(at)
+                                < self.tune.food_sight * self.tune.food_sight
                     })
                     .count();
                 let mouths = self
@@ -287,25 +245,25 @@ impl Game {
                             && b.kind == BodyKind::Creature
                             && !b.follower
                             && b.genome.diet == Diet::Graze
-                            && b.position.distance_squared(at) < food::FOOD_SIGHT * food::FOOD_SIGHT
+                            && b.position.distance_squared(at)
+                                < self.tune.food_sight * self.tune.food_sight
                     })
                     .count();
-                specks >= 3 && mouths <= specks * MOUTHS_PER_SPECK
+                specks >= 3 && mouths <= specks * self.tune.growth_mouths_per_speck
             }
-            Diet::Rocks => self
-                .bodies
-                .iter()
-                .any(|b| b.active && ecology::edible(b) && b.position.distance(at) < 700.0),
+            Diet::Rocks => self.bodies.iter().any(|b| {
+                b.active && ecology::edible(b, &self.tune) && b.position.distance(at) < 700.0
+            }),
             Diet::Hunt => {
                 self.bodies
                     .iter()
                     .filter(|b| {
-                        food::huntable(b)
+                        food::huntable(b, &self.tune)
                             && b.species != body.species
-                            && b.position.distance(at) < food::PREY_RANGE
+                            && b.position.distance(at) < self.tune.food_prey_range
                     })
                     .count()
-                    >= food::PREY_FLOOR
+                    >= self.tune.food_prey_floor
             }
             _ => false,
         }
@@ -323,7 +281,8 @@ impl Game {
             let Some(adult) = body.adult else { continue };
             body.age += dt;
             let rate = if body.genome.forages() && !body.provisioned {
-                ((body.energy_fraction() - GROW_STALLED) / (GROW_FULL - GROW_STALLED))
+                ((body.energy_fraction() - self.tune.growth_grow_stalled)
+                    / (self.tune.growth_grow_full - self.tune.growth_grow_stalled))
                     .clamp(0.0, 1.0)
             } else {
                 1.0
@@ -432,8 +391,9 @@ impl Game {
                     && !b.enraged
                     && b.panic <= 0.0
                     && !b.is_starving()
-                    && b.energy_fraction() >= BREED_ENERGY * 0.75
-                    && b.position.distance_squared(me.position) < MATE_RANGE * MATE_RANGE
+                    && b.energy_fraction() >= self.tune.growth_breed_energy * 0.75
+                    && b.position.distance_squared(me.position)
+                        < self.tune.growth_mate_range * self.tune.growth_mate_range
             })
             .min_by(|(_, a), (_, b)| {
                 a.position
@@ -446,30 +406,31 @@ impl Game {
     fn try_breed(&mut self, index: usize) {
         let parent = self.bodies[index].clone();
         let ship = self.player().map(|p| p.position);
-        let ready = parent.energy_fraction() >= BREED_ENERGY
+        let ready = parent.energy_fraction() >= self.tune.growth_breed_energy
             && !parent.is_starving()
             && !parent.alert
             && !parent.enraged
             && parent.panic <= 0.0
-            && ship.is_none_or(|p| p.distance(parent.position) > SHIP_CLEARANCE)
-            && !self.agitated_near(parent.position, CALM_RANGE)
+            && ship.is_none_or(|p| p.distance(parent.position) > self.tune.growth_ship_clearance)
+            && !self.agitated_near(parent.position, self.tune.growth_calm_range)
             && self.forage_nearby(&parent)
             && self.room_to_breed(&parent, 1);
         if !ready {
-            self.bodies[index].breed_clock = RETRY * self.breeding.range(0.75, 1.25);
+            self.bodies[index].breed_clock =
+                self.tune.growth_retry * self.breeding.range(0.75, 1.25);
             return;
         }
         let period = parent.genome.breeding_period();
         let mate = self.find_mate(index);
         let share = if mate.is_some() { 0.5 } else { 1.0 };
         let body = &mut self.bodies[index];
-        body.energy -= body.max_energy * BIRTH_COST * share;
+        body.energy -= body.max_energy * self.tune.growth_birth_cost * share;
         body.breed_clock = period * self.breeding.range(0.8, 1.2);
         let mut generation = parent.generation.saturating_add(1);
         let mut adult = match mate {
             Some(m) => {
                 let partner = &mut self.bodies[m];
-                partner.energy -= partner.max_energy * BIRTH_COST * share;
+                partner.energy -= partner.max_energy * self.tune.growth_birth_cost * share;
                 // The mate has just done its part; it leads its own litter later.
                 partner.breed_clock = partner.breed_clock.max(period * 0.5);
                 let (mate_genome, mate_generation, mate_at) =
@@ -481,7 +442,7 @@ impl Game {
             }
             None => parent.genome.mutate(&mut self.variation),
         };
-        if self.breeding.chance(MODE_FLIP) {
+        if self.breeding.chance(self.tune.growth_mode_flip) {
             adult.birth = match adult.birth {
                 Birth::Live => Birth::Egg,
                 Birth::Egg => Birth::Live,
@@ -500,7 +461,7 @@ impl Game {
                             parent.position,
                             juvenile.radius,
                             parent.root.map(|r| r.host),
-                            ROOT_BIRTH_REACH,
+                            self.tune.growth_root_birth_reach,
                         )
                     })
                     .flatten();
@@ -528,7 +489,7 @@ impl Game {
                             parent.position,
                             radius,
                             parent.root.map(|r| r.host),
-                            ROOT_BIRTH_REACH * 2.0,
+                            self.tune.growth_root_birth_reach * 2.0,
                         )
                     })
                     .flatten();
@@ -575,7 +536,7 @@ impl Game {
             let egg = &mut self.eggs[index];
             if egg.host.is_none() {
                 egg.position += egg.velocity * dt;
-                egg.velocity *= (1.0 - EGG_DRAG * dt).max(0.0);
+                egg.velocity *= (1.0 - self.tune.growth_egg_drag * dt).max(0.0);
             }
             egg.age += dt;
             if egg.age < egg.incubation {
@@ -583,10 +544,13 @@ impl Game {
                 continue;
             }
             let egg = self.eggs[index].clone();
-            let hatchable = ship.is_none_or(|p| p.distance(egg.position) > SHIP_CLEARANCE)
-                && !self.agitated_near(egg.position, CALM_RANGE * 0.5)
-                && self.lineage_load(egg.lineage, egg.position) <= LINEAGE_CAP + HATCH_SLACK
-                && self.lineage_world_load(egg.lineage) <= LINEAGE_WORLD_CAP + HATCH_SLACK
+            let hatchable = ship
+                .is_none_or(|p| p.distance(egg.position) > self.tune.growth_ship_clearance)
+                && !self.agitated_near(egg.position, self.tune.growth_calm_range * 0.5)
+                && self.lineage_load(egg.lineage, egg.position)
+                    <= self.tune.growth_lineage_cap + self.tune.growth_hatch_slack
+                && self.lineage_world_load(egg.lineage)
+                    <= self.tune.growth_lineage_world_cap + self.tune.growth_hatch_slack
                 && self.population() < MAX_BODIES - 1
                 && self.population_here(egg.position) < world::SECTOR_BODY_BUDGET as usize;
             if hatchable {
@@ -612,7 +576,7 @@ impl Game {
                 }
                 self.add_body(child);
                 self.effect(egg.position, 18.0, 0.4, EffectKind::Birth);
-            } else if egg.age > egg.incubation * SPOIL_FACTOR {
+            } else if egg.age > egg.incubation * self.tune.growth_spoil_factor {
                 self.eggs.remove(index);
                 self.note_egg_lost(&egg, false);
             } else {
@@ -690,7 +654,8 @@ mod tests {
     fn bloom(game: &mut Game, at: Vec2, count: usize) {
         for k in 0..count {
             let spot = at + Vec2::from_angle(k as f32 * 0.9) * (60.0 + k as f32 * 8.0);
-            game.food.push(Food::new(spot, Vec2::ZERO, food::GROW_TIME));
+            game.food
+                .push(Food::new(spot, Vec2::ZERO, DEFAULT_TUNING.food_grow_time));
         }
     }
 
@@ -796,7 +761,7 @@ mod tests {
             game.update_metabolism(DT);
         }
         assert!(game.bodies.iter().any(|b| b.id == id && !b.consumed));
-        assert!(!food::huntable(body(&game, id)));
+        assert!(!food::huntable(body(&game, id), &DEFAULT_TUNING));
         // Fed again, it grows on from where it was.
         for _ in 0..60 * 100 {
             set_energy(&mut game, id, 1.0);
@@ -888,7 +853,9 @@ mod tests {
         assert_eq!(child.generation, body(&game, parent).generation + 1);
         assert!(child.radius < body(&game, parent).radius);
         let paid = before - body(&game, parent).energy;
-        assert!((paid - body(&game, parent).max_energy * BIRTH_COST).abs() < 1e-3);
+        assert!(
+            (paid - body(&game, parent).max_energy * DEFAULT_TUNING.growth_birth_cost).abs() < 1e-3
+        );
         assert!(
             body(&game, parent).breed_clock > 30.0,
             "waits before the next"
@@ -986,7 +953,7 @@ mod tests {
         game.step(DT, Input::default());
         assert_eq!(game.eggs.len(), 1, "the far egg unloaded");
         // Crowded out, it eventually spoils instead of waiting forever.
-        for k in 0..LINEAGE_CAP + HATCH_SLACK + 2 {
+        for k in 0..DEFAULT_TUNING.growth_lineage_cap + DEFAULT_TUNING.growth_hatch_slack + 2 {
             spawn(
                 &mut game,
                 &species,
@@ -997,7 +964,10 @@ mod tests {
             game.update_eggs(DT);
         }
         assert!(game.eggs.is_empty());
-        assert_eq!(creatures(&game), LINEAGE_CAP + HATCH_SLACK + 2);
+        assert_eq!(
+            creatures(&game),
+            DEFAULT_TUNING.growth_lineage_cap + DEFAULT_TUNING.growth_hatch_slack + 2
+        );
     }
 
     #[test]
@@ -1052,7 +1022,7 @@ mod tests {
         );
         assert_eq!(
             setup(&|g, _| {
-                for k in 0..LINEAGE_CAP {
+                for k in 0..DEFAULT_TUNING.growth_lineage_cap {
                     spawn(
                         g,
                         &grazer(Birth::Live),
@@ -1061,7 +1031,7 @@ mod tests {
                 }
             })
             .0,
-            LINEAGE_CAP + 1,
+            DEFAULT_TUNING.growth_lineage_cap + 1,
             "crowded lineage"
         );
     }
@@ -1134,7 +1104,10 @@ mod tests {
                 .count()
         };
         assert!(peak > 6, "it did breed: {peak}");
-        assert!(grazers(&game, &species) <= LINEAGE_CAP + HATCH_SLACK + 2);
+        assert!(
+            grazers(&game, &species)
+                <= DEFAULT_TUNING.growth_lineage_cap + DEFAULT_TUNING.growth_hatch_slack + 2
+        );
         assert!(creatures(&game) < world::SECTOR_BODY_BUDGET as usize);
         assert!(game.bodies.len() + game.eggs.len() < MAX_BODIES);
     }
@@ -1177,7 +1150,7 @@ mod tests {
             .map(|&i| body(&game, i).energy)
             .collect();
         game.update_reproduction(DT);
-        let cost = body(&game, parent).max_energy * BIRTH_COST;
+        let cost = body(&game, parent).max_energy * DEFAULT_TUNING.growth_birth_cost;
         let paid = |i: usize, id: u64| before[i] - body(&game, id).energy;
         assert!((paid(0, parent) - cost * 0.5).abs() < 1e-3);
         assert!(
@@ -1234,7 +1207,9 @@ mod tests {
         game.update_reproduction(DT);
         assert_eq!(creatures(&game), 2);
         let paid = before - body(&game, parent).energy;
-        assert!((paid - body(&game, parent).max_energy * BIRTH_COST).abs() < 1e-3);
+        assert!(
+            (paid - body(&game, parent).max_energy * DEFAULT_TUNING.growth_birth_cost).abs() < 1e-3
+        );
         assert!(game.effects.iter().all(|e| e.kind != EffectKind::Pair));
     }
 
@@ -1272,7 +1247,10 @@ mod tests {
             assert!(game.bodies.len() + game.eggs.len() < MAX_BODIES);
         }
         let load = game.lineage_load(a.lineage, ORIGIN);
-        assert!(load <= LINEAGE_CAP + HATCH_SLACK + 2, "lineage load {load}");
+        assert!(
+            load <= DEFAULT_TUNING.growth_lineage_cap + DEFAULT_TUNING.growth_hatch_slack + 2,
+            "lineage load {load}"
+        );
     }
 
     #[test]
@@ -1353,7 +1331,7 @@ mod tests {
             }
         }
         assert!(
-            peak <= LINEAGE_WORLD_CAP + HATCH_SLACK + 4,
+            peak <= DEFAULT_TUNING.growth_lineage_world_cap + DEFAULT_TUNING.growth_hatch_slack + 4,
             "one lineage held {peak} creatures"
         );
     }
@@ -1460,7 +1438,7 @@ mod tests {
             }
             if tick % 60 == 0 {
                 assert!(game.bodies.len() + game.food.len() + game.eggs.len() <= MAX_BODIES);
-                assert!(game.food.len() <= food::FOOD_BUDGET);
+                assert!(game.food.len() <= DEFAULT_TUNING.food_budget);
                 assert!(creatures(&game) < 2 * world::SECTOR_BODY_BUDGET as usize);
                 if tick > 60 * 60 * 5 {
                     worst = worst.min(fed(&game).1);
@@ -1488,7 +1466,7 @@ mod tests {
         );
         assert!(here > 10, "plankton persists here: {here}");
         // The oasis itself stays rich, and bounded by its caps.
-        let (_, local_cap, reach) = food::fertility(planet).unwrap();
+        let (_, local_cap, reach) = food::fertility(planet, &DEFAULT_TUNING).unwrap();
         let aura = game
             .food
             .iter()

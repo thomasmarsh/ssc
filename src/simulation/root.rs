@@ -157,8 +157,9 @@ impl Game {
                         velocity: b.velocity,
                         angle: b.angle,
                         radius: b.radius,
-                        yield_rate: food::fertility(b)
-                            .map_or(0.0, |(rate, _, _)| rate * food::NUTRITION * HOST_YIELD),
+                        yield_rate: food::fertility(b, &self.tune).map_or(0.0, |(rate, _, _)| {
+                            rate * self.tune.food_nutrition * HOST_YIELD
+                        }),
                     },
                 )
             })
@@ -919,7 +920,7 @@ mod tests {
         set_player(&mut game, Vec2::ZERO, Vec2::ZERO);
         let host = rock_at(&mut game, FAR, 60.0, Vec2::ZERO);
         let c = rooted_on(&mut game, &rooter(0.9), host, 0.0);
-        assert!(!food::huntable(body(&game, c)));
+        assert!(!food::huntable(body(&game, c), &DEFAULT_TUNING));
         let before = game.score;
         game.bodies.iter_mut().find(|x| x.id == c).unwrap().health = 0.0;
         game.step(DT, Input::default());

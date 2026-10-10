@@ -11,9 +11,9 @@ use ssc::simulation::arsenal::Profile;
 use ssc::simulation::skills::{Skill, SkillTab};
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
-    Beam, Body, BodyKind, Cache, EchoKind, EffectKind, FOOD_RADIUS, GUARDIAN_COST, Game, GuideKind,
-    LAND_RANGE, MAX_PADS, Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind,
-    fertility, price_text,
+    Beam, Body, BodyKind, Cache, EchoKind, EffectKind, Game, GuideKind, LAND_RANGE, MAX_PADS,
+    Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind, Tunables, fertility,
+    price_text,
 };
 use ssc::world::{BaseKind, RockKind, SECTOR_SIZE, SectorId, hash2};
 
@@ -1728,10 +1728,10 @@ pub fn update_chart(
     }
 }
 
-fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
+fn draw_station(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color, tune: &Tunables) {
     let (p, r) = (body.position, body.radius);
     let Some(base) = &body.base else { return };
-    let stock = (base.stock / GUARDIAN_COST).clamp(0.0, 1.0);
+    let stock = (base.stock / tune.ecology_guardian_cost).clamp(0.0, 1.0);
     match base.kind {
         BaseKind::Hive => {
             // A living cluster, with six brood chambers around a soft central hull.
@@ -2265,7 +2265,7 @@ fn draw_planetoid(gizmos: &mut Gizmos, time: f32, body: &Body) {
     }
 }
 
-fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
+fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color, tune: &Tunables) {
     let (p, r) = (body.position, body.radius);
     if body.rock == RockKind::Planetoid {
         draw_planetoid(gizmos, time, body);
@@ -2314,7 +2314,7 @@ fn draw_rock(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
         }
     }
     // A faint lichen film on rocks that sprout plankton: a few lime flecks on the rim.
-    if fertility(body).is_some() {
+    if fertility(body, tune).is_some() {
         let lichen = Color::srgba(0.7, 0.95, 0.35, 0.4);
         for k in 0..2u32 {
             let at = corner((k * 3 + body.id as u32) % sides);
@@ -2452,7 +2452,13 @@ pub fn draw(
                         let stalk = Color::srgb(0.6, 0.7, 0.8).with_alpha(0.07 + 0.8 * crack);
                         gizmos.line_2d(p, p + direction * (r * 2.4 + 8.0), stalk);
                     }
-                    _ => draw_rock(&mut gizmos, game.time, body, Color::srgb(0.62, 0.5, 0.38)),
+                    _ => draw_rock(
+                        &mut gizmos,
+                        game.time,
+                        body,
+                        Color::srgb(0.62, 0.5, 0.38),
+                        &game.tune,
+                    ),
                 }
                 if crack > 0.0 {
                     for k in 0..5 {
@@ -2573,15 +2579,15 @@ pub fn draw(
             BodyKind::Base if body.fort.is_some() => {
                 draw_turret(&mut gizmos, game.time, body, lifted(game.civ_tint(body)));
             }
-            BodyKind::Base => draw_station(&mut gizmos, game.time, body, color),
+            BodyKind::Base => draw_station(&mut gizmos, game.time, body, color, &game.tune),
             // Fortress walls are drawn together after the loop, with their joins.
             BodyKind::Asteroid if body.rock == RockKind::Wall => {}
-            BodyKind::Asteroid => draw_rock(&mut gizmos, game.time, body, color),
+            BodyKind::Asteroid => draw_rock(&mut gizmos, game.time, body, color, &game.tune),
             BodyKind::BlackHole => crate::wellview::draw(&mut gizmos, game, body),
         }
         // A hungry forager shows a faint amber ring that warms as its energy runs out.
-        if body.kind == BodyKind::Creature && !body.follower && body.vigor() < 1.0 {
-            let need = 1.0 - body.vigor();
+        if body.kind == BodyKind::Creature && !body.follower && body.vigor(&game.tune) < 1.0 {
+            let need = 1.0 - body.vigor(&game.tune);
             let pulse = if body.is_starving() {
                 0.75 + 0.25 * (game.time * 4.0 + body.id as f32).sin()
             } else {
@@ -2734,13 +2740,15 @@ pub fn draw(
             .all()
     }) {
         let phase = food.position.x * 0.013 + food.position.y * 0.007;
-        let size = FOOD_RADIUS * food.grown() * (1.0 + 0.12 * (game.time * 1.7 + phase).sin());
-        let mote = Color::srgba(0.78, 0.95, 0.4, 0.65 * food.grown());
+        let size = game.tune.food_radius
+            * food.grown(&game.tune)
+            * (1.0 + 0.12 * (game.time * 1.7 + phase).sin());
+        let mote = Color::srgba(0.78, 0.95, 0.4, 0.65 * food.grown(&game.tune));
         gizmos.circle_2d(food.position, size, mote).resolution(8);
         gizmos.line_2d(
             food.position - Vec2::X * size * 1.6,
             food.position + Vec2::X * size * 1.6,
-            Color::srgba(0.78, 0.95, 0.4, 0.18 * food.grown()),
+            Color::srgba(0.78, 0.95, 0.4, 0.18 * food.grown(&game.tune)),
         );
     }
     // Eggs: small speckled ovals in the parent's colors that wobble as they near hatching.

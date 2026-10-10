@@ -122,8 +122,8 @@ impl Game {
                         heavy: matches!(b.kind, BodyKind::Asteroid | BodyKind::BlackHole),
                         rock: root::can_host(b),
                         well: b.kind == BodyKind::BlackHole,
-                        grazable: ecology::edible(b),
-                        huntable: food::huntable(b),
+                        grazable: ecology::edible(b, &self.tune),
+                        huntable: food::huntable(b, &self.tune),
                         mass: b.mass,
                         raising_alarm: creature
                             && match g.trigger {
@@ -180,7 +180,7 @@ impl Game {
             let temperament = (body.id % 5) as f32 / 4.0;
             let schooling = g.social == Social::School && g.trigger != Trigger::Sight;
             // A tired forager is slower; a fed one (or one that needs no food) is unchanged.
-            let vigor = body.vigor();
+            let vigor = body.vigor(&self.tune);
             let pace_spread = if schooling { 0.1 } else { 0.3 };
             let cruise = g.cruise
                 * (1.0 - pace_spread / 2.0 + pace_spread * temperament)
@@ -214,7 +214,7 @@ impl Game {
             let civ = self.civs.lineages.get(&body.species).copied();
             let pull = pulls.get(&body.id).copied();
             let mut civil_near: Option<(f32, Vec2)> = None;
-            let hunting = body.hunts_prey();
+            let hunting = body.hunts_prey(&self.tune);
             let prey_sight = (g.sight * phenotype.sensor_acuity).clamp(250.0, 900.0);
             for other in neighbors
                 .iter()
@@ -262,7 +262,7 @@ impl Game {
                 if hunting
                     && other.huntable
                     && other.species != body.species
-                    && other.mass < body.mass * food::PREY_MASS_RATIO
+                    && other.mass < body.mass * self.tune.food_prey_mass_ratio
                     && distance_squared < prey_sight * prey_sight
                     && prey.is_none_or(|(best, _)| distance_squared < best)
                 {
@@ -514,13 +514,13 @@ impl Game {
                 desired += toward.normalize_or_zero() * cruise * 1.2;
             }
             // Hunger beats hostility: a grazer weak with hunger breaks off its pursuit to eat.
-            let desperate = body.energy_fraction() < food::DESPERATE_BELOW;
-            if body.grazes_plankton()
+            let desperate = body.energy_fraction() < self.tune.food_desperate_below;
+            if body.grazes_plankton(&self.tune)
                 && (!body.alert || desperate)
                 && let Some(toward) = plankton
                     .iter()
                     .map(|&p| p - body.position)
-                    .filter(|d| d.length_squared() < food::FOOD_SIGHT * food::FOOD_SIGHT)
+                    .filter(|d| d.length_squared() < self.tune.food_sight * self.tune.food_sight)
                     .min_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))
             {
                 let pull = if body.alert {
@@ -533,7 +533,7 @@ impl Game {
             // Plants are food too, for a palate that likes them. They stand on a planetoid that
             // also pushes grazers away, so the pull to a plant is the stronger of the two. A school
             // keeps its shape (its members still graze whatever they drift past).
-            if body.grazes_plankton()
+            if body.grazes_plankton(&self.tune)
                 && (!body.alert || desperate)
                 && !schooling
                 && !crops.is_empty()
@@ -543,7 +543,9 @@ impl Game {
                         .iter()
                         .filter(|(_, s)| farm.flora(*s).is_some_and(|f| palate.eats(&f.chemistry)))
                         .map(|(p, _)| *p - body.position)
-                        .filter(|d| d.length_squared() < food::FOOD_SIGHT * food::FOOD_SIGHT)
+                        .filter(|d| {
+                            d.length_squared() < self.tune.food_sight * self.tune.food_sight
+                        })
                         .min_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))
                 }
             {

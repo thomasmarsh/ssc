@@ -105,9 +105,9 @@ pub use civmine::Cache;
 pub use cues::Cue;
 pub use diplomacy::{Regard, Tier, TitheError, TitheHint};
 pub use discovery::Info as DiscoveryInfo;
-pub use ecology::{BaseState, GUARDIAN_COST, TURRET_ANGLES};
+pub use ecology::{BaseState, TURRET_ANGLES};
 pub use flock::{Flock, Lod as FlockLod, Member as FlockMember};
-pub use food::{FOOD_RADIUS, Food, fertility};
+pub use food::{Food, fertility};
 pub use growth::Egg;
 pub use guide::{
     Bearing, GuideKind, MAX_BEACON_ARROWS, MAX_MINERAL_ARROWS, MAX_THREAT_ARROWS, proximity,

@@ -660,7 +660,8 @@ mod tests {
             let at = Vec2::new(0.0, 2400.0);
             for k in 0..8 {
                 let spot = at + Vec2::from_angle(k as f32 * 0.9) * (60.0 + k as f32 * 8.0);
-                game.food.push(Food::new(spot, Vec2::ZERO, food::GROW_TIME));
+                game.food
+                    .push(Food::new(spot, Vec2::ZERO, DEFAULT_TUNING.food_grow_time));
             }
             let parent = spawn(&mut game, &learner, at);
             let mate = spawn(&mut game, &learner, at + Vec2::new(200.0, 0.0));

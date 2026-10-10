@@ -9,76 +9,10 @@ use super::*;
 use crate::genome::Diet;
 use crate::world::Plankton;
 
-/// How far a hungry grazer looks for plankton.
-pub const FOOD_SIGHT: f32 = 650.0;
-/// A predator only takes prey lighter than this fraction of its own mass.
-pub const PREY_MASS_RATIO: f32 = 0.8;
-/// Energy one plankton restores, and its size.
-pub const NUTRITION: f32 = 7.0;
-pub const FOOD_RADIUS: f32 = 4.5;
-/// Energy restored per unit of radius of a rock eaten.
-pub const ROCK_NUTRITION: f32 = 1.2;
-/// A speck takes this long to swell to full size after budding.
-pub const GROW_TIME: f32 = 3.0;
-/// Most plankton alive at once, whatever the sectors say.
-pub const FOOD_BUDGET: usize = 900;
-
-/// Fraction of capacity drained per second at rest, and extra at full exertion. A forager
-/// that never eats runs dry in about ten minutes of drifting.
-const BASAL_DRAIN: f32 = 1.0 / 600.0;
-const MOVE_DRAIN: f32 = 1.0 / 900.0;
-/// Below this fraction of energy a forager slows; at empty it is at `MIN_VIGOR`.
-const WEAK_BELOW: f32 = 0.25;
-const MIN_VIGOR: f32 = 0.6;
-/// Foragers go looking for food below these fractions of energy, and stop eating above 95%.
-const GRAZE_HUNGER: f32 = 0.8;
-const HUNT_HUNGER: f32 = 0.6;
-const FULL: f32 = 0.95;
-/// Below this fraction of energy a grazer forgets a fight to eat.
-pub(super) const DESPERATE_BELOW: f32 = 0.3;
-/// Seconds at zero energy before a creature may starve, and the conditions for it to
-/// happen: calm, and well away from the ship. Weak and boss-like creatures never starve.
-const STARVE_DEATH: f32 = 150.0;
-const STARVE_SAFE_DISTANCE: f32 = 1600.0;
-const MORTAL_HULL: f32 = 150.0;
-const MORTAL_BOUNTY: f32 = 250.0;
-/// A predator bites this often, for at least this much, and only while prey of that
-/// lineage numbers at least `PREY_FLOOR` within `PREY_RANGE` (so local life is never wiped
-/// out in one go).
-const BITE_PERIOD: f32 = 2.5;
-const BITE_DAMAGE: f32 = 9.0;
-pub(super) const PREY_FLOOR: usize = 5;
-pub(super) const PREY_RANGE: f32 = 1500.0;
-/// Seconds between growth passes.
-const REGROW_PERIOD: f32 = 1.0;
-/// Specks per second one fully hungry grazer calls up near itself when none is in sight
-/// (scaled by its hunger, and by how little food is around it and in its sector).
-const DEMAND_RATE: f32 = 0.4;
-/// Most specks per second a sector of richness one can grow for hungry grazers: the
-/// carrying capacity of its land (a grazer eats roughly 0.025 a second).
-const SUPPLY_RATE: f32 = 1.1;
-/// A grazer with this many specks in sight, plus `PLENTY_PER_MOUTH` more for every other
-/// hungry grazer sharing them, asks for no more.
-const PLENTY: f32 = 6.0;
-const PLENTY_PER_MOUTH: f32 = 1.0;
-/// Specks per second a calm sector seeds from nowhere, scaled by richness.
-const SEED_RATE: f32 = 0.03;
-/// Planetoid bloom: specks per second is `PLANET_BLOOM + radius * PLANET_BLOOM_PER_UNIT`,
-/// held to `PLANET_BASE_CAP + radius / PLANET_CAP_DIVISOR` specks within the aura.
-const PLANET_BLOOM: f32 = 0.35;
-const PLANET_BLOOM_PER_UNIT: f32 = 0.003;
-const PLANET_BASE_CAP: f32 = 16.0;
-const PLANET_CAP_DIVISOR: f32 = 8.0;
-/// How far past a planetoid's surface its aura of plankton reaches.
-const PLANET_AURA: f32 = 320.0;
-/// Lichen on a rock: specks per second per unit of radius, and how far they sprout.
-const LICHEN_RATE: f32 = 0.0002;
-const LICHEN_REACH: f32 = 170.0;
-
 /// Whether and how a rock grows plankton: (specks per second, most specks held nearby,
 /// reach). Ice grows the most, ore little, and crystal and husks nothing. Pinned nest
 /// stones count: a nest is a green refuge.
-pub fn fertility(rock: &Body) -> Option<(f32, usize, f32)> {
+pub fn fertility(rock: &Body, tune: &Tunables) -> Option<(f32, usize, f32)> {
     if rock.kind != BodyKind::Asteroid {
         return None;
     }
@@ -86,9 +20,9 @@ pub fn fertility(rock: &Body) -> Option<(f32, usize, f32)> {
     let factor = match rock.rock {
         RockKind::Planetoid => {
             return Some((
-                PLANET_BLOOM + r * PLANET_BLOOM_PER_UNIT,
-                (PLANET_BASE_CAP + r / PLANET_CAP_DIVISOR) as usize,
-                r + PLANET_AURA,
+                tune.food_planet_bloom + r * tune.food_planet_bloom_per_unit,
+                (tune.food_planet_base_cap + r / tune.food_planet_cap_divisor) as usize,
+                r + tune.food_planet_aura,
             ));
         }
         RockKind::Plain => 1.0,
@@ -97,9 +31,9 @@ pub fn fertility(rock: &Body) -> Option<(f32, usize, f32)> {
         RockKind::Crystal | RockKind::Husk | RockKind::Wall => return None,
     };
     (r >= 20.0).then_some((
-        r * LICHEN_RATE * factor,
+        r * tune.food_lichen_rate * factor,
         3 + (r / 25.0) as usize,
-        r + LICHEN_REACH,
+        r + tune.food_lichen_reach,
     ))
 }
 
@@ -126,8 +60,8 @@ impl Food {
     }
 
     /// How grown it is, in [0, 1].
-    pub fn grown(&self) -> f32 {
-        (self.age / GROW_TIME).clamp(0.0, 1.0)
+    pub fn grown(&self, tune: &Tunables) -> f32 {
+        (self.age / tune.food_grow_time).clamp(0.0, 1.0)
     }
 }
 
@@ -145,7 +79,7 @@ pub fn starting_energy(genome: &crate::genome::Genome, id: u64) -> f32 {
 /// A lone, unprotected creature a predator may take: not part of a body chain, not tended
 /// by a parent, not fed by a base (guardians included), not boss-like and not itself a
 /// predator.
-pub(super) fn huntable(body: &Body) -> bool {
+pub(super) fn huntable(body: &Body, tune: &Tunables) -> bool {
     body.active
         && body.kind == BodyKind::Creature
         && !body.follower
@@ -157,8 +91,8 @@ pub(super) fn huntable(body: &Body) -> bool {
         && !body.consumed
         && body.health > 0.0
         && body.genome.diet != Diet::Hunt
-        && body.genome.hull < MORTAL_HULL
-        && body.genome.bounty < MORTAL_BOUNTY
+        && body.genome.hull < tune.food_mortal_hull
+        && body.genome.bounty < tune.food_mortal_bounty
 }
 
 impl Body {
@@ -173,9 +107,11 @@ impl Body {
 
     /// Scale on a creature's pace: one while fed, easing down to `MIN_VIGOR` as energy runs
     /// out. Creatures that need no food, or are fed by a base, are never weak.
-    pub fn vigor(&self) -> f32 {
+    pub fn vigor(&self, tune: &Tunables) -> f32 {
         if self.kind == BodyKind::Creature && self.genome.forages() && !self.provisioned {
-            MIN_VIGOR + (1.0 - MIN_VIGOR) * (self.energy_fraction() / WEAK_BELOW).min(1.0)
+            tune.food_min_vigor
+                + (1.0 - tune.food_min_vigor)
+                    * (self.energy_fraction() / tune.food_weak_below).min(1.0)
         } else {
             1.0
         }
@@ -193,12 +129,12 @@ impl Body {
         self.starving > 0.0
     }
 
-    pub(super) fn grazes_plankton(&self) -> bool {
-        self.genome.diet == Diet::Graze && self.energy_fraction() < GRAZE_HUNGER
+    pub(super) fn grazes_plankton(&self, tune: &Tunables) -> bool {
+        self.genome.diet == Diet::Graze && self.energy_fraction() < tune.food_graze_hunger
     }
 
-    pub(super) fn hunts_prey(&self) -> bool {
-        self.genome.diet == Diet::Hunt && self.energy_fraction() < HUNT_HUNGER
+    pub(super) fn hunts_prey(&self, tune: &Tunables) -> bool {
+        self.genome.diet == Diet::Hunt && self.energy_fraction() < tune.food_hunt_hunger
     }
 }
 
@@ -219,7 +155,8 @@ impl Game {
             if self.food_room() == 0 {
                 break;
             }
-            self.food.push(Food::new(position, velocity, GROW_TIME));
+            self.food
+                .push(Food::new(position, velocity, self.tune.food_grow_time));
         }
     }
 
@@ -227,7 +164,7 @@ impl Game {
     fn food_room(&self) -> usize {
         MAX_BODIES
             .saturating_sub(self.bodies.len() + self.food.len() + self.eggs.len())
-            .min(FOOD_BUDGET.saturating_sub(self.food.len()))
+            .min(self.tune.food_budget.saturating_sub(self.food.len()))
     }
 
     /// Drifts plankton in active sectors, and lets calm ones regrow.
@@ -237,7 +174,7 @@ impl Game {
             .bodies
             .iter()
             .filter(|b| b.active && b.rock == RockKind::Planetoid)
-            .map(|b| (b.position, b.radius + FOOD_RADIUS + 4.0))
+            .map(|b| (b.position, b.radius + self.tune.food_radius + 4.0))
             .collect();
         for food in self.food.iter_mut() {
             if !self.active.contains(&SectorId::containing(food.position)) {
@@ -271,7 +208,7 @@ impl Game {
         }
         self.food_clock -= dt;
         if self.food_clock <= 0.0 {
-            self.food_clock += REGROW_PERIOD;
+            self.food_clock += self.tune.food_regrow_period;
             let before = self.food.len();
             self.regrow_food();
             // Plankton does not take in the dark of a light eater.
@@ -303,7 +240,7 @@ impl Game {
             .bodies
             .iter()
             .filter(|b| b.active && b.kind == BodyKind::Creature && !b.follower)
-            .filter(|b| b.grazes_plankton() && !b.provisioned)
+            .filter(|b| b.grazes_plankton(&self.tune) && !b.provisioned)
         {
             hungry
                 .entry(SectorId::containing(body.position))
@@ -336,7 +273,9 @@ impl Game {
                 cap + cap / 2
             };
             // A sector's land only yields so much a second, however many mouths ask.
-            let supply = SUPPLY_RATE * world::food_richness(&params) * REGROW_PERIOD;
+            let supply = self.tune.food_supply_rate
+                * world::food_richness(&params)
+                * self.tune.food_regrow_period;
             let mut allowance =
                 supply.floor() as usize + usize::from(self.growth.chance(supply.fract()));
             let start = if grazers.is_empty() {
@@ -352,20 +291,24 @@ impl Game {
                 let sighted = self
                     .food
                     .iter()
-                    .filter(|f| f.position.distance(at) < FOOD_SIGHT)
+                    .filter(|f| f.position.distance(at) < self.tune.food_sight)
                     .count();
                 // Plenty is relative to the mouths sharing it: a crowd needs more specks.
                 let mouths = grazers
                     .iter()
-                    .filter(|g| g.0.distance(at) < FOOD_SIGHT)
+                    .filter(|g| g.0.distance(at) < self.tune.food_sight)
                     .count();
-                let enough = PLENTY + PLENTY_PER_MOUTH * mouths as f32;
+                let enough =
+                    self.tune.food_plenty + self.tune.food_plenty_per_mouth * mouths as f32;
                 let plenty = (1.0 - sighted as f32 / enough).max(0.0);
                 let slack = 1.0 - here as f32 / ceiling as f32;
-                if self
-                    .growth
-                    .chance(DEMAND_RATE * hunger * plenty * slack * REGROW_PERIOD)
-                {
+                if self.growth.chance(
+                    self.tune.food_demand_rate
+                        * hunger
+                        * plenty
+                        * slack
+                        * self.tune.food_regrow_period,
+                ) {
                     let spot = at + self.growth.direction() * self.growth.range(120.0, 520.0);
                     let velocity = self.growth.direction() * self.growth.range(4.0, 12.0);
                     self.food.push(Food::new(inside(spot), velocity, 0.0));
@@ -383,8 +326,10 @@ impl Game {
                     && (b.alert || b.enraged || b.panic > 0.0)
                     && SectorId::containing(b.position) == id
             });
-            let seed = SEED_RATE * world::food_richness(&params) * (1.0 - here as f32 / cap as f32);
-            if calm && self.growth.chance(seed * REGROW_PERIOD) {
+            let seed = self.tune.food_seed_rate
+                * world::food_richness(&params)
+                * (1.0 - here as f32 / cap as f32);
+            if calm && self.growth.chance(seed * self.tune.food_regrow_period) {
                 let neighbors: Vec<Vec2> = self
                     .food
                     .iter()
@@ -417,7 +362,7 @@ impl Game {
             .iter()
             .filter(|b| b.active && b.kind == BodyKind::Asteroid)
             .filter_map(|b| {
-                let (rate, cap, reach) = fertility(b)?;
+                let (rate, cap, reach) = fertility(b, &self.tune)?;
                 Some((b.position, b.radius, rate, cap, reach))
             })
             .collect();
@@ -425,7 +370,10 @@ impl Game {
             if self.food_room() == 0 {
                 return;
             }
-            if !self.growth.chance((rate * REGROW_PERIOD).min(1.0)) {
+            if !self
+                .growth
+                .chance((rate * self.tune.food_regrow_period).min(1.0))
+            {
                 continue;
             }
             let near = self
@@ -465,8 +413,11 @@ impl Game {
             }
             // Combat and rage drain like anything else; only effort matters.
             let effort = (body.velocity.length() / g.speed.max(30.0)).min(1.5);
-            body.energy =
-                (body.energy - body.max_energy * (BASAL_DRAIN + MOVE_DRAIN * effort) * dt).max(0.0);
+            body.energy = (body.energy
+                - body.max_energy
+                    * (self.tune.food_basal_drain + self.tune.food_move_drain * effort)
+                    * dt)
+                .max(0.0);
             if body.energy <= 0.0 {
                 body.starving += dt;
             } else {
@@ -474,13 +425,15 @@ impl Game {
             }
             let mortal = body.parent.is_none()
                 && body.adult.is_none()
-                && g.hull < MORTAL_HULL
-                && g.bounty < MORTAL_BOUNTY;
+                && g.hull < self.tune.food_mortal_hull
+                && g.bounty < self.tune.food_mortal_bounty;
             let unseen = !body.alert
                 && !body.enraged
                 && body.panic <= 0.0
-                && ship.is_none_or(|p| p.distance(body.position) > STARVE_SAFE_DISTANCE);
-            if mortal && unseen && body.starving >= STARVE_DEATH {
+                && ship.is_none_or(|p| {
+                    p.distance(body.position) > self.tune.food_starve_safe_distance
+                });
+            if mortal && unseen && body.starving >= self.tune.food_starve_death {
                 starved.push((body.id, body.chain));
             }
         }
@@ -508,9 +461,9 @@ impl Game {
                 && b.kind == BodyKind::Creature
                 && !b.follower
                 && b.genome.diet == Diet::Graze
-                && b.energy_fraction() < FULL
+                && b.energy_fraction() < self.tune.food_full
         }) {
-            let reach = body.radius + FOOD_RADIUS + 6.0;
+            let reach = body.radius + self.tune.food_radius + 6.0;
             let nearest = self
                 .food
                 .iter()
@@ -523,7 +476,7 @@ impl Game {
             if let Some((index, _)) = nearest {
                 eaten[index] = true;
                 any = true;
-                body.feed(NUTRITION);
+                body.feed(self.tune.food_nutrition);
             }
         }
         if any {
@@ -547,7 +500,7 @@ impl Game {
                 b.active
                     && b.kind == BodyKind::Creature
                     && !b.follower
-                    && b.hunts_prey()
+                    && b.hunts_prey(&self.tune)
                     && b.bite_clock <= 0.0
                     && !b.alert
                     && b.panic <= 0.0
@@ -562,16 +515,16 @@ impl Game {
                 hunter.mass,
                 hunter.species,
             );
-            let bite = (hunter.genome.contact_damage * 1.2).max(BITE_DAMAGE);
+            let bite = (hunter.genome.contact_damage * 1.2).max(self.tune.food_bite_damage);
             let target = self
                 .bodies
                 .iter()
                 .enumerate()
                 .filter(|(j, b)| {
                     *j != index
-                        && huntable(b)
+                        && huntable(b, &self.tune)
                         && b.species != species
-                        && b.mass < mass * PREY_MASS_RATIO
+                        && b.mass < mass * self.tune.food_prey_mass_ratio
                         && b.position.distance(at) < reach + b.radius
                 })
                 .min_by(|a, b| {
@@ -591,13 +544,13 @@ impl Game {
                         && b.kind == BodyKind::Creature
                         && !b.follower
                         && b.species == prey_species
-                        && b.position.distance(prey_at) < PREY_RANGE
+                        && b.position.distance(prey_at) < self.tune.food_prey_range
                 })
                 .count();
-            if kin < PREY_FLOOR {
+            if kin < self.tune.food_prey_floor {
                 continue;
             }
-            self.bodies[index].bite_clock = BITE_PERIOD;
+            self.bodies[index].bite_clock = self.tune.food_bite_period;
             let prey = &mut self.bodies[target];
             // A bite is not a shot: it neither hurts the shield nor sets the prey off.
             if prey.health <= bite {
@@ -687,13 +640,19 @@ mod tests {
         let id = spawn(&mut game, &grazer(), Vec2::new(600.0, 600.0));
         let at = Vec2::new(600.0, 600.0);
         set_energy(&mut game, id, 0.4);
-        game.food
-            .push(Food::new(at + Vec2::X * 5.0, Vec2::ZERO, GROW_TIME));
-        game.food
-            .push(Food::new(at + Vec2::X * 400.0, Vec2::ZERO, GROW_TIME));
+        game.food.push(Food::new(
+            at + Vec2::X * 5.0,
+            Vec2::ZERO,
+            DEFAULT_TUNING.food_grow_time,
+        ));
+        game.food.push(Food::new(
+            at + Vec2::X * 400.0,
+            Vec2::ZERO,
+            DEFAULT_TUNING.food_grow_time,
+        ));
         let before = body(&game, id).energy;
         game.graze_plankton();
-        assert!((body(&game, id).energy - before - NUTRITION).abs() < 1e-3);
+        assert!((body(&game, id).energy - before - DEFAULT_TUNING.food_nutrition).abs() < 1e-3);
         assert_eq!(game.food.len(), 1, "only the touched speck was eaten");
         // A full creature leaves food alone.
         set_energy(&mut game, id, 1.0);
@@ -712,8 +671,11 @@ mod tests {
         let id = spawn(&mut game, &grazer(), Vec2::new(0.0, -300.0));
         set_energy(&mut game, id, 0.2);
         let start = body(&game, id).energy;
-        game.food
-            .push(Food::new(Vec2::new(320.0, -300.0), Vec2::ZERO, GROW_TIME));
+        game.food.push(Food::new(
+            Vec2::new(320.0, -300.0),
+            Vec2::ZERO,
+            DEFAULT_TUNING.food_grow_time,
+        ));
         let speck = Vec2::new(320.0, -300.0);
         let there = |game: &Game| game.food.iter().any(|f| f.position == speck);
         for _ in 0..60 * 20 {
@@ -805,7 +767,7 @@ mod tests {
             let rock = body(&game, id);
             assert_eq!(rock.health, health, "the film does not eat the rock");
             assert!(rock.radius == radius);
-            let (_, cap, reach) = fertility(rock).unwrap_or((0.0, 0, 0.0));
+            let (_, cap, reach) = fertility(rock, &DEFAULT_TUNING).unwrap_or((0.0, 0, 0.0));
             let near = game
                 .food
                 .iter()
@@ -843,7 +805,7 @@ mod tests {
             w.pinned = true;
             w.mass = 900.0;
         }
-        let (_, cap, reach) = fertility(body(&game, id)).unwrap();
+        let (_, cap, reach) = fertility(body(&game, id), &DEFAULT_TUNING).unwrap();
         let at = body(&game, id).position;
         for _ in 0..120 {
             game.sprout_food();
@@ -1032,18 +994,21 @@ mod tests {
         set_player(&mut game, Vec2::new(0.0, 2500.0), Vec2::ZERO);
         let id = spawn(&mut game, &grazer(), Vec2::ZERO);
         set_energy(&mut game, id, 0.0);
-        assert_eq!(body(&game, id).vigor(), MIN_VIGOR);
+        assert_eq!(
+            body(&game, id).vigor(&DEFAULT_TUNING),
+            DEFAULT_TUNING.food_min_vigor
+        );
         // Weakness comes first and grows as the larder empties.
         let mut vigor = Vec::new();
         for fraction in [1.0, 0.5, 0.25, 0.12, 0.0] {
             set_energy(&mut game, id, fraction);
-            vigor.push(body(&game, id).vigor());
+            vigor.push(body(&game, id).vigor(&DEFAULT_TUNING));
         }
         assert!(vigor.windows(2).all(|w| w[1] <= w[0]), "{vigor:?}");
-        assert!(vigor[0] == 1.0 && vigor[4] == MIN_VIGOR);
+        assert!(vigor[0] == 1.0 && vigor[4] == DEFAULT_TUNING.food_min_vigor);
         // Nothing dies for a long while after running dry...
         set_energy(&mut game, id, 0.0);
-        for _ in 0..(60.0 * (STARVE_DEATH - 5.0)) as u32 {
+        for _ in 0..(60.0 * (DEFAULT_TUNING.food_starve_death - 5.0)) as u32 {
             game.update_metabolism(DT);
         }
         assert!(body(&game, id).is_starving() && body(&game, id).health > 0.0);
@@ -1079,8 +1044,11 @@ mod tests {
         }
         assert!(body(&game, id).is_starving());
         for _ in 0..3 {
-            game.food
-                .push(Food::new(Vec2::X * 5.0, Vec2::ZERO, GROW_TIME));
+            game.food.push(Food::new(
+                Vec2::X * 5.0,
+                Vec2::ZERO,
+                DEFAULT_TUNING.food_grow_time,
+            ));
             game.graze_plankton();
         }
         for _ in 0..60 * 60 {
@@ -1131,7 +1099,10 @@ mod tests {
                 .all(|&id| game.body(id).is_some())
         );
         assert_eq!(body(&game, kept).energy_fraction(), 1.0);
-        assert!(body(&game, boss).vigor() < 1.0, "the mighty still weaken");
+        assert!(
+            body(&game, boss).vigor(&DEFAULT_TUNING) < 1.0,
+            "the mighty still weaken"
+        );
     }
 
     #[test]
@@ -1148,7 +1119,7 @@ mod tests {
                         ..Default::default()
                     },
                 );
-                assert!(game.food.len() <= FOOD_BUDGET);
+                assert!(game.food.len() <= DEFAULT_TUNING.food_budget);
                 assert!(game.bodies.len() + game.food.len() <= MAX_BODIES);
                 assert!(game.food.iter().all(|f| f.position.is_finite()));
             }

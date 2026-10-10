@@ -413,7 +413,7 @@ mod tests {
         assert!(
             walls(&game)
                 .iter()
-                .all(|w| !w.minable() && !crate::simulation::ecology::edible(w))
+                .all(|w| !w.minable() && !crate::simulation::ecology::edible(w, &DEFAULT_TUNING))
         );
     }
 
