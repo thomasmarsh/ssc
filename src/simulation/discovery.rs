@@ -188,7 +188,18 @@ impl Game {
                 Some((
                     position,
                     Info::Relic {
-                        organ: strain.organ,
+                        organ: if self.loaded.contains(&id) {
+                            // A laid relic keeps the organ it was laid with.
+                            self.pickups
+                                .iter()
+                                .find_map(|p| match p.item {
+                                    Item::Specimen(s) if p.relic == Some(id) => Some(s.organ),
+                                    _ => None,
+                                })
+                                .unwrap_or(strain.organ)
+                        } else {
+                            self.relic_organ(id, strain.organ)
+                        },
                     },
                 ))
             }

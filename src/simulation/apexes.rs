@@ -714,8 +714,12 @@ impl Game {
         self.cue(Cue::Extirpated);
     }
 
-    /// What a slain apex leaves: materials of every kind, an epic part in the slot of an
-    /// Raw hoard only. Biology never manufactures technological gear.
+    /// What a slain apex leaves: materials of every kind, and the organ strain of every power
+    /// it carries that has one (its ward or gland, `docs/CAPABILITIES.md` section 4.1). An
+    /// elder dies once (a saved spawn identity), so the strain is a deterministic first-kill
+    /// payoff from its genes, never a roll and never farmable; a second elder of the family
+    /// raises the same organ a level, and the raw hoard is paid either way. Biology never
+    /// manufactures technological gear.
     pub(super) fn apex_loot(
         &self,
         body: &Body,
@@ -726,7 +730,7 @@ impl Game {
             return Vec::new();
         };
         let share = if info.rank == Rank::Major { 1.0 } else { 0.5 };
-        [
+        let mut drops: Vec<Item> = [
             Material::Metal,
             Material::Volatiles,
             Material::Crystal,
@@ -734,7 +738,20 @@ impl Game {
         ]
         .into_iter()
         .map(|m| Item::Material(m, (self.tune.apex_material * share).round()))
-        .collect()
+        .collect();
+        let mut paid: Vec<organs::Organ> = Vec::new();
+        for power in body.genome.live_powers() {
+            for kind in organs::harvestable(power.power) {
+                if !paid.contains(&kind.organ) {
+                    paid.push(kind.organ);
+                    drops.push(Item::Specimen(organs::Strain::from_donor(
+                        kind.organ,
+                        &body.genome,
+                    )));
+                }
+            }
+        }
+        drops
     }
 }
 
@@ -1165,21 +1182,83 @@ mod tests {
         assert!(game.apex_report().is_none());
     }
 
-    #[test]
-    fn apex_rewards_are_raw_even_after_the_ability_unlocks() {
-        let id = find(SEED, Rank::Major);
-        let mut game = visit(id);
-        game.loadout.skills.raise(skills::Skill::Parry);
-        let body = the_apex(&game).clone();
-        let drops = game.apex_loot(&body, &mut Rng::new(1), game.params());
-        assert_eq!(drops.len(), 4);
-        assert!(drops.iter().all(|d| matches!(
-            d,
+    fn is_raw(item: &Item) -> bool {
+        matches!(
+            item,
             Item::Material(
                 Material::Metal | Material::Volatiles | Material::Crystal | Material::Biomass,
                 _
             )
-        )));
+        )
+    }
+
+    #[test]
+    fn apex_rewards_are_raw_plus_the_organs_of_its_powers_even_after_the_ability_unlocks() {
+        let id = find(SEED, Rank::Major);
+        let mut game = visit(id);
+        game.loadout.skills.raise(skills::Skill::Parry);
+        let mut body = the_apex(&game).clone();
+        // Whatever the elder carries pays the organs of those powers, one strain each and
+        // nothing else but raw goods.
+        let expected: Vec<organs::Organ> = body
+            .genome
+            .live_powers()
+            .flat_map(|c| organs::harvestable(c.power).map(|k| k.organ))
+            .collect();
+        let drops = game.apex_loot(&body, &mut Rng::new(1), game.params());
+        assert_eq!(drops.iter().filter(|d| is_raw(d)).count(), 4);
+        let specimens: Vec<organs::Organ> = drops
+            .iter()
+            .filter_map(|d| match d {
+                Item::Specimen(s) => Some(s.organ),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            specimens.len(),
+            drops.len() - 4,
+            "only raw goods and organs"
+        );
+        for organ in &expected {
+            assert_eq!(specimens.iter().filter(|o| *o == organ).count(), 1);
+        }
+        // An elder stamped with an emp pays the Faraday ward at level 1, deterministically.
+        crate::power::Power::Emp.set(&mut body.genome, 0.7);
+        let a = game.apex_loot(&body, &mut Rng::new(1), game.params());
+        let b = game.apex_loot(&body, &mut Rng::new(99), game.params());
+        assert_eq!(a, b, "no roll in an elder's organ payoff");
+        let faraday: Vec<_> = a
+            .iter()
+            .filter_map(|d| match d {
+                Item::Specimen(s) if s.organ == organs::Organ::Faraday => Some(s.level),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(faraday, [1]);
+    }
+
+    #[test]
+    fn a_slain_keeper_pays_its_ward_once_and_never_by_the_harvest_roll() {
+        let id = find(SEED, Rank::Major);
+        let mut game = visit(id);
+        game.pickups.clear();
+        let body_id = the_apex(&game).id;
+        {
+            let b = game
+                .bodies
+                .iter_mut()
+                .find(|b| b.id == body_id)
+                .expect("apex");
+            crate::power::Power::Emp.set(&mut b.genome, 0.7);
+            b.health = 0.0;
+        }
+        game.step(DT, Input::default());
+        let faradays = game
+            .pickups
+            .iter()
+            .filter(|p| matches!(p.item, Item::Specimen(s) if s.organ == organs::Organ::Faraday))
+            .count();
+        assert_eq!(faradays, 1, "one deterministic strain, never a second roll");
     }
 
     #[test]

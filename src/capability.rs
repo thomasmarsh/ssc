@@ -264,6 +264,11 @@ pub fn trait_covers(kind: Trait) -> &'static [Cover] {
             cover!(Swarm, 1, "dense bursts cover a wide arc"),
         ],
         Trait::Nova => &[cover!(Swarm, 3, "a ring of shots hits all around")],
+        Trait::Hardening => &[cover!(
+            Jam,
+            2,
+            "a hardened casing shortens jams and glitches"
+        )],
     }
 }
 

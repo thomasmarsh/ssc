@@ -321,16 +321,18 @@ impl Game {
                     drops.push(self.creature_reward(body, &mut rng, &source));
                 }
                 // A special carrier's first kill may leave a specimen of its organ (drawn after
-                // everything else, so no other drop of this body moves).
+                // everything else, so no other drop of this body moves). An elder is paid in
+                // full and deterministically by `apex_loot`, so its roll is drawn and ignored.
                 if body.origin.is_some()
                     && let Some(organ) = genome
                         .live_powers()
-                        .filter_map(|c| {
-                            organs::Organ::from_power(c.power).map(|organ| (c.strength, organ))
+                        .flat_map(|c| {
+                            organs::harvestable(c.power).map(move |k| (c.strength, k.organ))
                         })
                         .max_by(|a, b| a.0.total_cmp(&b.0))
                         .map(|(_, organ)| organ)
                     && rng.chance(self.tune.harvest_chance)
+                    && self.apex_of(body).is_none()
                 {
                     drops.push(Item::Specimen(organs::Strain::from_donor(organ, genome)));
                 }

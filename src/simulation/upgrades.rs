@@ -153,10 +153,13 @@ pub enum Trait {
     Needles,
     /// Pulses a ring of shots when hostiles are close.
     Nova,
+    /// A hardened casing: every jam and glitch runs shorter (a supplier's answer to a
+    /// Faraday organ; the two add).
+    Hardening,
 }
 
 impl Trait {
-    pub const ALL: [Trait; 15] = [
+    pub const ALL: [Trait; 16] = [
         Self::Spread,
         Self::Pierce,
         Self::Homing,
@@ -172,6 +175,7 @@ impl Trait {
         Self::Mines,
         Self::Needles,
         Self::Nova,
+        Self::Hardening,
     ];
 
     fn index(self) -> usize {
@@ -195,6 +199,7 @@ impl Trait {
             Self::Mines => "mines",
             Self::Needles => "needles",
             Self::Nova => "nova",
+            Self::Hardening => "jam hardening",
         }
     }
 
@@ -212,6 +217,7 @@ impl Trait {
             Self::Pierce => 4,
             Self::Broadside => 2,
             Self::Tailgun | Self::Shears | Self::Ballast => 1,
+            Self::Hardening => 3,
             Self::Siphon => 4,
         }
     }
@@ -224,7 +230,7 @@ impl Trait {
             Self::Mines => 0.35,
             Self::Homing | Self::Siphon => 0.35,
             Self::Ram | Self::Shears | Self::Aura => 0.3,
-            Self::Tailgun | Self::Ballast => 0.25,
+            Self::Tailgun | Self::Ballast | Self::Hardening => 0.25,
         }
     }
 }
@@ -557,6 +563,12 @@ const PARTS: &[Blueprint] = &[
         &[T(Trait::Ballast, 1)],
     ),
     part("Cord Shears", Aux, Answers::Tech, &[T(Trait::Shears, 1)]),
+    part(
+        "Shielded Casing",
+        Aux,
+        Answers::Tech,
+        &[T(Trait::Hardening, 1)],
+    ),
     part(
         "Chaos Coil",
         Aux,
@@ -994,6 +1006,8 @@ pub struct Stats {
     pub shears: bool,
     pub ballast: bool,
     pub aura: u8,
+    /// Jam hardening level: each cuts every jam and glitch by `hardening_cut`.
+    pub hardening: u8,
 }
 
 impl Stats {
@@ -1025,6 +1039,7 @@ impl Stats {
         shears: false,
         ballast: false,
         aura: 0,
+        hardening: 0,
     };
 
     pub fn compute(effects: impl IntoIterator<Item = Effect>) -> Self {
@@ -1072,6 +1087,7 @@ impl Stats {
             shears: level(Trait::Shears) > 0,
             ballast: level(Trait::Ballast) > 0,
             aura: level(Trait::Aura),
+            hardening: level(Trait::Hardening),
         }
     }
 
@@ -1089,6 +1105,7 @@ impl Stats {
             Trait::Ballast => u8::from(self.ballast),
             Trait::Siphon => self.siphon,
             Trait::Aura => self.aura,
+            Trait::Hardening => self.hardening,
             Trait::Missiles => self.missiles,
             Trait::Mines => self.mines,
             Trait::Needles => self.needles,
@@ -1656,6 +1673,18 @@ mod tests {
         let (shallow, deep) = (build(1.0), build(5.0));
         assert!(shallow > 1.5, "{shallow}");
         assert!(deep > shallow * 1.8, "{shallow} vs {deep}");
+    }
+
+    #[test]
+    fn hardening_stacks_to_its_cap_and_is_in_the_part_pool() {
+        let stats = Stats::compute([Effect::Trait(Trait::Hardening, 2); 3]);
+        assert_eq!(stats.hardening, Trait::Hardening.cap());
+        assert_eq!(stats.level(Trait::Hardening), 3);
+        assert!(
+            PARTS
+                .iter()
+                .any(|b| b.effects.contains(&Effect::Trait(Trait::Hardening, 1)))
+        );
     }
 
     #[test]

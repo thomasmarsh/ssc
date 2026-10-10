@@ -244,6 +244,8 @@ tuning_life::groups! {
         remora_quiet: f32 = 2.0, 0.0, 60.0, Seconds;
         /// Share by which a Faraday organ cuts every jam and glitch (immune when it reaches one).
         faraday_cut: f32 = 0.3, 0.0, 1.0, Ratio;
+        /// Share by which each level of a hardened casing (jam hardening, up to 3) cuts every jam and glitch; it adds to the Faraday organ and never grants immunity.
+        hardening_cut: f32 = 0.2, 0.0, 0.3, Ratio;
         /// Seconds a Veil organ leaves the ship intangible after a dash.
         veil_time: f32 = 0.35, 0.0, 30.0, Seconds;
         /// A Skipjack dash hops an obstacle thinner than this.

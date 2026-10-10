@@ -22,7 +22,8 @@ use super::*;
 use crate::genome::Genome;
 use crate::power::Power;
 
-/// The kinds of organ.
+/// The kinds of organ. Every per-organ fact (label, donor power, aspect, whether an elder pays
+/// it) is a row of `ORGANS`; adding an organ is a variant here plus a row there (and its effect).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Organ {
     Remora,
@@ -31,41 +32,107 @@ pub enum Organ {
     Skipjack,
 }
 
+/// What an organ is to the capability poset (`docs/CAPABILITIES.md` section 4.5): a ward is a
+/// counter to a power, a gland is the power itself as an organ the ship uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Aspect {
+    Ward,
+    Gland,
+}
+
+/// One row of the organ table.
+#[derive(Clone, Copy, Debug)]
+pub struct OrganKind {
+    pub organ: Organ,
+    /// The power whose carrier is the donor.
+    pub power: Power,
+    pub aspect: Aspect,
+    pub label: &'static str,
+    /// Whether a carrier or an elder of `power` may leave a specimen. The Remora is bonded,
+    /// never harvested (shooting it is the moral joke).
+    pub harvest: bool,
+}
+
+/// The organ table, in `Organ` declaration order (a test pins it). Slices K6 adds rows here.
+pub const ORGANS: [OrganKind; 4] = [
+    OrganKind {
+        organ: Organ::Remora,
+        power: Power::Symbiote,
+        aspect: Aspect::Gland,
+        label: "REMORA",
+        harvest: false,
+    },
+    OrganKind {
+        organ: Organ::Faraday,
+        power: Power::Emp,
+        aspect: Aspect::Ward,
+        label: "FARADAY",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Veil,
+        power: Power::Phase,
+        aspect: Aspect::Gland,
+        label: "VEIL",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Skipjack,
+        power: Power::Blink,
+        aspect: Aspect::Gland,
+        label: "SKIP NODE",
+        harvest: true,
+    },
+];
+
+/// Number of organ kinds (sizes the saved arrays).
+pub const ORGAN_COUNT: usize = ORGANS.len();
+
+/// The organs a carrier of `power` can leave behind (a specimen), in table order.
+pub fn harvestable(power: Power) -> impl Iterator<Item = &'static OrganKind> {
+    ORGANS.iter().filter(move |k| k.harvest && k.power == power)
+}
+
 impl Organ {
-    pub const ALL: [Organ; 4] = [Self::Remora, Self::Faraday, Self::Veil, Self::Skipjack];
+    pub const ALL: [Organ; ORGAN_COUNT] = {
+        let mut all = [Organ::Remora; ORGAN_COUNT];
+        let mut i = 0;
+        while i < ORGAN_COUNT {
+            all[i] = ORGANS[i].organ;
+            i += 1;
+        }
+        all
+    };
 
     pub fn index(self) -> usize {
-        Self::ALL.iter().position(|&o| o == self).unwrap_or(0)
+        ORGANS.iter().position(|k| k.organ == self).unwrap_or(0)
+    }
+
+    pub fn kind(self) -> &'static OrganKind {
+        &ORGANS[self.index()]
     }
 
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Remora => "REMORA",
-            Self::Faraday => "FARADAY",
-            Self::Veil => "VEIL",
-            Self::Skipjack => "SKIP NODE",
-        }
+        self.kind().label
     }
 
     /// The power whose carrier is the donor.
     pub fn power(self) -> Power {
-        match self {
-            Self::Remora => Power::Symbiote,
-            Self::Faraday => Power::Emp,
-            Self::Veil => Power::Phase,
-            Self::Skipjack => Power::Blink,
-        }
+        self.kind().power
     }
 
-    /// The organ a carrier of `power` can leave behind, if any. The Remora is bonded, never
-    /// harvested (shooting it is the moral joke).
-    pub fn from_power(power: Power) -> Option<Organ> {
-        match power {
-            Power::Emp => Some(Self::Faraday),
-            Power::Phase => Some(Self::Veil),
-            Power::Blink => Some(Self::Skipjack),
-            _ => None,
-        }
+    pub fn aspect(self) -> Aspect {
+        self.kind().aspect
+    }
+
+    /// What the organ answers, one line from the capability table (the same `reason` strings
+    /// the readout uses), so a find says why it matters: "ANSWERS JAM: shortens jams ...".
+    pub fn answers(self) -> String {
+        crate::capability::organ_covers(self)
+            .iter()
+            .map(|c| format!("{}: {}", c.channel.label(), c.reason))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     pub fn tint(self) -> [f32; 3] {
@@ -139,11 +206,11 @@ pub enum Found {
 /// The organs a run owns, which are fitted, and the bond running without a slot.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Organs {
-    owned: [Option<Strain>; 4],
+    owned: [Option<Strain>; ORGAN_COUNT],
     /// Fitted kinds, oldest first, at most the slots open.
     slots: Vec<Organ>,
     /// Whether the first graft has been paid.
-    paid: [bool; 4],
+    paid: [bool; ORGAN_COUNT],
     /// A fresh bond working at once, and its seconds left.
     loan: Option<(Organ, f32)>,
     /// The hold is dry: fitted organs sleep.
@@ -236,6 +303,20 @@ impl Organs {
         Some(self.paid[organ.index()])
     }
 
+    /// The organ a relic or specimen of `picked` should be: what the ship lacks, so a find
+    /// fills a hole instead of duplicating (a seeded choice among organs not yet owned by
+    /// `salt`). When everything is owned the pick stands and raises that organ a level.
+    pub fn gap_for(&self, picked: Organ, salt: u64) -> Organ {
+        if !self.owns(picked) {
+            return picked;
+        }
+        let lacking: Vec<Organ> = Organ::ALL.into_iter().filter(|&o| !self.owns(o)).collect();
+        match lacking.len() {
+            0 => picked,
+            n => lacking[(salt % n as u64) as usize],
+        }
+    }
+
     fn unfit(&mut self, organ: Organ) -> bool {
         let before = self.slots.len();
         self.slots.retain(|&o| o != organ);
@@ -267,7 +348,7 @@ pub fn relic_of(
     if !h.is_multiple_of(tune.relic_one_in) {
         return None;
     }
-    let organ = Organ::ALL[((h >> 8) % 4) as usize];
+    let organ = Organ::ALL[((h >> 8) % ORGAN_COUNT as u64) as usize];
     let magnitude = 0.8 + 0.6 * ((h >> 16) % 1000) as f32 / 1000.0;
     let angle = ((h >> 28) % 6283) as f32 / 1000.0;
     let reach = 400.0 + ((h >> 40) % 1200) as f32;
@@ -299,6 +380,11 @@ impl Game {
                     ),
                     upgrades::Rarity::Epic,
                 );
+                // Additive and self-explanatory: say what it answers (fit it to use it).
+                let answers = found.organ.answers();
+                if !answers.is_empty() {
+                    self.notify(format!("{name} ANSWERS {answers}"), upgrades::Rarity::Rare);
+                }
             }
             Found::Raised { from, to } => self.notify(
                 format!("{source}  {name} ORGAN {from} -> {to}"),
@@ -366,16 +452,20 @@ impl Game {
         }
     }
 
-    /// Multiple of a jam's or glitch's length under the Faraday organ (one without it, zero
-    /// when it makes the ship immune).
+    /// Multiple of a jam's or glitch's length under the Faraday organ and a hardened casing
+    /// (one without either, zero when the organ makes the ship immune). The two add: a casing
+    /// only ever makes things better, and never lifts the organ's immunity.
     pub(super) fn jam_scale(&self) -> f32 {
-        match self.loadout.organs.active(Organ::Faraday) {
+        let organ = match self.loadout.organs.active(Organ::Faraday) {
             None => 1.0,
-            Some(strain) if strain.level >= t::ORGAN_LEVELS => 0.0,
+            Some(strain) if strain.level >= t::ORGAN_LEVELS => return 0.0,
             Some(strain) => {
                 (1.0 - self.tune.faraday_cut * strain.strength(&self.tune)).clamp(0.0, 1.0)
             }
-        }
+        };
+        let hardening = f32::from(self.stats.hardening);
+        let casing = (1.0 - self.tune.hardening_cut * hardening).clamp(0.0, 1.0);
+        organ * casing
     }
 
     /// Fits or unfits the organ of a bench row. Returns what to say.
@@ -426,18 +516,26 @@ impl Game {
             .map(|s| self.tune.skip_thick * s)
     }
 
+    /// The organ the relic of sector `id` holds for this ship: the generated one, or the organ
+    /// it lacks (a gap fill, seeded by the sector).
+    pub(super) fn relic_organ(&self, id: SectorId, generated: Organ) -> Organ {
+        let salt = world::hash2(self.seed ^ RELIC_SALT ^ 0x6A9, id.x, id.y);
+        self.loadout.organs.gap_for(generated, salt)
+    }
+
     /// Lays a sector's relic as a pickup the first time it loads and nothing like it lies there.
     pub(super) fn place_relic(&mut self, id: SectorId) {
         if self.relics_taken.contains(&id) {
             return;
         }
         let depth = world::latent(self.seed, id).depth;
-        let Some((strain, at)) = relic_of(self.seed, id, depth, &self.tune) else {
+        let Some((mut strain, at)) = relic_of(self.seed, id, depth, &self.tune) else {
             return;
         };
         if self.pickups.iter().any(|p| p.relic == Some(id)) {
             return;
         }
+        strain.organ = self.relic_organ(id, strain.organ);
         self.drop_item(at, Vec2::ZERO, Item::Specimen(strain));
         if let Some(p) = self.pickups.last_mut() {
             p.remaining = 900.0;
@@ -472,6 +570,85 @@ mod tests {
             ..Default::default()
         };
         game
+    }
+
+    #[test]
+    fn the_organ_table_is_the_single_source_of_per_organ_facts() {
+        for (i, k) in ORGANS.iter().enumerate() {
+            assert_eq!(Organ::ALL[i], k.organ);
+            assert_eq!(k.organ.index(), i);
+            assert_eq!(k.organ.label(), k.label);
+            assert_eq!(k.organ.power(), k.power);
+            assert!(!k.organ.answers().is_empty(), "{} answers nothing", k.label);
+            assert!(!k.organ.answers().contains('\u{2014}'));
+        }
+        assert_eq!(
+            harvestable(Power::Symbiote).count(),
+            0,
+            "bonded, never harvested"
+        );
+        let emp: Vec<_> = harvestable(Power::Emp).map(|k| k.organ).collect();
+        assert_eq!(emp, [Organ::Faraday]);
+        assert_eq!(Organ::Faraday.aspect(), Aspect::Ward);
+        assert_eq!(Organ::Skipjack.aspect(), Aspect::Gland);
+    }
+
+    #[test]
+    fn a_relic_fills_a_gap_and_only_duplicates_when_nothing_is_lacking() {
+        let mut organs = Organs::default();
+        organs.acquire(strain(Organ::Veil, 1, 1.0), &DEFAULT_TUNING);
+        for salt in 0..40 {
+            let organ = organs.gap_for(Organ::Veil, salt);
+            assert!(!organs.owns(organ), "{organ:?} is already owned");
+            assert_eq!(organs.gap_for(Organ::Veil, salt), organ, "deterministic");
+        }
+        assert_eq!(organs.gap_for(Organ::Faraday, 3), Organ::Faraday);
+        for o in Organ::ALL {
+            organs.acquire(strain(o, 1, 1.0), &DEFAULT_TUNING);
+        }
+        assert_eq!(organs.gap_for(Organ::Veil, 9), Organ::Veil);
+    }
+
+    #[test]
+    fn a_hardened_casing_shortens_jams_and_adds_to_the_organ_without_immunity() {
+        let mut game = stocked();
+        assert_eq!(game.jam_scale(), 1.0);
+        let cut = DEFAULT_TUNING.hardening_cut;
+        let mut last = 1.0;
+        for level in 1..=3_u8 {
+            game.stats.hardening = level;
+            let scale = game.jam_scale();
+            assert!((scale - (1.0 - cut * f32::from(level))).abs() < 1e-5);
+            assert!(scale < last && scale > 0.0, "{level}: {scale}");
+            last = scale;
+        }
+        // Beside a level 1 Faraday the two add (multiply) and stay short of immunity.
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Faraday, 1, 1.0), &DEFAULT_TUNING);
+        game.loadout.skills.raise(Skill::Symbiosis);
+        assert!(game.bench_organ(Organ::Faraday).is_ok());
+        let both = game.jam_scale();
+        assert!(both < last && both > 0.0, "{both} against {last}");
+        // The organ's own top level still makes the ship immune whatever the casing.
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Faraday, 1, 1.0), &DEFAULT_TUNING);
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Faraday, 1, 1.0), &DEFAULT_TUNING);
+        assert_eq!(game.jam_scale(), 0.0);
+    }
+
+    #[test]
+    fn finding_an_organ_says_what_it_answers() {
+        let mut game = stocked();
+        game.take_strain(strain(Organ::Faraday, 1, 1.0), "SPECIMEN");
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.starts_with("FARADAY ANSWERS JAM: "))
+        );
     }
 
     #[test]
