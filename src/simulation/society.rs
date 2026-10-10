@@ -1,7 +1,11 @@
-//! Saved cultural authority and contact estimates; relationship history is separate.
+//! Saved culture, directional player relationships and shared engagement authority.
 use super::*;
 use crate::culture::{self, Clock, Origin, Profile};
 use serde::{Deserialize, Serialize};
+
+mod relationship;
+use relationship::Relationship;
+pub use relationship::RelationshipReading;
 
 /// Saved permission, independent of sentiment. Only attributed player harm opens defense.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -43,6 +47,8 @@ struct Actor {
     reason: Option<String>,
     #[serde(default)]
     engagement: Engagement,
+    #[serde(default)]
+    relationship: Relationship,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -65,12 +71,14 @@ impl Societies {
             estimate: None,
             reason: None,
             engagement: Engagement::default(),
+            relationship: Relationship::default(),
         });
     }
-    pub(super) fn advance(&mut self, dt: f32) {
+    pub(super) fn advance(&mut self, dt: f32, tune: &Tunables) {
         self.clock.advance(f64::from(dt));
         for actor in self.actors.values_mut() {
             actor.engagement.defense = (actor.engagement.defense - f64::from(dt)).max(0.0);
+            actor.relationship.advance(f64::from(dt), tune);
         }
     }
     pub(super) fn restore(mut self, keep: bool, tune: &Tunables) -> Self {
@@ -81,6 +89,7 @@ impl Societies {
             self.actors.clear();
         }
         for actor in self.actors.values_mut() {
+            actor.relationship.sanitize(tune);
             if !actor.engagement.defense.is_finite() {
                 actor.engagement.defense = 0.0;
             }
@@ -173,9 +182,37 @@ impl Game {
         true
     }
 
-    pub(super) fn civil_player_harm(&mut self, actor: u64) {
-        if let Some(record) = self.civs.societies.actors.get_mut(&actor) {
+    pub(super) fn civil_player_harm(&mut self, actor: u64, damage: f32) {
+        if damage.is_finite()
+            && damage > 0.0
+            && let Some(record) = self.civs.societies.actors.get_mut(&actor)
+        {
             record.engagement.defense = f64::from(self.tune.society_defense_seconds);
+            record.relationship.harm(f64::from(damage), &self.tune);
+        }
+    }
+
+    /// Directly observed civilization -> player history; no reverse relation is inferred.
+    pub fn civilization_relationship(&self, actor: u64) -> Option<RelationshipReading> {
+        Some(
+            self.civs
+                .societies
+                .actors
+                .get(&actor)?
+                .relationship
+                .reading(),
+        )
+    }
+
+    pub(super) fn civil_job_fulfilled(&mut self, actor: u64) {
+        if let Some(record) = self.civs.societies.actors.get_mut(&actor) {
+            record.relationship.fulfilled(&self.tune);
+        }
+    }
+
+    pub(super) fn civil_claim_mined(&mut self, actor: u64, amount: f32) {
+        if let Some(record) = self.civs.societies.actors.get_mut(&actor) {
+            record.relationship.mined(f64::from(amount), &self.tune);
         }
     }
 
@@ -266,6 +303,9 @@ impl Game {
         {
             text.push_str(&format!(" Last response: {reason}."));
         }
+        if let Some(relation) = self.civilization_relationship(actor) {
+            text.push_str(&format!("\n{}", relation.text()));
+        }
         text
     }
 
@@ -284,6 +324,10 @@ impl Game {
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.health = ship.max_health * 0.4;
         }
+        self.cargo.fuel = 25.0;
+        self.bench_select(BenchAction::Job(actor, jobs::JobKind::Fuel));
+        self.bench_confirm();
+        self.bench_confirm();
         self.farm.granary.insert(actor, self.tune.farm_granary_cap);
         self.cargo.biomass = 0.0;
         self.bench_select(BenchAction::Tithe);
@@ -340,6 +384,11 @@ mod tests {
                 .filter(|body| game.civ_of(body).is_some_and(|(id, _)| id == t.id))
                 .all(|body| !body.alert)
         );
+        assert_eq!(game.civilization_relationship(t.id).unwrap().trust, 0.0);
+        assert_eq!(
+            game.civilization_relationship(t.id).unwrap().cause,
+            Some("claim mining")
+        );
         game.update_civilizations(0.05);
         assert!(game.territory_report().unwrap().next_in.is_none());
         assert!(!game.civilization_may_attack(u64::MAX, CivilTarget::Ship));
@@ -371,26 +420,29 @@ mod tests {
                 .any(|(id, damage)| *id == body && *damage > 0.0)
         );
         game.update_diplomacy(0.01);
+        let relation = game.civilization_relationship(t.id).unwrap();
+        assert!(relation.trust < 0.0 && relation.friction > 0.0);
+        assert_eq!(relation.cause, Some("player harm"));
         assert!(game.civilization_may_attack(t.id, CivilTarget::Ship));
         assert!(!game.civilization_may_attack(t.id, CivilTarget::Pad));
         assert!(!game.civilization_may_attack(t.id, CivilTarget::Fleet));
-        game.civs.societies.advance(10.0);
+        game.civs.societies.advance(10.0, &game.tune);
         let (state, generator) = save::SaveState::from_text(&game.save_state().to_text()).unwrap();
         let (mut loaded, _) = Game::from_save(state, generator);
         assert_eq!(
             loaded.civilization_engagement(t.id),
             EngagementRule::SelfDefense
         );
-        game.civs.societies.advance(19.0);
+        game.civs.societies.advance(19.0, &game.tune);
         for _ in 0..76 {
-            loaded.civs.societies.advance(0.25);
+            loaded.civs.societies.advance(0.25, &loaded.tune);
         }
         assert_eq!(
             loaded.civilization_engagement(t.id),
             game.civilization_engagement(t.id)
         );
-        game.civs.societies.advance(1.0);
-        loaded.civs.societies.advance(1.0);
+        game.civs.societies.advance(1.0, &game.tune);
+        loaded.civs.societies.advance(1.0, &loaded.tune);
         assert_eq!(loaded.civilization_engagement(t.id), EngagementRule::Peace);
         assert_eq!(
             loaded.civilization_engagement(t.id),
@@ -440,7 +492,7 @@ mod tests {
         let o = outpost(game.seed);
         game.register_territory(o);
         assert!(!game.set_civilization_war(o.id, true));
-        game.civil_player_harm(o.id);
+        game.civil_player_harm(o.id, 1.0);
         assert!(game.civilization_may_attack(o.id, CivilTarget::Ship));
         assert!(!game.civilization_may_attack(o.id, CivilTarget::Pad));
     }
@@ -454,12 +506,12 @@ mod tests {
         assert!(game.culture_reading(t.id).is_none());
         game.assess_culture(t.id);
         let reading = game.culture_reading(t.id);
-        game.civs.societies.advance(1e8);
+        game.civs.societies.advance(1e8, &game.tune);
         game.shift_regard(t.id, -90.0);
         assert_eq!(game.civilization_profile(t.id), Some(original));
         assert_eq!(game.civ_tier(t.id), Tier::Hostile);
         game.configure_culture_drift(0.5, 1000.0);
-        game.civs.societies.advance(100.0);
+        game.civs.societies.advance(100.0, &game.tune);
         let warm = game.civilization_profile(t.id).unwrap();
         assert_ne!(original, warm);
         assert_eq!(game.culture_reading(t.id), reading);
@@ -472,10 +524,10 @@ mod tests {
         assert_eq!(loaded.culture_clock(), game.culture_clock());
         assert_eq!(loaded.civilization_profile(t.id), Some(warm));
         assert_eq!(loaded.culture_reading(t.id), reading);
-        loaded.civs.societies.advance(1e8);
+        loaded.civs.societies.advance(1e8, &loaded.tune);
         assert_eq!(loaded.civilization_profile(t.id), Some(warm));
         loaded.configure_culture_drift(0.5, 2000.0);
-        loaded.civs.societies.advance(100.0);
+        loaded.civs.societies.advance(100.0, &loaded.tune);
         let mut discovered_late = Game::new(42);
         discovered_late.civs.societies.clock = loaded.civs.societies.clock.clone();
         discovered_late.register_territory(t);
