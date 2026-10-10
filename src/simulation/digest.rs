@@ -38,7 +38,7 @@ pub struct StateDigest {
     /// Bullets, mines, pickups, rune fields, rifts, song rings, eggs and plankton.
     pub projectiles: u64,
     /// The ship's persistent record: loadout, cargo, pads, jobs, chart, run record, legacy, score,
-    /// lives, dev toggles, feel and ping state.
+    /// lives, dev toggles, tuning overrides (only when not the default), feel and ping state.
     pub ship: u64,
     /// Civilizations met: territories, lineages, bases, brains, regard, societies, fauna, raids,
     /// apex elders.
@@ -245,6 +245,8 @@ impl Game {
             lore: _,
             lives,
             dev,
+            tune,
+            tune_regen,
             game_over,
             // Wall-clock profiling, not state.
             #[cfg(feature = "profile")]
@@ -390,6 +392,14 @@ impl Game {
         h.put(&ping.cooldown);
         h.put(&ping.ring);
         h.put(&ping.echoes);
+        // Tuning joins only when it is not the default, so an untouched run digests as it
+        // always did and two runs with different tuning can never compare equal.
+        if *tune != tuning::Tunables::DEFAULT {
+            h.put(&tune.overrides());
+        }
+        if *tune_regen {
+            h.put("tune_regen");
+        }
         let ship = h.finish();
 
         let mut h = Hasher::new("civilization");

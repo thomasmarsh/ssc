@@ -118,6 +118,9 @@ pub struct SaveState {
     /// Plants, seeds and biomass (see `farm`).
     #[serde(default)]
     farm: farm::Farm,
+    /// Tunables that differ from their defaults, by name (see `tune`); absent in a normal run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tuning: Vec<(String, f32)>,
     streams: Streams,
 }
 
@@ -240,6 +243,12 @@ impl Game {
             structures: self.structures_snapshot().into_iter().collect(),
             civ_started: sorted(&self.builds.civ_started),
             farm: self.farm.clone(),
+            tuning: self
+                .tune
+                .overrides()
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), value))
+                .collect(),
             streams: Streams {
                 rng: self.rng.clone(),
                 loot: self.loot.clone(),
@@ -258,6 +267,9 @@ impl Game {
     pub fn from_save(state: SaveState, generator: u32) -> (Game, LoadReport) {
         let keep = generator == GENERATOR_VERSION;
         let mut game = Game::blank(state.seed);
+        // Before anything is generated, so `Regen` entries shape the world that loads. An entry
+        // a newer build dropped or a value now out of range is skipped, never fatal.
+        tunables::set_many(&mut game.tune, state.tuning);
         game.societies = state.societies.restore(keep);
         game.time = state.time;
         game.score = state.score;

@@ -76,6 +76,8 @@ mod song;
 mod split;
 mod tether;
 mod titles;
+pub mod tunables;
+pub mod tune;
 pub mod tuning;
 pub mod upgrades;
 mod weapons;
@@ -523,6 +525,11 @@ pub struct Game {
     pub lives: u32,
     /// Developer toggles; all off unless the panel (SSC_DEV=1) turns them on. See `dev`.
     pub dev: dev::DevState,
+    /// The resolved gameplay numbers every rule reads (`tuning::Tunables`, default = the shipped
+    /// values); any non-default value marks the run dev-touched. Changed through `tune_set`.
+    pub tune: tuning::Tunables,
+    /// A `Regen` entry changed since the world was generated; see `tuning_needs_regen`.
+    tune_regen: bool,
     pub game_over: bool,
     /// Per-phase wall time of the tick; present only with the `profile` feature.
     #[cfg(feature = "profile")]
@@ -688,6 +695,8 @@ impl Game {
             lore: run::Lore::default(),
             lives: 3,
             dev: dev::DevState::default(),
+            tune: tuning::Tunables::DEFAULT,
+            tune_regen: false,
             game_over: false,
             #[cfg(feature = "profile")]
             profile: phases::Profile::default(),
@@ -747,11 +756,7 @@ impl Game {
     }
 
     pub fn new(seed: u64) -> Self {
-        let mut game = Self::blank(seed);
-        game.stream_sectors();
-        game.spawn_player(Vec2::ZERO);
-        game.seed_home_pad();
-        game
+        Self::with_tuning(seed, tuning::Tunables::DEFAULT)
     }
 
     /// Replays the initial seed so a restart is useful for comparing tuning changes.

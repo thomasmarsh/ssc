@@ -143,7 +143,7 @@ impl Game {
     /// The new game after this one: this seed, with the legacy of a lost run (if it was lost)
     /// and every wreck still waiting.
     pub fn next_run(&self) -> Game {
-        let mut next = Game::new(self.seed);
+        let mut next = Game::with_tuning(self.seed, self.tune);
         let mut legacy = Legacy {
             generation: self.legacy.generation,
             wrecks: self.legacy.wrecks.clone(),
@@ -165,7 +165,8 @@ impl Game {
             }
         }
         next.begin_with(legacy);
-        // Developer toggles ride through a restart (all off in a normal run).
+        // Developer toggles ride through a restart (all off in a normal run), and so does tuning
+        // (already used to generate the new world above).
         next.dev = self.dev;
         next.sync_dev();
         next
