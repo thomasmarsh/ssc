@@ -172,6 +172,8 @@ pub struct CargoPip {
 pub struct StandingMeter {
     pub name: String,
     pub tier: Tier,
+    /// The readable wording of the tier and the reason that still explains it.
+    pub stance: super::Stance,
     /// Regard from hostile (0) to friendly (1).
     pub fraction: f32,
     pub regard: f32,
@@ -483,6 +485,7 @@ impl Game {
         let standing = self.territory_report().map(|r| StandingMeter {
             name: r.name,
             tier: r.tier,
+            stance: r.stance,
             fraction: ((r.regard + 100.0) / 200.0).clamp(0.0, 1.0),
             regard: r.regard,
             color: r.color,

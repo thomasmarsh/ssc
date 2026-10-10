@@ -72,6 +72,8 @@ pub struct TerritoryReport {
     pub standing: Standing,
     /// What it thinks of the ship, as a tier and a number from -100 to 100.
     pub tier: Tier,
+    /// The tier's readable wording (COOL, CURIOUS, WELCOMING...) and the reason it still holds.
+    pub stance: Stance,
     pub regard: f32,
     pub engagement: EngagementRule,
     /// The territory's threat: the depth's threat times the civilization's menace.
@@ -280,6 +282,7 @@ impl Game {
             color: t.color(self.seed),
             standing,
             tier: self.civ_tier(t.id),
+            stance: self.civ_stance(t.id),
             regard: self.civ_regard(t.id),
             engagement: self.civilization_engagement_known(t.id),
             threat: self.threat() * menace,
@@ -366,12 +369,14 @@ impl Game {
                         }
                         _ => {
                             let threat = self.threat() * t.menace();
+                            let stance = self.civ_stance(t.id);
                             format!(
-                                "ENTERING  {}  THREAT x{:.1}  {}  - {}",
+                                "ENTERING  {}  THREAT x{:.1}  {}  - {}{}",
                                 self.territory_name,
                                 threat,
                                 verdict(self.power(), threat),
-                                self.civ_tier(t.id).label()
+                                stance.label,
+                                stance.note.map_or_else(String::new, |n| format!(", {n}"))
                             )
                         }
                     };

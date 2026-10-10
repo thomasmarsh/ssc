@@ -22,7 +22,7 @@ impl Tier {
         match self {
             Self::Hostile => "HOSTILE",
             Self::Wary => "WARY",
-            Self::Ignores => "IGNORES YOU",
+            Self::Ignores => "NEUTRAL",
             Self::Friendly => "FRIENDLY",
         }
     }
@@ -51,6 +51,29 @@ impl Tier {
     }
 }
 
+/// How a civilization stands toward the ship, finer than a tier: the wording a player reads
+/// (COOL, NEUTRAL, CURIOUS, WELCOMING between WARY and FRIENDLY) and, while it still explains
+/// the standing, the short reason from its first contact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stance {
+    pub label: &'static str,
+    pub note: Option<&'static str>,
+}
+
+/// The wording of a tier at an opinion score. Hostile, wary and friendly speak for themselves;
+/// the wide middle tier is read by the stance bands (registry `stance_*`), measured from the
+/// civilization's own base start so settlers (who start kinder) read the same ladder.
+fn stance_label(tier: Tier, score: f32, base: f32, tune: &Tunables) -> &'static str {
+    let lift = score - base;
+    match tier {
+        Tier::Ignores if lift < tune.stance_cool_below => "COOL",
+        Tier::Ignores if lift < tune.stance_curious_from => "NEUTRAL",
+        Tier::Ignores if lift < tune.stance_welcome_from => "CURIOUS",
+        Tier::Ignores => "WELCOMING",
+        other => other.label(),
+    }
+}
+
 /// What one civilization thinks of the ship.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Regard {
@@ -62,11 +85,17 @@ pub struct Regard {
     gift: f32,
     /// The charts have been shared (once a run).
     shared: bool,
+    /// Where this civilization's first contact opened (its recovery target and its warm-up
+    /// floor), and the index of the short reason; absent only in a state saved without one.
+    #[serde(default)]
+    opened: Option<f32>,
+    #[serde(default)]
+    note: Option<u8>,
 }
 
 impl Regard {
-    fn start(t: &Territory, tune: &Tunables) -> Self {
-        let value = start_value(t, tune);
+    fn start(t: &Territory, tune: &Tunables, opening: Option<society::Opening>) -> Self {
+        let value = opening.map_or_else(|| start_value(t, tune), |o| o.start);
         Self {
             value,
             tier: Tier::of(value, tune),
@@ -74,7 +103,14 @@ impl Regard {
             warn: 0.0,
             gift: 0.0,
             shared: false,
+            opened: opening.map(|o| o.start),
+            note: opening.map(|o| o.note),
         }
+    }
+
+    /// Where regard recovers to when left alone away from the claim.
+    fn home(&self, t: &Territory, tune: &Tunables) -> f32 {
+        self.opened.unwrap_or_else(|| start_value(t, tune))
     }
 }
 
@@ -151,6 +187,56 @@ impl Game {
         }
     }
 
+    /// Where the civilization's regard starts before any first-contact reception.
+    fn civ_base(&self, territory: u64) -> f32 {
+        self.civs
+            .territories
+            .get(&territory)
+            .map_or(self.tune.regard_start, |t| start_value(t, &self.tune))
+    }
+
+    /// The readable stance of a civilization (see [`Stance`]); a civilization not yet dealt
+    /// with reads as its base start.
+    pub fn civ_stance(&self, territory: u64) -> Stance {
+        let Some(r) = self.civs.regard.get(&territory) else {
+            let value = self.civ_regard(territory);
+            let tier = self.civ_tier(territory);
+            return Stance {
+                label: stance_label(tier, value, self.civ_base(territory), &self.tune),
+                note: None,
+            };
+        };
+        let base = self.civ_base(territory);
+        let score = self.opinion_score(territory, r.value);
+        let label = stance_label(r.tier, score, base, &self.tune);
+        // The reason holds only while the standing still reads as the one it opened with.
+        let note = r
+            .opened
+            .zip(r.note)
+            .filter(|(opened, _)| {
+                stance_label(Tier::of(*opened, &self.tune), *opened, base, &self.tune) == label
+            })
+            .and_then(|(_, note)| society::NOTES.get(usize::from(note)).copied());
+        Stance { label, note }
+    }
+
+    /// How the civilization first received the ship and why, as read at first contact.
+    pub fn civ_first_contact(&self, territory: u64) -> Option<Stance> {
+        let r = self.civs.regard.get(&territory)?;
+        let opened = r.opened?;
+        Some(Stance {
+            label: stance_label(
+                Tier::of(opened, &self.tune),
+                opened,
+                self.civ_base(territory),
+                &self.tune,
+            ),
+            note: r
+                .note
+                .and_then(|n| society::NOTES.get(usize::from(n)).copied()),
+        })
+    }
+
     /// Hostile opinion only. Combat callers must query civilization_may_attack.
     pub fn civ_hostile(&self, territory: u64) -> bool {
         self.civ_tier(territory) == Tier::Hostile
@@ -163,12 +249,13 @@ impl Game {
 
     pub(super) fn regard_mut(&mut self, territory: u64) -> Option<&mut Regard> {
         let t = *self.civs.territories.get(&territory)?;
-        Some(
-            self.civs
-                .regard
-                .entry(territory)
-                .or_insert_with(|| Regard::start(&t, &self.tune)),
-        )
+        if !self.civs.regard.contains_key(&territory) {
+            // The first contact: the civilization decides how to receive the ship, once.
+            let opening = self.first_contact(&t);
+            let regard = Regard::start(&t, &self.tune, Some(opening));
+            self.civs.regard.insert(territory, regard);
+        }
+        self.civs.regard.get_mut(&territory)
     }
 
     /// Sets sentiment outright for scenario tests; engagement remains independent.
@@ -330,16 +417,18 @@ impl Game {
             let Some(r) = self.civs.regard.get_mut(&tid) else {
                 continue;
             };
+            let home = r.home(&civ, &self.tune);
             r.calm += dt;
             r.warn = (r.warn - dt).max(0.0);
             r.gift = (r.gift - dt).max(0.0);
             if inside {
                 // Left alone in its own land, a civilization slowly warms, up to a point.
-                if r.calm >= self.tune.rest_delay && r.value < rest_cap(&civ, &self.tune) {
-                    r.value = (r.value + self.tune.rest_rate * dt).min(rest_cap(&civ, &self.tune));
+                let cap = rest_cap(&civ, &self.tune).max(home);
+                if r.calm >= self.tune.rest_delay && r.value < cap {
+                    r.value = (r.value + self.tune.rest_rate * dt).min(cap);
                 }
-            } else if r.value < start_value(&civ, &self.tune) {
-                r.value = (r.value + self.tune.away_rate * dt).min(start_value(&civ, &self.tune));
+            } else if r.value < home {
+                r.value = (r.value + self.tune.away_rate * dt).min(home);
             }
             self.settle_tier(tid);
         }
@@ -671,9 +760,20 @@ mod tests {
         panic!("no {shape:?} territory");
     }
 
-    /// A game with the ship (invulnerable) at `at`, a fresh world around it.
+    /// A game with the ship (invulnerable) at `at`, a fresh world around it. First contact is
+    /// neutral (every reception opens at the base start), so these mechanics tests start from
+    /// the same regard whatever a civilization's culture would choose; `contact::tests` and
+    /// `opening_game` cover the real receptions.
     fn visit(at: Vec2) -> Game {
         let mut game = Game::new(SEED);
+        for name in [
+            "society_contact_wary",
+            "society_contact_cool",
+            "society_contact_curious",
+            "society_contact_welcome",
+        ] {
+            game.tune_set(name, 0.0).unwrap();
+        }
         game.player_invulnerability = 1e9;
         game.teleport(at);
         game.step(DT, Input::default());
@@ -802,15 +902,15 @@ mod tests {
     }
 
     #[test]
-    fn an_ordinary_civilization_ignores_a_quiet_ship_and_never_raids() {
+    fn an_ordinary_civilization_at_a_neutral_opening_never_raids_a_quiet_ship() {
         let t = find(CivShape::Both);
         let spot = t.capital.center() + Vec2::new(0.0, 2500.0);
         let mut game = visit(spot);
         assert!(!members(&game, t.id).is_empty());
         assert_eq!(game.civ_tier(t.id), Tier::Ignores);
         assert!(
-            said(&game, "IGNORES YOU"),
-            "the entry banner names the tier"
+            said(&game, "NEUTRAL"),
+            "the entry banner names the stance (a neutral opening here)"
         );
         for _ in 0..40 {
             hold(&mut game, spot, 10.0);

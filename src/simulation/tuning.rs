@@ -823,6 +823,25 @@ fn validate(t: &Tunables) -> Result<(), String> {
         "regard_start and regard_start_outpost must lie within regard_min..regard_max"
     );
     rule!(
+        t.stance_cool_below < 0.0
+            && 0.0 < t.stance_curious_from
+            && t.stance_curious_from < t.stance_welcome_from,
+        "stance bands must stay ordered around a start: cool {} < 0 < curious {} < welcome {}",
+        t.stance_cool_below,
+        t.stance_curious_from,
+        t.stance_welcome_from
+    );
+    rule!(
+        t.regard_start.max(t.regard_start_outpost) + t.society_contact_welcome
+            <= t.friendly_at - t.tier_hysteresis,
+        "a first contact may not open at FRIENDLY: start plus society_contact_welcome must stay under friendly_at less the hysteresis"
+    );
+    rule!(
+        t.rest_cap >= t.regard_start + t.society_contact_welcome
+            && t.rest_cap_outpost >= t.regard_start_outpost + t.society_contact_welcome,
+        "a rest cap may not sit below where the warmest first contact starts"
+    );
+    rule!(
         t.rest_cap >= t.regard_start && t.rest_cap_outpost >= t.regard_start_outpost,
         "a rest cap may not sit below where its civilization starts"
     );
@@ -1205,6 +1224,10 @@ mod tests {
         refused("regard_min", -10.0);
         refused("regard_start", 150.0);
         refused("rest_cap", -5.0);
+        // A first contact never opens FRIENDLY, and the stance bands keep their order.
+        refused("society_contact_welcome", 30.0);
+        refused("regard_start_outpost", 30.0);
+        refused("stance_curious_from", 20.0);
         // Floors below caps.
         refused("impact_min_speed", 1500.0);
         refused("impact_speed_cap", 200.0);

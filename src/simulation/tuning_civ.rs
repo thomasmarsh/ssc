@@ -383,6 +383,20 @@ macro_rules! groups {
             society_opinion_trust: f32 = 0.2, 0.0, 5.0, Multiplier;
             /// Opinion points lost per point of friction (decays with the grievance).
             society_opinion_friction: f32 = 0.1, 0.0, 5.0, Multiplier;
+            /// First contact: start regard offset (from the base start) of a civilization that meets a stranger warily.
+            society_contact_wary: f32 = -18.0, -100.0, 0.0, Regard;
+            /// First contact: start regard offset of a civilization that meets a stranger coolly.
+            society_contact_cool: f32 = -6.0, -100.0, 0.0, Regard;
+            /// First contact: start regard offset of a civilization curious about a stranger.
+            society_contact_curious: f32 = 8.0, 0.0, 100.0, Regard;
+            /// First contact: start regard offset of a civilization that welcomes a stranger (never reaches FRIENDLY alone).
+            society_contact_welcome: f32 = 18.0, 0.0, 100.0, Regard;
+            /// Opinion this far below the civilization's own start reads COOL (inside the middle tier).
+            stance_cool_below: f32 = -3.0, -100.0, 0.0, Regard;
+            /// Opinion this far above its start reads CURIOUS instead of NEUTRAL.
+            stance_curious_from: f32 = 4.0, 0.0, 100.0, Regard;
+            /// Opinion this far above its start reads WELCOMING.
+            stance_welcome_from: f32 = 13.0, 0.0, 100.0, Regard;
             /// Trust at which a disputed relationship reads TENSE instead of its tier.
             society_tense_trust: f32 = 20.0, 0.0, 100.0, Regard;
             /// Friction at which a trusted relationship reads TENSE.

@@ -133,6 +133,8 @@ pub struct CivReading {
     pub tint: [f32; 3],
     /// How it stands toward the ship, once the ship has dealt with it.
     pub regard: Option<super::Tier>,
+    /// The readable wording of `regard` and the reason from first contact, once met.
+    pub stance: Option<super::Stance>,
     pub culture: Option<super::CultureReading>,
     pub engagement: Option<super::EngagementRule>,
     pub relationship: Option<super::RelationshipReading>,
@@ -482,6 +484,7 @@ impl Game {
             fallen: self.civ_standing(territory) == Standing::Fallen,
             tint: t.color(self.seed),
             regard: self.civ_met(territory),
+            stance: self.civ_met(territory).map(|_| self.civ_stance(territory)),
             culture: self.culture_reading(territory),
             relationship: self
                 .civ_met(territory)

@@ -908,8 +908,8 @@ fn entry_lines(game: &Game, cursor: &ChartCursor, entry: Option<&ChartEntry>) ->
             Tint::Rgb(lifted(c.tint)),
             false,
         );
-        let regard = match c.regard {
-            Some(tier) if !c.fallen => format!("   regard {}", tier.label()),
+        let regard = match c.stance {
+            Some(stance) if !c.fallen => format!("   regard {}", stance.label),
             None if !c.fallen => "   regard UNMET".to_string(),
             _ => String::new(),
         };

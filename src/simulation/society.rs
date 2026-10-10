@@ -3,7 +3,9 @@ use super::*;
 use crate::culture::{self, Clock, Origin, Profile};
 use serde::{Deserialize, Serialize};
 
+mod contact;
 mod policy;
+pub(super) use contact::{NOTES, Opening};
 mod relationship;
 use policy::Policy;
 pub use policy::Posture;
@@ -322,7 +324,11 @@ impl Game {
             let tense = tier != Tier::Hostile
                 && reading.trust >= f64::from(self.tune.society_tense_trust)
                 && reading.friction >= f64::from(self.tune.society_tense_friction);
-            reading.opinion = Some(if tense { "TENSE" } else { tier.label() });
+            reading.opinion = Some(if tense {
+                "TENSE"
+            } else {
+                self.civ_stance(actor).label
+            });
         }
         if let Some(e) = record.estimate {
             reading.posture = e.posture.map(Posture::label);
@@ -466,10 +472,22 @@ impl Game {
     }
 
     pub(super) fn contact_culture_text(&self, actor: u64) -> String {
+        let mut text = String::new();
+        if let Some(first) = self.civ_first_contact(actor) {
+            text = format!("First contact: {}", first.label);
+            if let Some(note) = first.note {
+                text.push_str(&format!(", {note}"));
+            }
+            text.push_str(".\n");
+        }
         let Some(reading) = self.culture_reading(actor) else {
-            return "Culture unknown.".into();
+            text.push_str("Culture unknown.");
+            return text;
         };
-        let mut text = format!("Tends toward {} (contact estimate).", reading.tendency);
+        text.push_str(&format!(
+            "Tends toward {} (contact estimate).",
+            reading.tendency
+        ));
         if let Some(reason) = self
             .civs
             .societies

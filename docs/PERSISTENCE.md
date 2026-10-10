@@ -23,7 +23,7 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 | `chart` (known marks, visited, pins, beacons, beacon counter) | delta | travel charge, cooldown, last visit are ephemeral |
 | `run` (RunStats) | delta | sets are `BTreeSet` so the text is deterministic |
 | `legacy` (carried, wrecks, generation) | delta | `bequest` is not saved; ordinary death creates none (the legacy API is retained for existing data) |
-| `civ_regard`, `civ_fall` | delta | regard timers are saved with the value |
+| `civ_regard`, `civ_fall` | delta | regard timers are saved with the value, plus the first-contact opening (`opened` start regard and `note` index; additive, defaulted, classified in the `civilization` digest by the Regard `Debug` text) |
 | `fallen`, `mined`, `regrow_stamp`, `relics_taken` | delta | all keyed by sector and spawn index; dropped on a generator change |
 | the eight random streams | delta | restored after the world loads, so loading does not spend the player's rolls |
 | `bodies`, `bullets`, `effects`, `food`, `eggs`, `pickups`, `mines`, `tethers`, `chains`, `pools`, `rune_fields`, `rifts`, `splits`, `song_rings` | ephemeral | regenerated from the seed, or lost with the sector exactly as when sectors unload today |

@@ -458,9 +458,12 @@ fn territory_status(game: &Game) -> String {
         },
         None => String::new(),
     };
+    let stance = match report.stance.note {
+        Some(note) => format!("{} ({note})", report.stance.label),
+        None => report.stance.label.to_string(),
+    };
     let regard = format!(
-        "{} [{meter}] {:+.0}  {}{tithe}",
-        report.tier.label(),
+        "{stance} [{meter}] {:+.0}  {}{tithe}",
         report.regard,
         report.engagement.label()
     );

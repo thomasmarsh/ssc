@@ -104,7 +104,7 @@ pub use chart::{
 pub use civ::{Raid, RaidStage, TerritoryReport, verdict};
 pub use civmine::Cache;
 pub use cues::Cue;
-pub use diplomacy::{Regard, Tier, TitheError, TitheHint};
+pub use diplomacy::{Regard, Stance, Tier, TitheError, TitheHint};
 pub use discovery::Info as DiscoveryInfo;
 pub use ecology::{BaseState, TURRET_ANGLES};
 pub use flock::{Flock, Lod as FlockLod, Member as FlockMember};

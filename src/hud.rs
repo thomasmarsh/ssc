@@ -1444,7 +1444,10 @@ fn describe(
             let tag = if meter.fallen {
                 "FALLEN".to_string()
             } else {
-                meter.tier.label().to_string()
+                match meter.stance.note {
+                    Some(note) => format!("{} - {}", meter.stance.label, note.to_uppercase()),
+                    None => meter.stance.label.to_string(),
+                }
             };
             // The region line above already names the place; this is how it feels about the ship.
             (
