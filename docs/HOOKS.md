@@ -48,7 +48,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 ## Pads and bench
 
 - `SSC_PAD=kit|deploy|land|bench`: stage the pad states beside the nearest planetoid (a kit in hand, pad down, landed, landed with the bench open). `SSC_BENCH=0..2` picks the bench tab for `bench`.
-- `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash|research|power|refinery|warehouse|water-tank|water-extractor|mining-drone|mining-fleet|mining-fleet-status|mining-fleet-retrofit|raw-input`: land at the HOME pad with existing progress staged, open the real bench on that pose and hold. Extra modes with `SSC_BENCH_RESULT`: `reforge-good|reforge-kept|unlock|repeated`.
+- `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash|research|power|refinery|warehouse|water-tank|water-extractor|mining-drone|mining-fleet|mining-fleet-status|mining-fleet-retrofit|mining-fleet-template|raw-input`: land at the HOME pad with existing progress staged, open the real bench on that pose and hold. Extra modes with `SSC_BENCH_RESULT`: `reforge-good|reforge-kept|unlock|repeated`.
 - `SSC_FLEET_FLIGHT=<seconds>`: stage four paid HOME mining units, stash 4F, close the bench and advance 0 to 15 simulation seconds, then hold for a flight capture (1 launch, 5 mining, 12 return, 15 dock). Only active during smoke runs.
 - `SSC_BENCH_RESULT=1`: confirm the selected bench action 20 frames before capture (receipts). See [BENCH.md](BENCH.md).
 - `SSC_BUY=1`: buy the bench's selected row 20 frames before capture (purchase ring).

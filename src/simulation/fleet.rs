@@ -29,13 +29,13 @@ impl DroneUpgrade {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-struct DroneModules {
+pub struct DroneModules {
     cargo: bool,
     mining: bool,
 }
 
 impl DroneModules {
-    fn has(self, upgrade: DroneUpgrade) -> bool {
+    pub(super) fn has(self, upgrade: DroneUpgrade) -> bool {
         match upgrade {
             DroneUpgrade::Cargo => self.cargo,
             DroneUpgrade::Mining => self.mining,
@@ -218,17 +218,87 @@ impl Game {
             self.bench_failed(why.into());
             return;
         }
-        if !self.cargo.spend(&DRONE_PRICE) {
-            self.bench_failed("NEEDS 40M 10C".into());
+        if !self.cargo.spend(&self.mining_drone_price()) {
+            self.bench_failed("NEEDS DRONE AND TEMPLATE MATERIALS".into());
             return;
         }
-        self.pad
-            .pads
-            .get_mut(&self.pad.landed.unwrap())
-            .unwrap()
-            .drones
-            .push(MiningDrone::default());
+        let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
+        pad.drones.push(MiningDrone {
+            ordered: pad.drone_template,
+            fitted: pad.drone_template,
+            ..Default::default()
+        });
         self.bench_done("MINING DRONE BUILT".into(), upgrades::Rarity::Common);
+    }
+
+    pub(super) fn mining_drone_detail(&self) -> String {
+        let drone = MiningDrone {
+            fitted: self
+                .landed_pad()
+                .map_or(DroneModules::default(), |p| p.drone_template),
+            ..Default::default()
+        };
+        drone.trip_detail() + " Build includes this pad's template modules and their price."
+    }
+
+    pub(super) fn mining_drone_price(&self) -> Vec<(Material, f32)> {
+        let mut price = DRONE_PRICE.to_vec();
+        if let Some(pad) = self.landed_pad() {
+            for upgrade in DroneUpgrade::ALL {
+                if pad.drone_template.has(upgrade) {
+                    for (entry, (_, amount)) in price.iter_mut().zip(upgrade.price()) {
+                        entry.1 += amount;
+                    }
+                }
+            }
+        }
+        price
+    }
+
+    pub(super) fn drone_template_price(&self, upgrade: DroneUpgrade) -> Vec<(Material, f32)> {
+        let count = self.landed_pad().map_or(0, |p| {
+            p.drones.iter().filter(|d| !d.ordered.has(upgrade)).count()
+        });
+        upgrade
+            .price()
+            .map(|(m, amount)| (m, amount * count as f32))
+            .to_vec()
+    }
+
+    pub(super) fn drone_template_block(&self, upgrade: DroneUpgrade) -> Option<&'static str> {
+        match self.landed_pad() {
+            None => Some("LAND AT A PAD"),
+            Some(p) if p.drone_template.has(upgrade) => Some("TEMPLATE SET"),
+            Some(_) if !self.loadout.research.active(research::Tech::Automation) => {
+                Some("NEEDS AUTOMATION RESEARCH")
+            }
+            Some(p) if !p.power => Some("NEEDS LOCAL POWER"),
+            Some(p) if !p.warehouse => Some("NEEDS WAREHOUSE"),
+            Some(_) => None,
+        }
+    }
+
+    pub(super) fn buy_drone_template(&mut self, upgrade: DroneUpgrade) {
+        if let Some(why) = self.drone_template_block(upgrade) {
+            self.bench_failed(why.into());
+            return;
+        }
+        if !self.cargo.spend(&self.drone_template_price(upgrade)) {
+            self.bench_failed("NEEDS FLEET TEMPLATE MATERIALS".into());
+            return;
+        }
+        let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
+        pad.drone_template.add(upgrade);
+        for drone in &mut pad.drones {
+            drone.ordered.add(upgrade);
+            if drone.remaining <= 0.0 && drone.cargo <= 0.0 {
+                drone.fitted = drone.ordered;
+            }
+        }
+        self.bench_done(
+            format!("FLEET {} TEMPLATE SET", upgrade.label()),
+            upgrades::Rarity::Common,
+        );
     }
 
     pub(super) fn drone_upgrade_block(
@@ -461,6 +531,140 @@ mod tests {
         loaded.update_mining_drones(5.0);
         assert_eq!(loaded.pad.pads[&key].stash.amount(material), 10.0);
         assert_eq!(loaded.pad.pads[&key].drones[0].cargo, 0.0);
+    }
+
+    #[test]
+    fn template_payment_is_atomic_counts_only_missing_modules_and_is_one_time() {
+        let (mut game, key, _) = setup();
+        build_fleet(&mut game);
+        retrofit(&mut game, 0, DroneUpgrade::Cargo);
+        game.bench_select(BenchAction::DroneTemplate(DroneUpgrade::Cargo));
+        assert_eq!(
+            game.drone_template_price(DroneUpgrade::Cargo),
+            vec![(Material::Metal, 60.0), (Material::Crystal, 15.0)]
+        );
+        game.cargo.metal = 60.0;
+        game.cargo.crystal = 14.0;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (60.0, 14.0));
+        assert!(!game.pad.pads[&key].drone_template.cargo);
+        assert!(!game.pad.pads[&key].drones[1].ordered.cargo);
+        game.cargo.crystal = 15.0;
+        for (power, warehouse) in [(false, true), (true, false)] {
+            let pad = game.pad.pads.get_mut(&key).unwrap();
+            pad.power = power;
+            pad.warehouse = warehouse;
+            game.bench_confirm();
+            assert_eq!((game.cargo.metal, game.cargo.crystal), (60.0, 15.0));
+        }
+        game.pad.pads.get_mut(&key).unwrap().warehouse = true;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (0.0, 0.0));
+        assert!(game.pad.pads[&key].drones.iter().all(|d| d.fitted.cargo));
+        game.cargo.metal = 80.0;
+        game.cargo.crystal = 20.0;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (80.0, 20.0));
+        game.pad.landed = None;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (80.0, 20.0));
+    }
+
+    #[test]
+    fn saved_template_prices_future_builds_and_requires_automation() {
+        let (mut game, key, _) = setup();
+        game.bench_select(BenchAction::DroneTemplate(DroneUpgrade::Mining));
+        game.loadout
+            .research
+            .known
+            .remove(&research::Tech::Automation);
+        game.bench_confirm();
+        assert!(!game.pad.pads[&key].drone_template.mining);
+        game.loadout
+            .research
+            .known
+            .insert(research::Tech::Automation);
+        let before = game.cargo;
+        game.bench_confirm(); // Empty fleet: choose the template without buying free modules.
+        assert_eq!(game.cargo, before);
+        game.bench_select(BenchAction::DroneTemplate(DroneUpgrade::Cargo));
+        game.bench_confirm();
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut game, _) = Game::from_save(state, generator);
+        game.pad.landed = Some(key);
+        game.bench_toggle();
+        game.bench_select(BenchAction::MiningDrone);
+        assert_eq!(
+            game.mining_drone_price(),
+            vec![(Material::Metal, 80.0), (Material::Crystal, 20.0)]
+        );
+        game.cargo.metal = 80.0;
+        game.cargo.crystal = 19.0;
+        game.bench_confirm();
+        assert!(game.pad.pads[&key].drones.is_empty());
+        assert_eq!(game.cargo.metal, 80.0);
+        game.cargo.crystal = 20.0;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (0.0, 0.0));
+        let pad = &game.pad.pads[&key];
+        assert_eq!(pad.drones[0].ordered, pad.drone_template);
+        assert_eq!(pad.drones[0].fitted, pad.drone_template);
+        let state = game.save_state();
+        let (game, report) = Game::from_save(state, generator + 1);
+        assert!(!report.world_deltas_kept);
+        assert!(
+            game.pad
+                .pads
+                .values()
+                .all(|p| p.drone_template == DroneModules::default())
+        );
+    }
+
+    #[test]
+    fn fleet_template_keeps_paid_trips_and_blocked_cargo_until_saved_remote_dock() {
+        let (mut game, key, material) = setup();
+        build_fleet(&mut game);
+        game.pad.pads.get_mut(&key).unwrap().stash.fuel = 4.0;
+        game.update_mining_drones(5.0);
+        for upgrade in DroneUpgrade::ALL {
+            game.cargo.metal = 80.0;
+            game.cargo.crystal = 20.0;
+            game.bench_select(BenchAction::DroneTemplate(upgrade));
+            game.bench_confirm();
+        }
+        assert!(game.pad.pads[&key].drones.iter().all(|d| d.cargo == 10.0
+            && d.remaining == 10.0
+            && d.fitted == DroneModules::default()));
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut game, _) = Game::from_save(state, generator);
+        game.bodies.retain(|b| b.origin != Some(key));
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .add_capped(material, 300.0, 300.0);
+        game.update_mining_drones(10.0);
+        assert!(
+            game.pad.pads[&key]
+                .drones
+                .iter()
+                .all(|d| d.cargo == 10.0 && d.fitted == DroneModules::default())
+        );
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .take(material, 15.0);
+        game.update_mining_drones(1.0);
+        let pad = &game.pad.pads[&key];
+        assert_eq!(pad.drones[0].fitted, pad.drone_template);
+        assert_eq!(pad.drones[1].cargo, 5.0);
+        assert_eq!(pad.drones[1].fitted, DroneModules::default());
+        assert_eq!(pad.drones.iter().map(|d| d.cargo).sum::<f32>(), 25.0);
+        assert_eq!(game.mined[&key], 40.0);
+        assert_eq!(pad.stash.fuel, 0.0);
     }
 
     #[test]

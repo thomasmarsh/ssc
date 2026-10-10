@@ -43,6 +43,7 @@ pub enum BenchAction {
     MiningDrone,
     MiningDroneStatus(usize),
     DroneUpgrade(usize, fleet::DroneUpgrade),
+    DroneTemplate(fleet::DroneUpgrade),
     Research(research::Tech),
     Grade,
     Partnership,
@@ -151,6 +152,8 @@ impl Game {
                         BenchAction::Warehouse,
                         BenchAction::WaterExtractor,
                         BenchAction::MiningDrone,
+                        BenchAction::DroneTemplate(fleet::DroneUpgrade::Cargo),
+                        BenchAction::DroneTemplate(fleet::DroneUpgrade::Mining),
                     ]
                 }))
                 .chain(
@@ -235,6 +238,7 @@ impl Game {
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
+            Some(BenchAction::DroneTemplate(upgrade)) => self.buy_drone_template(upgrade),
             Some(BenchAction::DroneUpgrade(slot, upgrade)) => self.buy_drone_upgrade(slot, upgrade),
             Some(BenchAction::MiningDroneStatus(_)) => self.bench_failed("STATUS ONLY".into()),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
@@ -702,7 +706,8 @@ impl Game {
                 row.group = "PAD FLEET";
                 row.text = "BUILD MINING DRONE".into();
                 row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. Local flight; no combat yet.".into();
-                row.costs = fleet::DRONE_PRICE.to_vec();
+                row.costs = self.mining_drone_price();
+                row.detail = self.mining_drone_detail();
                 if let Some(pad) = self.landed_pad() {
                     row.text = format!(
                         "BUILD MINING DRONE   {}/{}",
@@ -729,6 +734,19 @@ impl Game {
                     row.state = drone.status(pad, material);
                     row.detail = drone.trip_detail();
                     row.detail += &format!(" Output: {}. Status only.", material.label());
+                }
+            }
+            BenchAction::DroneTemplate(upgrade) => {
+                row.group = "PAD FLEET";
+                row.text = format!("FLEET TEMPLATE {}", upgrade.label());
+                row.costs = self.drone_template_price(upgrade);
+                row.detail = "This pad's existing and future drones. Pay 20M 5C per unit missing this module; future builds include its price. Active trips fit after cargo unloads. Permanent; no refund on pad loss.".into();
+                if let Some(why) = self.drone_template_block(upgrade) {
+                    row.ok = false;
+                    row.state = why.into();
+                    if why == "TEMPLATE SET" {
+                        row.costs.clear();
+                    }
                 }
             }
             BenchAction::DroneUpgrade(slot, upgrade) => {
