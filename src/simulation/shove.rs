@@ -16,7 +16,6 @@
 //! Numbers live in `tuning`. Nothing here is random.
 
 use super::skills::Skills;
-use super::tuning as t;
 use super::*;
 
 /// Whether the ship may push this body at all: a free rock (husks included) or a loose,
@@ -74,27 +73,28 @@ pub(super) fn on_contact(
     {
         return;
     }
-    if !shoveable(other) || closing < t::SHOVE_MIN_CLOSING * 0.5 {
+    if !shoveable(other) || closing < tune.shove_min_closing * 0.5 {
         return;
     }
     // Let go of a rock that is being rammed, so the grip does not yank it back.
-    other.grip_free = other.grip_free.max(t::GRIP_RELEASE);
+    other.grip_free = other.grip_free.max(tune.grip_release);
     other.sling_thrown = 0.0;
     other.rune_pushed = 0.0;
     other.rift_redirected = 0.0;
     if other.kind == BodyKind::Asteroid {
-        other.shoved = other.shoved.max(t::SHOVE_TAG);
+        other.shoved = other.shoved.max(tune.shove_tag);
     }
     let mult = skills.shove_mult(tune);
-    if mult > 1.0 && closing >= t::SHOVE_MIN_CLOSING && other.shove_clock <= 0.0 {
+    if mult > 1.0 && closing >= tune.shove_min_closing && other.shove_clock <= 0.0 {
         let travel = ship.velocity.normalize_or_zero();
-        let mut dir = (toward * (1.0 - t::SHOVE_AIM) + travel * t::SHOVE_AIM).normalize_or_zero();
+        let mut dir =
+            (toward * (1.0 - tune.shove_aim) + travel * tune.shove_aim).normalize_or_zero();
         if dir.dot(toward) < 0.3 {
             dir = toward;
         }
         let dv = ((mult - 1.0) * impulse / other.mass).min(skills.shove_bonus_dv(tune));
         other.velocity += dir * dv;
-        other.shove_clock = t::SHOVE_COOLDOWN;
+        other.shove_clock = tune.shove_cooldown;
     }
     if other.kind == BodyKind::Asteroid {
         other.velocity = other
@@ -129,32 +129,35 @@ impl Game {
         let gap = offset.length() - rock.radius - ship_r;
         if gap > skills.grip_reach(&self.tune) {
             // Breakaway: too far to hold; it stays off for a moment.
-            rock.grip_free = t::GRIP_RETRY;
+            rock.grip_free = self.tune.grip_retry;
             return;
         }
         self.gripped = Some(rock.id);
-        let over = gap - t::GRIP_SLACK;
+        let over = gap - self.tune.grip_slack;
         if over <= 0.0 {
             return;
         }
-        let heft = (t::GRIP_REF_MASS / rock.mass).clamp(0.25, 1.5);
-        let pull = (t::GRIP_PULL * over).min(skills.grip_accel(&self.tune)) * heft;
+        let heft = (self.tune.grip_ref_mass / rock.mass).clamp(0.25, 1.5);
+        let pull = (self.tune.grip_pull * over).min(skills.grip_accel(&self.tune)) * heft;
         let dir = offset.normalize_or_zero();
         let before = rock.velocity;
         let mut next = before + dir * pull * dt;
         // Sideways drift relative to the ship is damped.
         let rel = ship_v - next;
-        next += (rel - dir * rel.dot(dir)) * (t::GRIP_DAMP * dt).min(1.0);
+        next += (rel - dir * rel.dot(dir)) * (self.tune.grip_damp * dt).min(1.0);
         // The rock comes in no faster than the ship's own pace plus a share of the stretch, so
         // it settles at the slack instead of overshooting into the hull.
-        let allowed = ship_v.dot(dir).max(0.0) + t::GRIP_APPROACH * over;
+        let allowed = ship_v.dot(dir).max(0.0) + self.tune.grip_approach * over;
         let inward = next.dot(dir);
         if inward > allowed {
             next -= dir * (inward - allowed);
         }
         // No energy from a grab: never faster than the faster of the rock, the ship and a slow
         // floor (so a rock at rest can be drawn in).
-        let limit = before.length().max(ship_v.length()).max(t::GRIP_FLOOR);
+        let limit = before
+            .length()
+            .max(ship_v.length())
+            .max(self.tune.grip_floor);
         next = next.clamp_length_max(limit);
         rock.velocity = next;
     }
@@ -173,7 +176,9 @@ impl Game {
             let offset = rock.position - at;
             let distance = offset.length();
             let gap = distance - rock.radius - ship_r;
-            if gap > t::WHIP_REACH || offset.normalize_or_zero().dot(dir) < t::WHIP_CONE {
+            if gap > self.tune.whip_reach
+                || offset.normalize_or_zero().dot(dir) < self.tune.whip_cone
+            {
                 continue;
             }
             if best.is_none_or(|(g, _)| gap < g) {
@@ -186,15 +191,15 @@ impl Game {
             rock,
             dir,
             skills.whip_impulse(&self.tune),
-            t::WHIP_DV,
+            self.tune.whip_dv,
             skills.shove_speed_cap(&self.tune),
         );
         rock.sling_thrown = 0.0;
         rock.rune_pushed = 0.0;
         rock.rift_redirected = 0.0;
-        rock.shoved = rock.shoved.max(t::SHOVE_TAG);
-        rock.shove_clock = t::SHOVE_COOLDOWN;
-        rock.grip_free = rock.grip_free.max(t::GRIP_RELEASE);
+        rock.shoved = rock.shoved.max(self.tune.shove_tag);
+        rock.shove_clock = self.tune.shove_cooldown;
+        rock.grip_free = rock.grip_free.max(self.tune.grip_release);
         let (position, radius) = (rock.position, rock.radius);
         self.effect(position, radius + 18.0, 0.25, EffectKind::Impact);
     }
@@ -437,7 +442,7 @@ mod tests {
             game.step(DT, mining());
         }
         let gap = body(&game, id).position.length() - 80.0 - 14.0;
-        assert!(gap > 0.0 && gap < t::GRIP_SLACK + 25.0, "{gap}");
+        assert!(gap > 0.0 && gap < DEFAULT_TUNING.grip_slack + 25.0, "{gap}");
         // Inside the slack the rock is left alone (so it can be rammed).
         let (mut near, nid) = hold_rock(0, Vec2::new(160.0, 0.0), Vec2::ZERO, Vec2::ZERO);
         for _ in 0..30 {
@@ -448,7 +453,7 @@ mod tests {
 
     #[test]
     fn the_grip_breaks_away_beyond_its_reach_and_lets_go_with_the_beam() {
-        let far = 14.0 + 80.0 + t::GRIP_REACH + 40.0;
+        let far = 14.0 + 80.0 + DEFAULT_TUNING.grip_reach + 40.0;
         let (mut game, id) = hold_rock(0, Vec2::new(far, 0.0), Vec2::ZERO, Vec2::ZERO);
         for _ in 0..20 {
             game.step(DT, mining());
@@ -477,14 +482,19 @@ mod tests {
         let start = body(&game, id).velocity.length();
         for _ in 0..600 {
             game.step(DT, mining());
-            assert!(body(&game, id).velocity.length() <= start.max(t::GRIP_FLOOR) + 1.0);
+            assert!(
+                body(&game, id).velocity.length() <= start.max(DEFAULT_TUNING.grip_floor) + 1.0
+            );
         }
         // A moving ship can bring it up to the ship's speed and no more.
         let (mut game, id) = hold_rock(4, Vec2::new(250.0, 0.0), Vec2::ZERO, Vec2::new(0.0, 250.0));
         for _ in 0..300 {
             game.step(DT, mining());
             let ship_speed = game.player().unwrap().velocity.length();
-            assert!(body(&game, id).velocity.length() <= ship_speed.max(t::GRIP_FLOOR) + 1.0);
+            assert!(
+                body(&game, id).velocity.length()
+                    <= ship_speed.max(DEFAULT_TUNING.grip_floor) + 1.0
+            );
         }
     }
 

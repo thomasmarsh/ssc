@@ -495,7 +495,10 @@ mod tests {
             game.bodies.retain(|b| ids.contains(&b.id));
             game.step(DT, Input::default());
         }
-        assert_eq!(game.player().unwrap().shield, shield - tuning::DASH_COST);
+        assert_eq!(
+            game.player().unwrap().shield,
+            shield - DEFAULT_TUNING.dash_cost
+        );
         assert!(body(&game, rock).position.x > 500.0);
     }
 
@@ -671,7 +674,7 @@ mod tests {
             let before = game.player().unwrap().shield + game.player().unwrap().health;
             game.resolve_contacts();
             let after = game.player().unwrap().shield + game.player().unwrap().health;
-            assert!(before - after >= raw * tuning::IMPACT_PLAYER_SHARE - 0.01);
+            assert!(before - after >= raw * DEFAULT_TUNING.impact_player_share - 0.01);
             assert_eq!(game.run.damage_dealt, 0.0);
         }
     }

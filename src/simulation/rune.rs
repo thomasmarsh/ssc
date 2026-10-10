@@ -321,7 +321,7 @@ impl Game {
             let resist = if credited {
                 self.adapt
                     .get(&body.id)
-                    .map_or(1.0, |r| r.scale(arsenal::Family::Explosive))
+                    .map_or(1.0, |r| r.scale(arsenal::Family::Explosive, &self.tune))
             } else {
                 1.0
             };
@@ -652,7 +652,7 @@ mod tests {
                 _ => {
                     let strain = Strain::from_donor(Organ::Faraday, &Genome::stormcap());
                     for _ in 0..3 {
-                        g.loadout.organs.acquire(strain);
+                        g.loadout.organs.acquire(strain, &DEFAULT_TUNING);
                     }
                     g.loadout.skills.raise(Skill::Symbiosis);
                     g.bond(strain);

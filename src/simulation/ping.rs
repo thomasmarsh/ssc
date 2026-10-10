@@ -20,9 +20,9 @@
 
 use super::mining::{Material, material_of, ore_for, renewable};
 use super::skills::Skill;
-use super::tuning as t;
 use super::{BodyKind, Cue, Game};
 use crate::genome::Niche;
+use crate::simulation::Tunables;
 use crate::territory::{CivRole, SeatCache, Standing};
 use crate::world::{self, RockKind, SECTOR_SIZE, SectorId, Spawn};
 use bevy::prelude::Vec2;
@@ -76,7 +76,7 @@ pub enum EchoKind {
 }
 
 impl EchoKind {
-    fn cap(self) -> usize {
+    fn cap(self, tune: &Tunables) -> usize {
         match self {
             Self::Rift => 4,
             Self::Well | Self::Relic => 2,
@@ -85,11 +85,11 @@ impl EchoKind {
             Self::Fortress => CAP_FORTRESS,
             Self::Nearest => 1,
             Self::Pad => CAP_PAD,
-            Self::PadAlert => t::CAP_PAD_ALERT,
-            Self::Lode => t::CAP_LODE,
-            Self::Nest => t::CAP_NEST,
-            Self::Eggs => t::CAP_EGGS,
-            Self::Predators => t::CAP_PREDATORS,
+            Self::PadAlert => tune.cap_pad_alert,
+            Self::Lode => tune.cap_lode,
+            Self::Nest => tune.cap_nest,
+            Self::Eggs => tune.cap_eggs,
+            Self::Predators => tune.cap_predators,
         }
     }
 
@@ -175,8 +175,10 @@ pub struct PingState {
 
 impl PingState {
     /// The sites of a sector, generated once.
-    pub(super) fn sites(&mut self, seed: u64, id: SectorId) -> &[Site] {
-        self.cache.entry(id).or_insert_with(|| sites_of(seed, id))
+    pub(super) fn sites(&mut self, seed: u64, id: SectorId, tune: &Tunables) -> &[Site] {
+        self.cache
+            .entry(id)
+            .or_insert_with(|| sites_of(seed, id, tune))
     }
 }
 
@@ -191,7 +193,7 @@ fn material_tint(material: Material) -> Option<[f32; 3]> {
     Some(material.color())
 }
 
-pub(super) fn sites_of(seed: u64, id: SectorId) -> Vec<Site> {
+pub(super) fn sites_of(seed: u64, id: SectorId, tune: &Tunables) -> Vec<Site> {
     let territory = world::territory(seed, id);
     let tint = territory.map(|t| t.color(seed));
     let spawns = world::generate(seed, id);
@@ -211,7 +213,7 @@ pub(super) fn sites_of(seed: u64, id: SectorId) -> Vec<Site> {
             (BodyKind::Asteroid, RockKind::Planetoid, _) => {
                 let key = (id, spawn.index);
                 let mut site = single(EchoKind::Planetoid, spawn, None, None, 0.0, false);
-                site.renewable = renewable(seed, key);
+                site.renewable = renewable(seed, key, tune);
                 if site.renewable {
                     site.tint = material_tint(material_of(seed, RockKind::Planetoid, Some(key)));
                 }
@@ -235,7 +237,7 @@ pub(super) fn sites_of(seed: u64, id: SectorId) -> Vec<Site> {
                     continue;
                 }
                 let ore = ore_for(rock, spawn.radius.unwrap_or(0.0));
-                if ore >= t::LODE_MIN_ORE {
+                if ore >= tune.lode_min_ore {
                     let material = material_of(seed, rock, Some((id, spawn.index)));
                     sites.push(single(
                         EchoKind::Lode,
@@ -355,7 +357,7 @@ impl Game {
                     .ping
                     .cache
                     .entry(id)
-                    .or_insert_with(|| sites_of(seed, id))
+                    .or_insert_with(|| sites_of(seed, id, &self.tune))
                     .clone();
                 let fallen = self.fallen.get(&id);
                 for site in sites.iter() {
@@ -453,7 +455,7 @@ impl Game {
         found.retain(|echo| {
             let n = taken.entry(echo.kind).or_default();
             *n += 1;
-            echo.discovery.is_some() || *n <= echo.kind.cap() + extra
+            echo.discovery.is_some() || *n <= echo.kind.cap(&self.tune) + extra
         });
         self.ping.echoes = found;
         self.cue(Cue::Ping);
@@ -551,15 +553,15 @@ impl Game {
 /// Planetoids a ping would find, for tests of the far-reach claim.
 #[cfg(test)]
 pub(super) fn site_count(seed: u64, id: SectorId) -> usize {
-    sites_of(seed, id).len()
+    sites_of(seed, id, &crate::simulation::DEFAULT_TUNING).len()
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::tests::{DT, empty_game};
     use super::super::{Bearing, GuideKind, Input};
-    use super::t;
     use super::*;
+    use crate::simulation::DEFAULT_TUNING;
 
     fn run(game: &mut Game, seconds: f32) {
         for _ in 0..(seconds / DT) as usize {
@@ -635,7 +637,7 @@ mod tests {
             EchoKind::Pad,
         ] {
             let n = a.ping.echoes.iter().filter(|e| e.kind == kind).count();
-            assert!(n <= kind.cap());
+            assert!(n <= kind.cap(&DEFAULT_TUNING));
         }
         assert!(site_count(42, SectorId { x: 5, y: -2 }) < 50);
     }
@@ -675,7 +677,10 @@ mod tests {
                         continue;
                     }
                     let id = SectorId { x, y };
-                    if sites_of(42, id).iter().any(|s| s.kind == kind) {
+                    if sites_of(42, id, &DEFAULT_TUNING)
+                        .iter()
+                        .any(|s| s.kind == kind)
+                    {
                         return id;
                     }
                 }
@@ -708,7 +713,7 @@ mod tests {
             assert!(echoes.iter().all(|e| e.kind.unlocked_by().is_none()));
             for kind in [EchoKind::Planetoid, EchoKind::Civilization] {
                 let n = echoes.iter().filter(|e| e.kind == kind).count();
-                assert!(n <= kind.cap());
+                assert!(n <= kind.cap(&DEFAULT_TUNING));
             }
             assert!(
                 echoes
@@ -738,7 +743,10 @@ mod tests {
                 .fold(0.0, f32::max)
         };
         assert!(farthest(&wide) > farthest(&near), "level 4 hears farther");
-        assert_eq!(far.ping_ring_range(), PING_RANGE + 4.0 * t::PING_REACH_STEP);
+        assert_eq!(
+            far.ping_ring_range(),
+            PING_RANGE + 4.0 * DEFAULT_TUNING.ping_reach_step
+        );
         let range = far.ping_ring_range();
         run(&mut far, 1.0);
         let (_, radius) = far.ping_ring().unwrap();
@@ -773,7 +781,7 @@ mod tests {
         for level in 1..=4u8 {
             let game = skilled(&[(Skill::PingCooldown, level)]);
             assert!(game.ping_recharge() < last);
-            assert!(game.ping_recharge() >= t::PING_COOLDOWN_FLOOR);
+            assert!(game.ping_recharge() >= DEFAULT_TUNING.ping_cooldown_floor);
             last = game.ping_recharge();
         }
         let mut game = skilled(&[(Skill::PingCooldown, 4)]);
@@ -796,8 +804,8 @@ mod tests {
         let b = kinds_after_ping(&mut wide, id.center());
         let count = |v: &[Echo], k| v.iter().filter(|e| e.kind == k).count();
         for kind in [EchoKind::Planetoid, EchoKind::Predators, EchoKind::Lode] {
-            assert!(count(&a, kind) <= kind.cap());
-            assert!(count(&b, kind) <= kind.cap() + 4);
+            assert!(count(&a, kind) <= kind.cap(&DEFAULT_TUNING));
+            assert!(count(&b, kind) <= kind.cap(&DEFAULT_TUNING) + 4);
             assert!(count(&b, kind) >= count(&a, kind));
         }
         assert!(b.len() > a.len(), "more echoes overall");
@@ -865,7 +873,7 @@ mod tests {
     #[test]
     fn a_destroyed_nest_or_a_cleared_sector_goes_quiet() {
         let id = sector_with(EchoKind::Nest);
-        let sites = sites_of(42, id);
+        let sites = sites_of(42, id, &DEFAULT_TUNING);
         let nest = sites.iter().find(|s| s.kind == EchoKind::Nest).unwrap();
         let mut game = skilled(&[(Skill::EchoNests, 1)]);
         let at = nest.position;

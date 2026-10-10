@@ -447,14 +447,8 @@ fn hud_lines(game: &Game) -> String {
         let hardened: Vec<String> = ssc::simulation::arsenal::Family::ALL
             .into_iter()
             .zip(apex.resist)
-            .filter(|(_, m)| *m >= ssc::simulation::tuning::ADAPT_SHOWN)
-            .map(|(f, m)| {
-                format!(
-                    "{} -{:.0}%",
-                    f.label(),
-                    100.0 * ssc::simulation::tuning::ADAPT_MAX * m
-                )
-            })
+            .filter(|(_, m)| *m >= game.tune.adapt_shown)
+            .map(|(f, m)| format!("{} -{:.0}%", f.label(), 100.0 * game.tune.adapt_max * m))
             .collect();
         if !hardened.is_empty() {
             text.push_str(&format!(
@@ -692,7 +686,7 @@ fn rig_lines(game: &Game) -> Vec<(String, Color)> {
                 text.push_str(&format!(
                     "  BOOST x{:.2} {:.1}s",
                     game.damage_boost(),
-                    left * ssc::simulation::tuning::DASH_BOOST_TIME
+                    left * game.tune.dash_boost_time
                 ));
             }
             text.push('\n');
@@ -1831,7 +1825,7 @@ fn draw_resistance(gizmos: &mut Gizmos, game: &Game, body: &Body) {
     if let Some(meters) = game.resistance_of(body.id) {
         for (k, family) in Family::ALL.into_iter().enumerate() {
             let meter = meters[k];
-            if meter < ssc::simulation::tuning::ADAPT_SHOWN {
+            if meter < game.tune.adapt_shown {
                 continue;
             }
             let [cr, cg, cb] = family.tint();
@@ -2482,8 +2476,7 @@ pub fn draw(
                 // A piece broken off a body fades as it drifts away.
                 let shown = if body.adrift > 0.0 {
                     shown.with_alpha(
-                        0.15 + 0.6
-                            * (body.adrift / ssc::simulation::tuning::POOL_DRIFT).clamp(0.0, 1.0),
+                        0.15 + 0.6 * (body.adrift / game.tune.pool_drift).clamp(0.0, 1.0),
                     )
                 } else {
                     shown
@@ -3666,11 +3659,7 @@ fn draw_wrecks(gizmos: &mut Gizmos, game: &Game, camera: Vec2, half: Vec2) {
             color,
         );
         gizmos
-            .circle_2d(
-                at,
-                ssc::simulation::tuning::WRECK_RADIUS,
-                DRY_RED.with_alpha(0.25),
-            )
+            .circle_2d(at, game.tune.wreck_radius, DRY_RED.with_alpha(0.25))
             .resolution(32);
         gizmos
             .circle_2d(
@@ -5166,11 +5155,15 @@ mod bench_layout_tests {
     fn long_organ_description_is_bounded_and_material_costs_keep_their_colours() {
         let mut game = game();
         game.loadout.skills.raise(Skill::Symbiosis);
-        game.loadout.organs.acquire(Strain {
-            organ: Organ::Skipjack,
-            level: 3,
-            magnitude: 1.6,
-        });
+        let tune = game.tune;
+        game.loadout.organs.acquire(
+            Strain {
+                organ: Organ::Skipjack,
+                level: 3,
+                magnitude: 1.6,
+            },
+            &tune,
+        );
         game.bench_select(BenchAction::Organ(Organ::Skipjack));
         let spans = bench_lines(&game, 680.0, 382.0);
         assert!(

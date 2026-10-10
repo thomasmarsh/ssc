@@ -354,7 +354,7 @@ mod tests {
         while peaceful.civ_tier(civ.id) != Tier::Friendly {
             fund(&mut peaceful);
             assert!(peaceful.tithe().is_ok());
-            peaceful.update_diplomacy(super::tuning::TITHE_COOLDOWN + 0.1);
+            peaceful.update_diplomacy(DEFAULT_TUNING.tithe_cooldown + 0.1);
         }
         assert_eq!(peaceful.interact(), Some(interact::Verb::Contact));
         fund(&mut peaceful);

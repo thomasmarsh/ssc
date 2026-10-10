@@ -8,7 +8,6 @@
 
 use super::*;
 use crate::realm::{Effects, Realm, RealmKind, realm};
-use tuning::{REALM_COOLDOWN, REALM_HOLD};
 
 /// Where the realm tracking stands.
 #[derive(Clone, Debug, Default)]
@@ -53,7 +52,7 @@ impl Game {
             _ => dt,
         };
         self.realms.candidate = Some((here.key, held));
-        if held >= REALM_HOLD && self.realms.since_banner >= REALM_COOLDOWN {
+        if held >= self.tune.realm_hold && self.realms.since_banner >= self.tune.realm_cooldown {
             self.enter_realm(here, true);
         }
     }
@@ -64,7 +63,11 @@ impl Game {
             self.run.realm_names.push(entered.name.clone());
         }
         self.realms.candidate = None;
-        self.realms.since_banner = if mid_run { 0.0 } else { REALM_COOLDOWN };
+        self.realms.since_banner = if mid_run {
+            0.0
+        } else {
+            self.tune.realm_cooldown
+        };
         if mid_run {
             self.notify(entered.banner(), upgrades::Rarity::Epic);
         }
@@ -139,7 +142,7 @@ impl Game {
 
     /// Whether an energy ability (0 dash, 1 parry) fizzles as it is raised, in a realm that
     /// dulls them. Deterministic: a hash of the seed, the game time and the ability, so replays
-    /// agree and no stream moves. A fizzle costs nothing but locks the ability for `FIZZLE_LOCK`
+    /// agree and no stream moves. A fizzle costs nothing but locks the ability for `fizzle_lock`
     /// seconds, so a mashed key cannot reroll it every frame.
     pub(super) fn ability_fizzles(&mut self, ability: i32) -> bool {
         let chance = self
@@ -176,7 +179,6 @@ mod tests {
     use super::*;
     use crate::realm::{CATALOG, Realm};
     use crate::simulation::tests::{DT, empty_game, set_player};
-    use tuning::REALM_COOLDOWN;
 
     const SEED: u64 = 42;
 
@@ -271,10 +273,26 @@ mod tests {
         game.player_invulnerability = 1e9;
         game.step(DT, Input::default());
         game.teleport(a.center());
-        assert_eq!(stay(&mut game, a.center(), REALM_HOLD - 1.5, &mut log), 0);
+        assert_eq!(
+            stay(
+                &mut game,
+                a.center(),
+                DEFAULT_TUNING.realm_hold - 1.5,
+                &mut log
+            ),
+            0
+        );
         assert_eq!(game.realm().unwrap().kind, RealmKind::CRADLE);
         assert!(log.0.is_empty(), "a brief visit announces nothing");
-        assert_eq!(stay(&mut game, a.center(), REALM_COOLDOWN, &mut log), 1);
+        assert_eq!(
+            stay(
+                &mut game,
+                a.center(),
+                DEFAULT_TUNING.realm_cooldown,
+                &mut log
+            ),
+            1
+        );
         let ra = crate::realm::realm(SEED, a);
         assert_eq!(game.realm().unwrap().key, ra.key);
         assert_eq!(log.0.len(), 1);
@@ -294,7 +312,12 @@ mod tests {
         assert_eq!(log.0.len(), 1);
         // A real stay on the far side switches once, after the cooldown, and counts the realm.
         assert_eq!(
-            stay(&mut game, b.center(), REALM_COOLDOWN + REALM_HOLD, &mut log),
+            stay(
+                &mut game,
+                b.center(),
+                DEFAULT_TUNING.realm_cooldown + DEFAULT_TUNING.realm_hold,
+                &mut log
+            ),
             1
         );
         assert_eq!(log.0.len(), 2);
@@ -313,7 +336,7 @@ mod tests {
         stay(
             &mut game,
             spot.center(),
-            REALM_COOLDOWN + REALM_HOLD + 1.0,
+            DEFAULT_TUNING.realm_cooldown + DEFAULT_TUNING.realm_hold + 1.0,
             &mut Log::default(),
         );
         let tag = game.hud().realm.expect("a tag");

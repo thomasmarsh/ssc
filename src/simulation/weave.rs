@@ -440,7 +440,10 @@ mod tests {
         assert!(game.dash(Some(Vec2::Y)));
         game.step(DT, Input::default());
         assert!(game.player().unwrap().position.y > 100.0);
-        assert_eq!(game.player().unwrap().shield, shield - tuning::DASH_COST);
+        assert_eq!(
+            game.player().unwrap().shield,
+            shield - DEFAULT_TUNING.dash_cost
+        );
         assert!(game.player().unwrap().velocity.length() < 100.0);
     }
 

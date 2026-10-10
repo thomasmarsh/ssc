@@ -663,6 +663,7 @@ mod mapping_tests {
 mod game_tests {
     use super::*;
     use crate::genome::Species;
+    use crate::simulation::DEFAULT_TUNING;
     use crate::simulation::tests::{DT, empty_game, spawn};
     use crate::simulation::{BodyKind, Bullet, EffectKind, Input};
 
@@ -726,7 +727,7 @@ mod game_tests {
             game.step(DT, Input::default());
             waited += DT;
         }
-        assert!(game.request_hit_stop(crate::simulation::tuning::PARRY_HITSTOP));
+        assert!(game.request_hit_stop(DEFAULT_TUNING.parry_hitstop));
     }
 
     #[test]

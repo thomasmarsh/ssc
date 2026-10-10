@@ -548,11 +548,14 @@ mod tests {
         let mut game = setup();
         game.loadout.skills.raise(Skill::Symbiosis);
         for organ in [Organ::Remora, Organ::Faraday] {
-            game.loadout.organs.acquire(Strain {
-                organ,
-                level: 1,
-                magnitude: 1.0,
-            });
+            game.loadout.organs.acquire(
+                Strain {
+                    organ,
+                    level: 1,
+                    magnitude: 1.0,
+                },
+                &DEFAULT_TUNING,
+            );
             game.bench_select(BenchAction::Organ(organ));
             game.bench_confirm();
         }

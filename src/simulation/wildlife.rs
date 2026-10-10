@@ -1,7 +1,7 @@
 //! Wildlife versus civilizations in play. `crate::affinity` says how a species regards a
 //! civilization (hostile, neutral, friendly); this module acts on it.
 //!
-//! Every `FAUNA_PERIOD` seconds each wild creature near a civil body is classed by the affinity
+//! Every `fauna_period` seconds each wild creature near a civil body is classed by the affinity
 //! of its lineage for that civilization at its position:
 //!
 //! - **Hostile** wildlife sets upon the nearest civil body (people, seats, turrets), biting it.
@@ -16,7 +16,6 @@
 //! Stances are rebuilt from scratch each scan and kept in ordered maps, so play is
 //! deterministic. Nothing here draws.
 
-use super::tuning as t;
 use super::*;
 use crate::affinity::{self, Disposition};
 use crate::territory::{CivRole, Standing};
@@ -133,7 +132,7 @@ impl Game {
             });
         }
         let mut fauna = Fauna {
-            clock: t::FAUNA_PERIOD,
+            clock: self.tune.fauna_period,
             ..Fauna::default()
         };
         if things.is_empty() {
@@ -156,7 +155,9 @@ impl Game {
             let mut best: Option<(f32, usize)> = None;
             for (i, th) in things.iter().enumerate() {
                 let d = th.position.distance_squared(w.position);
-                if d < t::FRIEND_RANGE * t::FRIEND_RANGE && best.is_none_or(|(bd, _)| d < bd) {
+                if d < self.tune.friend_range * self.tune.friend_range
+                    && best.is_none_or(|(bd, _)| d < bd)
+                {
                     best = Some((d, i));
                 }
             }
@@ -165,7 +166,7 @@ impl Game {
                 continue;
             };
             match Disposition::of(a) {
-                Disposition::Hostile if d < t::HOSTILE_REACH * t::HOSTILE_REACH => {
+                Disposition::Hostile if d < self.tune.hostile_reach * self.tune.hostile_reach => {
                     hostile.push((d, w.id, i, a));
                 }
                 Disposition::Friendly => {
@@ -188,15 +189,15 @@ impl Game {
         for (_, wid, i, a) in hostile {
             let th = &things[i];
             let cap = if self.civ_peaceful(th.tid) {
-                t::MAX_ASSAULT_PEACEFUL
+                self.tune.max_assault_peaceful
             } else {
-                t::MAX_ASSAULT
+                self.tune.max_assault
             };
             let (n_target, n_civ) = (
                 on_target.get(&th.id).copied().unwrap_or(0),
                 on_civ.get(&th.tid).copied().unwrap_or(0),
             );
-            if n_target >= t::MAX_ATTACKERS || n_civ >= cap {
+            if n_target >= self.tune.max_attackers || n_civ >= cap {
                 continue;
             }
             *on_target.entry(th.id).or_default() += 1;
@@ -220,9 +221,9 @@ impl Game {
             .collect();
         for th in things.iter().filter(|th| (th.unit && th.idle) || th.turret) {
             let range = if th.turret {
-                t::TURRET_DEFEND_RANGE
+                self.tune.turret_defend_range
             } else {
-                t::DEFEND_RANGE
+                self.tune.defend_range
             };
             let pick = fauna
                 .stances
@@ -232,7 +233,7 @@ impl Game {
                 .filter(|(_, p)| p.distance(th.position) < range)
                 .filter(|(_, p)| {
                     th.home
-                        .is_none_or(|h| p.distance(h) < t::DEFEND_LEASH + range)
+                        .is_none_or(|h| p.distance(h) < self.tune.defend_leash + range)
                 })
                 .min_by(|a, b| {
                     a.1.distance_squared(th.position)
@@ -273,22 +274,22 @@ impl Game {
         let now = self.time;
         let (delta, text, rarity) = match st.disposition {
             Disposition::Friendly => (
-                -t::FRIEND_KILL_COST * st.affinity,
+                -self.tune.friend_kill_cost * st.affinity,
                 format!("{name}  - they valued this herd"),
                 upgrades::Rarity::Rare,
             ),
             Disposition::Hostile => {
                 let credit = self.fauna.credit.entry(st.tid).or_default();
-                if now - credit.start > t::GAIN_WINDOW {
+                if now - credit.start > self.tune.gain_window {
                     *credit = Credit {
                         start: now,
                         ..Credit::default()
                     };
                 }
-                let want = t::HOSTILE_KILL_GAIN
+                let want = self.tune.hostile_kill_gain
                     * -st.affinity
-                    * t::GAIN_DIMINISH.powi(credit.kills as i32);
-                let gain = want.min((t::GAIN_CAP - credit.earned).max(0.0));
+                    * self.tune.gain_diminish.powi(credit.kills as i32);
+                let gain = want.min((self.tune.gain_cap - credit.earned).max(0.0));
                 credit.kills += 1;
                 credit.earned += gain;
                 (
@@ -304,14 +305,14 @@ impl Game {
         }
         self.shift_regard(st.tid, delta);
         if now >= self.fauna.banner_until {
-            self.fauna.banner_until = now + t::KILL_BANNER_EVERY;
+            self.fauna.banner_until = now + self.tune.kill_banner_every;
             self.notify(text, rarity);
         }
     }
 
     /// The wildlife near the ship that a civilization of the territory it is in has a view on,
     /// nearest first: (species name, disposition), hostile and friendly only, at most
-    /// `TAG_COUNT`.
+    /// `tag_count`.
     pub fn fauna_tags(&self) -> Vec<(String, Disposition)> {
         let (Some(civ), Some(ship)) = (self.territory, self.player().map(|p| p.position)) else {
             return Vec::new();
@@ -325,7 +326,9 @@ impl Game {
                 && self.apex_of(b).is_none()
         }) {
             let d = b.position.distance_squared(ship);
-            if d > t::TAG_RANGE * t::TAG_RANGE || seen.iter().any(|s| s.1 == b.species) {
+            if d > self.tune.tag_range * self.tune.tag_range
+                || seen.iter().any(|s| s.1 == b.species)
+            {
                 continue;
             }
             let a = affinity::affinity(
@@ -342,7 +345,7 @@ impl Game {
         }
         seen.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         seen.into_iter()
-            .take(t::TAG_COUNT)
+            .take(self.tune.tag_count)
             .map(|(_, _, n, d)| (n, d))
             .collect()
     }
@@ -386,7 +389,7 @@ impl Game {
                 continue;
             };
             let (w, tgt) = (&self.bodies[wi], &self.bodies[ti]);
-            let reach = w.radius + tgt.radius + t::FAUNA_BITE_REACH;
+            let reach = w.radius + tgt.radius + self.tune.fauna_bite_reach;
             if w.bite_clock > 0.0
                 || w.panic > 0.0
                 || tgt.health <= 0.0
@@ -394,21 +397,24 @@ impl Game {
             {
                 continue;
             }
-            let mut amount = (t::FAUNA_BITE + t::FAUNA_BITE_PER_CONTACT * w.genome.contact_damage)
+            let mut amount = (self.tune.fauna_bite
+                + self.tune.fauna_bite_per_contact * w.genome.contact_damage)
                 * w.genes.threat.max(1.0);
             let guarded = tgt.kind == BodyKind::Base || self.is_elder(tgt);
             if tgt.kind == BodyKind::Base {
-                amount *= t::FAUNA_STRUCTURE_SCALE;
+                amount *= self.tune.fauna_structure_scale;
             }
             if self.civ_peaceful(st.tid) {
-                amount *= t::FAUNA_PEACEFUL_SCALE;
+                amount *= self.tune.fauna_peaceful_scale;
             }
-            self.bodies[wi].bite_clock = t::FAUNA_BITE_PERIOD;
+            self.bodies[wi].bite_clock = self.tune.fauna_bite_period;
             let at = self.bodies[ti].position;
             let tgt = &mut self.bodies[ti];
             damage(tgt, amount, 0.0, &self.tune);
             if guarded {
-                tgt.health = tgt.health.max(tgt.max_health * t::FAUNA_STRUCTURE_FLOOR);
+                tgt.health = tgt
+                    .health
+                    .max(tgt.max_health * self.tune.fauna_structure_floor);
             } else if tgt.health <= 0.0 {
                 tgt.consumed = true;
             }
@@ -426,9 +432,9 @@ impl Game {
             }
             let turret = s.kind == BodyKind::Base;
             let reach = if turret {
-                t::TURRET_DEFEND_RANGE
+                self.tune.turret_defend_range
             } else if s.genome.weapon != crate::genome::Weapon::None {
-                (s.genome.weapon_range * t::DEFEND_REACH_SHARE).min(t::DEFEND_RANGE)
+                (s.genome.weapon_range * self.tune.defend_reach_share).min(self.tune.defend_range)
             } else {
                 s.radius + w.radius + 12.0
             };
@@ -436,14 +442,14 @@ impl Game {
                 continue;
             }
             let amount = if turret {
-                t::TURRET_STRIKE * s.genes.threat.max(1.0)
+                self.tune.turret_strike * s.genes.threat.max(1.0)
             } else {
-                t::STRIKE_DAMAGE * s.genes.threat.max(1.0)
+                self.tune.strike_damage * s.genes.threat.max(1.0)
             };
             let period = if turret {
                 1.2
             } else {
-                s.genome.fire_period.max(t::STRIKE_PERIOD_MIN)
+                s.genome.fire_period.max(self.tune.strike_period_min)
             };
             self.bodies[si].fire_cooldown = period;
             let at = self.bodies[wi].position;
@@ -775,12 +781,12 @@ mod tests {
             .filter(|s| s.disposition == Disposition::Hostile)
             .collect();
         assert!(!hostile.is_empty());
-        assert!(hostile.len() <= t::MAX_ASSAULT);
+        assert!(hostile.len() <= DEFAULT_TUNING.max_assault);
         let mut per: BTreeMap<u64, usize> = BTreeMap::new();
         for s in hostile {
             *per.entry(s.target).or_default() += 1;
         }
-        assert!(per.values().all(|&n| n <= t::MAX_ATTACKERS));
+        assert!(per.values().all(|&n| n <= DEFAULT_TUNING.max_attackers));
     }
 
     #[test]
@@ -808,7 +814,7 @@ mod tests {
         let h = health(&game, base);
         assert!(h < 60.0, "untouched");
         assert!(
-            h >= 60.0 * t::FAUNA_STRUCTURE_FLOOR - 0.01,
+            h >= 60.0 * DEFAULT_TUNING.fauna_structure_floor - 0.01,
             "destroyed: {h}"
         );
     }
@@ -899,7 +905,7 @@ mod tests {
         kill_one(&mut game, &t, Disposition::Friendly);
         let after = game.civ_regard(t.id);
         assert!(after < before - 0.5, "{before} -> {after}");
-        assert!(after >= before - t::FRIEND_KILL_COST - 0.01);
+        assert!(after >= before - DEFAULT_TUNING.friend_kill_cost - 0.01);
         assert!(
             game.notices
                 .iter()
@@ -916,7 +922,7 @@ mod tests {
         kill_one(&mut game, &t, Disposition::Hostile);
         let first = game.civ_regard(t.id) - before;
         assert!(
-            first > 0.0 && first <= t::HOSTILE_KILL_GAIN + 0.01,
+            first > 0.0 && first <= DEFAULT_TUNING.hostile_kill_gain + 0.01,
             "{first}"
         );
         assert!(game.notices.iter().any(|n| n.text.contains("thank you")));
@@ -930,10 +936,10 @@ mod tests {
             last = gain;
         }
         let total = game.civ_regard(t.id) - before;
-        assert!(total <= t::GAIN_CAP + 0.01, "farmed {total}");
+        assert!(total <= DEFAULT_TUNING.gain_cap + 0.01, "farmed {total}");
         assert!(last < first);
         // A new window pays again.
-        game.time += t::GAIN_WINDOW + 1.0;
+        game.time += DEFAULT_TUNING.gain_window + 1.0;
         let was = game.civ_regard(t.id);
         kill_one(&mut game, &t, Disposition::Hostile);
         assert!(game.civ_regard(t.id) > was);

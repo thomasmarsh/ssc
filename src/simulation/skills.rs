@@ -313,7 +313,7 @@ impl Skill {
         if level >= self.max_level() {
             return None;
         }
-        let k = t::PRICE_GROWTH.powi(i32::from(level));
+        let k = tune.price_growth.powi(i32::from(level));
         Some(
             self.base_price(tune)
                 .into_iter()

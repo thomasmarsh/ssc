@@ -179,7 +179,11 @@ pub fn sample_cell(seed: u64, id: SectorId) -> Cell {
                 let (dx, dy) = frac(s.position);
                 planetoids.push(PlanetoidAt {
                     radius: s.radius.unwrap_or(0.0),
-                    renewable: renewable(seed, (id, s.index)),
+                    renewable: renewable(
+                        seed,
+                        (id, s.index),
+                        &crate::simulation::Tunables::DEFAULT,
+                    ),
                     dx,
                     dy,
                 });

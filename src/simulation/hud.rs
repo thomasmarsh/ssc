@@ -3,7 +3,6 @@
 //! functions here are pure and tested; nothing in the rules reads them.
 
 use super::skills::Skill;
-use super::tuning as t;
 use super::{BodyKind, Game, Material, Tier, arsenal::Profile};
 use crate::world::Standing;
 
@@ -430,7 +429,7 @@ impl Game {
                 self.parry_cooldown(),
                 skills.parry_cooldown(&self.tune),
                 self.parry_active(),
-                shield >= t::PARRY_COST,
+                shield >= self.tune.parry_cost,
             ),
             ability_ring(
                 Ability::Dash,
@@ -438,7 +437,7 @@ impl Game {
                 self.dash_cooldown(),
                 skills.dash_cooldown(&self.tune),
                 false,
-                shield >= t::DASH_COST,
+                shield >= self.tune.dash_cost,
             ),
             // Pinging is free: it is only ever cooling or ready.
             ability_ring(
@@ -553,7 +552,7 @@ impl Game {
             icons.push(OrganIcon {
                 organ,
                 level: s.level,
-                state: OrganState::Bond((left / t::BOND_LOAN).clamp(0.0, 1.0)),
+                state: OrganState::Bond((left / self.tune.bond_loan).clamp(0.0, 1.0)),
             });
         }
         icons

@@ -2,7 +2,6 @@
 //! readout, and what its death pays and records. A slain apex is remembered by spawn index
 //! like any kill, so it does not return in this world instance.
 
-use super::tuning as t;
 use super::upgrades::{Item, Rarity};
 use super::*;
 use crate::apex::{self, Archetype, Rank};
@@ -48,7 +47,7 @@ pub struct ApexState {
     mv: Move,
     /// Living members of a queen's retinue.
     pub escorts: Vec<u64>,
-    /// Seconds the ship has spent hurting it from afar (see `tuning::SNIPE_AFTER`).
+    /// Seconds the ship has spent hurting it from afar (see `tuning::snipe_after`).
     sniped: f32,
     /// Seconds until the next barrage.
     barrage_clock: f32,
@@ -133,7 +132,7 @@ pub(super) fn is_part(apexes: &BTreeMap<(SectorId, u32), ApexInfo>, body: &Body)
 }
 
 /// What a friendly shot meets on an elder: the bulwark's plated front (`guard`) and a bubble
-/// (shots from beyond `BUBBLE_RANGE` leak `BUBBLE_LEAK`, a lance passes whole, a close shot
+/// (shots from beyond `bubble_range` leak `bubble_leak`, a lance passes whole, a close shot
 /// goes through and hurts the bubble). Returns the share of damage that lands and whether the
 /// shot counts against the bubble.
 pub(super) fn shield_factor(
@@ -141,6 +140,7 @@ pub(super) fn shield_factor(
     states: &HashMap<u64, ApexState>,
     body: &Body,
     bullet: &Bullet,
+    tune: &Tunables,
 ) -> (f32, bool) {
     let arc = guard(apexes, states, body, bullet.velocity);
     let Some(info) = body.origin.and_then(|key| apexes.get(&key)) else {
@@ -152,10 +152,10 @@ pub(super) fn shield_factor(
     if bullet.pierce > 0 {
         return (arc, false);
     }
-    if bullet.origin.distance(body.position) <= t::BUBBLE_RANGE + body.radius {
+    if bullet.origin.distance(body.position) <= tune.bubble_range + body.radius {
         (arc, true)
     } else {
-        (arc * t::BUBBLE_LEAK, false)
+        (arc * tune.bubble_leak, false)
     }
 }
 
@@ -262,7 +262,7 @@ impl Game {
             }
             let enraged = state.enraged;
             state.clock -= dt;
-            Self::mend_bubble(&mut state, dt);
+            Self::mend_bubble(&mut state, dt, &self.tune);
             self.closers(index, &mut state, dt, ship, archetype, alert, enraged);
             match archetype {
                 Archetype::Juggernaut => {
@@ -284,9 +284,9 @@ impl Game {
         }
     }
 
-    /// A bubble that has been broken re-forms whole after `BUBBLE_DOWN` seconds; one that has
+    /// A bubble that has been broken re-forms whole after `bubble_down` seconds; one that has
     /// been left alone mends a little a second.
-    fn mend_bubble(state: &mut ApexState, dt: f32) {
+    fn mend_bubble(state: &mut ApexState, dt: f32, tune: &Tunables) {
         if state.bubble_down > 0.0 {
             state.bubble_down -= dt;
             if state.bubble_down <= 0.0 {
@@ -294,8 +294,8 @@ impl Game {
             }
         } else if state.bubble_hurt > 0.0 {
             state.bubble_rest += dt;
-            if state.bubble_rest > t::BUBBLE_REST {
-                state.bubble_hurt = (state.bubble_hurt - t::BUBBLE_MEND * dt).max(0.0);
+            if state.bubble_rest > tune.bubble_rest {
+                state.bubble_hurt = (state.bubble_hurt - tune.bubble_mend * dt).max(0.0);
             }
         }
     }
@@ -313,9 +313,9 @@ impl Game {
             return;
         }
         state.bubble_rest = 0.0;
-        state.bubble_hurt = (state.bubble_hurt + damage / (pool * t::BUBBLE_BREAK)).min(1.0);
+        state.bubble_hurt = (state.bubble_hurt + damage / (pool * self.tune.bubble_break)).min(1.0);
         if state.bubble_hurt >= 1.0 {
-            state.bubble_down = t::BUBBLE_DOWN;
+            state.bubble_down = self.tune.bubble_down;
             self.effect(at, radius * 3.0, 0.7, EffectKind::Explosion);
             self.notify("BUBBLE BROKEN".to_string(), Rarity::Rare);
         }
@@ -336,9 +336,9 @@ impl Game {
     }
 
     /// The range closers: what makes holding a safe distance a poor plan. An elder that has been
-    /// hurt from beyond `SNIPE_RANGE` for `SNIPE_AFTER` seconds lunges at the ship (the ones
+    /// hurt from beyond `snipe_range` for `snipe_after` seconds lunges at the ship (the ones
     /// without a closer of their own: a juggernaut charges, a phantom blinks, a lasher reels and a
-    /// maelstrom pulls already), and any elder with the ship beyond `BARRAGE_RANGE` plants and
+    /// maelstrom pulls already), and any elder with the ship beyond `barrage_range` plants and
     /// sends a telegraphed fan of slow shots at where the ship will be.
     #[allow(clippy::too_many_arguments)]
     fn closers(
@@ -353,11 +353,11 @@ impl Game {
     ) {
         let (at, hurt) = {
             let b = &self.bodies[index];
-            (b.position, b.since_hit < t::SNIPE_WINDOW)
+            (b.position, b.since_hit < self.tune.snipe_window)
         };
         let to_ship = ship.0 - at;
         let distance = to_ship.length();
-        if hurt && distance > t::SNIPE_RANGE {
+        if hurt && distance > self.tune.snipe_range {
             state.sniped += dt;
         } else {
             state.sniped = (state.sniped - 0.5 * dt).max(0.0);
@@ -365,29 +365,39 @@ impl Game {
         state.barrage_clock -= dt;
         let radius = self.bodies[index].radius;
         state.mv = match state.mv {
-            Move::Idle if alert && state.sniped >= t::SNIPE_AFTER && lunges(archetype) => {
+            Move::Idle if alert && state.sniped >= self.tune.snipe_after && lunges(archetype) => {
                 state.sniped = 0.0;
-                self.effect(at, radius * 2.6, t::LUNGE_WINDUP, EffectKind::Respawn);
-                Move::LungeWind(t::LUNGE_WINDUP, to_ship.normalize_or_zero())
+                self.effect(
+                    at,
+                    radius * 2.6,
+                    self.tune.lunge_windup,
+                    EffectKind::Respawn,
+                );
+                Move::LungeWind(self.tune.lunge_windup, to_ship.normalize_or_zero())
             }
             Move::Idle
                 if alert
-                    && distance > t::BARRAGE_RANGE
+                    && distance > self.tune.barrage_range
                     && state.barrage_clock <= 0.0
                     && state.clock <= 0.0 =>
             {
-                let lead = ship.0 + ship.1 * t::BARRAGE_LEAD;
+                let lead = ship.0 + ship.1 * self.tune.barrage_lead;
                 let aim = (lead - at).normalize_or_zero();
-                self.effect(at, radius * 2.8, t::BARRAGE_WINDUP, EffectKind::Respawn);
+                self.effect(
+                    at,
+                    radius * 2.8,
+                    self.tune.barrage_windup,
+                    EffectKind::Respawn,
+                );
                 for k in 1..=3 {
                     self.effect(
                         at + aim * (300.0 * k as f32),
                         26.0,
-                        t::BARRAGE_WINDUP,
+                        self.tune.barrage_windup,
                         EffectKind::Pair,
                     );
                 }
-                Move::BarrageWind(t::BARRAGE_WINDUP, aim)
+                Move::BarrageWind(self.tune.barrage_windup, aim)
             }
             Move::LungeWind(left, _) if left > dt => {
                 let body = &mut self.bodies[index];
@@ -396,10 +406,10 @@ impl Game {
                 body.angle = aim.y.atan2(aim.x);
                 Move::LungeWind(left - dt, aim)
             }
-            Move::LungeWind(_, aim) => Move::Lunge(t::LUNGE_TIME, aim),
+            Move::LungeWind(_, aim) => Move::Lunge(self.tune.lunge_time, aim),
             Move::Lunge(left, aim) if left > dt => {
                 let body = &mut self.bodies[index];
-                body.velocity = aim * t::LUNGE_SPEED;
+                body.velocity = aim * self.tune.lunge_speed;
                 body.angle = aim.y.atan2(aim.x);
                 Move::Lunge(left - dt, aim)
             }
@@ -419,19 +429,31 @@ impl Game {
                     let b = &self.bodies[index];
                     (b.position + aim * (b.radius + 8.0), b.genes.sharpness())
                 };
-                let shots = pick(t::BARRAGE_SHOTS, enraged);
+                let shots = pick(
+                    (
+                        self.tune.barrage_shots_calm,
+                        self.tune.barrage_shots_enraged,
+                    ),
+                    enraged,
+                );
                 let muzzle = weapons::Muzzle {
                     civilization: None,
                     origin,
                     aim,
                     velocity: Vec2::ZERO,
-                    reach: t::BARRAGE_REACH,
-                    shot_speed: t::BARRAGE_SPEED,
-                    sharpness: sharp * t::BARRAGE_SHARE,
+                    reach: self.tune.barrage_reach,
+                    shot_speed: self.tune.barrage_speed,
+                    sharpness: sharp * self.tune.barrage_share,
                     pith: 0.0,
                 };
                 self.discharge(crate::genome::Weapon::Projectile, shots, &muzzle, 0.0);
-                state.barrage_clock = pick(t::BARRAGE_EVERY, enraged);
+                state.barrage_clock = pick(
+                    (
+                        self.tune.barrage_every_calm,
+                        self.tune.barrage_every_enraged,
+                    ),
+                    enraged,
+                );
                 Move::Idle
             }
             other => other,
@@ -594,7 +616,7 @@ impl Game {
             if let Some(key) = body.origin
                 && !self.apex_seen.contains(&key)
                 && !stirred.iter().any(|(seen, _)| *seen == key)
-                && body.position.distance(ship) < t::APEX_NOTICE_RANGE
+                && body.position.distance(ship) < self.tune.apex_notice_range
                 && let Some(info) = self.apexes.get(&key)
             {
                 stirred.push((key, info.name.clone()));
@@ -607,7 +629,7 @@ impl Game {
         }
     }
 
-    /// The nearest living apex within `APEX_HUD_RANGE`, for the HUD and the arrows.
+    /// The nearest living apex within `apex_hud_range`, for the HUD and the arrows.
     pub fn apex_report(&self) -> Option<ApexReport> {
         let ship = self.player()?.position;
         self.bodies
@@ -626,7 +648,7 @@ impl Game {
                 resist: self.resistance_of(b.id).unwrap_or([0.0; 4]),
                 bubble: self.apex_bubble(b),
             })
-            .filter(|r| r.distance <= t::APEX_HUD_RANGE)
+            .filter(|r| r.distance <= self.tune.apex_hud_range)
             .min_by(|a, b| a.distance.total_cmp(&b.distance))
     }
 
@@ -641,7 +663,7 @@ impl Game {
         let share = if info.rank == Rank::Major { 1.0 } else { 0.5 };
         self.score = self
             .score
-            .saturating_add((t::APEX_SCORE * share * body.genes.threat) as u64);
+            .saturating_add((self.tune.apex_score * share * body.genes.threat) as u64);
         self.run.apex_slain.push(info.name.clone());
         self.notify(format!("APEX SLAIN: {}", info.name), Rarity::Epic);
         self.cue(Cue::Extirpated);
@@ -666,7 +688,7 @@ impl Game {
             Material::Biomass,
         ]
         .into_iter()
-        .map(|m| Item::Material(m, (t::APEX_MATERIAL * share).round()))
+        .map(|m| Item::Material(m, (self.tune.apex_material * share).round()))
         .collect()
     }
 }
@@ -1069,7 +1091,7 @@ mod tests {
                 _ => None,
             })
             .sum();
-        assert!(metal >= t::APEX_MATERIAL);
+        assert!(metal >= DEFAULT_TUNING.apex_material);
         assert!(
             game.run_report()
                 .lines
@@ -1642,8 +1664,8 @@ mod tests {
         for profile in Profile::ALL {
             assert!(profile.reach().floor >= 0.35);
         }
-        const { assert!(t::ADAPT_MAX <= 0.6 && t::BUBBLE_LEAK >= 0.1) };
-        const { assert!(t::HEAVY_SLOW_FLOOR >= 0.5 && t::RECOIL_CAP <= 40.0) };
+        const { assert!(DEFAULT_TUNING.adapt_max <= 0.6 && DEFAULT_TUNING.bubble_leak >= 0.1) };
+        const { assert!(DEFAULT_TUNING.heavy_slow_floor >= 0.5 && DEFAULT_TUNING.recoil_cap <= 40.0) };
     }
 
     /// A far shot lands for less than a near one (its profile's falloff), a heavy one is slower,
@@ -1666,11 +1688,11 @@ mod tests {
                 heavy_shot(damage, &DEFAULT_TUNING),
                 recoil_of(damage, Profile::Stock, &DEFAULT_TUNING),
             );
-            assert!(s <= slow + 1e-6 && s >= t::HEAVY_SLOW_FLOOR - 1e-6);
-            assert!(r + 1e-6 >= kick && r <= t::RECOIL_CAP + 1e-6);
+            assert!(s <= slow + 1e-6 && s >= DEFAULT_TUNING.heavy_slow_floor - 1e-6);
+            assert!(r + 1e-6 >= kick && r <= DEFAULT_TUNING.recoil_cap + 1e-6);
             (slow, kick) = (s, r);
         }
-        assert!(slow < 0.75 && kick == t::RECOIL_CAP);
+        assert!(slow < 0.75 && kick == DEFAULT_TUNING.recoil_cap);
         assert!(
             recoil_of(200.0, Profile::Pierce, &DEFAULT_TUNING)
                 > recoil_of(200.0, Profile::Needles, &DEFAULT_TUNING)
@@ -1734,14 +1756,29 @@ mod tests {
         };
         let far = body.position + Vec2::new(0.0, 1500.0);
         let near = body.position + Vec2::new(0.0, 300.0);
-        let (f_far, close_far) =
-            shield_factor(&game.apexes, &game.apex_state, &body, &shot(far, 0));
-        let (f_near, close_near) =
-            shield_factor(&game.apexes, &game.apex_state, &body, &shot(near, 0));
-        let (f_lance, close_lance) =
-            shield_factor(&game.apexes, &game.apex_state, &body, &shot(far, 1));
+        let (f_far, close_far) = shield_factor(
+            &game.apexes,
+            &game.apex_state,
+            &body,
+            &shot(far, 0),
+            &DEFAULT_TUNING,
+        );
+        let (f_near, close_near) = shield_factor(
+            &game.apexes,
+            &game.apex_state,
+            &body,
+            &shot(near, 0),
+            &DEFAULT_TUNING,
+        );
+        let (f_lance, close_lance) = shield_factor(
+            &game.apexes,
+            &game.apex_state,
+            &body,
+            &shot(far, 1),
+            &DEFAULT_TUNING,
+        );
         // A warden has no plated front: only the bubble is in play.
-        assert!((f_far - t::BUBBLE_LEAK).abs() < 1e-6 && !close_far);
+        assert!((f_far - DEFAULT_TUNING.bubble_leak).abs() < 1e-6 && !close_far);
         assert!(
             (f_near - 1.0).abs() < 1e-6 && close_near,
             "a close shot goes through"
@@ -1752,16 +1789,22 @@ mod tests {
         );
         // Close damage wears the bubble down, and it breaks, stays down and re-forms.
         let pool = body.max_health + body.max_shield;
-        game.bubble_hit(id, pool * t::BUBBLE_BREAK * 0.5);
+        game.bubble_hit(id, pool * DEFAULT_TUNING.bubble_break * 0.5);
         let half = game.apex_bubble(apex_body(&game, id)).unwrap();
         assert!((half - 0.5).abs() < 0.02, "{half}");
-        game.bubble_hit(id, pool * t::BUBBLE_BREAK);
+        game.bubble_hit(id, pool * DEFAULT_TUNING.bubble_break);
         assert_eq!(game.apex_bubble(apex_body(&game, id)), Some(0.0));
         let body = apex_body(&game, id).clone();
-        let (f_down, _) = shield_factor(&game.apexes, &game.apex_state, &body, &shot(far, 0));
+        let (f_down, _) = shield_factor(
+            &game.apexes,
+            &game.apex_state,
+            &body,
+            &shot(far, 0),
+            &DEFAULT_TUNING,
+        );
         assert_eq!(f_down, 1.0, "no bubble while it is down");
         game.player_invulnerability = 1e9;
-        for _ in 0..((t::BUBBLE_DOWN + 1.0) / 0.1) as usize {
+        for _ in 0..((DEFAULT_TUNING.bubble_down + 1.0) / 0.1) as usize {
             set_player(
                 &mut game,
                 body.position + Vec2::new(0.0, 5000.0),
@@ -1813,7 +1856,7 @@ mod tests {
                     })
                     .map(|b| (b.position, b.velocity))
                     .collect();
-                if slow.len() >= usize::from(t::BARRAGE_SHOTS.0) {
+                if slow.len() >= usize::from(DEFAULT_TUNING.barrage_shots_calm) {
                     fired = now;
                     shots = slow;
                 }
@@ -1824,10 +1867,10 @@ mod tests {
         }
         let warned = warned.expect("a barrage was telegraphed");
         assert!(
-            fired - warned >= t::BARRAGE_WINDUP - 0.2,
+            fired - warned >= DEFAULT_TUNING.barrage_windup - 0.2,
             "warned {warned}, fired {fired}"
         );
-        assert!(shots.len() >= usize::from(t::BARRAGE_SHOTS.0));
+        assert!(shots.len() >= usize::from(DEFAULT_TUNING.barrage_shots_calm));
         // Neighbouring shots are far enough apart, once they have flown to the ship, to fly between.
         let mut angles: Vec<f32> = shots.iter().map(|(_, v)| v.to_angle()).collect();
         angles.sort_by(f32::total_cmp);
@@ -1841,7 +1884,7 @@ mod tests {
         assert!(
             shots
                 .iter()
-                .all(|(_, v)| v.length() <= t::BARRAGE_SPEED + 40.0)
+                .all(|(_, v)| v.length() <= DEFAULT_TUNING.barrage_speed + 40.0)
         );
     }
 
@@ -1874,7 +1917,7 @@ mod tests {
             }
         }
         assert!(wound, "a lunge was telegraphed");
-        assert!(fastest >= t::LUNGE_SPEED * 0.9, "{fastest}");
+        assert!(fastest >= DEFAULT_TUNING.lunge_speed * 0.9, "{fastest}");
     }
 
     /// The elders of a realm carry its signature: blinks in the veil, jams in the dead reach, a

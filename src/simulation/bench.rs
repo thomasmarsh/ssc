@@ -657,7 +657,7 @@ impl Game {
                 let organs = &self.loadout.organs;
                 let slots = self.loadout.skills.organ_slots();
                 row.text = o.label().into();
-                row.detail = o.summary();
+                row.detail = o.summary(&self.tune);
                 if let Some(strain) = organs.strain(o) {
                     row.text += &format!("   {}/3 x{:.1}", strain.level, strain.magnitude);
                     if organs.is_fitted(o) {
@@ -675,13 +675,13 @@ impl Game {
                             row.detail += ". Needs SYMBIOSIS for an organ slot.";
                         }
                         if !organs.grafted(o) {
-                            row.costs = graft_price(&strain).to_vec();
+                            row.costs = graft_price(&strain, &self.tune).to_vec();
                         }
                         row.detail += &format!(
                             ". Slots {}/{}; upkeep {:.1} biomass/min.",
                             organs.fitted().len(),
                             slots,
-                            tuning::ORGAN_UPKEEP
+                            self.tune.organ_upkeep
                         );
                         if slots > 0 && organs.fitted().len() >= slots {
                             row.detail +=
@@ -1328,11 +1328,14 @@ mod tests {
             let before = game.cargo;
             game.bench_confirm();
             assert_eq!(game.cargo, before);
-            game.loadout.organs.acquire(Strain {
-                organ,
-                level: 1,
-                magnitude: 1.0,
-            });
+            game.loadout.organs.acquire(
+                Strain {
+                    organ,
+                    level: 1,
+                    magnitude: 1.0,
+                },
+                &DEFAULT_TUNING,
+            );
         }
         assert_eq!(selected(&game).state, "LOCKED");
         game.loadout.skills.raise(Skill::Symbiosis);
@@ -1397,9 +1400,10 @@ mod tests {
         let mut game = setup();
         game.loadout.skills.raise(Skill::Symbiosis);
         funds(&mut game);
-        game.loadout
-            .organs
-            .acquire(Strain::from_donor(Organ::Remora, &Genome::remora()));
+        game.loadout.organs.acquire(
+            Strain::from_donor(Organ::Remora, &Genome::remora()),
+            &DEFAULT_TUNING,
+        );
         game.bench_select(BenchAction::Organ(Organ::Remora));
         game.bench_confirm();
         game.loadout.skills = skills::Skills::default();

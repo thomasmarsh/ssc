@@ -677,12 +677,22 @@ mod tests {
         assert!(game.body(id).is_none(), "the remora joined the ship");
         assert_eq!(game.loadout.organs.strain(Organ::Remora).unwrap().level, 1);
         // It works at once, without a slot, and for a limited time.
-        assert!(game.loadout.organs.perk(Organ::Remora).is_some());
+        assert!(
+            game.loadout
+                .organs
+                .perk(Organ::Remora, &DEFAULT_TUNING)
+                .is_some()
+        );
         assert_eq!(game.loadout.organs.fitted().len(), 0);
-        for _ in 0..(super::tuning::BOND_LOAN / DT) as usize + 5 {
+        for _ in 0..(DEFAULT_TUNING.bond_loan / DT) as usize + 5 {
             game.update_organs(DT);
         }
-        assert!(game.loadout.organs.perk(Organ::Remora).is_none());
+        assert!(
+            game.loadout
+                .organs
+                .perk(Organ::Remora, &DEFAULT_TUNING)
+                .is_none()
+        );
         assert!(game.loadout.organs.owns(Organ::Remora));
     }
 

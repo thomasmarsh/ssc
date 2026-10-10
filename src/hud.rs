@@ -544,7 +544,7 @@ pub fn draw_apex(g: &mut Gizmos, game: &Game, s: &Screen, y: f32) {
         .enumerate()
     {
         let meter = apex.resist[k];
-        if meter < ssc::simulation::tuning::ADAPT_SHOWN {
+        if meter < game.tune.adapt_shown {
             continue;
         }
         let [r, gr, b] = family.tint();

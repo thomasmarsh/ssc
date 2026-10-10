@@ -1,19 +1,18 @@
 //! Renewable planetoids: some planetoids (a share chosen by a hash of the spawn key, see
 //! `mining::renewable`) slowly regrow the ore the beam took, so there is a reason to come back.
-//! Regrowth runs at `REGROW_RATE` ore per second of game time while the sector is loaded, and
+//! Regrowth runs at `regrow_rate` ore per second of game time while the sector is loaded, and
 //! is caught up from a timestamp when it reloads, so leaving a planetoid alone for a while
 //! refills it and unloading never refreshes or stalls one. Only game time matters, so the
 //! result is deterministic. Rocks other than planetoids never regrow.
 
 use super::mining::{quantize, renewable};
-use super::tuning as t;
 use super::*;
 
 impl Game {
     /// Ore a renewable planetoid has regrown since `since`, for a sector that was not loaded.
     pub(super) fn regrown_since(&self, key: (SectorId, u32), since: f32) -> f32 {
-        if renewable(self.seed, key) {
-            ((self.time - since).max(0.0)) * t::REGROW_RATE
+        if renewable(self.seed, key, &self.tune) {
+            ((self.time - since).max(0.0)) * self.tune.regrow_rate
         } else {
             0.0
         }
@@ -28,12 +27,12 @@ impl Game {
                 continue;
             }
             let Some(key) = body.origin else { continue };
-            if !self.mined.contains_key(&key) || !renewable(seed, key) {
+            if !self.mined.contains_key(&key) || !renewable(seed, key, &self.tune) {
                 continue;
             }
             body.init_lode();
             let full = body.lode.full;
-            let ore = (body.lode.ore + t::REGROW_RATE * dt).min(full);
+            let ore = (body.lode.ore + self.tune.regrow_rate * dt).min(full);
             body.set_ore(ore);
             if ore >= full - 1e-3 {
                 self.mined.remove(&key);
@@ -47,7 +46,10 @@ impl Game {
 
     /// Whether this planetoid is a renewable one (for the HUD and tests).
     pub fn is_renewable(&self, body: &Body) -> bool {
-        body.rock == RockKind::Planetoid && body.origin.is_some_and(|k| renewable(self.seed, k))
+        body.rock == RockKind::Planetoid
+            && body
+                .origin
+                .is_some_and(|k| renewable(self.seed, k, &self.tune))
     }
 }
 
@@ -60,7 +62,7 @@ mod tests {
     fn planetoid(game: &mut Game, want_renewable: bool, spent: f32) -> (u64, (SectorId, u32)) {
         let sector = SectorId { x: 0, y: 0 };
         let index = (1..500)
-            .find(|&i| renewable(game.seed, (sector, i)) == want_renewable)
+            .find(|&i| renewable(game.seed, (sector, i), &DEFAULT_TUNING) == want_renewable)
             .unwrap();
         let key = (sector, index);
         let id = super::super::tests::add(game, BodyKind::Asteroid, Vec2::new(0.0, 1500.0));
@@ -99,14 +101,18 @@ mod tests {
                         },
                         i as u32,
                     ),
+                    &DEFAULT_TUNING,
                 )
             })
             .count();
         let share = hits as f32 / n as f32;
-        assert!((share - t::RENEWABLE_SHARE).abs() < 0.06, "{share}");
+        assert!(
+            (share - DEFAULT_TUNING.renewable_share).abs() < 0.06,
+            "{share}"
+        );
         assert_eq!(
-            renewable(42, (SectorId { x: 3, y: -2 }, 7)),
-            renewable(42, (SectorId { x: 3, y: -2 }, 7))
+            renewable(42, (SectorId { x: 3, y: -2 }, 7), &DEFAULT_TUNING),
+            renewable(42, (SectorId { x: 3, y: -2 }, 7), &DEFAULT_TUNING)
         );
     }
 
@@ -119,7 +125,7 @@ mod tests {
         run(&mut game, 20.0);
         let gain = ore(&game, a) - a0;
         assert!(
-            (gain - 20.0 * t::REGROW_RATE).abs() < 0.2,
+            (gain - 20.0 * DEFAULT_TUNING.regrow_rate).abs() < 0.2,
             "regrew {gain} in 20 s"
         );
         assert_eq!(ore(&game, b), b0, "an ordinary planetoid stays spent");
@@ -129,7 +135,7 @@ mod tests {
     fn regrowth_stops_at_full_and_forgets_the_wound() {
         let mut game = empty_game();
         let (id, key) = planetoid(&mut game, true, 5.0);
-        run(&mut game, 5.0 / t::REGROW_RATE + 2.0);
+        run(&mut game, 5.0 / DEFAULT_TUNING.regrow_rate + 2.0);
         let body = game.body(id).unwrap();
         assert!((body.lode.ore - body.lode.full).abs() < 1e-2);
         assert!(!game.mined.contains_key(&key), "nothing left to remember");
@@ -147,7 +153,7 @@ mod tests {
         // Sixty seconds pass while the sector is away: the same sum a reload applies.
         game.time += 60.0;
         let back = game.regrown_since(key, stamp);
-        assert!((back - 60.0 * t::REGROW_RATE).abs() < 1e-3);
+        assert!((back - 60.0 * DEFAULT_TUNING.regrow_rate).abs() < 1e-3);
         assert!(spent_then > back, "still partly spent after a minute");
         assert_eq!(game.regrown_since(key, game.time), 0.0);
         // A fresh body for the same planetoid comes back with the catch-up applied.
@@ -167,7 +173,7 @@ mod tests {
         plain.radius = 300.0;
         let other = (1..500)
             .map(|i| (key.0, i))
-            .find(|&k| !renewable(game.seed, k))
+            .find(|&k| !renewable(game.seed, k, &DEFAULT_TUNING))
             .unwrap();
         plain.origin = Some(other);
         game.mined.insert(other, 100.0);

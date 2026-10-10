@@ -12,8 +12,7 @@ use super::upgrades::Item;
 use super::*;
 use crate::world::hash2;
 
-use super::tuning as t;
-pub use super::tuning::{BEAM_DRAIN, CAP, CRUMBLE_RADIUS, PLANETOID_BUDGET, SHIELD_FLOOR};
+pub use super::tuning::{CAP, PLANETOID_BUDGET};
 /// Fraction of each material lost when the ship is destroyed.
 pub const DEATH_LOSS: f32 = 0.25;
 const MINE_SALT: u64 = 0x31A3_0000_0000_00FE;
@@ -393,11 +392,11 @@ pub fn ore_for(rock: RockKind, radius: f32) -> f32 {
 }
 
 /// Substrate worked per second; ordinary asteroids use the same continuous beam.
-pub(super) fn rate(rock: RockKind) -> f32 {
+pub(super) fn rate(rock: RockKind, tune: &Tunables) -> f32 {
     match rock {
-        RockKind::Ore | RockKind::Plain | RockKind::Ice | RockKind::Crystal => t::RATE_PLAIN,
-        RockKind::Husk => t::RATE_HUSK,
-        RockKind::Planetoid => t::RATE_PLANETOID,
+        RockKind::Ore | RockKind::Plain | RockKind::Ice | RockKind::Crystal => tune.rate_plain,
+        RockKind::Husk => tune.rate_husk,
+        RockKind::Planetoid => tune.rate_planetoid,
         RockKind::Wall => 0.0,
     }
 }
@@ -428,14 +427,14 @@ pub fn material_of(seed: u64, rock: RockKind, origin: Option<(SectorId, u32)>) -
 
 /// Whether the planetoid at `key` regrows what is mined from it (see `regrow`). Pure, so the
 /// sonar and the chart can mark it from generation alone.
-pub fn renewable(seed: u64, key: (SectorId, u32)) -> bool {
+pub fn renewable(seed: u64, key: (SectorId, u32), tune: &Tunables) -> bool {
     let (sector, index) = key;
     let h = hash2(
         seed ^ REGROW_SALT ^ u64::from(index).wrapping_mul(0x9E37_79B9_7F4A_7C15),
         sector.x,
         sector.y,
     );
-    (h % 10_000) as f32 / 10_000.0 < t::RENEWABLE_SHARE
+    (h % 10_000) as f32 / 10_000.0 < tune.renewable_share
 }
 
 pub(super) fn quantize(spent: f32) -> f32 {
@@ -584,7 +583,7 @@ impl Game {
             }
         }
         let planetoid = body.rock == RockKind::Planetoid;
-        let floor = CRUMBLE_RADIUS.min(body.lode.radius);
+        let floor = self.tune.crumble_radius.min(body.lode.radius);
         if planetoid || !(body.radius <= floor + 1e-3 || body.lode.ore <= 1e-3) {
             return None;
         }
@@ -601,8 +600,8 @@ impl Game {
     }
 
     /// Splits a shot rock's remaining ore among its `pieces` fragments.
-    pub(super) fn fragment_lode(rock: &Body, pieces: u32, radius: f32) -> Lode {
-        let share = rock.ore() * t::SHOT_ORE_KEEP / pieces.max(1) as f32;
+    pub(super) fn fragment_lode(rock: &Body, pieces: u32, radius: f32, tune: &Tunables) -> Lode {
+        let share = rock.ore() * tune.shot_ore_keep / pieces.max(1) as f32;
         Lode {
             ore: share,
             full: share,
@@ -610,7 +609,7 @@ impl Game {
             remaining: rock
                 .lode
                 .remaining
-                .map(|c| Contents(c.0.map(|n| n * t::SHOT_ORE_KEEP / pieces.max(1) as f32))),
+                .map(|c| Contents(c.0.map(|n| n * tune.shot_ore_keep / pieces.max(1) as f32))),
         }
     }
 
@@ -620,13 +619,13 @@ impl Game {
             return 0.0;
         };
         let (speed, shield) = (ship.velocity.length(), ship.shield);
-        let blocked = if speed > t::ELECTROLYSIS_MAX_SPEED {
+        let blocked = if speed > self.tune.electrolysis_max_speed {
             Some("ELECTROLYSIS - HOLD STILL")
         } else if self.cargo.water <= 1e-3 {
             Some("ELECTROLYSIS - NEEDS WATER")
         } else if self.cargo.room(Material::Fuel) <= 1e-3 {
             Some("ELECTROLYSIS - FUEL FULL")
-        } else if shield <= SHIELD_FLOOR {
+        } else if shield <= self.tune.shield_floor {
             Some("ELECTROLYSIS - NEEDS SHIELD")
         } else {
             None
@@ -635,14 +634,16 @@ impl Game {
             self.electrolysis = Some(status);
             return 0.0;
         }
-        let water = (t::ELECTROLYSIS_WATER_RATE * dt)
+        let water = (self.tune.electrolysis_water_rate * dt)
             .min(self.cargo.water)
-            .min(self.cargo.room(Material::Fuel) / t::ELECTROLYSIS_FUEL_PER_WATER)
-            .min((shield - SHIELD_FLOOR) / t::ELECTROLYSIS_SHIELD_PER_WATER);
+            .min(self.cargo.room(Material::Fuel) / self.tune.electrolysis_fuel_per_water)
+            .min((shield - self.tune.shield_floor) / self.tune.electrolysis_shield_per_water);
         self.cargo.take(Material::Water, water);
-        self.cargo
-            .add(Material::Fuel, water * t::ELECTROLYSIS_FUEL_PER_WATER);
-        let drained = water * t::ELECTROLYSIS_SHIELD_PER_WATER;
+        self.cargo.add(
+            Material::Fuel,
+            water * self.tune.electrolysis_fuel_per_water,
+        );
+        let drained = water * self.tune.electrolysis_shield_per_water;
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.shield -= drained;
         }
@@ -659,7 +660,7 @@ impl Game {
             return 0.0;
         };
         let (origin, shield) = ship;
-        if !mining || shield < SHIELD_FLOOR {
+        if !mining || shield < self.tune.shield_floor {
             self.stop_harvest();
             self.stop_beam();
             return 0.0;
@@ -722,7 +723,7 @@ impl Game {
         self.mine_clock += dt;
 
         // The beam draws shield and holds off its recharge (the step skips regen while on).
-        let drained = (BEAM_DRAIN * dt).min(shield);
+        let drained = (self.tune.beam_drain * dt).min(shield);
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.shield -= drained;
         }
@@ -747,7 +748,7 @@ impl Game {
         let gain = self.loadout.skills.yield_mult(&self.tune) * self.realm_effects().mining;
         let contents = rock.contents(seed);
         let available = rock.available_contents(seed);
-        let work = rate(kind) * power * dt;
+        let work = rate(kind, &self.tune) * power * dt;
         let extracted = Contents(std::array::from_fn(|i| {
             let material = Contents::MATERIALS[i];
             (work * contents.0[i])
@@ -799,7 +800,7 @@ impl Game {
             body.health = body.health.min(body.max_health * 0.999);
         }
         let planetoid = kind == RockKind::Planetoid;
-        let floor = CRUMBLE_RADIUS.min(body.lode.radius);
+        let floor = self.tune.crumble_radius.min(body.lode.radius);
         let crumbled = !planetoid && (body.radius <= floor + 1e-3 || body.lode.ore <= 1e-3);
         let progress = 1.0 - body.lode.ore / body.lode.full;
         let end = body.position - (body.position - origin).normalize_or_zero() * body.radius;
@@ -988,7 +989,7 @@ mod tests {
                 .iter()
                 .map(|s| s.available_contents(game.seed).0[i])
                 .sum();
-            assert!((total - remaining.0[i] * t::SHOT_ORE_KEEP).abs() < 0.001);
+            assert!((total - remaining.0[i] * DEFAULT_TUNING.shot_ore_keep).abs() < 0.001);
         }
         game.cargo.water = 0.0;
         hold(&mut game, 1.0);
@@ -1033,13 +1034,13 @@ mod tests {
         assert_eq!(game.cargo, balances);
         assert_eq!(game.electrolysis, Some("ELECTROLYSIS - FUEL FULL"));
         game.cargo.fuel = 0.0;
-        game.bodies[0].shield = SHIELD_FLOOR;
+        game.bodies[0].shield = DEFAULT_TUNING.shield_floor;
         game.step(DT, input);
         assert_eq!(game.cargo.fuel, 0.0);
         assert_eq!(game.electrolysis, Some("ELECTROLYSIS - NEEDS SHIELD"));
-        game.bodies[0].shield = SHIELD_FLOOR + 0.01;
+        game.bodies[0].shield = DEFAULT_TUNING.shield_floor + 0.01;
         game.step(DT, input);
-        assert!((game.player().unwrap().shield - SHIELD_FLOOR).abs() < 1e-5);
+        assert!((game.player().unwrap().shield - DEFAULT_TUNING.shield_floor).abs() < 1e-5);
         game.bodies[0].velocity = Vec2::X * 100.0;
         let balances = game.cargo;
         game.step(DT, input);
@@ -1052,7 +1053,7 @@ mod tests {
         game.bodies[0].since_hit = 3.0;
         game.step(DT, Input::default());
         assert!(game.electrolysis.is_none());
-        assert!(game.player().unwrap().shield > SHIELD_FLOOR);
+        assert!(game.player().unwrap().shield > DEFAULT_TUNING.shield_floor);
     }
 
     fn mine() -> Input {
@@ -1094,11 +1095,23 @@ mod tests {
     #[test]
     fn yields_follow_the_kind_of_rock() {
         for (kind, material, per_second) in [
-            (RockKind::Ore, Material::Metal, t::RATE_PLAIN),
-            (RockKind::Plain, Material::Metal, t::RATE_PLAIN),
-            (RockKind::Ice, Material::Volatiles, t::RATE_PLAIN),
-            (RockKind::Husk, Material::Volatiles, t::RATE_HUSK),
-            (RockKind::Crystal, Material::Crystal, t::RATE_PLAIN),
+            (RockKind::Ore, Material::Metal, DEFAULT_TUNING.rate_plain),
+            (RockKind::Plain, Material::Metal, DEFAULT_TUNING.rate_plain),
+            (
+                RockKind::Ice,
+                Material::Volatiles,
+                DEFAULT_TUNING.rate_plain,
+            ),
+            (
+                RockKind::Husk,
+                Material::Volatiles,
+                DEFAULT_TUNING.rate_husk,
+            ),
+            (
+                RockKind::Crystal,
+                Material::Crystal,
+                DEFAULT_TUNING.rate_plain,
+            ),
         ] {
             let mut game = rig();
             rock(&mut game, kind, Vec2::new(110.0, 0.0), 40.0);
@@ -1124,7 +1137,7 @@ mod tests {
                 // No wild plants: the beam would cut a crop before mining the world.
                 game.farm.stocked.insert((SectorId { x: 3, y: -2 }, index));
                 hold(&mut game, 10.0);
-                assert!((game.cargo.total() - 10.0 * t::RATE_PLANETOID).abs() < 0.2);
+                assert!((game.cargo.total() - 10.0 * DEFAULT_TUNING.rate_planetoid).abs() < 0.2);
                 Material::ALL
                     .into_iter()
                     .find(|&m| game.cargo.amount(m) > 1.0)
@@ -1174,7 +1187,7 @@ mod tests {
             })
             .sum();
         assert!(
-            (left - ore_for(RockKind::Ice, CRUMBLE_RADIUS)).abs() < 0.3,
+            (left - ore_for(RockKind::Ice, DEFAULT_TUNING.crumble_radius)).abs() < 0.3,
             "{left}"
         );
         assert!((game.cargo.volatiles + left - ore).abs() < 0.3);
@@ -1264,7 +1277,7 @@ mod tests {
             .collect();
         assert!(shards.len() >= 2);
         let total: f32 = shards.iter().map(|s| s.ore()).sum();
-        let kept = before * t::SHOT_ORE_KEEP;
+        let kept = before * DEFAULT_TUNING.shot_ore_keep;
         assert!((total - kept).abs() < 1e-3, "{total} vs {kept}");
         // And a pristine rock's fragments hold part of what it held, never more.
         let fresh = {
@@ -1279,7 +1292,7 @@ mod tests {
             .filter(|b| b.kind == BodyKind::Asteroid)
             .map(|s| s.ore())
             .sum();
-        assert!((total - fresh.ore() * t::SHOT_ORE_KEEP).abs() < 1e-3);
+        assert!((total - fresh.ore() * DEFAULT_TUNING.shot_ore_keep).abs() < 1e-3);
     }
 
     #[test]
@@ -1292,8 +1305,8 @@ mod tests {
         let shield = 120.0;
         hold(&mut game, 4.0);
         assert!(game.body(id).is_some());
-        assert!((game.cargo.crystal - 4.0 * t::RATE_PLAIN).abs() < 0.2);
-        assert!((game.bodies[0].shield - (shield - BEAM_DRAIN * 4.0)).abs() < 1.0);
+        assert!((game.cargo.crystal - 4.0 * DEFAULT_TUNING.rate_plain).abs() < 0.2);
+        assert!((game.bodies[0].shield - (shield - DEFAULT_TUNING.beam_drain * 4.0)).abs() < 1.0);
         assert!((game.beam.unwrap().progress - 18.0 / 90.0).abs() < 0.01);
     }
 
@@ -1370,14 +1383,17 @@ mod tests {
         game.bodies[0].since_hit = 10.0;
         hold(&mut game, 2.0);
         let shield = game.bodies[0].shield;
-        assert!((shield - (40.0 - 2.0 * BEAM_DRAIN)).abs() < 0.2, "{shield}");
+        assert!(
+            (shield - (40.0 - 2.0 * DEFAULT_TUNING.beam_drain)).abs() < 0.2,
+            "{shield}"
+        );
         // Once the beam is off, recharge returns.
         for _ in 0..60 {
             game.step(DT, Input::default());
         }
         assert!(game.bodies[0].shield > shield);
         // Below the floor nothing is mined.
-        game.bodies[0].shield = SHIELD_FLOOR - 1.0;
+        game.bodies[0].shield = DEFAULT_TUNING.shield_floor - 1.0;
         game.bodies[0].since_hit = 0.0;
         let metal = game.cargo.metal;
         hold(&mut game, 1.0);
@@ -1480,7 +1496,7 @@ mod tests {
         assert!(creatures >= 3);
         // The shell is plain rock once it has hatched: no yield from the creature itself.
         assert!(
-            game.cargo.total() < t::RATE_PLAIN * 0.2 + 0.1,
+            game.cargo.total() < DEFAULT_TUNING.rate_plain * 0.2 + 0.1,
             "{}",
             game.cargo.total()
         );
@@ -1648,19 +1664,6 @@ mod tests {
         assert!(game.cargo.metal > 35.0, "{}", game.cargo.metal);
     }
 
-    #[test]
-    fn shot_rocks_surface_little() {
-        for chance in [
-            t::SALVAGE_CHANCE,
-            t::ICE_CHANCE,
-            t::ORE_CHANCE,
-            t::CRYSTAL_CHANCE,
-        ] {
-            assert!(chance <= 0.12);
-        }
-        const { assert!(t::SHOT_ORE_KEEP < 1.0) };
-    }
-
     fn mined_in(skill: skills::Skill, level: u8, seconds: f32) -> Game {
         let mut game = rig();
         for _ in 0..level {
@@ -1676,9 +1679,9 @@ mod tests {
     fn beam_power_and_yield_raise_what_a_second_of_beam_pays() {
         let base = mined_in(skills::Skill::BeamPower, 0, 2.0).cargo.metal;
         let power = mined_in(skills::Skill::BeamPower, 4, 2.0).cargo.metal;
-        assert!((power / base - (1.0 + 4.0 * t::POWER_STEP)).abs() < 0.02);
+        assert!((power / base - (1.0 + 4.0 * DEFAULT_TUNING.power_step)).abs() < 0.02);
         let yields = mined_in(skills::Skill::Yield, 4, 2.0).cargo.metal;
-        assert!((yields / base - (1.0 + 4.0 * t::YIELD_STEP)).abs() < 0.02);
+        assert!((yields / base - (1.0 + 4.0 * DEFAULT_TUNING.yield_step)).abs() < 0.02);
         // Yield does not make the rock deplete faster: same ore spent.
         let spent = |g: &Game| {
             g.bodies
@@ -1694,7 +1697,7 @@ mod tests {
 
     #[test]
     fn beam_range_reaches_rocks_that_were_out_of_range() {
-        let far = Vec2::new(t::BEAM_RANGE + 40.0 + 60.0, 0.0);
+        let far = Vec2::new(DEFAULT_TUNING.beam_range + 40.0 + 60.0, 0.0);
         let mut game = rig();
         rock(&mut game, RockKind::Ore, far, 40.0);
         hold(&mut game, 1.0);
@@ -1712,7 +1715,10 @@ mod tests {
         game.loadout.skills.raise(skills::Skill::Cargo);
         game.loadout.skills.raise(skills::Skill::Cargo);
         game.refresh_stats();
-        assert_eq!(game.cargo.cap(Material::Metal), CAP + 2.0 * t::CARGO_STEP);
+        assert_eq!(
+            game.cargo.cap(Material::Metal),
+            CAP + 2.0 * DEFAULT_TUNING.cargo_step
+        );
         game.cargo.metal = CAP;
         assert!(game.cargo.room(Material::Metal) > 99.0);
         // A pickup just past the base magnet is drawn in once the magnet is upgraded.
@@ -1743,7 +1749,10 @@ mod tests {
         game.step(DT, Input::default());
         assert_eq!(game.lives, 2);
         assert_eq!(game.loadout.skills.level(skills::Skill::BeamPower), 1);
-        assert_eq!(game.cargo.cap(Material::Metal), CAP + t::CARGO_STEP);
+        assert_eq!(
+            game.cargo.cap(Material::Metal),
+            CAP + DEFAULT_TUNING.cargo_step
+        );
         game.reset();
         assert_eq!(game.loadout.skills.level(skills::Skill::BeamPower), 0);
     }

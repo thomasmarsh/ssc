@@ -25,7 +25,6 @@
 use super::arsenal::Profile;
 use super::digest::{DetMap, DetSet};
 use super::skills::{Skill, SkillTab};
-use super::tuning as t;
 use super::upgrades::Rarity;
 use super::*;
 use crate::genome::ROOT_ARMED;
@@ -575,7 +574,7 @@ impl Game {
         }
     }
 
-    /// Starts the field repair by itself once the ship has sat quiet for `AUTO_REPAIR_DELAY`
+    /// Starts the field repair by itself once the ship has sat quiet for `auto_repair_delay`
     /// seconds (no damage, thrust, fire or beam) with something to mend and the material to
     /// do it, and stops it as soon as the ship moves or fires.
     fn update_auto_repair(&mut self, input: &Input) {
@@ -600,13 +599,13 @@ impl Game {
             return;
         }
         let Some(ship) = self.player() else { return };
-        if ship.since_hit < t::AUTO_REPAIR_DELAY {
+        if ship.since_hit < self.tune.auto_repair_delay {
             return;
         }
         let hull = ship.health < ship.max_health - 1e-3
             && (self.cargo.metal > 0.0 || self.cargo.biomass > 0.0);
-        let shield = ship.shield < ship.max_shield * t::AUTO_SHIELD_BELOW
-            && self.cargo.fuel > t::AUTO_FUEL_RESERVE;
+        let shield = ship.shield < ship.max_shield * self.tune.auto_shield_below
+            && self.cargo.fuel > self.tune.auto_fuel_reserve;
         if hull || shield {
             self.pad.repairing = true;
             self.pad.auto_run = true;
@@ -644,7 +643,12 @@ impl Game {
             self.cargo
                 .take(Material::Metal, hull * REPAIR_METAL / grade);
         } else if shield_missing > 1e-3
-            && self.cargo.fuel > if auto { t::AUTO_FUEL_RESERVE } else { 1e-4 }
+            && self.cargo.fuel
+                > if auto {
+                    self.tune.auto_fuel_reserve
+                } else {
+                    1e-4
+                }
         {
             shield = (REPAIR_SHIELD_RATE * grade * dt)
                 .min(shield_missing)
@@ -1234,7 +1238,7 @@ impl Game {
     /// I: whether a death pays `INSURANCE` metal to keep the best part.
     pub fn toggle_insurance(&mut self) {
         self.pad.insured = !self.pad.insured;
-        let (share, cap, weapon) = super::legacy::terms(self.pad.insured);
+        let (share, cap, weapon) = super::legacy::terms(self.pad.insured, &self.tune);
         let weapon = if weapon > 0 {
             format!(" + best weapon to level {weapon}")
         } else {
@@ -1664,7 +1668,7 @@ mod tests {
         ship_mut(&mut game).since_hit = 0.0;
         game.notices.clear();
         let hull = ship(&game).health;
-        run(&mut game, t::AUTO_REPAIR_DELAY - 0.5);
+        run(&mut game, DEFAULT_TUNING.auto_repair_delay - 0.5);
         assert_eq!(ship(&game).health, hull, "not before the delay");
         run(&mut game, 4.5);
         let gained = ship(&game).health - hull;
@@ -1723,10 +1727,10 @@ mod tests {
             .unwrap()
             .since_hit = 99.0;
         game.stats.recharge = 0.0;
-        stock(&mut game, 0.0, t::AUTO_FUEL_RESERVE + 3.0, 0.0);
+        stock(&mut game, 0.0, DEFAULT_TUNING.auto_fuel_reserve + 3.0, 0.0);
         run(&mut game, 30.0);
-        assert!(game.cargo.fuel >= t::AUTO_FUEL_RESERVE - 0.5);
-        assert!(game.cargo.fuel < t::AUTO_FUEL_RESERVE + 3.0);
+        assert!(game.cargo.fuel >= DEFAULT_TUNING.auto_fuel_reserve - 0.5);
+        assert!(game.cargo.fuel < DEFAULT_TUNING.auto_fuel_reserve + 3.0);
     }
 
     #[test]
@@ -2513,10 +2517,7 @@ mod tests {
         game.bench_confirm();
         assert_eq!(game.loadout.skills.level(Skill::Parry), 1);
         assert!(game.parry_unlocked());
-        assert_eq!(
-            game.cargo.metal,
-            500.0 - crate::simulation::tuning::PRICE_PARRY[0].1
-        );
+        assert_eq!(game.cargo.metal, 500.0 - DEFAULT_TUNING.price_parry_metal);
     }
 
     #[test]

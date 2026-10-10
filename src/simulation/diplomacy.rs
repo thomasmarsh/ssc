@@ -3,7 +3,6 @@
 //! Gifts, quiet visits, harm and claim mining still affect the legacy regard summary;
 //! independent trust/friction history remains to be modeled.
 
-use super::tuning as t;
 use super::*;
 use crate::territory::Standing;
 
@@ -29,17 +28,17 @@ impl Tier {
     }
 
     /// The tier a stored regard reads as, given the tier it held before (rising across a line
-    /// takes `TIER_HYSTERESIS` more than falling across it).
-    pub fn settle(self, value: f32) -> Tier {
+    /// takes `tier_hysteresis` more than falling across it).
+    pub fn settle(self, value: f32, tune: &Tunables) -> Tier {
         let mut tier = self;
         loop {
             let next = match tier {
-                Tier::Hostile if value > t::HOSTILE_AT + t::TIER_HYSTERESIS => Tier::Wary,
-                Tier::Wary if value <= t::HOSTILE_AT => Tier::Hostile,
-                Tier::Wary if value > t::WARY_AT + t::TIER_HYSTERESIS => Tier::Ignores,
-                Tier::Ignores if value <= t::WARY_AT => Tier::Wary,
-                Tier::Ignores if value >= t::FRIENDLY_AT => Tier::Friendly,
-                Tier::Friendly if value < t::FRIENDLY_AT - t::TIER_HYSTERESIS => Tier::Ignores,
+                Tier::Hostile if value > tune.hostile_at + tune.tier_hysteresis => Tier::Wary,
+                Tier::Wary if value <= tune.hostile_at => Tier::Hostile,
+                Tier::Wary if value > tune.wary_at + tune.tier_hysteresis => Tier::Ignores,
+                Tier::Ignores if value <= tune.wary_at => Tier::Wary,
+                Tier::Ignores if value >= tune.friendly_at => Tier::Friendly,
+                Tier::Friendly if value < tune.friendly_at - tune.tier_hysteresis => Tier::Ignores,
                 _ => return tier,
             };
             tier = next;
@@ -47,13 +46,8 @@ impl Tier {
     }
 
     /// The tier a fresh regard reads as, with no history.
-    pub fn of(value: f32) -> Tier {
-        Tier::Ignores.settle(value)
-    }
-
-    /// Index into per-tier tables (`DOCTRINE_PULL`).
-    fn index(self) -> usize {
-        self as usize
+    pub fn of(value: f32, tune: &Tunables) -> Tier {
+        Tier::Ignores.settle(value, tune)
     }
 }
 
@@ -71,12 +65,12 @@ pub struct Regard {
 }
 
 impl Regard {
-    fn start(t: &Territory) -> Self {
-        let value = start_value(t);
+    fn start(t: &Territory, tune: &Tunables) -> Self {
+        let value = start_value(t, tune);
         Self {
             value,
-            tier: Tier::of(value),
-            calm: t::REST_DELAY,
+            tier: Tier::of(value, tune),
+            calm: tune.rest_delay,
             warn: 0.0,
             gift: 0.0,
             shared: false,
@@ -85,28 +79,28 @@ impl Regard {
 }
 
 /// Where a civilization's regard begins, and how high a quiet ship can raise it.
-fn start_value(t: &Territory) -> f32 {
+fn start_value(t: &Territory, tune: &Tunables) -> f32 {
     if t.peaceful() {
-        t::REGARD_START_OUTPOST
+        tune.regard_start_outpost
     } else {
-        t::REGARD_START
+        tune.regard_start
     }
 }
 
-fn rest_cap(t: &Territory) -> f32 {
+fn rest_cap(t: &Territory, tune: &Tunables) -> f32 {
     if t.peaceful() {
-        t::REST_CAP_OUTPOST
+        tune.rest_cap_outpost
     } else {
-        t::REST_CAP
+        tune.rest_cap
     }
 }
 
 /// Why a tithe was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TitheError {
-    /// No living civilization's seat is within `TITHE_RANGE`.
+    /// No living civilization's seat is within `tithe_range`.
     NoSeat,
-    /// The hold has no material of `TITHE_AMOUNT`.
+    /// The hold has no material of `tithe_amount`.
     Poor,
     /// A gift was made a moment ago.
     TooSoon,
@@ -137,7 +131,7 @@ impl Game {
             None => self
                 .civ_territories
                 .get(&territory)
-                .map_or(t::REGARD_START, start_value),
+                .map_or(self.tune.regard_start, |t| start_value(t, &self.tune)),
         }
     }
 
@@ -149,7 +143,9 @@ impl Game {
             None => self
                 .civ_territories
                 .get(&territory)
-                .map_or(Tier::Hostile, |t| Tier::of(start_value(t))),
+                .map_or(Tier::Hostile, |t| {
+                    Tier::of(start_value(t, &self.tune), &self.tune)
+                }),
         }
     }
 
@@ -168,16 +164,17 @@ impl Game {
         Some(
             self.civ_regard
                 .entry(territory)
-                .or_insert_with(|| Regard::start(&t)),
+                .or_insert_with(|| Regard::start(&t, &self.tune)),
         )
     }
 
     /// Sets sentiment outright for scenario tests; engagement remains independent.
     #[cfg(test)]
     pub(super) fn set_regard(&mut self, territory: u64, value: f32) {
+        let tune = self.tune;
         if let Some(r) = self.regard_mut(territory) {
-            r.value = value.clamp(t::REGARD_MIN, t::REGARD_MAX);
-            r.tier = Tier::of(r.value);
+            r.value = value.clamp(tune.regard_min, tune.regard_max);
+            r.tier = Tier::of(r.value, &tune);
             r.calm = 0.0;
         }
     }
@@ -193,10 +190,11 @@ impl Game {
 
     /// Lowers (or, negative, raises) regard and announces any tier change.
     pub(super) fn shift_regard(&mut self, territory: u64, delta: f32) {
+        let (lowest, highest) = (self.tune.regard_min, self.tune.regard_max);
         let Some(r) = self.regard_mut(territory) else {
             return;
         };
-        r.value = (r.value + delta).clamp(t::REGARD_MIN, t::REGARD_MAX);
+        r.value = (r.value + delta).clamp(lowest, highest);
         if delta < 0.0 {
             r.calm = 0.0;
         }
@@ -208,7 +206,7 @@ impl Game {
         let Some(&Regard { value, tier, .. }) = self.civ_regard.get(&territory) else {
             return;
         };
-        let now = tier.settle(value);
+        let now = tier.settle(value, &self.tune);
         if now == tier {
             return;
         }
@@ -262,7 +260,7 @@ impl Game {
         if !first {
             return;
         }
-        let reach = civ.radius.ceil() as i32 + t::SHARE_MARGIN;
+        let reach = civ.radius.ceil() as i32 + self.tune.share_margin;
         let mut charted = 0;
         for dx in -reach..=reach {
             for dy in -reach..=reach {
@@ -292,11 +290,13 @@ impl Game {
                 continue;
             };
             let owner = match body.kind {
-                BodyKind::Creature => self.civ_of(body).map(|(tid, _)| (tid, t::HURT_MEMBER)),
+                BodyKind::Creature => self
+                    .civ_of(body)
+                    .map(|(tid, _)| (tid, self.tune.hurt_member)),
                 _ => body
                     .origin
                     .and_then(|o| self.civ_bases.get(&o).or_else(|| self.civ_works.get(&o)))
-                    .map(|(tid, _)| (*tid, t::HURT_STRUCTURE)),
+                    .map(|(tid, _)| (*tid, self.tune.hurt_structure)),
             };
             if let Some((tid, per_point)) = owner {
                 if dealt > 0.0 {
@@ -308,7 +308,8 @@ impl Game {
         }
         if self.civ_struck.len() > 64 {
             let now = self.time;
-            self.civ_struck.retain(|_, at| now - *at < t::KILL_WINDOW);
+            self.civ_struck
+                .retain(|_, at| now - *at < self.tune.kill_window);
         }
         let here = self
             .territory
@@ -327,11 +328,11 @@ impl Game {
             r.gift = (r.gift - dt).max(0.0);
             if inside {
                 // Left alone in its own land, a civilization slowly warms, up to a point.
-                if r.calm >= t::REST_DELAY && r.value < rest_cap(&civ) {
-                    r.value = (r.value + t::REST_RATE * dt).min(rest_cap(&civ));
+                if r.calm >= self.tune.rest_delay && r.value < rest_cap(&civ, &self.tune) {
+                    r.value = (r.value + self.tune.rest_rate * dt).min(rest_cap(&civ, &self.tune));
                 }
-            } else if r.value < start_value(&civ) {
-                r.value = (r.value + t::AWAY_RATE * dt).min(start_value(&civ));
+            } else if r.value < start_value(&civ, &self.tune) {
+                r.value = (r.value + self.tune.away_rate * dt).min(start_value(&civ, &self.tune));
             }
             self.settle_tier(tid);
         }
@@ -345,7 +346,7 @@ impl Game {
         let struck = self
             .civ_struck
             .remove(&body.id)
-            .is_some_and(|at| self.time - at < t::KILL_WINDOW);
+            .is_some_and(|at| self.time - at < self.tune.kill_window);
         if !struck {
             return;
         }
@@ -354,9 +355,9 @@ impl Game {
                 (
                     tid,
                     match role {
-                        CivRole::Elder => t::KILL_ELDER,
-                        CivRole::Warrior => t::KILL_WARRIOR,
-                        _ => t::KILL_MEMBER,
+                        CivRole::Elder => self.tune.kill_elder,
+                        CivRole::Warrior => self.tune.kill_warrior,
+                        _ => self.tune.kill_member,
                     },
                 )
             }),
@@ -367,10 +368,10 @@ impl Game {
                     (
                         tid,
                         match role {
-                            CivRole::Capital => t::KILL_CAPITAL,
-                            CivRole::Outpost => t::KILL_OUTPOST_BASE,
-                            CivRole::Turret => t::KILL_TURRET,
-                            _ => t::KILL_WALL,
+                            CivRole::Capital => self.tune.kill_capital,
+                            CivRole::Outpost => self.tune.kill_outpost_base,
+                            CivRole::Turret => self.tune.kill_turret,
+                            _ => self.tune.kill_wall,
                         },
                     )
                 }),
@@ -391,10 +392,10 @@ impl Game {
         };
         self.register_territory(civ);
         let tier = self.civ_tier(civ.id);
-        let cost = t::MINE_COST
+        let cost = self.tune.mine_cost
             * amount
             * if tier == Tier::Friendly {
-                t::MINE_COST_FRIEND
+                self.tune.mine_cost_friend
             } else {
                 1.0
             };
@@ -405,7 +406,7 @@ impl Game {
         if let Some(r) = warn
             && tier != Tier::Friendly
         {
-            r.warn = t::MINE_WARN_EVERY;
+            r.warn = self.tune.mine_warn_every;
             let text = match tier {
                 Tier::Hostile => {
                     format!("{name}  - mining their claim, as if they had not noticed")
@@ -428,7 +429,7 @@ impl Game {
                 let (tid, role) = *self.civ_bases.get(&b.origin?)?;
                 matches!(role, CivRole::Capital | CivRole::Outpost).then_some((b, tid))
             })
-            .filter(|(b, _)| b.position.distance(ship) <= t::TITHE_RANGE + b.radius)
+            .filter(|(b, _)| b.position.distance(ship) <= self.tune.tithe_range + b.radius)
             .filter(|(_, tid)| self.civ_standing(*tid) != Standing::Fallen)
             .min_by(|a, b| {
                 let (da, db) = (
@@ -445,7 +446,7 @@ impl Game {
     fn tithe_material(&self) -> Option<Material> {
         let mut best: Option<Material> = None;
         for kind in Material::ALL {
-            if self.cargo.amount(kind) >= t::TITHE_AMOUNT
+            if self.cargo.amount(kind) >= self.tune.tithe_amount
                 && best.is_none_or(|b| self.cargo.amount(kind) > self.cargo.amount(b))
             {
                 best = Some(kind);
@@ -466,8 +467,8 @@ impl Game {
         })
     }
 
-    /// Gives a civilization's seat an offering: `TITHE_AMOUNT` of the material the hold has most
-    /// of, for `TITHE_GAIN` regard. A friendly civilization trades instead: a repair if the ship
+    /// Gives a civilization's seat an offering: `tithe_amount` of the material the hold has most
+    /// of, for `tithe_gain` regard. A friendly civilization trades instead: a repair if the ship
     /// is hurt, else a swap for the material the hold lacks.
     pub fn tithe(&mut self) -> Result<(), TitheError> {
         if self.player().is_none() {
@@ -487,18 +488,19 @@ impl Game {
         }
         let Some(kind) = self.tithe_material() else {
             self.notify(
-                format!("A TITHE IS {:.0} OF ONE MATERIAL", t::TITHE_AMOUNT),
+                format!("A TITHE IS {:.0} OF ONE MATERIAL", self.tune.tithe_amount),
                 upgrades::Rarity::Common,
             );
             return Err(TitheError::Poor);
         };
         let friendly = self.civilization_service_allowed(civ.id);
-        let given = self.cargo.take(kind, t::TITHE_AMOUNT);
+        let given = self.cargo.take(kind, self.tune.tithe_amount);
         self.assess_culture(civ.id);
         self.run.tithes += 1;
         self.run.tithed += given;
+        let cooldown = self.tune.tithe_cooldown;
         if let Some(r) = self.regard_mut(civ.id) {
-            r.gift = t::TITHE_COOLDOWN;
+            r.gift = cooldown;
         }
         if friendly {
             let returned = self.trade_back(&civ, given);
@@ -506,13 +508,13 @@ impl Game {
                 format!("{name}  accepts {given:.0} {} and {returned}", kind.label()),
                 upgrades::Rarity::Rare,
             );
-            self.shift_regard(civ.id, t::TRADE_GAIN);
+            self.shift_regard(civ.id, self.tune.trade_gain);
         } else {
             self.notify(
                 format!("{name}  accepts {given:.0} {}", kind.label()),
                 upgrades::Rarity::Rare,
             );
-            self.shift_regard(civ.id, t::TITHE_GAIN);
+            self.shift_regard(civ.id, self.tune.tithe_gain);
         }
         Ok(())
     }
@@ -523,14 +525,19 @@ impl Game {
         use crate::culture::Candidate;
         let health = self.player().map_or(1.0, |s| s.health / s.max_health);
         let offer = if self.civ_trades_biomass(civ.id) {
-            farm::biomass_offer(self.farm.stored(civ.id), self.civ_regard(civ.id), given)
-                .min(self.cargo.room(Material::Biomass))
+            farm::biomass_offer(
+                self.farm.stored(civ.id),
+                self.civ_regard(civ.id),
+                given,
+                &self.tune,
+            )
+            .min(self.cargo.room(Material::Biomass))
         } else {
             0.0
         };
         let repair = Candidate {
             action: 1,
-            feasible: health < t::TRADE_REPAIR_BELOW,
+            feasible: health < self.tune.trade_repair_below,
             // Known benefit to a friendly partner; own security/demand remain unknown.
             outcomes: [
                 None,
@@ -555,7 +562,7 @@ impl Game {
                 None,
                 None,
                 Some(0.3),
-                Some(f64::from(offer / (given * t::TRADE_RATE).max(1.0)).min(1.0)),
+                Some(f64::from(offer / (given * self.tune.trade_rate).max(1.0)).min(1.0)),
                 None,
             ],
             delayed: 0.0,
@@ -584,7 +591,7 @@ impl Game {
             .into_iter()
             .min_by(|a, b| self.cargo.fraction(*a).total_cmp(&self.cargo.fraction(*b)))
             .unwrap_or(Material::Metal);
-        let got = self.cargo.add(scarce, given * t::TRADE_RATE);
+        let got = self.cargo.add(scarce, given * self.tune.trade_rate);
         format!("trades {got:.0} {}", scarce.label())
     }
 
@@ -597,7 +604,8 @@ impl Game {
         }
         let regard = self.civ_regard(civ.id);
         let room = self.cargo.room(Material::Biomass);
-        let offer = farm::biomass_offer(self.farm.stored(civ.id), regard, given).min(room);
+        let offer =
+            farm::biomass_offer(self.farm.stored(civ.id), regard, given, &self.tune).min(room);
         if offer < 1.0 {
             return None;
         }
@@ -617,7 +625,12 @@ impl Game {
 
     /// How fast a civilization's doctrine table learns from its members, by tier.
     pub(super) fn doctrine_pull(&self, territory: u64) -> f32 {
-        t::DOCTRINE_PULL[self.civ_tier(territory).index()]
+        match self.civ_tier(territory) {
+            Tier::Hostile => self.tune.doctrine_pull_hostile,
+            Tier::Wary => self.tune.doctrine_pull_wary,
+            Tier::Ignores => self.tune.doctrine_pull_ignores,
+            Tier::Friendly => self.tune.doctrine_pull_friendly,
+        }
     }
 
     /// The tiers of every civilization the ship has dealt with, for the HUD and the chart.
@@ -718,31 +731,64 @@ mod tests {
 
     #[test]
     fn tiers_read_from_regard_and_hysteresis_stops_a_border_from_flickering() {
-        assert_eq!(Tier::of(0.0), Tier::Ignores);
-        assert_eq!(Tier::of(t::HOSTILE_AT), Tier::Wary.min(Tier::Hostile));
-        assert_eq!(Tier::of(t::WARY_AT), Tier::Wary);
-        assert_eq!(Tier::of(t::FRIENDLY_AT), Tier::Friendly);
-        assert_eq!(Tier::of(t::REGARD_MAX), Tier::Friendly);
-        assert_eq!(Tier::of(t::REGARD_MIN), Tier::Hostile);
+        assert_eq!(Tier::of(0.0, &DEFAULT_TUNING), Tier::Ignores);
+        assert_eq!(
+            Tier::of(DEFAULT_TUNING.hostile_at, &DEFAULT_TUNING),
+            Tier::Wary.min(Tier::Hostile)
+        );
+        assert_eq!(
+            Tier::of(DEFAULT_TUNING.wary_at, &DEFAULT_TUNING),
+            Tier::Wary
+        );
+        assert_eq!(
+            Tier::of(DEFAULT_TUNING.friendly_at, &DEFAULT_TUNING),
+            Tier::Friendly
+        );
+        assert_eq!(
+            Tier::of(DEFAULT_TUNING.regard_max, &DEFAULT_TUNING),
+            Tier::Friendly
+        );
+        assert_eq!(
+            Tier::of(DEFAULT_TUNING.regard_min, &DEFAULT_TUNING),
+            Tier::Hostile
+        );
         // Falling across a line is immediate; coming back up needs the margin.
-        assert_eq!(Tier::Ignores.settle(t::WARY_AT), Tier::Wary);
-        assert_eq!(Tier::Wary.settle(t::WARY_AT + 1.0), Tier::Wary);
         assert_eq!(
-            Tier::Wary.settle(t::WARY_AT + t::TIER_HYSTERESIS + 0.1),
+            Tier::Ignores.settle(DEFAULT_TUNING.wary_at, &DEFAULT_TUNING),
+            Tier::Wary
+        );
+        assert_eq!(
+            Tier::Wary.settle(DEFAULT_TUNING.wary_at + 1.0, &DEFAULT_TUNING),
+            Tier::Wary
+        );
+        assert_eq!(
+            Tier::Wary.settle(
+                DEFAULT_TUNING.wary_at + DEFAULT_TUNING.tier_hysteresis + 0.1,
+                &DEFAULT_TUNING
+            ),
             Tier::Ignores
         );
-        assert_eq!(Tier::Friendly.settle(t::FRIENDLY_AT - 1.0), Tier::Friendly);
         assert_eq!(
-            Tier::Friendly.settle(t::FRIENDLY_AT - t::TIER_HYSTERESIS - 0.1),
+            Tier::Friendly.settle(DEFAULT_TUNING.friendly_at - 1.0, &DEFAULT_TUNING),
+            Tier::Friendly
+        );
+        assert_eq!(
+            Tier::Friendly.settle(
+                DEFAULT_TUNING.friendly_at - DEFAULT_TUNING.tier_hysteresis - 0.1,
+                &DEFAULT_TUNING
+            ),
             Tier::Ignores
         );
-        assert_eq!(Tier::Hostile.settle(t::HOSTILE_AT + 1.0), Tier::Hostile);
+        assert_eq!(
+            Tier::Hostile.settle(DEFAULT_TUNING.hostile_at + 1.0, &DEFAULT_TUNING),
+            Tier::Hostile
+        );
         assert!(Tier::Hostile < Tier::Wary && Tier::Ignores < Tier::Friendly);
         // Every value settles to a fixed point whatever it held before.
         for v in (-100..=100).map(|v| v as f32) {
             for from in [Tier::Hostile, Tier::Wary, Tier::Ignores, Tier::Friendly] {
-                let tier = from.settle(v);
-                assert_eq!(tier.settle(v), tier, "{from:?} at {v}");
+                let tier = from.settle(v, &DEFAULT_TUNING);
+                assert_eq!(tier.settle(v, &DEFAULT_TUNING), tier, "{from:?} at {v}");
             }
         }
     }
@@ -771,7 +817,7 @@ mod tests {
         }
         // Left alone it warms a little, to the cap and no further.
         let regard = game.civ_regard(t.id);
-        assert!((regard - t::REST_CAP).abs() < 0.01, "{regard}");
+        assert!((regard - DEFAULT_TUNING.rest_cap).abs() < 0.01, "{regard}");
         assert_eq!(game.civ_tier(t.id), Tier::Ignores);
         let report = game.territory_report().unwrap();
         assert_eq!((report.tier, report.next_in), (Tier::Ignores, None));
@@ -781,10 +827,12 @@ mod tests {
     fn the_early_outpost_warms_to_friendship_if_left_alone() {
         let (mut game, o, ship) = at_the_outpost();
         assert_eq!(game.civ_tier(o.id), Tier::Ignores);
-        assert!(game.civ_regard(o.id) >= t::REGARD_START_OUTPOST);
+        assert!(game.civ_regard(o.id) >= DEFAULT_TUNING.regard_start_outpost);
         // (A slack of a minute: a member bumping the idle ship costs a little regard and the
         // calm clock, and where they mill about varies with what else is loaded.)
-        let seconds = (t::FRIENDLY_AT - t::REGARD_START_OUTPOST) / t::REST_RATE + 60.0;
+        let seconds = (DEFAULT_TUNING.friendly_at - DEFAULT_TUNING.regard_start_outpost)
+            / DEFAULT_TUNING.rest_rate
+            + 60.0;
         let ok = hold_saying(&mut game, ship, seconds, "shares its charts");
         assert!(ok);
         assert_eq!(game.civ_tier(o.id), Tier::Friendly);
@@ -802,7 +850,7 @@ mod tests {
         assert_eq!(reading.regard, Some(Tier::Friendly));
         // It never goes past the cap by being left alone.
         hold(&mut game, ship, 400.0);
-        assert!(game.civ_regard(o.id) <= t::REST_CAP_OUTPOST + 0.01);
+        assert!(game.civ_regard(o.id) <= DEFAULT_TUNING.rest_cap_outpost + 0.01);
         assert!(game.raid.is_none());
     }
 
@@ -813,26 +861,26 @@ mod tests {
         let mut game = visit(spot);
         let id = t.id;
         // Ignores -> Wary -> Hostile by mining.
-        game.civ_mined(10.0 / t::MINE_COST);
+        game.civ_mined(10.0 / DEFAULT_TUNING.mine_cost);
         assert_eq!(game.civ_tier(id), Tier::Ignores);
-        game.civ_mined(5.0 / t::MINE_COST);
+        game.civ_mined(5.0 / DEFAULT_TUNING.mine_cost);
         assert_eq!(game.civ_tier(id), Tier::Wary);
         assert!(said(&game, "WARY"));
         game.notices.clear();
-        game.civ_mined(40.0 / t::MINE_COST);
+        game.civ_mined(40.0 / DEFAULT_TUNING.mine_cost);
         assert_eq!(game.civ_tier(id), Tier::Hostile);
         assert!(said(&game, "HOSTILE"));
         // Hostile -> Wary -> Ignores by being left alone inside the claim.
         game.notices.clear();
-        let wary_at = t::HOSTILE_AT + t::TIER_HYSTERESIS;
-        let need = (wary_at - game.civ_regard(id)).max(0.0) / t::REST_RATE;
-        let seconds = t::REST_DELAY + need + 5.0;
+        let wary_at = DEFAULT_TUNING.hostile_at + DEFAULT_TUNING.tier_hysteresis;
+        let need = (wary_at - game.civ_regard(id)).max(0.0) / DEFAULT_TUNING.rest_rate;
+        let seconds = DEFAULT_TUNING.rest_delay + need + 5.0;
         assert!(hold_saying(&mut game, spot, seconds, "opinion improved"));
         assert_eq!(game.civ_tier(id), Tier::Wary);
         game.notices.clear();
-        game.set_regard(id, t::WARY_AT);
+        game.set_regard(id, DEFAULT_TUNING.wary_at);
         game.shift_regard(id, 0.5);
-        let seconds = t::REST_DELAY + 40.0;
+        let seconds = DEFAULT_TUNING.rest_delay + 40.0;
         assert!(hold_saying(&mut game, spot, seconds, "no longer mind you"));
         assert_eq!(game.civ_tier(id), Tier::Ignores);
         // Ignores -> Friendly by tithes at a seat, and back down by a grievance.
@@ -898,7 +946,7 @@ mod tests {
         assert!(game.run.total_mined() > 20.0);
         let lost = before - game.civ_regard(t.id);
         assert!(
-            (lost - t::MINE_COST * game.run.total_mined()).abs() < 0.5,
+            (lost - DEFAULT_TUNING.mine_cost * game.run.total_mined()).abs() < 0.5,
             "lost {lost} for {}",
             game.run.total_mined()
         );
@@ -930,7 +978,10 @@ mod tests {
         game.notices.clear();
         game.civ_mined(100.0);
         let lost = 70.0 - game.civ_regard(t.id);
-        assert!((lost - 100.0 * t::MINE_COST * t::MINE_COST_FRIEND).abs() < 0.01);
+        assert!(
+            (lost - 100.0 * DEFAULT_TUNING.mine_cost * DEFAULT_TUNING.mine_cost_friend).abs()
+                < 0.01
+        );
         assert!(!said(&game, "mining"));
     }
 
@@ -950,7 +1001,7 @@ mod tests {
         game.step(DT, Input::default());
         let hurt = before - game.civ_regard(t.id);
         assert!(
-            (hurt - t::HURT_MEMBER * 5.0).abs() < 0.2,
+            (hurt - DEFAULT_TUNING.hurt_member * 5.0).abs() < 0.2,
             "a graze of 5 costs {hurt}"
         );
         // The ship's kill costs a kill; the same death by another hand costs nothing.
@@ -974,7 +1025,7 @@ mod tests {
         let before = game.civ_regard(t.id);
         game.step(DT, Input::default());
         assert!(
-            ((before - game.civ_regard(t.id)) - t::KILL_MEMBER).abs() < 0.2,
+            ((before - game.civ_regard(t.id)) - DEFAULT_TUNING.kill_member).abs() < 0.2,
             "killing a struck member costs {}",
             before - game.civ_regard(t.id)
         );
@@ -998,7 +1049,7 @@ mod tests {
             .unwrap()
             .health = 0.0;
         game.step(DT, Input::default());
-        assert!(game.civ_regard(t.id) <= -(t::KILL_CAPITAL - 1.0));
+        assert!(game.civ_regard(t.id) <= -(DEFAULT_TUNING.kill_capital - 1.0));
         assert_eq!(game.civ_tier(t.id), Tier::Hostile);
     }
 
@@ -1014,7 +1065,7 @@ mod tests {
         let hint = game.tithe_hint().expect("a seat is in reach");
         assert_eq!((hint.tier, hint.material), (Tier::Ignores, None));
         game.cargo = Cargo::default();
-        game.cargo.metal = t::TITHE_AMOUNT - 1.0;
+        game.cargo.metal = DEFAULT_TUNING.tithe_amount - 1.0;
         assert_eq!(game.tithe(), Err(TitheError::Poor));
         // It takes the material the hold has most of.
         game.cargo.metal = 30.0;
@@ -1022,13 +1073,16 @@ mod tests {
         assert_eq!(game.tithe_hint().unwrap().material, Some(Material::Crystal));
         let before = game.civ_regard(o.id);
         assert_eq!(game.tithe(), Ok(()));
-        assert_eq!(game.cargo.crystal, 50.0 - t::TITHE_AMOUNT);
+        assert_eq!(game.cargo.crystal, 50.0 - DEFAULT_TUNING.tithe_amount);
         assert_eq!(game.cargo.metal, 30.0);
-        assert!((game.civ_regard(o.id) - before - t::TITHE_GAIN).abs() < 0.2);
-        assert_eq!((game.run.tithes, game.run.tithed), (1, t::TITHE_AMOUNT));
+        assert!((game.civ_regard(o.id) - before - DEFAULT_TUNING.tithe_gain).abs() < 0.2);
+        assert_eq!(
+            (game.run.tithes, game.run.tithed),
+            (1, DEFAULT_TUNING.tithe_amount)
+        );
         assert!(said(&game, "accepts"));
         assert_eq!(game.tithe(), Err(TitheError::TooSoon));
-        hold(&mut game, ship, t::TITHE_COOLDOWN + 0.2);
+        hold(&mut game, ship, DEFAULT_TUNING.tithe_cooldown + 0.2);
         assert_eq!(game.tithe(), Ok(()));
         assert_eq!(game.run.tithes, 2);
         // Out of reach it is refused again.
@@ -1057,9 +1111,12 @@ mod tests {
             assert_eq!(game.tithe(), Ok(()));
             gifts += 1;
             assert!(gifts < 10);
-            hold(&mut game, ship, t::TITHE_COOLDOWN + 0.1);
+            hold(&mut game, ship, DEFAULT_TUNING.tithe_cooldown + 0.1);
         }
-        assert_eq!(gifts, (t::FRIENDLY_AT / t::TITHE_GAIN).ceil() as usize);
+        assert_eq!(
+            gifts,
+            (DEFAULT_TUNING.friendly_at / DEFAULT_TUNING.tithe_gain).ceil() as usize
+        );
         assert!(said(&game, "FRIENDLY"));
         // A friend trades: hurt, it mends the ship; whole, it swaps for what the hold lacks.
         game.player_invulnerability = 0.0;
@@ -1072,13 +1129,16 @@ mod tests {
         let mended = pilot(&mut game);
         assert_eq!(mended.health, mended.max_health);
         assert!(said(&game, "mends the ship"));
-        hold(&mut game, ship, t::TITHE_COOLDOWN + 0.1);
+        hold(&mut game, ship, DEFAULT_TUNING.tithe_cooldown + 0.1);
         assert_eq!(game.tithe(), Ok(()));
-        assert!((game.cargo.crystal - t::TITHE_AMOUNT * t::TRADE_RATE).abs() < 0.01);
+        assert!(
+            (game.cargo.crystal - DEFAULT_TUNING.tithe_amount * DEFAULT_TUNING.trade_rate).abs()
+                < 0.01
+        );
         assert_eq!(game.cargo.metal, 60.0);
         assert!(said(&game, "trades"));
         // The interact key does the same away from a pad.
-        hold(&mut game, ship, t::TITHE_COOLDOWN + 0.1);
+        hold(&mut game, ship, DEFAULT_TUNING.tithe_cooldown + 0.1);
         let tithes = game.run.tithes;
         assert_eq!(game.interact(), Some(interact::Verb::Contact));
         game.bench_select(BenchAction::Tithe);

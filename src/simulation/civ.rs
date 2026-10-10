@@ -919,7 +919,7 @@ mod tests {
                 .count() as u32;
             let tier = t.fort_tier();
             assert!(
-                parts >= crate::simulation::tuning::CAPITAL_PARTS + u32::from(tier),
+                parts >= DEFAULT_TUNING.capital_parts + u32::from(tier),
                 "{seed} {shape:?} tier {tier}: {parts} parts"
             );
             seen.insert(tier);

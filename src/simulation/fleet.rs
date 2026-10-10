@@ -801,7 +801,7 @@ impl Game {
                 .map(contact_damage)
                 .sum::<f32>()
                 * dt
-                / tuning::DRONE_CONTACT_SECONDS;
+                / self.tune.drone_contact_seconds;
             if amount > 0.0 && damage_drone(&mut self.pad, drone, amount) {
                 self.note_drone_loss(drone);
             }
@@ -880,7 +880,7 @@ impl Game {
             for (fraction, id, amount) in hits {
                 self.drone_impact_gap.insert(
                     (drone.home, drone.slot, id),
-                    self.time + tuning::IMPACT_PAIR_COOLDOWN,
+                    self.time + self.tune.impact_pair_cooldown,
                 );
                 let hit = DroneView {
                     position: old.position.lerp(drone.position, fraction),
@@ -1687,7 +1687,7 @@ mod tests {
         assert!(health > 0.0 && health < DRONE_HEALTH);
         game.damage_drone_impacts(0.2, &[view], &before);
         assert_eq!(game.pad.pads[&key].drones[0].health, health);
-        game.time += tuning::IMPACT_PAIR_COOLDOWN;
+        game.time += DEFAULT_TUNING.impact_pair_cooldown;
         game.damage_drone_impacts(0.2, &[view], &before);
         assert!(game.pad.pads[&key].drones[0].health < health);
     }

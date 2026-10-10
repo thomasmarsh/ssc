@@ -1121,7 +1121,7 @@ impl Game {
             shard.mass = radius * 0.6;
             shard.rune_pushed = rock.rune_pushed;
             shard.rift_redirected = rock.rift_redirected;
-            shard.lode = Self::fragment_lode(rock, pieces, radius);
+            shard.lode = Self::fragment_lode(rock, pieces, radius, &self.tune);
             shard.health = radius * 1.6 * 0.8;
             shard.max_health = shard.health;
             shard.velocity = rock.velocity + direction * self.rng.range(70.0, 150.0);
@@ -1177,7 +1177,7 @@ impl Game {
             let (position, velocity, radius) = (player.position, player.velocity, player.radius);
             // A realm of dust shortens how far a shot flies (see `realm::Effects`).
             let shot_life = stats.shot_life * reach;
-            // A heavy gun is slow to leave and kicks the ship (see `tuning::RECOIL_PER_DAMAGE`).
+            // A heavy gun is slow to leave and kicks the ship (see `tuning::recoil_per_damage`).
             let heavy = heavy_shot(stats.damage, &self.tune);
             let kick = recoil_of(stats.damage, active, &self.tune);
             if kick > 0.0 {
@@ -1333,7 +1333,7 @@ impl Game {
                     };
                     if let Some(creature) = creature {
                         let flinger = fling_strength(creature) > 0.0;
-                        if dash::stagger(creature) && flinger {
+                        if dash::stagger(creature, &self.tune) && flinger {
                             grazes.push(creature.position);
                         }
                     }
@@ -1737,6 +1737,7 @@ impl Game {
                             &self.apex_state,
                             &self.bodies[index],
                             bullet,
+                            &self.tune,
                         )
                     } else {
                         (1.0, false)
@@ -1747,9 +1748,12 @@ impl Game {
                             let family = profile.family();
                             (
                                 profile.reach().at(bullet.origin.distance(at), &self.tune)
-                                    * self.adapt.get(&target.id).map_or(1.0, |r| r.scale(family)),
+                                    * self
+                                        .adapt
+                                        .get(&target.id)
+                                        .map_or(1.0, |r| r.scale(family, &self.tune)),
                                 Some(family),
-                                adapt::adaptive(target, &self.apexes),
+                                adapt::adaptive(target, &self.apexes, &self.tune),
                             )
                         }
                         _ => (1.0, None, false),
@@ -1952,8 +1956,8 @@ impl Game {
                     let resist = self
                         .adapt
                         .get(&body.id)
-                        .map_or(1.0, |r| r.scale(arsenal::Family::Explosive));
-                    let adaptive = adapt::adaptive(body, &self.apexes);
+                        .map_or(1.0, |r| r.scale(arsenal::Family::Explosive, &self.tune));
+                    let adaptive = adapt::adaptive(body, &self.apexes, &self.tune);
                     let dealt = damage(
                         body,
                         armored(body, amount * boost * resist, true, &self.tune),
@@ -2480,7 +2484,7 @@ fn ram_contact(
     0.0
 }
 
-/// The speed share of a shot of `damage` (heavier shots are slower: see `tuning::HEAVY_SLOW`).
+/// The speed share of a shot of `damage` (heavier shots are slower: see `tuning::heavy_slow`).
 pub(crate) fn heavy_shot(damage: f32, tune: &Tunables) -> f32 {
     let over = (damage / Stats::BASE.damage - 1.0).max(0.0);
     (1.0 / (1.0 + tune.heavy_slow * over)).max(tune.heavy_slow_floor)

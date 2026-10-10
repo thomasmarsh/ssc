@@ -70,7 +70,7 @@ impl Family {
 }
 
 /// How a profile's shots carry over distance: full damage out to the sweet spot, then a mild
-/// falloff over `FALLOFF_SPAN` more, down to `floor` of the damage and never below (a far hit
+/// falloff over `falloff_span` more, down to `floor` of the damage and never below (a far hit
 /// still hurts). Numbers live with the profile so the tradeoff reads at a glance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Reach {

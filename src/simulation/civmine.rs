@@ -317,7 +317,7 @@ impl Game {
                 .sum();
             let end = rock.position - offset.normalize_or_zero() * radius;
             self.bodies[bi].velocity *= 0.8;
-            let want = rate(kind) * YIELD * dt;
+            let want = rate(kind, &self.tune) * YIELD * dt;
             let left = (budget - mining.spent).max(0.0);
             let mined = want
                 .min(ore)

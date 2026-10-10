@@ -1,14 +1,13 @@
 //! The region the ship is in, announced when it changes. The region of a sector is a pure
 //! function (`region::region`); this module only decides when the ship has really moved from
 //! one to the next, so a border does not flicker: a new region must hold the ship for
-//! `REGION_HOLD` seconds and at least `REGION_COOLDOWN` must have passed since the last
+//! `region_hold` seconds and at least `region_cooldown` must have passed since the last
 //! banner. Entering posts an `ENTERING` notice in the style of the extirpation one, and
 //! counts toward the run's regions explored. A civilization's territory is announced by its
 //! own notice (see `civ`), so it is only recorded here.
 
 use super::*;
 use crate::region::{Region, RegionKind, region};
-use tuning::{REGION_COOLDOWN, REGION_HOLD};
 
 /// Where the region tracking stands.
 #[derive(Clone, Debug, Default)]
@@ -57,7 +56,7 @@ impl Game {
             _ => dt,
         };
         self.region.candidate = Some((here.key, held));
-        if held >= REGION_HOLD && self.region.since_banner >= REGION_COOLDOWN {
+        if held >= self.tune.region_hold && self.region.since_banner >= self.tune.region_cooldown {
             self.enter_region(here, true);
         }
     }
@@ -66,7 +65,11 @@ impl Game {
     fn enter_region(&mut self, entered: Region, mid_run: bool) {
         self.run.regions.insert(entered.key);
         self.region.candidate = None;
-        self.region.since_banner = if mid_run { 0.0 } else { REGION_COOLDOWN };
+        self.region.since_banner = if mid_run {
+            0.0
+        } else {
+            self.tune.region_cooldown
+        };
         if entered.kind != RegionKind::Civ {
             let text = format!("ENTERING  {}", entered.name.to_uppercase());
             self.notify(text, upgrades::Rarity::Epic);
@@ -141,9 +144,12 @@ mod tests {
         assert_eq!(game.region().unwrap().name, "Homestead");
         assert_eq!(banners(&game), 1, "the start is announced like any region");
         assert_eq!(game.run.regions.len(), 1);
-        // A brief visit (under REGION_HOLD) announces nothing.
+        // A brief visit (under region_hold) announces nothing.
         game.teleport(a.center());
-        assert_eq!(stay(&mut game, a.center(), REGION_HOLD - 1.0), 0);
+        assert_eq!(
+            stay(&mut game, a.center(), DEFAULT_TUNING.region_hold - 1.0),
+            0
+        );
         assert_eq!(game.region().unwrap().name, "Homestead");
         // A steady stay does.
         assert_eq!(stay(&mut game, a.center(), 2.0), 1);
@@ -157,9 +163,15 @@ mod tests {
         assert!(game.run_report().lines[1].contains("REGIONS 2"));
         // The next region must also wait out the cooldown since that banner.
         let before = banners(&game);
-        assert_eq!(stay(&mut game, b.center(), REGION_HOLD + 2.0), 0);
+        assert_eq!(
+            stay(&mut game, b.center(), DEFAULT_TUNING.region_hold + 2.0),
+            0
+        );
         assert_eq!(banners(&game), before, "too soon after the last banner");
-        assert_eq!(stay(&mut game, b.center(), REGION_COOLDOWN), 1);
+        assert_eq!(
+            stay(&mut game, b.center(), DEFAULT_TUNING.region_cooldown),
+            1
+        );
         assert_eq!(game.region().unwrap().key, region(seed, b).key);
         assert_eq!(game.run.regions.len(), 3);
         // The time in each region adds up to the time played.
@@ -175,7 +187,7 @@ mod tests {
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
         game.teleport(a.center());
-        stay(&mut game, a.center(), REGION_HOLD + 1.0);
+        stay(&mut game, a.center(), DEFAULT_TUNING.region_hold + 1.0);
         let mut changes = 0;
         // Two minutes of crossing back and forth every second.
         for k in 0..120 {
@@ -184,14 +196,14 @@ mod tests {
         }
         assert_eq!(changes, 0, "never held long enough to switch");
         // Lingering on the far side then back and forth every 4 seconds: a banner at most
-        // every REGION_COOLDOWN seconds.
+        // every region_cooldown seconds.
         let mut changes = 0;
         for k in 0..30 {
             let at = if k % 2 == 0 { b.center() } else { a.center() };
             changes += stay(&mut game, at, 4.0);
         }
         assert!(
-            changes as f32 <= 120.0 / REGION_COOLDOWN + 1.0,
+            changes as f32 <= 120.0 / DEFAULT_TUNING.region_cooldown + 1.0,
             "{changes} banners"
         );
         assert!(changes >= 2, "it does switch when the stays are real");
@@ -206,7 +218,11 @@ mod tests {
         let mut game = Game::new(seed);
         game.player_invulnerability = 1e9;
         game.teleport(t.capital.center());
-        stay(&mut game, t.capital.center(), REGION_HOLD + 1.0);
+        stay(
+            &mut game,
+            t.capital.center(),
+            DEFAULT_TUNING.region_hold + 1.0,
+        );
         let r = game.region().unwrap();
         assert_eq!(r.kind, RegionKind::Civ);
         assert_eq!(r.key, t.id);

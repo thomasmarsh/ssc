@@ -2,19 +2,18 @@
 //!
 //! A creature of many parts is a compound enemy: every part is its own body with its own hull,
 //! so a ten-part serpent took about ten times the damage of a single circle of the same head
-//! (and paid ten bounties). In easy places (threat at most `POOL_FULL_THREAT`) the whole body
-//! shares one pool instead, sized in head-equivalents: the head's hull plus `POOL_FLOOR` of
+//! (and paid ten bounties). In easy places (threat at most `pool_full_threat`) the whole body
+//! shares one pool instead, sized in head-equivalents: the head's hull plus `pool_floor` of
 //! every other part's. Hull lost by any part drains the pool, and the parts are kept whole
 //! (no part dies alone). As the pool falls the body sheds parts from the tail end, which break
-//! off, lose their weapons and drift away for `POOL_DRIFT` s before they vanish (silently, like
+//! off, lose their weapons and drift away for `pool_drift` s before they vanish (silently, like
 //! anything consumed); at zero the head dies as an ordinary kill (one bounty, scaled by the pool
 //! size in heads, one drop) and every remaining part breaks off. Deeper (threat from
-//! `POOL_FULL_THREAT` to `POOL_NONE_THREAT`) the pool grows back toward the plain sum of
-//! parts, and from `POOL_NONE_THREAT` the chain is as it always was. Apex elders keep their
+//! `pool_full_threat` to `pool_none_threat`) the pool grows back toward the plain sum of
+//! parts, and from `pool_none_threat` the chain is as it always was. Apex elders keep their
 //! own rules (`apexes`). Only behaviour: nothing here changes generation.
 
 use super::*;
-use tuning::*;
 
 /// The shared health of one chain.
 #[derive(Clone, Copy, Debug)]
@@ -30,8 +29,9 @@ pub struct Pool {
 }
 
 /// How pooled a chain born where the threat is `threat` is: 1 fully, 0 not at all.
-pub fn share(threat: f32) -> f32 {
-    let t = ((threat - POOL_FULL_THREAT) / (POOL_NONE_THREAT - POOL_FULL_THREAT)).clamp(0.0, 1.0);
+pub fn share(threat: f32, tune: &Tunables) -> f32 {
+    let t = ((threat - tune.pool_full_threat) / (tune.pool_none_threat - tune.pool_full_threat))
+        .clamp(0.0, 1.0);
     1.0 - t * t * (3.0 - 2.0 * t)
 }
 
@@ -85,7 +85,7 @@ impl Game {
         let elder = head
             .origin
             .is_some_and(|key| self.apexes.contains_key(&key));
-        let pooled = share(head.genes.threat);
+        let pooled = share(head.genes.threat, &self.tune);
         if elder
             || head.kind != BodyKind::Creature
             || (pooled <= 0.0 && !self.pools.contains_key(&id))
@@ -102,7 +102,7 @@ impl Game {
                             let max = self.body(*part).map_or(0.0, |b| b.max_health);
                             if n == 0 { (max, o) } else { (h, o + max) }
                         });
-                let counted = POOL_FLOOR + (1.0 - POOL_FLOOR) * (1.0 - pooled);
+                let counted = self.tune.pool_floor + (1.0 - self.tune.pool_floor) * (1.0 - pooled);
                 let total = (head_max + others * counted).max(1.0);
                 Pool {
                     left: 1.0,
@@ -164,10 +164,10 @@ impl Game {
         };
         let h = world::hash2(seed ^ 0xB4EA_C0FF, (id & 0x7FFF_FFFF) as i32, 17);
         let angle = (h >> 40) as f32 / 16_777_216.0 * TAU;
-        let speed = POOL_FLING * (0.4 + 0.6 * ((h >> 20) & 0xFF) as f32 / 255.0);
+        let speed = self.tune.pool_fling * (0.4 + 0.6 * ((h >> 20) & 0xFF) as f32 / 255.0);
         body.chain = None;
         body.follower = true;
-        body.adrift = POOL_DRIFT;
+        body.adrift = self.tune.pool_drift;
         body.health = body.max_health.max(1.0);
         body.velocity += Vec2::from_angle(angle) * speed;
         body.genome.weapon = crate::genome::Weapon::None;
@@ -264,11 +264,14 @@ mod tests {
 
     #[test]
     fn pooling_fades_with_threat_and_is_neutral_at_home() {
-        assert_eq!(share(1.0), 1.0);
-        assert_eq!(share(POOL_FULL_THREAT), 1.0);
-        assert_eq!(share(POOL_NONE_THREAT), 0.0);
-        assert_eq!(share(9.0), 0.0);
-        let mid = share((POOL_FULL_THREAT + POOL_NONE_THREAT) / 2.0);
+        assert_eq!(share(1.0, &DEFAULT_TUNING), 1.0);
+        assert_eq!(share(DEFAULT_TUNING.pool_full_threat, &DEFAULT_TUNING), 1.0);
+        assert_eq!(share(DEFAULT_TUNING.pool_none_threat, &DEFAULT_TUNING), 0.0);
+        assert_eq!(share(9.0, &DEFAULT_TUNING), 0.0);
+        let mid = share(
+            (DEFAULT_TUNING.pool_full_threat + DEFAULT_TUNING.pool_none_threat) / 2.0,
+            &DEFAULT_TUNING,
+        );
         assert!((0.4..0.6).contains(&mid));
     }
 
@@ -315,7 +318,7 @@ mod tests {
             game.body(head).unwrap().health,
             game.body(head).unwrap().max_health
         );
-        for _ in 0..(POOL_DRIFT / DT) as usize + 5 {
+        for _ in 0..(DEFAULT_TUNING.pool_drift / DT) as usize + 5 {
             game.step(DT, Input::default());
         }
         assert!(game.bodies.iter().all(|b| b.adrift <= 0.0));

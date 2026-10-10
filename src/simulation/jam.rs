@@ -12,7 +12,6 @@
 //! - the glitch is presentation only: nothing in the rules reads it, and it has its own gap.
 
 use super::skills::Skill;
-use super::tuning as t;
 use super::*;
 use crate::power;
 
@@ -158,7 +157,7 @@ impl Game {
             && !self.is_landed()
             && !self.jam.active()
             && self.jam.immunity <= 0.0
-            && self.player_invulnerability <= t::DASH_INVULN
+            && self.player_invulnerability <= self.tune.dash_invuln
     }
 
     fn glitchable(&self) -> bool {
@@ -167,7 +166,7 @@ impl Game {
             && !self.is_landed()
             && self.jam.glitch <= 0.0
             && self.jam.glitch_gap <= 0.0
-            && self.player_invulnerability <= t::DASH_INVULN
+            && self.player_invulnerability <= self.tune.dash_invuln
     }
 
     /// Whether a glare may start a charge now.

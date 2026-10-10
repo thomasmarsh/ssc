@@ -8,7 +8,6 @@
 //! hardly a kill); and the fallback, Wandering Hazard. Ties among regions or friends go to the
 //! longer stay or the warmer regard, then to the lower key.
 
-use super::tuning as t;
 use super::*;
 
 /// What the title is chosen from.
@@ -45,40 +44,40 @@ pub fn title_case(text: &str) -> String {
 }
 
 /// The epithet for a run.
-pub fn title(f: &TitleFacts) -> String {
+pub fn title(f: &TitleFacts, tune: &Tunables) -> String {
     if f.apex_slain >= 1 {
         return "Apex Hunter".into();
     }
-    if f.extirpated >= t::TITLE_SCOURGE_EXTIRPATIONS
+    if f.extirpated >= tune.title_scourge_extirpations
         && let Some(region) = &f.top_region
     {
         return format!("Scourge of the {region}");
     }
-    if f.extirpated >= 1 && f.mined >= t::TITLE_PROSPECT_MINED {
+    if f.extirpated >= 1 && f.mined >= tune.title_prospect_mined {
         return "Genocidal Prospector".into();
     }
     if let Some(friend) = &f.friend {
         return format!("Friend of the {friend}");
     }
-    if f.tithes >= t::TITLE_TITHES {
+    if f.tithes >= tune.title_tithes {
         return "Tithe Payer".into();
     }
-    if f.perfect_parries >= t::TITLE_PARRIES {
+    if f.perfect_parries >= tune.title_parries {
         return "Parry Dancer".into();
     }
-    if f.dashes >= t::TITLE_DASHES {
+    if f.dashes >= tune.title_dashes {
         return "Blink Addict".into();
     }
-    if f.sectors >= t::TITLE_CARTOGRAPHER_SECTORS
-        && f.regions >= t::TITLE_CARTOGRAPHER_REGIONS
-        && f.kills * t::TITLE_GENTLE_KILLS_PER_SECTOR <= f.sectors as u32
+    if f.sectors >= tune.title_cartographer_sectors
+        && f.regions >= tune.title_cartographer_regions
+        && f.kills * tune.title_gentle_kills_per_sector <= f.sectors as u32
     {
         return "Gentle Cartographer".into();
     }
-    if f.deaths >= t::TITLE_RECKLESS_DEATHS && f.seconds < t::TITLE_RECKLESS_SECONDS {
+    if f.deaths >= tune.title_reckless_deaths && f.seconds < tune.title_reckless_seconds {
         return "Reckless Wreck".into();
     }
-    if f.mined >= t::TITLE_HERMIT_MINED && f.kills <= t::TITLE_HERMIT_KILLS {
+    if f.mined >= tune.title_hermit_mined && f.kills <= tune.title_hermit_kills {
         return "Pacifist Prospector".into();
     }
     "Wandering Hazard".into()
@@ -122,7 +121,7 @@ impl Game {
 
     /// The epithet of this run.
     pub fn run_title(&self) -> String {
-        title(&self.title_facts())
+        title(&self.title_facts(), &self.tune)
     }
 }
 
@@ -143,11 +142,11 @@ mod tests {
 
     #[test]
     fn every_title_has_its_own_trigger_and_the_fallback_is_the_base() {
-        assert_eq!(title(&facts()), "Wandering Hazard");
+        assert_eq!(title(&facts(), &DEFAULT_TUNING), "Wandering Hazard");
         let with = |f: &dyn Fn(&mut TitleFacts)| {
             let mut x = facts();
             f(&mut x);
-            title(&x)
+            title(&x, &DEFAULT_TUNING)
         };
         assert_eq!(with(&|f| f.apex_slain = 1), "Apex Hunter");
         assert_eq!(
@@ -200,7 +199,7 @@ mod tests {
         let with = |f: &dyn Fn(&mut TitleFacts)| {
             let mut x = facts();
             f(&mut x);
-            title(&x)
+            title(&x, &DEFAULT_TUNING)
         };
         // One extirpation alone, or two with no region, is not a scourge.
         assert_eq!(with(&|f| f.extirpated = 1), "Wandering Hazard");
@@ -233,15 +232,18 @@ mod tests {
         f.tithes = 9;
         f.perfect_parries = 30;
         f.friend = Some("X".into());
-        assert_eq!(title(&f), "Apex Hunter");
+        assert_eq!(title(&f, &DEFAULT_TUNING), "Apex Hunter");
         f.apex_slain = 0;
-        assert_eq!(title(&f), "Friend of the X");
+        assert_eq!(title(&f, &DEFAULT_TUNING), "Friend of the X");
         f.friend = None;
-        assert_eq!(title(&f), "Tithe Payer");
+        assert_eq!(title(&f, &DEFAULT_TUNING), "Tithe Payer");
         f.tithes = 0;
-        assert_eq!(title(&f), "Parry Dancer");
+        assert_eq!(title(&f, &DEFAULT_TUNING), "Parry Dancer");
         // Same facts, same title.
-        assert_eq!(title(&f), title(&f.clone()));
+        assert_eq!(
+            title(&f, &DEFAULT_TUNING),
+            title(&f.clone(), &DEFAULT_TUNING)
+        );
     }
 
     #[test]

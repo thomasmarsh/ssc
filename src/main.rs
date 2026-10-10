@@ -1518,11 +1518,12 @@ fn smoke_run(
         ] {
             game.loadout
                 .organs
-                .acquire(Strain::from_donor(organ, &genome));
+                .acquire(Strain::from_donor(organ, &genome), &game.tune);
         }
-        game.loadout
-            .organs
-            .acquire(Strain::from_donor(Organ::Veil, &Genome::veilwing()));
+        game.loadout.organs.acquire(
+            Strain::from_donor(Organ::Veil, &Genome::veilwing()),
+            &game.tune,
+        );
         game.cargo = Cargo {
             metal: 120.0,
             volatiles: 150.0,
@@ -2413,7 +2414,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
             ] {
                 game.loadout
                     .organs
-                    .acquire(Strain::from_donor(organ, &donor));
+                    .acquire(Strain::from_donor(organ, &donor), &game.tune);
             }
             game.bench_organ(Organ::Remora).unwrap();
             game.bench_select(BenchAction::Organ(Organ::Skipjack));

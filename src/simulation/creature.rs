@@ -497,15 +497,15 @@ impl Game {
                 match p.mode {
                     Mode::Attack | Mode::Defend if !body.alert => {
                         let pace = if p.mode == Mode::Attack {
-                            tuning::ATTACK_PACE
+                            self.tune.attack_pace
                         } else {
-                            tuning::DEFEND_PACE
+                            self.tune.defend_pace
                         };
                         desired += p.toward.normalize_or_zero() * speed * pace;
                         striking = true;
                     }
-                    Mode::Herd if p.distance > tuning::HERD_RING => {
-                        desired += p.toward.normalize_or_zero() * cruise * tuning::HERD_PULL;
+                    Mode::Herd if p.distance > self.tune.herd_ring => {
+                        desired += p.toward.normalize_or_zero() * cruise * self.tune.herd_pull;
                     }
                     _ => {}
                 }

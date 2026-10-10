@@ -5,7 +5,7 @@
 //!   and, with insurance on, the best weapon profile owned at up to level 2. So later runs start
 //!   a little faster, never with the late game handed over.
 //! - **The wreck** is left at the place of death, holding what the hold still carried (up to a
-//!   cap per material) and the best part. Flying within `WRECK_RADIUS` of it in a later run
+//!   cap per material) and the best part. Flying within `wreck_radius` of it in a later run
 //!   recovers it, as far as the hold has room. A wreck inside a living civilization's territory
 //!   is looted after a delay fixed by a hash of the seed, sector and wreck, counted in play time
 //!   across runs. At most three wrecks wait; the oldest is lost.
@@ -14,7 +14,6 @@
 //! `Legacy` into the new `Game`; restarting mid-run keeps the wrecks but earns no new legacy.
 
 use super::arsenal::{Gain, Profile};
-use super::tuning as t;
 use super::upgrades::{Item, Part, Rarity};
 use super::*;
 use crate::territory::Standing;
@@ -66,29 +65,29 @@ pub struct Bequest {
 }
 
 /// Share, cap and weapon rule for the insurance setting, for the toggle's notice.
-pub fn terms(insured: bool) -> (f32, f32, u8) {
+pub fn terms(insured: bool, tune: &Tunables) -> (f32, f32, u8) {
     if insured {
         (
-            t::LEGACY_FRACTION,
-            t::LEGACY_CAP,
-            t::LEGACY_WEAPON_LEVEL_CAP,
+            tune.legacy_fraction,
+            tune.legacy_cap,
+            tune.legacy_weapon_level_cap,
         )
     } else {
-        (t::LEGACY_FRACTION_BARE, t::LEGACY_CAP_BARE, 0)
+        (tune.legacy_fraction_bare, tune.legacy_cap_bare, 0)
     }
 }
 
 /// Seconds a wreck lies before the civilization holding its sector loots it.
-pub fn loot_time(seed: u64, sector: SectorId, id: u32) -> f32 {
+pub fn loot_time(seed: u64, sector: SectorId, id: u32, tune: &Tunables) -> f32 {
     let h = hash2(seed ^ LOOT_SALT ^ u64::from(id), sector.x, sector.y);
-    t::LOOT_AFTER + t::LOOT_JITTER * ((h % 10_000) as f32 / 10_000.0)
+    tune.loot_after + tune.loot_jitter * ((h % 10_000) as f32 / 10_000.0)
 }
 
 impl Game {
     /// What this run would pass on if it ended now (and the wreck it would leave).
     pub fn bequest(&self, position: Vec2, part: Option<Part>) -> Bequest {
         let insured = self.is_insured();
-        let (share, cap, weapon_cap) = terms(insured);
+        let (share, cap, weapon_cap) = terms(insured, &self.tune);
         let mut carried = Cargo::default();
         for (k, kind) in Material::MINERALS.into_iter().enumerate() {
             carried.add(kind, (self.run.mined[k] * share).min(cap).floor());
@@ -111,7 +110,10 @@ impl Game {
             .map(|s| super::organs::Strain { level: 1, ..s });
         let mut held = Cargo::default();
         for kind in Material::ALL {
-            held.add(kind, self.cargo.amount(kind).min(t::WRECK_CAP).floor());
+            held.add(
+                kind,
+                self.cargo.amount(kind).min(self.tune.wreck_cap).floor(),
+            );
         }
         let has = held.metal + held.volatiles + held.crystal >= 0.5 || part.is_some();
         let wreck = has.then_some(Wreck {
@@ -159,7 +161,7 @@ impl Game {
                 legacy.next_wreck += 1;
                 wreck.id = legacy.next_wreck;
                 legacy.wrecks.push(wreck);
-                while legacy.wrecks.len() > t::MAX_WRECKS {
+                while legacy.wrecks.len() > self.tune.max_wrecks {
                     legacy.wrecks.remove(0);
                 }
             }
@@ -185,7 +187,7 @@ impl Game {
             self.refresh_stats();
         }
         if let Some(strain) = legacy.organ {
-            self.loadout.organs.acquire(strain);
+            self.loadout.organs.acquire(strain, &self.tune);
         }
         self.legacy = legacy;
         if !self.legacy.is_empty() {
@@ -211,7 +213,8 @@ impl Game {
 
     /// The legacy line while a run is young, else None.
     pub fn legacy_hud(&self) -> Option<String> {
-        (self.time < t::LEGACY_HUD_SECONDS && !self.legacy.is_empty()).then(|| self.legacy_line())
+        (self.time < self.tune.legacy_hud_seconds && !self.legacy.is_empty())
+            .then(|| self.legacy_line())
     }
 
     pub fn legacy(&self) -> &Legacy {
@@ -247,7 +250,7 @@ impl Game {
             let sector = SectorId::containing(position);
             let rival = world::territory(seed, sector)
                 .filter(|t| self.civ_standing(t.id) != Standing::Fallen);
-            if rival.is_some() && age >= loot_time(seed, sector, id) {
+            if rival.is_some() && age >= loot_time(seed, sector, id, &self.tune) {
                 gone.push(id);
                 self.notify("A RIVAL LOOTED YOUR WRECK".into(), Rarity::Epic);
             }
@@ -260,7 +263,7 @@ impl Game {
             .legacy
             .wrecks
             .iter()
-            .position(|w| w.position.distance(ship) <= t::WRECK_RADIUS)
+            .position(|w| w.position.distance(ship) <= self.tune.wreck_radius)
         else {
             return;
         };
@@ -304,7 +307,7 @@ impl Game {
         let Some(b) = &self.bequest else {
             return Vec::new();
         };
-        let (share, cap, _) = terms(b.insured);
+        let (share, cap, _) = terms(b.insured, &self.tune);
         let mut out = vec![format!(
             "({})  carries {:.0}M {:.0}V {:.0}C   ({:.0}% of ore mined, up to {:.0} each){}",
             if b.insured { "INSURED" } else { "UNINSURED" },
@@ -407,13 +410,13 @@ mod tests {
         mined(&mut game, 1000.0, 100.0, 0.0);
         let b = game.bequest(Vec2::ZERO, None);
         assert!(b.insured);
-        assert_eq!(b.carried.metal, t::LEGACY_CAP, "capped");
+        assert_eq!(b.carried.metal, DEFAULT_TUNING.legacy_cap, "capped");
         assert_eq!(b.carried.volatiles, 25.0, "a quarter");
         assert_eq!(b.carried.crystal, 0.0);
         game.toggle_insurance();
         let b = game.bequest(Vec2::ZERO, None);
         assert!(!b.insured);
-        assert_eq!(b.carried.metal, t::LEGACY_CAP_BARE);
+        assert_eq!(b.carried.metal, DEFAULT_TUNING.legacy_cap_bare);
         assert_eq!(b.carried.volatiles, 10.0);
         assert!(b.carried.metal < 120.0 && b.carried.volatiles < 25.0);
     }
@@ -427,7 +430,12 @@ mod tests {
         let b = game.bequest(Vec2::ZERO, None);
         assert_eq!(
             b.weapon,
-            Some((weapon, t::LEGACY_WEAPON_LEVEL_CAP.min(weapon.max_level())))
+            Some((
+                weapon,
+                DEFAULT_TUNING
+                    .legacy_weapon_level_cap
+                    .min(weapon.max_level())
+            ))
         );
         game.toggle_insurance();
         assert_eq!(game.bequest(Vec2::ZERO, None).weapon, None);
@@ -502,7 +510,7 @@ mod tests {
         let wreck = b.wreck.as_ref().expect("a wreck");
         assert!(wreck.position.distance(at) < 1.0);
         assert!(wreck.part.is_some(), "the best part rides in the wreck");
-        assert!(wreck.cargo.metal > 0.0 && wreck.cargo.metal <= t::WRECK_CAP);
+        assert!(wreck.cargo.metal > 0.0 && wreck.cargo.metal <= DEFAULT_TUNING.wreck_cap);
         let mut next = game.next_run();
         assert_eq!(next.wrecks().len(), 1);
         assert_eq!(next.wrecks()[0].position, wreck.position);
@@ -518,7 +526,7 @@ mod tests {
         let game = dead_with(100.0, at);
         let mut next = game.next_run();
         let held = next.wrecks()[0].cargo;
-        next.teleport(at + Vec2::new(t::WRECK_RADIUS - 10.0, 0.0));
+        next.teleport(at + Vec2::new(DEFAULT_TUNING.wreck_radius - 10.0, 0.0));
         next.step(DT, Input::default());
         assert!(next.wrecks().is_empty(), "recovered");
         assert_eq!(next.cargo.metal, held.metal);
@@ -545,7 +553,7 @@ mod tests {
             lose_the_ship(&mut game);
         }
         let next = game.next_run();
-        assert_eq!(next.wrecks().len(), t::MAX_WRECKS);
+        assert_eq!(next.wrecks().len(), DEFAULT_TUNING.max_wrecks);
         assert!(
             next.wrecks().iter().all(|w| w.position.x > 150.0),
             "the first is gone"
@@ -558,9 +566,16 @@ mod tests {
     fn a_rival_loots_a_wreck_in_its_territory_after_a_fixed_delay_and_only_there() {
         let seed = 42;
         let id = territory_sector(seed);
-        let time = loot_time(seed, id, 1);
-        assert!((t::LOOT_AFTER..t::LOOT_AFTER + t::LOOT_JITTER).contains(&time));
-        assert_eq!(time, loot_time(seed, id, 1), "deterministic");
+        let time = loot_time(seed, id, 1, &DEFAULT_TUNING);
+        assert!(
+            (DEFAULT_TUNING.loot_after..DEFAULT_TUNING.loot_after + DEFAULT_TUNING.loot_jitter)
+                .contains(&time)
+        );
+        assert_eq!(
+            time,
+            loot_time(seed, id, 1, &DEFAULT_TUNING),
+            "deterministic"
+        );
         let wreck = |at: Vec2| Wreck {
             id: 1,
             position: at,

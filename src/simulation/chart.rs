@@ -15,7 +15,6 @@
 //! (`legacy`).
 
 use super::ping::EchoKind;
-use super::tuning as t;
 use super::upgrades::Rarity;
 use super::*;
 use crate::territory::Standing;
@@ -372,9 +371,12 @@ impl Game {
                     return;
                 }
                 super::discovery::Target::Relic { sector: id, .. } => {
-                    if let Some((_, position)) =
-                        super::organs::relic_of(self.seed, id, world::latent(self.seed, id).depth)
-                    {
+                    if let Some((_, position)) = super::organs::relic_of(
+                        self.seed,
+                        id,
+                        world::latent(self.seed, id).depth,
+                        &self.tune,
+                    ) {
                         self.learn(Mark {
                             well_mode: None,
                             kind: EchoKind::Relic,
@@ -415,7 +417,7 @@ impl Game {
     pub(super) fn chart_reveal(&mut self, id: SectorId, visited: bool) {
         let seed = self.seed;
         let fallen = self.fallen.get(&id).cloned().unwrap_or_default();
-        let sites: Vec<_> = self.ping.sites(seed, id).to_vec();
+        let sites: Vec<_> = self.ping.sites(seed, id, &self.tune).to_vec();
         let known = self.chart.known.entry(id).or_default();
         known.visited |= visited;
         for site in sites {
@@ -613,7 +615,7 @@ impl Game {
                     (
                         ChartGeometryKind::Planetoid,
                         crate::backdrop::ROCK,
-                        renewable(self.seed, (id, spawn.index)),
+                        renewable(self.seed, (id, spawn.index), &self.tune),
                     )
                 } else if let Some(civ) = spawn.civ {
                     let kind = match civ.role {
@@ -673,8 +675,11 @@ impl Game {
 
     /// Pins a sector with a preset note, replacing any note there. Refused at the pin cap.
     pub fn chart_pin(&mut self, sector: SectorId, label: PinLabel) -> bool {
-        if !self.chart.pins.contains_key(&sector) && self.chart.pins.len() >= t::MAX_PINS {
-            self.notify(format!("CHART FULL  {} PINS", t::MAX_PINS), Rarity::Common);
+        if !self.chart.pins.contains_key(&sector) && self.chart.pins.len() >= self.tune.max_pins {
+            self.notify(
+                format!("CHART FULL  {} PINS", self.tune.max_pins),
+                Rarity::Common,
+            );
             return false;
         }
         self.chart.pins.insert(sector, label);
@@ -762,13 +767,17 @@ impl Game {
         let ship = self.player()?.position;
         let beacon = self.chart.beacons.iter().find(|b| b.id == id)?;
         let sectors = ship.distance(beacon.position) / SECTOR_SIZE;
-        let charge = (t::TRAVEL_CHARGE_BASE + t::TRAVEL_CHARGE_PER_SECTOR * sectors)
-            .min(t::TRAVEL_CHARGE_MAX)
+        let charge = (self.tune.travel_charge_base + self.tune.travel_charge_per_sector * sectors)
+            .min(self.tune.travel_charge_max)
             * self.loadout.skills.travel_charge_factor(&self.tune);
         Some(TravelQuote {
             sectors,
-            volatiles: (t::TRAVEL_VOLATILES_BASE + t::TRAVEL_VOLATILES_PER_SECTOR * sectors).ceil(),
-            crystal: (t::TRAVEL_CRYSTAL_BASE + t::TRAVEL_CRYSTAL_PER_SECTOR * sectors).ceil(),
+            volatiles: (self.tune.travel_volatiles_base
+                + self.tune.travel_volatiles_per_sector * sectors)
+                .ceil(),
+            crystal: (self.tune.travel_crystal_base
+                + self.tune.travel_crystal_per_sector * sectors)
+                .ceil(),
             charge,
         })
     }
@@ -807,13 +816,12 @@ impl Game {
                 format!("TRAVEL RECHARGING  {:.0}s", left.ceil()),
             );
         }
-        if quote.sectors > t::TRAVEL_MAX_SECTORS {
+        if quote.sectors > self.tune.travel_max_sectors {
             return self.refuse_travel(
                 TravelError::TooFar,
                 format!(
                     "TOO FAR  {:.0} sectors, limit {:.0}",
-                    quote.sectors,
-                    t::TRAVEL_MAX_SECTORS
+                    quote.sectors, self.tune.travel_max_sectors
                 ),
             );
         }
@@ -859,8 +867,8 @@ impl Game {
             return;
         }
         if let Some(travel) = self.chart.travel.take() {
-            self.refund(&travel, t::TRAVEL_CANCEL_REFUND);
-            self.chart.cooldown = self.chart.cooldown.max(t::TRAVEL_CANCEL_COOLDOWN);
+            self.refund(&travel, self.tune.travel_cancel_refund);
+            self.chart.cooldown = self.chart.cooldown.max(self.tune.travel_cancel_cooldown);
             self.notify("JUMP BROKEN  hit while charging".into(), Rarity::Common);
             self.cue(Cue::Dry);
         }
@@ -939,8 +947,8 @@ impl Game {
         self.beam = None;
         self.mine_target = None;
         self.mine_clock = 0.0;
-        self.chart.cooldown = t::TRAVEL_COOLDOWN;
-        self.chart.exposed = t::TRAVEL_EXPOSED;
+        self.chart.cooldown = self.tune.travel_cooldown;
+        self.chart.exposed = self.tune.travel_exposed;
         self.player_invulnerability = 0.0;
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.shield = 0.0;
@@ -1172,7 +1180,7 @@ mod tests {
         assert_eq!(game.chart_entry(id).unwrap().pin, Some(PinLabel::Camp));
         assert!(game.chart_unpin(id));
         assert!(!game.chart_unpin(id));
-        for n in 0..t::MAX_PINS as i32 {
+        for n in 0..DEFAULT_TUNING.max_pins as i32 {
             assert!(game.chart_pin(SectorId { x: 10 + n, y: 0 }, PinLabel::Loot));
         }
         assert!(
@@ -1236,7 +1244,7 @@ mod tests {
         game.teleport(Vec2::new(-10.0 * SECTOR_SIZE, 0.0));
         let b = game.travel_quote(near).unwrap();
         assert!(b.volatiles > a.volatiles && b.crystal >= a.crystal && b.charge > a.charge);
-        assert!(b.charge <= t::TRAVEL_CHARGE_MAX);
+        assert!(b.charge <= DEFAULT_TUNING.travel_charge_max);
         rich(&mut game);
         assert_eq!(game.begin_travel(99), Err(TravelError::TooFar));
         assert_eq!(game.cargo.volatiles, 200.0, "a refused jump costs nothing");
@@ -1268,8 +1276,8 @@ mod tests {
             game.run.damage_taken < 1.0,
             "the dropped shield is not a hit"
         );
-        assert!((game.travel_cooldown() - t::TRAVEL_COOLDOWN).abs() < 1.0);
-        run(&mut game, t::TRAVEL_EXPOSED + 0.5);
+        assert!((game.travel_cooldown() - DEFAULT_TUNING.travel_cooldown).abs() < 1.0);
+        run(&mut game, DEFAULT_TUNING.travel_exposed + 0.5);
         assert_eq!(game.exposed_for(), 0.0);
         rich(&mut game);
         assert!(matches!(
@@ -1293,7 +1301,7 @@ mod tests {
         }
         game.chart_ship_damaged(20.0);
         assert!(game.travel_progress().is_none(), "broken");
-        let back = (quote.volatiles * t::TRAVEL_CANCEL_REFUND).floor();
+        let back = (quote.volatiles * DEFAULT_TUNING.travel_cancel_refund).floor();
         assert_eq!(game.cargo.volatiles, 200.0 - quote.volatiles + back);
         assert!(
             game.cargo.volatiles < 200.0,
@@ -1307,7 +1315,7 @@ mod tests {
             game.begin_travel(id),
             Err(TravelError::Cooldown(_))
         ));
-        run(&mut game, t::TRAVEL_CANCEL_COOLDOWN + 0.5);
+        run(&mut game, DEFAULT_TUNING.travel_cancel_cooldown + 0.5);
         assert!(game.begin_travel(id).is_ok(), "the short wait ends");
     }
 

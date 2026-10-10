@@ -171,8 +171,12 @@ impl Game {
                 if self.relics_taken.contains(&id) {
                     return None;
                 }
-                let (strain, generated) =
-                    organs::relic_of(self.seed, id, world::latent(self.seed, id).depth)?;
+                let (strain, generated) = organs::relic_of(
+                    self.seed,
+                    id,
+                    world::latent(self.seed, id).depth,
+                    &self.tune,
+                )?;
                 let position = if self.loaded.contains(&id) {
                     self.pickups
                         .iter()
@@ -373,11 +377,22 @@ impl Game {
         let id = (10..20)
             .flat_map(|x| (0..10).map(move |y| SectorId { x, y }))
             .find(|&id| {
-                organs::relic_of(self.seed, id, world::latent(self.seed, id).depth).is_some()
+                organs::relic_of(
+                    self.seed,
+                    id,
+                    world::latent(self.seed, id).depth,
+                    &self.tune,
+                )
+                .is_some()
             })
             .unwrap();
-        let (_, relic) =
-            organs::relic_of(self.seed, id, world::latent(self.seed, id).depth).unwrap();
+        let (_, relic) = organs::relic_of(
+            self.seed,
+            id,
+            world::latent(self.seed, id).depth,
+            &self.tune,
+        )
+        .unwrap();
         let ship = relic - Vec2::new(450.0, 170.0);
         self.teleport(ship);
         self.set_auto_ping(false);
@@ -521,12 +536,16 @@ mod tests {
     fn relic_sector(g: &Game) -> SectorId {
         (2..15)
             .flat_map(|x| (-10..10).map(move |y| SectorId { x, y }))
-            .find(|&id| organs::relic_of(g.seed, id, world::latent(g.seed, id).depth).is_some())
+            .find(|&id| {
+                organs::relic_of(g.seed, id, world::latent(g.seed, id).depth, &DEFAULT_TUNING)
+                    .is_some()
+            })
             .unwrap()
     }
     fn local_relic(g: &mut Game) -> SectorId {
         let id = relic_sector(g);
-        let (_, at) = organs::relic_of(g.seed, id, world::latent(g.seed, id).depth).unwrap();
+        let (_, at) =
+            organs::relic_of(g.seed, id, world::latent(g.seed, id).depth, &DEFAULT_TUNING).unwrap();
         g.bodies[0].position = at - Vec2::new(1500.0, 0.0);
         g.active.push(id);
         g.loaded.insert(id);

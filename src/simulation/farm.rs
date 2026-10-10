@@ -705,7 +705,7 @@ impl Game {
         self.mine_clock = 0.0;
         let drained = self
             .player()
-            .map_or(0.0, |p| (mining::BEAM_DRAIN * dt).min(p.shield));
+            .map_or(0.0, |p| (self.tune.beam_drain * dt).min(p.shield));
         if let Some(body) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             body.shield -= drained;
         }
@@ -2091,22 +2091,28 @@ mod tests {
     #[test]
     fn biomass_trade_math_scales_with_warmth_and_never_exceeds_the_store() {
         use super::{biomass_offer, seed_gift_chance, warmth};
-        let friendly = crate::simulation::tuning::FRIENDLY_AT;
-        let max = crate::simulation::tuning::REGARD_MAX;
-        assert_eq!(warmth(friendly - 10.0), 0.0);
-        assert_eq!(warmth(friendly), 0.0);
-        assert!((warmth((friendly + max) / 2.0) - 0.5).abs() < 1e-6);
-        assert_eq!(warmth(max), 1.0);
-        let given = crate::simulation::tuning::TITHE_AMOUNT;
-        let cool = biomass_offer(100.0, friendly, given);
-        let warm = biomass_offer(100.0, max, given);
+        let friendly = DEFAULT_TUNING.friendly_at;
+        let max = DEFAULT_TUNING.regard_max;
+        assert_eq!(warmth(friendly - 10.0, &DEFAULT_TUNING), 0.0);
+        assert_eq!(warmth(friendly, &DEFAULT_TUNING), 0.0);
+        assert!((warmth((friendly + max) / 2.0, &DEFAULT_TUNING) - 0.5).abs() < 1e-6);
+        assert_eq!(warmth(max, &DEFAULT_TUNING), 1.0);
+        let given = DEFAULT_TUNING.tithe_amount;
+        let cool = biomass_offer(100.0, friendly, given, &DEFAULT_TUNING);
+        let warm = biomass_offer(100.0, max, given, &DEFAULT_TUNING);
         assert!((cool - given * tend::TRADE_BIOMASS).abs() < 1e-4);
         assert!((warm - 2.0 * cool).abs() < 1e-4);
-        assert_eq!(biomass_offer(5.0, max, given), 5.0, "capped by the store");
-        assert_eq!(biomass_offer(0.0, max, given), 0.0);
-        assert_eq!(biomass_offer(-3.0, max, given), 0.0);
-        assert!(seed_gift_chance(max) > seed_gift_chance(friendly));
-        assert!(seed_gift_chance(max) <= 1.0);
+        assert_eq!(
+            biomass_offer(5.0, max, given, &DEFAULT_TUNING),
+            5.0,
+            "capped by the store"
+        );
+        assert_eq!(biomass_offer(0.0, max, given, &DEFAULT_TUNING), 0.0);
+        assert_eq!(biomass_offer(-3.0, max, given, &DEFAULT_TUNING), 0.0);
+        assert!(
+            seed_gift_chance(max, &DEFAULT_TUNING) > seed_gift_chance(friendly, &DEFAULT_TUNING)
+        );
+        assert!(seed_gift_chance(max, &DEFAULT_TUNING) <= 1.0);
     }
 
     /// Visits `t`'s capital sector and returns the game and its seat's position.
@@ -2159,7 +2165,7 @@ mod tests {
         let hint = game.tithe_hint().expect("a seat in reach");
         assert_eq!(hint.store, 40.0);
         let regard = game.civ_regard(t.id);
-        let expect = farm::biomass_offer(40.0, regard, 20.0);
+        let expect = farm::biomass_offer(40.0, regard, 20.0, &DEFAULT_TUNING);
         assert_eq!(game.tithe(), Ok(()));
         assert!(
             (game.cargo.biomass - expect).abs() < 1e-3,

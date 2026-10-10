@@ -32,7 +32,7 @@ pub struct Greenhouse {
     pub tint: [f32; 3],
 }
 
-/// Biomass a tithe of `TITHE_AMOUNT` buys from a friendly farm at regard `FRIENDLY_AT`, and
+/// Biomass a tithe of `tithe_amount` buys from a friendly farm at regard `friendly_at`, and
 /// the extra warmth adds (up to this much again at maximum regard).
 pub const TRADE_BIOMASS: f32 = 0.6;
 /// Chance a trade also gives a seed: this at friendly regard, plus this much more at maximum.
@@ -42,19 +42,19 @@ pub const SEED_GIFT: (f32, f32) = (0.35, 0.35);
 const GIFT_SALT: u64 = 0xFA12_3000_0000_0006;
 
 /// How warm a regard is within the friendly band, in [0, 1].
-pub fn warmth(regard: f32) -> f32 {
-    ((regard - tuning::FRIENDLY_AT) / (tuning::REGARD_MAX - tuning::FRIENDLY_AT)).clamp(0.0, 1.0)
+pub fn warmth(regard: f32, tune: &Tunables) -> f32 {
+    ((regard - tune.friendly_at) / (tune.regard_max - tune.friendly_at)).clamp(0.0, 1.0)
 }
 
 /// Biomass a friendly farm sells for a tithe of `given` material at `regard`, from a granary
 /// holding `store` (never more than it has).
-pub fn biomass_offer(store: f32, regard: f32, given: f32) -> f32 {
-    (given * TRADE_BIOMASS * (1.0 + warmth(regard))).min(store.max(0.0))
+pub fn biomass_offer(store: f32, regard: f32, given: f32, tune: &Tunables) -> f32 {
+    (given * TRADE_BIOMASS * (1.0 + warmth(regard, tune))).min(store.max(0.0))
 }
 
 /// Chance a trade at `regard` also gives a seed.
-pub fn seed_gift_chance(regard: f32) -> f32 {
-    SEED_GIFT.0 + SEED_GIFT.1 * warmth(regard)
+pub fn seed_gift_chance(regard: f32, tune: &Tunables) -> f32 {
+    SEED_GIFT.0 + SEED_GIFT.1 * warmth(regard, tune)
 }
 
 /// Where plot `n` of the greenhouse of station `key` points: a world-frame angle. Pure.
@@ -390,7 +390,7 @@ impl Game {
     /// Whether the seed-gift roll of the `salt`th trade with `t` at `regard` succeeds.
     pub(in crate::simulation) fn gift_roll(&self, t: &Territory, salt: u32, regard: f32) -> bool {
         Rng::new(hash2(self.seed ^ GIFT_SALT ^ 0x6F ^ t.id, salt as i32, 3))
-            .chance(seed_gift_chance(regard))
+            .chance(seed_gift_chance(regard, &self.tune))
     }
 
     /// Smoke hook (`SSC_FARM_CIV`): goes to the early outpost, a farming settlement, and once

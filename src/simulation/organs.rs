@@ -73,15 +73,15 @@ impl Organ {
     }
 
     /// What the organ does at level 1 and magnitude 1, for the bench and the details.
-    pub fn summary(self) -> String {
+    pub fn summary(self, tune: &Tunables) -> String {
         match self {
-            Self::Remora => format!("mends {:.1} hull a second when quiet", t::REMORA_REGEN),
+            Self::Remora => format!("mends {:.1} hull a second when quiet", tune.remora_regen),
             Self::Faraday => format!(
                 "jams and glitches {:.0}% shorter, none at level 3",
-                t::FARADAY_CUT * 100.0
+                tune.faraday_cut * 100.0
             ),
-            Self::Veil => format!("intangible {:.2}s after a dash", t::VEIL_TIME),
-            Self::Skipjack => format!("a dash hops walls under {:.0} thick", t::SKIP_THICK),
+            Self::Veil => format!("intangible {:.2}s after a dash", tune.veil_time),
+            Self::Skipjack => format!("a dash hops walls under {:.0} thick", tune.skip_thick),
         }
     }
 }
@@ -112,8 +112,13 @@ impl Strain {
     }
 
     /// The perk's strength: magnitude times the level's gain.
-    pub fn strength(&self) -> f32 {
-        self.magnitude * t::ORGAN_LEVEL_GAIN[usize::from(self.level.clamp(1, 3)) - 1]
+    pub fn strength(&self, tune: &Tunables) -> f32 {
+        let gain = match self.level.clamp(1, 3) {
+            1 => tune.organ_level_gain_1,
+            2 => tune.organ_level_gain_2,
+            _ => tune.organ_level_gain_3,
+        };
+        self.magnitude * gain
     }
 }
 
@@ -172,7 +177,7 @@ impl Organs {
     }
 
     /// Takes a strain aboard under the no-downgrade rule.
-    pub fn acquire(&mut self, found: Strain) -> Found {
+    pub fn acquire(&mut self, found: Strain, tune: &Tunables) -> Found {
         let slot = &mut self.owned[found.organ.index()];
         match slot {
             None => {
@@ -192,7 +197,7 @@ impl Organs {
                 have.magnitude = found.magnitude;
                 Found::Improved
             }
-            Some(have) => Found::Lesser(t::LESSER_BIOMASS * f32::from(have.level)),
+            Some(have) => Found::Lesser(tune.lesser_biomass * f32::from(have.level)),
         }
     }
 
@@ -204,8 +209,8 @@ impl Organs {
     }
 
     /// The perk strength of an active organ, or None.
-    pub fn perk(&self, organ: Organ) -> Option<f32> {
-        self.active(organ).map(|s| s.strength())
+    pub fn perk(&self, organ: Organ, tune: &Tunables) -> Option<f32> {
+        self.active(organ).map(|s| s.strength(tune))
     }
 
     /// The best strain owned (highest level, then magnitude), for the legacy.
@@ -239,22 +244,27 @@ impl Organs {
 }
 
 /// Graft price of a strain at its level.
-pub fn graft_price(strain: &Strain) -> [(Material, f32); 2] {
+pub fn graft_price(strain: &Strain, tune: &Tunables) -> [(Material, f32); 2] {
     let k = f32::from(strain.level);
     [
-        (Material::Crystal, t::GRAFT_CRYSTAL * k),
-        (Material::Fuel, t::GRAFT_FUEL * k),
+        (Material::Crystal, tune.graft_crystal * k),
+        (Material::Fuel, tune.graft_fuel * k),
     ]
 }
 
 /// The relic of a sector, if it has one: the organ and the strain, from a hash of the seed and
 /// the sector alone (so a route always finds the same).
-pub fn relic_of(seed: u64, sector: SectorId, depth: f32) -> Option<(Strain, Vec2)> {
-    if depth < t::RELIC_FROM {
+pub fn relic_of(
+    seed: u64,
+    sector: SectorId,
+    depth: f32,
+    tune: &Tunables,
+) -> Option<(Strain, Vec2)> {
+    if depth < tune.relic_from {
         return None;
     }
     let h = world::hash2(seed ^ RELIC_SALT, sector.x, sector.y);
-    if !h.is_multiple_of(t::RELIC_ONE_IN) {
+    if !h.is_multiple_of(tune.relic_one_in) {
         return None;
     }
     let organ = Organ::ALL[((h >> 8) % 4) as usize];
@@ -277,13 +287,16 @@ const RELIC_SALT: u64 = 0x0126_A117_0000_00B1;
 impl Game {
     /// Takes a strain aboard (a specimen picked up, a relic, a bond) and tells the player.
     pub(super) fn take_strain(&mut self, found: Strain, source: &str) -> Found {
-        let result = self.loadout.organs.acquire(found);
+        let result = self.loadout.organs.acquire(found, &self.tune);
         let name = found.organ.label();
         match result {
             Found::New => {
                 self.run.organs += 1;
                 self.notify(
-                    format!("{source}  {name} ORGAN  {}", found.organ.summary()),
+                    format!(
+                        "{source}  {name} ORGAN  {}",
+                        found.organ.summary(&self.tune)
+                    ),
                     upgrades::Rarity::Epic,
                 );
             }
@@ -306,12 +319,12 @@ impl Game {
         result
     }
 
-    /// A bond: the strain is owned and works at once for `BOND_LOAN` seconds; a free slot takes
+    /// A bond: the strain is owned and works at once for `bond_loan` seconds; a free slot takes
     /// it for good without the graft cost.
     pub(super) fn bond(&mut self, strain: Strain) {
         self.take_strain(strain, "BONDED");
         let organ = strain.organ;
-        self.loadout.organs.loan = Some((organ, t::BOND_LOAN));
+        self.loadout.organs.loan = Some((organ, self.tune.bond_loan));
         let open = self.loadout.skills.organ_slots();
         let organs = &mut self.loadout.organs;
         if organs.slots.len() < open && organs.fit(organ, open).is_some() {
@@ -330,7 +343,7 @@ impl Game {
         }
         let fitted = organs.slots.len();
         if fitted > 0 {
-            let want = t::ORGAN_UPKEEP / 60.0 * fitted as f32 * dt;
+            let want = self.tune.organ_upkeep / 60.0 * fitted as f32 * dt;
             let taken = self.cargo.take(Material::Biomass, want);
             let dry = taken + 1e-6 < want || self.cargo.amount(Material::Biomass) <= 0.0;
             let organs = &mut self.loadout.organs;
@@ -343,12 +356,13 @@ impl Game {
             self.loadout.organs.dormant = false;
         }
         let grade = self.equipment_grade();
-        if let Some(rate) = self.loadout.organs.perk(Organ::Remora)
+        if let Some(rate) = self.loadout.organs.perk(Organ::Remora, &self.tune)
             && let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
             && ship.health > 0.0
-            && ship.since_hit >= t::REMORA_QUIET
+            && ship.since_hit >= self.tune.remora_quiet
         {
-            ship.health = (ship.health + t::REMORA_REGEN * rate * grade * dt).min(ship.max_health);
+            ship.health =
+                (ship.health + self.tune.remora_regen * rate * grade * dt).min(ship.max_health);
         }
     }
 
@@ -358,7 +372,9 @@ impl Game {
         match self.loadout.organs.active(Organ::Faraday) {
             None => 1.0,
             Some(strain) if strain.level >= t::ORGAN_LEVELS => 0.0,
-            Some(strain) => (1.0 - t::FARADAY_CUT * strain.strength()).clamp(0.0, 1.0),
+            Some(strain) => {
+                (1.0 - self.tune.faraday_cut * strain.strength(&self.tune)).clamp(0.0, 1.0)
+            }
         }
     }
 
@@ -380,7 +396,7 @@ impl Game {
             return Err(format!("{name} IS NOT OWNED"));
         };
         if !self.loadout.organs.paid[organ.index()] {
-            let price = graft_price(&strain);
+            let price = graft_price(&strain, &self.tune);
             if !self.cargo.spend(&price) {
                 return Err(format!(
                     "{name} GRAFT NEEDS {:.0} CRYSTAL {:.0} FUEL",
@@ -398,16 +414,16 @@ impl Game {
     pub(super) fn veil_time(&self) -> Option<f32> {
         self.loadout
             .organs
-            .perk(Organ::Veil)
-            .map(|s| t::VEIL_TIME * s)
+            .perk(Organ::Veil, &self.tune)
+            .map(|s| self.tune.veil_time * s)
     }
 
     /// The thickest obstacle a dash hops, if the Skipjack node is working.
     pub(super) fn skip_thickness(&self) -> Option<f32> {
         self.loadout
             .organs
-            .perk(Organ::Skipjack)
-            .map(|s| t::SKIP_THICK * s)
+            .perk(Organ::Skipjack, &self.tune)
+            .map(|s| self.tune.skip_thick * s)
     }
 
     /// Lays a sector's relic as a pickup the first time it loads and nothing like it lies there.
@@ -416,7 +432,7 @@ impl Game {
             return;
         }
         let depth = world::latent(self.seed, id).depth;
-        let Some((strain, at)) = relic_of(self.seed, id, depth) else {
+        let Some((strain, at)) = relic_of(self.seed, id, depth, &self.tune) else {
             return;
         };
         if self.pickups.iter().any(|p| p.relic == Some(id)) {
@@ -461,25 +477,31 @@ mod tests {
     #[test]
     fn strains_only_rise_and_a_lesser_find_pays_volatiles() {
         let mut organs = Organs::default();
-        assert_eq!(organs.acquire(strain(Organ::Veil, 1, 1.0)), Found::New);
         assert_eq!(
-            organs.acquire(strain(Organ::Veil, 1, 0.7)),
+            organs.acquire(strain(Organ::Veil, 1, 1.0), &DEFAULT_TUNING),
+            Found::New
+        );
+        assert_eq!(
+            organs.acquire(strain(Organ::Veil, 1, 0.7), &DEFAULT_TUNING),
             Found::Raised { from: 1, to: 2 }
         );
         assert_eq!(
-            organs.acquire(strain(Organ::Veil, 1, 0.9)),
+            organs.acquire(strain(Organ::Veil, 1, 0.9), &DEFAULT_TUNING),
             Found::Raised { from: 2, to: 3 }
         );
         // Raised levels keep the better genes.
         assert_eq!(organs.strain(Organ::Veil).unwrap().magnitude, 1.0);
         // At the top: a weaker sample pays biomass and changes nothing; a stronger one improves.
         let before = organs.strain(Organ::Veil);
-        let Found::Lesser(v) = organs.acquire(strain(Organ::Veil, 1, 0.6)) else {
+        let Found::Lesser(v) = organs.acquire(strain(Organ::Veil, 1, 0.6), &DEFAULT_TUNING) else {
             panic!("expected a lesser find");
         };
-        assert_eq!(v, t::LESSER_BIOMASS * 3.0);
+        assert_eq!(v, DEFAULT_TUNING.lesser_biomass * 3.0);
         assert_eq!(organs.strain(Organ::Veil), before);
-        assert_eq!(organs.acquire(strain(Organ::Veil, 1, 1.4)), Found::Improved);
+        assert_eq!(
+            organs.acquire(strain(Organ::Veil, 1, 1.4), &DEFAULT_TUNING),
+            Found::Improved
+        );
         assert_eq!(organs.strain(Organ::Veil).unwrap().level, 3);
         assert_eq!(organs.strain(Organ::Veil).unwrap().magnitude, 1.4);
         assert!(!organs.owns(Organ::Faraday));
@@ -506,23 +528,36 @@ mod tests {
         // The same genome gives the same strain.
         assert_eq!(a, Strain::from_donor(Organ::Faraday, &big));
         // Levels scale the perk by the doc's 1, 1.5 and 2.
-        let one = strain(Organ::Veil, 1, 1.0).strength();
-        assert_eq!(strain(Organ::Veil, 2, 1.0).strength(), one * 1.5);
-        assert_eq!(strain(Organ::Veil, 3, 1.0).strength(), one * 2.0);
+        let one = strain(Organ::Veil, 1, 1.0).strength(&DEFAULT_TUNING);
+        assert_eq!(
+            strain(Organ::Veil, 2, 1.0).strength(&DEFAULT_TUNING),
+            one * 1.5
+        );
+        assert_eq!(
+            strain(Organ::Veil, 3, 1.0).strength(&DEFAULT_TUNING),
+            one * 2.0
+        );
     }
 
     #[test]
     fn a_graft_needs_symbiosis_pays_once_and_a_swap_is_free() {
         let mut game = stocked();
-        game.loadout.organs.acquire(strain(Organ::Veil, 2, 1.0));
-        game.loadout.organs.acquire(strain(Organ::Faraday, 1, 1.0));
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Veil, 2, 1.0), &DEFAULT_TUNING);
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Faraday, 1, 1.0), &DEFAULT_TUNING);
         assert!(game.bench_organ(Organ::Veil).is_err(), "no slot yet");
         game.loadout.skills.raise(Skill::Symbiosis);
         assert_eq!(game.loadout.skills.organ_slots(), 1);
         // A level 2 graft: 2 x (8 crystal, 20 volatiles).
         assert!(game.bench_organ(Organ::Veil).is_ok());
-        assert_eq!(game.cargo.crystal, 100.0 - t::GRAFT_CRYSTAL * 2.0);
-        assert_eq!(game.cargo.fuel, 100.0 - t::GRAFT_FUEL * 2.0);
+        assert_eq!(
+            game.cargo.crystal,
+            100.0 - DEFAULT_TUNING.graft_crystal * 2.0
+        );
+        assert_eq!(game.cargo.fuel, 100.0 - DEFAULT_TUNING.graft_fuel * 2.0);
         assert!(game.loadout.organs.is_fitted(Organ::Veil));
         // One slot: a second organ bumps the first, never destroying it.
         assert!(game.bench_organ(Organ::Faraday).is_ok());
@@ -536,7 +571,9 @@ mod tests {
         // Short of the price: refused, nothing spent.
         let mut poor = stocked();
         poor.loadout.skills.raise(Skill::Symbiosis);
-        poor.loadout.organs.acquire(strain(Organ::Skipjack, 3, 1.0));
+        poor.loadout
+            .organs
+            .acquire(strain(Organ::Skipjack, 3, 1.0), &DEFAULT_TUNING);
         poor.cargo.crystal = 10.0;
         assert!(poor.bench_organ(Organ::Skipjack).is_err());
         assert_eq!(poor.cargo.crystal, 10.0);
@@ -569,8 +606,12 @@ mod tests {
         let mut game = stocked();
         game.loadout.skills.raise(Skill::Symbiosis);
         game.loadout.skills.raise(Skill::Symbiosis);
-        game.loadout.organs.acquire(strain(Organ::Remora, 1, 1.0));
-        game.loadout.organs.acquire(strain(Organ::Veil, 1, 1.0));
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Remora, 1, 1.0), &DEFAULT_TUNING);
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Veil, 1, 1.0), &DEFAULT_TUNING);
         game.bench_organ(Organ::Remora).unwrap();
         game.bench_organ(Organ::Veil).unwrap();
         game.cargo.biomass = 50.0;
@@ -579,25 +620,42 @@ mod tests {
         }
         let spent = 50.0 - game.cargo.biomass;
         assert!(
-            (spent - 2.0 * t::ORGAN_UPKEEP).abs() < 0.05,
+            (spent - 2.0 * DEFAULT_TUNING.organ_upkeep).abs() < 0.05,
             "two organs for a minute: {spent}"
         );
-        assert!(game.loadout.organs.perk(Organ::Veil).is_some());
+        assert!(
+            game.loadout
+                .organs
+                .perk(Organ::Veil, &DEFAULT_TUNING)
+                .is_some()
+        );
         // A dry hold puts them to sleep, nothing is lost, and feeding it wakes them.
         game.cargo.biomass = 0.0;
         game.update_organs(DT);
         assert!(game.loadout.organs.dormant);
-        assert!(game.loadout.organs.perk(Organ::Veil).is_none());
+        assert!(
+            game.loadout
+                .organs
+                .perk(Organ::Veil, &DEFAULT_TUNING)
+                .is_none()
+        );
         assert!(
             game.loadout.organs.owns(Organ::Veil) && game.loadout.organs.is_fitted(Organ::Veil)
         );
         game.cargo.biomass = 5.0;
         game.update_organs(DT);
         assert!(!game.loadout.organs.dormant);
-        assert!(game.loadout.organs.perk(Organ::Veil).is_some());
+        assert!(
+            game.loadout
+                .organs
+                .perk(Organ::Veil, &DEFAULT_TUNING)
+                .is_some()
+        );
         // No fitted organ, no upkeep.
         let mut idle = stocked();
-        idle.loadout.organs.acquire(strain(Organ::Veil, 1, 1.0));
+        idle.loadout
+            .organs
+            .acquire(strain(Organ::Veil, 1, 1.0), &DEFAULT_TUNING);
         for _ in 0..600 {
             idle.update_organs(DT);
         }
@@ -606,9 +664,13 @@ mod tests {
 
     fn fit(game: &mut Game, organ: Organ, level: u8, magnitude: f32) {
         game.loadout.skills.raise(Skill::Symbiosis);
-        game.loadout.organs.acquire(strain(organ, 1, magnitude));
+        game.loadout
+            .organs
+            .acquire(strain(organ, 1, magnitude), &DEFAULT_TUNING);
         for _ in 1..level {
-            game.loadout.organs.acquire(strain(organ, 1, magnitude));
+            game.loadout
+                .organs
+                .acquire(strain(organ, 1, magnitude), &DEFAULT_TUNING);
         }
         game.bench_organ(organ).unwrap();
     }
@@ -819,7 +881,7 @@ mod tests {
             game.loadout.organs.strain(Organ::Skipjack).unwrap().level,
             3
         );
-        assert_eq!(game.cargo.biomass, v + t::LESSER_BIOMASS * 3.0);
+        assert_eq!(game.cargo.biomass, v + DEFAULT_TUNING.lesser_biomass * 3.0);
     }
 
     #[test]
@@ -827,22 +889,29 @@ mod tests {
         let seed = 7;
         let found: Vec<_> = (-30..30)
             .flat_map(|x| (-30..30).map(move |y| SectorId { x, y }))
-            .filter_map(|id| relic_of(seed, id, 5.0).map(|r| (id, r)))
+            .filter_map(|id| relic_of(seed, id, 5.0, &DEFAULT_TUNING).map(|r| (id, r)))
             .collect();
         let share = found.len() as f32 / 3600.0;
         assert!((0.04..0.11).contains(&share), "{share}");
         for (id, (strain, at)) in &found {
-            assert_eq!(relic_of(seed, *id, 5.0), Some((*strain, *at)));
+            assert_eq!(
+                relic_of(seed, *id, 5.0, &DEFAULT_TUNING),
+                Some((*strain, *at))
+            );
             assert_eq!(SectorId::containing(*at), *id, "inside its own sector");
             assert!((0.8..=1.4).contains(&strain.magnitude));
-            assert_eq!(relic_of(seed, *id, 1.0), None, "not near home");
+            assert_eq!(
+                relic_of(seed, *id, 1.0, &DEFAULT_TUNING),
+                None,
+                "not near home"
+            );
         }
         let (id, (strain, at)) = found[0];
         let mut game = Game::new(seed);
         game.pickups.clear();
         game.place_relic(id);
         // Depth gates it: only if the generator puts this sector deep enough.
-        let deep = world::latent(seed, id).depth >= t::RELIC_FROM;
+        let deep = world::latent(seed, id).depth >= DEFAULT_TUNING.relic_from;
         assert_eq!(
             game.pickups
                 .iter()
@@ -863,8 +932,12 @@ mod tests {
     fn organs_survive_death_clear_on_restart_and_one_rides_the_legacy() {
         let mut game = stocked();
         game.loadout.skills.raise(Skill::Symbiosis);
-        game.loadout.organs.acquire(strain(Organ::Veil, 3, 1.2));
-        game.loadout.organs.acquire(strain(Organ::Faraday, 1, 1.0));
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Veil, 3, 1.2), &DEFAULT_TUNING);
+        game.loadout
+            .organs
+            .acquire(strain(Organ::Faraday, 1, 1.0), &DEFAULT_TUNING);
         game.bench_organ(Organ::Veil).unwrap();
         game.player_invulnerability = 0.0;
         game.bodies[0].health = 0.0;
@@ -892,7 +965,10 @@ mod tests {
         assert!(!next.loadout.organs.is_fitted(Organ::Veil));
         assert_eq!(next.loadout.skills.organ_slots(), 0);
         let mut reset = stocked();
-        reset.loadout.organs.acquire(strain(Organ::Veil, 2, 1.0));
+        reset
+            .loadout
+            .organs
+            .acquire(strain(Organ::Veil, 2, 1.0), &DEFAULT_TUNING);
         reset.reset();
         assert!(!reset.loadout.organs.owns(Organ::Veil));
     }

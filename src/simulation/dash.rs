@@ -12,7 +12,6 @@
 
 use super::skills::Skill;
 use super::tether::SHEARS_INSTANT;
-use super::tuning as t;
 use super::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -42,13 +41,13 @@ fn point_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
 
 /// Staggers a creature the ship has dashed through. True if it was newly staggered, so one
 /// pass does not stagger it again every tick.
-pub(super) fn stagger(body: &mut Body) -> bool {
-    if body.contact_cooldown >= t::DASH_STAGGER * 0.5 {
+pub(super) fn stagger(body: &mut Body, tune: &Tunables) -> bool {
+    if body.contact_cooldown >= tune.dash_stagger * 0.5 {
         return false;
     }
-    body.velocity *= t::DASH_STAGGER_DAMP;
-    body.contact_cooldown = body.contact_cooldown.max(t::DASH_STAGGER);
-    body.fire_cooldown = body.fire_cooldown.max(t::DASH_STAGGER);
+    body.velocity *= tune.dash_stagger_damp;
+    body.contact_cooldown = body.contact_cooldown.max(tune.dash_stagger);
+    body.fire_cooldown = body.fire_cooldown.max(tune.dash_stagger);
     true
 }
 
@@ -91,7 +90,7 @@ impl Game {
         else {
             return false;
         };
-        if shield < t::DASH_COST {
+        if shield < self.tune.dash_cost {
             self.cue(Cue::Dry);
             return false;
         }
@@ -132,21 +131,21 @@ impl Game {
                 travel = along;
             }
         }
-        if travel < t::DASH_MIN {
+        if travel < self.tune.dash_min {
             return false;
         }
         let to = from + dir * travel;
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.position = to;
-            ship.shield -= t::DASH_COST;
+            ship.shield -= self.tune.dash_cost;
             ship.since_hit = 0.0;
         }
         self.focus = to;
-        self.player_invulnerability = self.player_invulnerability.max(t::DASH_INVULN);
+        self.player_invulnerability = self.player_invulnerability.max(self.tune.dash_invuln);
         self.dash.cooldown = self.loadout.skills.dash_cooldown(&self.tune);
         self.feel.used[1] = true;
         self.dash.trail = Some((from, to, 0.0));
-        self.dash.window = t::DASH_INVULN;
+        self.dash.window = self.tune.dash_invuln;
         self.dash.grazed = false;
         self.dash_through(from, to, radius);
         self.shake_off();
@@ -192,8 +191,8 @@ impl Game {
             .filter(|b| b.active && b.kind == BodyKind::Creature)
         {
             if point_segment(body.position, from, to)
-                < body.radius + ship_radius + t::DASH_GRAZE_MARGIN
-                && stagger(body)
+                < body.radius + ship_radius + self.tune.dash_graze_margin
+                && stagger(body, &self.tune)
                 && fling_strength(body) > 0.0
             {
                 grazes.push(body.position);
@@ -201,7 +200,7 @@ impl Game {
         }
         for bullet in self.bullets.iter_mut().filter(|b| !b.friendly) {
             if point_segment(bullet.position, from, to)
-                < bullet.radius + ship_radius + t::DASH_GRAZE_MARGIN
+                < bullet.radius + ship_radius + self.tune.dash_graze_margin
             {
                 bullet.remaining = 0.0;
                 grazes.push(bullet.position);
@@ -215,15 +214,15 @@ impl Game {
     /// Records a graze: the first of a dash adds a stack and refunds some shield, every one
     /// refreshes the boost's clock.
     pub(super) fn dash_graze(&mut self, at: Vec2) {
-        self.dash.boost = t::DASH_BOOST_TIME;
+        self.dash.boost = self.tune.dash_boost_time;
         if self.dash.grazed {
             return;
         }
         self.dash.grazed = true;
         self.streak.link();
-        self.dash.stacks = (self.dash.stacks + 1).min(t::DASH_BOOST_STACKS);
+        self.dash.stacks = (self.dash.stacks + 1).min(self.tune.dash_boost_stacks);
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
-            ship.shield = (ship.shield + t::DASH_GRAZE_REFUND).min(ship.max_shield);
+            ship.shield = (ship.shield + self.tune.dash_graze_refund).min(ship.max_shield);
         }
         self.cue(Cue::Graze { at });
     }
@@ -235,14 +234,14 @@ impl Game {
 
     /// Damage multiple of the ship's shots and bursts from grazes (one when none).
     pub fn damage_boost(&self) -> f32 {
-        1.0 + t::DASH_BOOST_STEP * f32::from(self.dash.stacks)
+        1.0 + self.tune.dash_boost_step * f32::from(self.dash.stacks)
     }
 
     /// The boost for the HUD: stacks held and the share of their time left in 0..=1.
     pub fn dash_boost(&self) -> (u8, f32) {
         (
             self.dash.stacks,
-            (self.dash.boost / t::DASH_BOOST_TIME).clamp(0.0, 1.0),
+            (self.dash.boost / self.tune.dash_boost_time).clamp(0.0, 1.0),
         )
     }
 
@@ -259,7 +258,7 @@ impl Game {
     pub fn dash_trail(&self) -> Option<(Vec2, Vec2, f32)> {
         self.dash
             .trail
-            .map(|(a, b, age)| (a, b, (1.0 - age / t::DASH_TRAIL).clamp(0.0, 1.0)))
+            .map(|(a, b, age)| (a, b, (1.0 - age / self.tune.dash_trail).clamp(0.0, 1.0)))
     }
 
     pub(super) fn update_dash(&mut self, dt: f32) {
@@ -284,7 +283,7 @@ impl Game {
         if self
             .dash
             .trail
-            .is_some_and(|(_, _, age)| age >= t::DASH_TRAIL)
+            .is_some_and(|(_, _, age)| age >= self.tune.dash_trail)
         {
             self.dash.trail = None;
         }
@@ -328,35 +327,35 @@ mod tests {
         assert!(game.dash(Some(Vec2::new(0.0, -3.0))));
         let at = game.player().unwrap().position;
         assert!(
-            at.x.abs() < 1e-3 && (at.y + t::DASH_DISTANCE).abs() < 1e-3,
+            at.x.abs() < 1e-3 && (at.y + DEFAULT_TUNING.dash_distance).abs() < 1e-3,
             "{at}"
         );
         let mut game = ready(1);
         game.bodies[0].angle = 0.0;
         assert!(game.dash(None));
-        assert!((x(&game) - t::DASH_DISTANCE).abs() < 1e-3);
+        assert!((x(&game) - DEFAULT_TUNING.dash_distance).abs() < 1e-3);
         let mut far = ready(4);
         far.dash(Some(Vec2::X));
-        assert!(x(&far) > t::DASH_DISTANCE);
+        assert!(x(&far) > DEFAULT_TUNING.dash_distance);
     }
 
     #[test]
     fn it_costs_shield_and_cools_down() {
         let mut game = ready(1);
-        game.bodies[0].shield = t::DASH_COST - 1.0;
+        game.bodies[0].shield = DEFAULT_TUNING.dash_cost - 1.0;
         assert!(!game.dash(Some(Vec2::X)), "too little shield");
         game.bodies[0].shield = 60.0;
         assert!(game.dash(Some(Vec2::X)));
-        assert!((game.bodies[0].shield - (60.0 - t::DASH_COST)).abs() < 1e-4);
+        assert!((game.bodies[0].shield - (60.0 - DEFAULT_TUNING.dash_cost)).abs() < 1e-4);
         let first = x(&game);
         assert!(!game.dash(Some(Vec2::X)), "cooling down");
         assert_eq!(x(&game), first);
-        for _ in 0..(t::DASH_COOLDOWN / DT) as usize + 2 {
+        for _ in 0..(DEFAULT_TUNING.dash_cooldown / DT) as usize + 2 {
             game.step(DT, Input::default());
         }
         game.bodies[0].shield = 60.0;
         assert!(game.dash(Some(Vec2::X)));
-        assert!(x(&game) > first + t::DASH_DISTANCE * 0.9);
+        assert!(x(&game) > first + DEFAULT_TUNING.dash_distance * 0.9);
     }
 
     #[test]
@@ -413,7 +412,7 @@ mod tests {
     fn it_grants_brief_invulnerability_that_runs_out() {
         let mut game = ready(1);
         assert!(game.dash(Some(Vec2::X)));
-        assert!(game.player_invulnerability >= t::DASH_INVULN - 1e-4);
+        assert!(game.player_invulnerability >= DEFAULT_TUNING.dash_invuln - 1e-4);
         let hull = game.player().unwrap().health;
         game.bullets.push(Bullet::hostile(
             game.player().unwrap().position + Vec2::new(30.0, 0.0),
@@ -429,7 +428,7 @@ mod tests {
             hull,
             "hit while invulnerable"
         );
-        for _ in 0..(t::DASH_INVULN / DT) as usize + 5 {
+        for _ in 0..(DEFAULT_TUNING.dash_invuln / DT) as usize + 5 {
             game.step(DT, Input::default());
         }
         assert_eq!(game.player_invulnerability, 0.0);
@@ -465,8 +464,8 @@ mod tests {
                 .any(|c| matches!(c, Cue::Dash { .. }))
         );
         let (_, to, bright) = game.dash_trail().unwrap();
-        assert!((to.x - t::DASH_DISTANCE).abs() < 1e-3 && bright > 0.9);
-        for _ in 0..(t::DASH_TRAIL / DT) as usize + 3 {
+        assert!((to.x - DEFAULT_TUNING.dash_distance).abs() < 1e-3 && bright > 0.9);
+        for _ in 0..(DEFAULT_TUNING.dash_trail / DT) as usize + 3 {
             game.step(DT, Input::default());
         }
         assert!(game.dash_trail().is_none());
@@ -494,9 +493,12 @@ mod tests {
         assert_eq!(game.run.dashes, 1, "a dash is counted for the summary");
         let (stacks, left) = game.dash_boost();
         assert_eq!((stacks, left), (1, 1.0), "one stack per dash, not per shot");
-        assert!((game.damage_boost() - (1.0 + t::DASH_BOOST_STEP)).abs() < 1e-6);
+        assert!((game.damage_boost() - (1.0 + DEFAULT_TUNING.dash_boost_step)).abs() < 1e-6);
         let shield = game.bodies[0].shield;
-        assert!((shield - (60.0 - t::DASH_COST + t::DASH_GRAZE_REFUND)).abs() < 1e-3);
+        assert!(
+            (shield - (60.0 - DEFAULT_TUNING.dash_cost + DEFAULT_TUNING.dash_graze_refund)).abs()
+                < 1e-3
+        );
         assert!(shield < 60.0, "a dash is never free");
         assert!(game.bullets.iter().all(|b| b.remaining <= 0.0));
         assert!(game.cues.iter().any(|c| matches!(c, Cue::Graze { .. })));
@@ -516,15 +518,15 @@ mod tests {
     #[test]
     fn stacks_cap_and_the_boost_runs_out() {
         let mut game = ready(4);
-        for _ in 0..(t::DASH_BOOST_STACKS + 2) {
+        for _ in 0..(DEFAULT_TUNING.dash_boost_stacks + 2) {
             game.bodies[0].shield = 60.0;
             game.bodies[0].position = Vec2::ZERO;
             let y = game.bodies[0].position.y + 100.0;
             shot_on_path(&mut game, y);
             assert!(dash_up(&mut game));
         }
-        assert_eq!(game.dash_boost().0, t::DASH_BOOST_STACKS);
-        for _ in 0..(t::DASH_BOOST_TIME / DT) as usize + 5 {
+        assert_eq!(game.dash_boost().0, DEFAULT_TUNING.dash_boost_stacks);
+        for _ in 0..(DEFAULT_TUNING.dash_boost_time / DT) as usize + 5 {
             game.step(DT, Input::default());
         }
         assert_eq!(game.dash_boost().0, 0);
@@ -553,7 +555,7 @@ mod tests {
         let hit = |stacks: u8| {
             let mut game = ready(1);
             game.dash.stacks = stacks;
-            game.dash.boost = t::DASH_BOOST_TIME;
+            game.dash.boost = DEFAULT_TUNING.dash_boost_time;
             let id = add(&mut game, BodyKind::Creature, Vec2::new(200.0, 0.0));
             game.bodies.iter_mut().find(|b| b.id == id).unwrap().shield = 0.0;
             let before = body(&game, id).health;
@@ -565,7 +567,7 @@ mod tests {
         };
         let plain = hit(0);
         assert!(plain > 0.0);
-        assert!((hit(2) / plain - (1.0 + 2.0 * t::DASH_BOOST_STEP)).abs() < 1e-3);
+        assert!((hit(2) / plain - (1.0 + 2.0 * DEFAULT_TUNING.dash_boost_step)).abs() < 1e-3);
     }
 
     #[test]
@@ -581,19 +583,19 @@ mod tests {
         let shield = game.bodies[0].shield;
         assert!(dash_up(&mut game));
         let creature = body(&game, id);
-        assert!(creature.contact_cooldown >= t::DASH_STAGGER - 1e-4);
-        assert!(creature.velocity.length() <= 200.0 * t::DASH_STAGGER_DAMP + 1e-3);
+        assert!(creature.contact_cooldown >= DEFAULT_TUNING.dash_stagger - 1e-4);
+        assert!(creature.velocity.length() <= 200.0 * DEFAULT_TUNING.dash_stagger_damp + 1e-3);
         assert_eq!(game.dash_boost().0, 0, "a plain creature is no graze");
         game.bodies
             .iter_mut()
             .find(|b| b.id == id)
             .unwrap()
             .position = game.bodies[0].position;
-        for _ in 0..(t::DASH_INVULN / DT) as usize - 1 {
+        for _ in 0..(DEFAULT_TUNING.dash_invuln / DT) as usize - 1 {
             game.step(DT, Input::default());
         }
         assert_eq!(game.bodies[0].health, hull);
-        assert!(game.bodies[0].shield >= shield - t::DASH_COST - 1e-3);
+        assert!(game.bodies[0].shield >= shield - DEFAULT_TUNING.dash_cost - 1e-3);
     }
 
     #[test]

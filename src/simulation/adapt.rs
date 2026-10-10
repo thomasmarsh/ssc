@@ -2,12 +2,11 @@
 //! builds resistance to the damage family (`arsenal::Family`) that has hurt it most lately: each
 //! family has a meter that fills as that family deals damage (a third of the creature's pool
 //! fills it) and bleeds away with time, faster once the family is no longer being used. The meter
-//! cuts the family's damage by up to `ADAPT_MAX` (so a hit always lands for something), and the
+//! cuts the family's damage by up to `adapt_max` (so a hit always lands for something), and the
 //! hull bar shows a pip per family with a meter, so the player can read it and switch guns
 //! (`[` and `]`). Everything is plain numbers in `tuning`; nothing is hidden.
 
 use super::arsenal::Family;
-use super::tuning as t;
 use super::*;
 
 /// The meters of one creature.
@@ -20,9 +19,9 @@ pub struct Resist {
 }
 
 impl Resist {
-    /// The share of a family's damage that still lands, in `[1 - ADAPT_MAX, 1]`.
-    pub fn scale(&self, family: Family) -> f32 {
-        1.0 - t::ADAPT_MAX * self.meter[family.index()]
+    /// The share of a family's damage that still lands, in `[1 - adapt_max, 1]`.
+    pub fn scale(&self, family: Family, tune: &Tunables) -> f32 {
+        1.0 - tune.adapt_max * self.meter[family.index()]
     }
 
     /// The meter of each family, in `Family::ALL` order.
@@ -31,19 +30,19 @@ impl Resist {
     }
 
     /// A family dealt `dealt` hull to a creature with a pool of `pool`.
-    pub fn hit(&mut self, family: Family, dealt: f32, pool: f32) {
+    pub fn hit(&mut self, family: Family, dealt: f32, pool: f32, tune: &Tunables) {
         let i = family.index();
-        self.meter[i] = (self.meter[i] + t::ADAPT_GAIN * dealt / pool.max(1.0)).min(1.0);
+        self.meter[i] = (self.meter[i] + tune.adapt_gain * dealt / pool.max(1.0)).min(1.0);
         self.idle[i] = 0.0;
     }
 
     /// Time passes: every meter bleeds, the idle ones faster.
-    pub fn tick(&mut self, dt: f32) {
+    pub fn tick(&mut self, dt: f32, tune: &Tunables) {
         for i in 0..4 {
             self.idle[i] += dt;
-            let rate = t::ADAPT_DECAY
-                + if self.idle[i] > t::ADAPT_IDLE {
-                    t::ADAPT_IDLE_DECAY
+            let rate = tune.adapt_decay
+                + if self.idle[i] > tune.adapt_idle {
+                    tune.adapt_idle_decay
                 } else {
                     0.0
                 };
@@ -52,24 +51,31 @@ impl Resist {
     }
 
     /// Whether any meter is worth showing.
-    pub fn shown(&self) -> bool {
-        self.meter.iter().any(|m| *m >= t::ADAPT_SHOWN)
+    pub fn shown(&self, tune: &Tunables) -> bool {
+        self.meter.iter().any(|m| *m >= tune.adapt_shown)
     }
 }
 
 /// Whether a body adapts: an apex elder, or a creature with a big enough pool.
-pub(super) fn adaptive(body: &Body, apexes: &BTreeMap<(SectorId, u32), apexes::ApexInfo>) -> bool {
+pub(super) fn adaptive(
+    body: &Body,
+    apexes: &BTreeMap<(SectorId, u32), apexes::ApexInfo>,
+    tune: &Tunables,
+) -> bool {
     body.kind == BodyKind::Creature
         && !body.follower
         && (body.origin.is_some_and(|key| apexes.contains_key(&key))
-            || body.max_health + body.max_shield >= t::ADAPT_MIN_POOL)
+            || body.max_health + body.max_shield >= tune.adapt_min_pool)
 }
 
 impl Game {
     /// Records that `family` dealt `dealt` to the adaptive body `id` with the given pool.
     pub(super) fn note_family_hit(&mut self, id: u64, family: Family, dealt: f32, pool: f32) {
         if dealt > 0.0 {
-            self.adapt.entry(id).or_default().hit(family, dealt, pool);
+            self.adapt
+                .entry(id)
+                .or_default()
+                .hit(family, dealt, pool, &self.tune);
         }
     }
 
@@ -82,17 +88,17 @@ impl Game {
         self.adapt
             .retain(|id, _| bodies.iter().any(|b| b.id == *id && b.health > 0.0));
         for resist in self.adapt.values_mut() {
-            resist.tick(dt);
+            resist.tick(dt, &self.tune);
         }
         self.adapt
-            .retain(|_, r| r.shown() || r.meter.iter().any(|m| *m > 0.0));
+            .retain(|_, r| r.shown(&self.tune) || r.meter.iter().any(|m| *m > 0.0));
     }
 
     /// The resistance meters of a creature the HUD may draw (None when nothing is worth a pip).
     pub fn resistance_of(&self, id: u64) -> Option<[f32; 4]> {
         self.adapt
             .get(&id)
-            .filter(|r| r.shown())
+            .filter(|r| r.shown(&self.tune))
             .map(|r| r.meters())
     }
 }
@@ -104,61 +110,70 @@ mod tests {
     #[test]
     fn spamming_one_family_builds_resistance_that_is_bounded_and_never_total() {
         let mut r = Resist::default();
-        assert_eq!(r.scale(Family::Kinetic), 1.0);
+        assert_eq!(r.scale(Family::Kinetic, &DEFAULT_TUNING), 1.0);
         let pool = 1000.0;
         let mut last = 1.0;
         for _ in 0..200 {
-            r.hit(Family::Kinetic, 10.0, pool);
-            let now = r.scale(Family::Kinetic);
+            r.hit(Family::Kinetic, 10.0, pool, &DEFAULT_TUNING);
+            let now = r.scale(Family::Kinetic, &DEFAULT_TUNING);
             assert!(
                 now <= last,
                 "resistance only grows while the family keeps hitting"
             );
             last = now;
         }
-        assert!((last - (1.0 - t::ADAPT_MAX)).abs() < 1e-6, "{last}");
+        assert!(
+            (last - (1.0 - DEFAULT_TUNING.adapt_max)).abs() < 1e-6,
+            "{last}"
+        );
         assert!(last > 0.0, "a hit always lands for something");
         // The other families are untouched.
         for f in [Family::Needle, Family::Lance, Family::Explosive] {
-            assert_eq!(r.scale(f), 1.0);
+            assert_eq!(r.scale(f, &DEFAULT_TUNING), 1.0);
         }
         // A third of the pool is enough to fill it.
         let mut fresh = Resist::default();
-        fresh.hit(Family::Needle, pool / t::ADAPT_GAIN, pool);
+        fresh.hit(
+            Family::Needle,
+            pool / DEFAULT_TUNING.adapt_gain,
+            pool,
+            &DEFAULT_TUNING,
+        );
         assert!((fresh.meters()[Family::Needle.index()] - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn the_meter_decays_and_decays_faster_once_the_family_is_idle() {
         let mut r = Resist::default();
-        r.hit(Family::Lance, 330.0, 1000.0);
+        r.hit(Family::Lance, 330.0, 1000.0, &DEFAULT_TUNING);
         let full = r.meters()[Family::Lance.index()];
         // While it keeps hitting, only the slow bleed.
         let mut busy = r;
         for _ in 0..40 {
-            busy.hit(Family::Lance, 0.0, 1000.0);
-            busy.tick(0.05);
+            busy.hit(Family::Lance, 0.0, 1000.0, &DEFAULT_TUNING);
+            busy.tick(0.05, &DEFAULT_TUNING);
         }
         let busy_after = busy.meters()[Family::Lance.index()];
         assert!(
-            (full - busy_after - t::ADAPT_DECAY * 2.0).abs() < 0.01,
+            (full - busy_after - DEFAULT_TUNING.adapt_decay * 2.0).abs() < 0.01,
             "{full} {busy_after}"
         );
         // Left alone, it clears within about ten seconds.
         let mut idle = r;
         let mut seconds = 0.0;
         while idle.meters()[Family::Lance.index()] > 0.0 && seconds < 60.0 {
-            idle.tick(0.1);
+            idle.tick(0.1, &DEFAULT_TUNING);
             seconds += 0.1;
         }
-        let expected = t::ADAPT_IDLE
-            + (full - t::ADAPT_IDLE * t::ADAPT_DECAY) / (t::ADAPT_DECAY + t::ADAPT_IDLE_DECAY);
+        let expected = DEFAULT_TUNING.adapt_idle
+            + (full - DEFAULT_TUNING.adapt_idle * DEFAULT_TUNING.adapt_decay)
+                / (DEFAULT_TUNING.adapt_decay + DEFAULT_TUNING.adapt_idle_decay);
         assert!(
             (seconds - expected).abs() < 0.6,
             "{seconds} against {expected}"
         );
         assert!(seconds < 14.0, "{seconds}");
-        assert!(!idle.shown());
+        assert!(!idle.shown(&DEFAULT_TUNING));
     }
 
     #[test]
@@ -174,11 +189,11 @@ mod tests {
                 } else {
                     Family::Kinetic
                 };
-                let share = r.scale(f);
+                let share = r.scale(f, &DEFAULT_TUNING);
                 let dealt = 2.0 * share;
                 dealt_total += dealt;
-                r.hit(f, dealt, pool);
-                r.tick(0.05);
+                r.hit(f, dealt, pool, &DEFAULT_TUNING);
+                r.tick(0.05, &DEFAULT_TUNING);
             }
             (dealt_total, r.meters().iter().copied().fold(0.0, f32::max))
         };
@@ -203,13 +218,16 @@ mod tests {
         let tough = crate::simulation::tests::spawn(&mut game, &species, Vec2::new(-900.0, 0.0));
         let apexes = BTreeMap::new();
         let find = |game: &Game, id: u64| game.bodies.iter().find(|b| b.id == id).unwrap().clone();
-        assert!(!adaptive(&find(&game, small), &apexes));
-        assert!(adaptive(&find(&game, tough), &apexes));
+        assert!(!adaptive(&find(&game, small), &apexes, &DEFAULT_TUNING));
+        assert!(adaptive(&find(&game, tough), &apexes, &DEFAULT_TUNING));
         game.note_family_hit(tough, Family::Kinetic, 400.0, 900.0);
         assert!(game.resistance_of(tough).unwrap()[0] > 0.9);
         assert_eq!(game.resistance_of(small), None);
-        assert!(game.adapt[&tough].scale(Family::Kinetic) < 0.5);
-        assert_eq!(game.adapt[&tough].scale(Family::Lance), 1.0);
+        assert!(game.adapt[&tough].scale(Family::Kinetic, &DEFAULT_TUNING) < 0.5);
+        assert_eq!(
+            game.adapt[&tough].scale(Family::Lance, &DEFAULT_TUNING),
+            1.0
+        );
         // Meters are dropped with the body and with time.
         for _ in 0..400 {
             game.update_adapt(0.1);
@@ -282,6 +300,6 @@ mod tests {
             "taking turns deals more: {turns} against {spam}"
         );
         // And a hit never lands for less than the floor of what it would have.
-        assert!(spam > 0.0 && (1.0 - t::ADAPT_MAX) > 0.0);
+        assert!(spam > 0.0 && (1.0 - DEFAULT_TUNING.adapt_max) > 0.0);
     }
 }

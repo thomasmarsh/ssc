@@ -203,7 +203,7 @@ Keep the safe start and spatial threat ramp. Equipment **grade** must keep scali
 
 ### What exists (built)
 
-- Perfect parry: hit stop 0.06 s (`PARRY_HITSTOP`, `hold_hit_stop` freezes the whole step), a gold flash for 0.3 s, a chime, cooldown refund, reflected shots re-aimed at 1.5x.
+- Perfect parry: hit stop 0.06 s (`parry_hitstop`, `hold_hit_stop` freezes the whole step), a gold flash for 0.3 s, a chime, cooldown refund, reflected shots re-aimed at 1.5x.
 - Dash: trail, whoosh cue, graze (pass through fire or a flinger) gives a damage boost with up to three stacks and a shield refund.
 - Cues for shots, impacts, explosions, respawn, pickups by rarity, cord latch (heavier for strong cords), mining, weapon switch and dry, pad deploy, land, takeoff, hurt, ping and echo, dash, parry, deflect, perfect parry, graze, extirpation.
 - Visual: the nebula backdrop, glow and neon styles, rings on the ship, a pickup notice feed.
@@ -262,7 +262,7 @@ Using the formula: a rock of mass 25 hitting a creature of mass 8 gives a reduce
 ### Cost and unlock gating
 
 - **It is a later upgrade.** TOW is a locked skill in the SKILLS tab (and a new row in `skills.rs`): level 1 needs a **Rare or better Aux part fitted** and a price (`60 metal, 12 crystal, 24 volatiles`, three materials like parry), like parry needs plating and dash needs an engine. Apex elders already drop an epic in the slot of the next locked ability: extend the sequence plating (parry), engine (dash), then aux (tow), then cannon. A **Slinger sinew** organ (BESTIARY.md) is an alternative key, which makes a creature the source of the tool it uses against you.
-- **Levels.** L1: one rock up to radius 30, cable 240, pod 4 s, guided. L2: radius 45, pod 6 s, a second pod charge. L3: a second rock at once, radius 60 (`ASTEROID_MAX_RADIUS`), cable 320. L4: no guidance, pod 8 s, sling kick 1.4, and the whip crack on dash bonus raised to 2x. Prices follow the usual `PRICE_GROWTH` of 1.8.
+- **Levels.** L1: one rock up to radius 30, cable 240, pod 4 s, guided. L2: radius 45, pod 6 s, a second pod charge. L3: a second rock at once, radius 60 (`ASTEROID_MAX_RADIUS`), cable 320. L4: no guidance, pod 8 s, sling kick 1.4, and the whip crack on dash bonus raised to 2x. Prices follow the usual `price_growth` of 1.8.
 - **Per-use cost.** A hook costs nothing; each pod charge costs 6 volatiles when the pod first lights (not per second, so there is no drip), and the pod is a material cost the player sees as a volatiles pip falling. A pod lost with a rock is simply spent; one recovered is refunded.
 
 ### Limits so it cannot be abused
@@ -409,7 +409,7 @@ The exact table is `realm::CATALOG`; adding a realm kind is one row (its stress 
 
 ### The rule
 
-**No build covers every realm.** A realm's primary stress must be something a build can fail, and every axis must be tested in some realm and favoured in another. Adaptive resistance (damage families), weapon falloff, recoil and heavy shots, elder closers (lunges, blinks, pulls) and barrages, and bubbles are the per-fight form of the same rule: the realm decides which counters are in play, and each leaves a hit worth something (`ADAPT_MAX`, `Reach.floor`, `BUBBLE_LEAK`, `PLATING_FLOOR` are all above zero).
+**No build covers every realm.** A realm's primary stress must be something a build can fail, and every axis must be tested in some realm and favoured in another. Adaptive resistance (damage families), weapon falloff, recoil and heavy shots, elder closers (lunges, blinks, pulls) and barrages, and bubbles are the per-fight form of the same rule: the realm decides which counters are in play, and each leaves a hit worth something (`adapt_max`, `Reach.floor`, `bubble_leak`, `plating_floor` are all above zero).
 
 ### Play-testing questions
 

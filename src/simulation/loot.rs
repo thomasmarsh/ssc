@@ -49,23 +49,28 @@ fn lifetime(item: &Item) -> f32 {
 }
 
 /// How hard a creature is to put down, as a multiplier on its drop chance (see
-/// `tuning::HARD_FLOOR`).
-fn hardness(genome: &crate::genome::Genome) -> f32 {
-    (tuning::HARD_FLOOR + tuning::HARD_SLOPE * (genome.hull + genome.shield) / tuning::HARD_REF)
-        .min(tuning::HARD_CAP)
+/// `tuning::hard_floor`).
+fn hardness(genome: &crate::genome::Genome, tune: &Tunables) -> f32 {
+    (tune.hard_floor + tune.hard_slope * (genome.hull + genome.shield) / tune.hard_ref)
+        .min(tune.hard_cap)
 }
 
 /// The chance that a creature of `genome` drops something when it falls (`bred` is 1 for a
 /// generated creature and less for one raised in play).
-fn creature_drop_chance(genome: &crate::genome::Genome, bred: f32) -> f32 {
-    ((0.08 + 0.4 * genome.bounty / 400.0) / genome.parts() as f32 * bred * hardness(genome))
-        .min(tuning::DROP_CHANCE_CAP)
+fn creature_drop_chance(genome: &crate::genome::Genome, bred: f32, tune: &Tunables) -> f32 {
+    ((0.08 + 0.4 * genome.bounty / 400.0) / genome.parts() as f32 * bred * hardness(genome, tune))
+        .min(tune.drop_chance_cap)
 }
 
 /// What a fallen civilization seat pays: (guaranteed parts, extra rolls, a floor on the first
 /// part's rarity). `tier` is the fortress tier of its territory (0 to 3), the measure of how
 /// well it was defended; `capital` tells the heart from an outpost seat.
-fn seat_loot(kind: BaseKind, capital: bool, tier: u8) -> (u32, u32, upgrades::Rarity) {
+fn seat_loot(
+    kind: BaseKind,
+    capital: bool,
+    tier: u8,
+    tune: &Tunables,
+) -> (u32, u32, upgrades::Rarity) {
     let (parts, rolls) = match kind {
         BaseKind::Hive => (0, 2),
         BaseKind::Foundry | BaseKind::Depot => (0, 3),
@@ -73,7 +78,7 @@ fn seat_loot(kind: BaseKind, capital: bool, tier: u8) -> (u32, u32, upgrades::Ra
         BaseKind::Turret => (0, 0),
     };
     if capital {
-        let floor = if tier >= tuning::CAPITAL_EPIC_TIER {
+        let floor = if tier >= tune.capital_epic_tier {
             upgrades::Rarity::Epic
         } else if tier >= 1 {
             upgrades::Rarity::Rare
@@ -81,15 +86,15 @@ fn seat_loot(kind: BaseKind, capital: bool, tier: u8) -> (u32, u32, upgrades::Ra
             upgrades::Rarity::Common
         };
         (
-            tuning::CAPITAL_PARTS + parts + u32::from(tier),
+            tune.capital_parts + parts + u32::from(tier),
             rolls + u32::from(tier),
             floor,
         )
     } else {
-        let bonus = u32::from(tier >= tuning::OUTPOST_BONUS_TIER);
+        let bonus = u32::from(tier >= tune.outpost_bonus_tier);
         (
             1 + parts.min(1) + bonus,
-            tuning::OUTPOST_ROLLS + bonus,
+            tune.outpost_rolls + bonus,
             upgrades::Rarity::Common,
         )
     }
@@ -298,7 +303,7 @@ impl Game {
                     source.min_rarity = upgrades::Rarity::Rare;
                     drops.push(Item::Part(upgrades::roll_part(&mut rng, &source)));
                     // A well defended civilization's elder is worth more.
-                    if self.civ_tier_of(body) >= tuning::ELDER_BONUS_TIER {
+                    if self.civ_tier_of(body) >= self.tune.elder_bonus_tier {
                         drops.push(Item::Part(upgrades::roll_part(&mut rng, &source)));
                     }
                     for _ in 0..2 {
@@ -307,7 +312,7 @@ impl Game {
                 }
                 drops.extend(self.apex_loot(body, &mut rng, params));
                 let bred = if body.origin.is_some() { 1.0 } else { 0.35 };
-                if rng.chance(creature_drop_chance(genome, bred)) {
+                if rng.chance(creature_drop_chance(genome, bred, &self.tune)) {
                     let source = Source::of_creature(genome, body.genes.threat, params);
                     drops.push(self.creature_reward(body, &mut rng, &source));
                 }
@@ -329,7 +334,7 @@ impl Game {
                         })
                         .max_by(|a, b| a.0.total_cmp(&b.0))
                         .map(|(_, organ)| organ)
-                    && rng.chance(tuning::HARVEST_CHANCE)
+                    && rng.chance(self.tune.harvest_chance)
                 {
                     drops.push(Item::Specimen(organs::Strain::from_donor(organ, genome)));
                 }
@@ -369,7 +374,8 @@ impl Game {
                     }
                 } else {
                     let capital = matches!(self.civ_membership(body), Some((_, CivRole::Capital)));
-                    let (parts, rolls, floor) = seat_loot(kind, capital, self.civ_tier_of(body));
+                    let (parts, rolls, floor) =
+                        seat_loot(kind, capital, self.civ_tier_of(body), &self.tune);
                     for k in 0..parts {
                         // The heart's first part is the prize: at least `floor` rare.
                         source.min_rarity = if k == 0 {
@@ -1024,14 +1030,19 @@ mod supply_tests {
             shield: 60.0,
             ..Genome::bogey()
         };
-        assert!(hardness(&frail) < 1.0 && hardness(&tough) > 2.0);
-        assert!(creature_drop_chance(&tough, 1.0) > 2.0 * creature_drop_chance(&frail, 1.0));
+        assert!(hardness(&frail, &DEFAULT_TUNING) < 1.0 && hardness(&tough, &DEFAULT_TUNING) > 2.0);
+        assert!(
+            creature_drop_chance(&tough, 1.0, &DEFAULT_TUNING)
+                > 2.0 * creature_drop_chance(&frail, 1.0, &DEFAULT_TUNING)
+        );
         let huge = Genome {
             hull: 5000.0,
             ..Genome::bogey()
         };
-        assert!(creature_drop_chance(&huge, 1.0) <= tuning::DROP_CHANCE_CAP);
-        assert!(hardness(&huge) <= tuning::HARD_CAP);
+        assert!(
+            creature_drop_chance(&huge, 1.0, &DEFAULT_TUNING) <= DEFAULT_TUNING.drop_chance_cap
+        );
+        assert!(hardness(&huge, &DEFAULT_TUNING) <= DEFAULT_TUNING.hard_cap);
     }
 
     #[test]
@@ -1044,18 +1055,28 @@ mod supply_tests {
         ] {
             let mut last = (0, 0);
             for tier in 0..=3 {
-                let (parts, rolls, _) = seat_loot(kind, true, tier);
+                let (parts, rolls, _) = seat_loot(kind, true, tier, &DEFAULT_TUNING);
                 assert!(parts >= last.0 && rolls >= last.1);
                 last = (parts, rolls);
-                let (outpost_parts, outpost_rolls, _) = seat_loot(kind, false, tier);
+                let (outpost_parts, outpost_rolls, _) =
+                    seat_loot(kind, false, tier, &DEFAULT_TUNING);
                 assert!(parts > outpost_parts && rolls >= outpost_rolls);
             }
-            assert!(seat_loot(kind, true, 3).0 >= 5);
-            assert_eq!(seat_loot(kind, true, 0).2, upgrades::Rarity::Common);
-            assert_eq!(seat_loot(kind, true, 1).2, upgrades::Rarity::Rare);
-            assert_eq!(seat_loot(kind, true, 3).2, upgrades::Rarity::Epic);
+            assert!(seat_loot(kind, true, 3, &DEFAULT_TUNING).0 >= 5);
+            assert_eq!(
+                seat_loot(kind, true, 0, &DEFAULT_TUNING).2,
+                upgrades::Rarity::Common
+            );
+            assert_eq!(
+                seat_loot(kind, true, 1, &DEFAULT_TUNING).2,
+                upgrades::Rarity::Rare
+            );
+            assert_eq!(
+                seat_loot(kind, true, 3, &DEFAULT_TUNING).2,
+                upgrades::Rarity::Epic
+            );
             // An undefended outpost pays about what one base used to, never a farm.
-            assert!(seat_loot(kind, false, 0).0 <= 2);
+            assert!(seat_loot(kind, false, 0, &DEFAULT_TUNING).0 <= 2);
         }
     }
 

@@ -308,17 +308,16 @@ impl Game {
                     && !body.phased
                     && !super::apexes::is_part(&self.apexes, body)
                 {
-                    let resist = self
-                        .adapt
-                        .get(&body.id)
-                        .map_or(1.0, |r| r.scale(super::arsenal::Family::Explosive));
+                    let resist = self.adapt.get(&body.id).map_or(1.0, |r| {
+                        r.scale(super::arsenal::Family::Explosive, &self.tune)
+                    });
                     let dealt = damage(
                         body,
                         armored(body, amount * resist, true, &self.tune),
                         0.0,
                         &self.tune,
                     );
-                    if super::adapt::adaptive(body, &self.apexes) {
+                    if super::adapt::adaptive(body, &self.apexes, &self.tune) {
                         blast_hits.push((body.id, dealt, body.max_health + body.max_shield));
                     }
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {

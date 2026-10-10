@@ -492,7 +492,7 @@ impl Game {
             for _ in 0..tuning::ORGAN_LEVELS {
                 self.loadout
                     .organs
-                    .acquire(Strain::from_donor(organ, &genome));
+                    .acquire(Strain::from_donor(organ, &genome), &self.tune);
             }
         }
         let was_free = self.cargo.dev_free;

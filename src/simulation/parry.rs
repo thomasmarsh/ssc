@@ -6,7 +6,6 @@
 //! carries on, so part of a barrage always leaks through. Numbers live in `tuning`.
 
 use super::skills::Skill;
-use super::tuning as t;
 use super::*;
 
 /// Salt for the parry's own random stream, so rolling it never disturbs anything else.
@@ -48,16 +47,16 @@ impl Game {
         let Some(ship) = self.player() else {
             return false;
         };
-        if ship.shield < t::PARRY_COST {
+        if ship.shield < self.tune.parry_cost {
             self.cue(Cue::Dry);
             return false;
         }
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
-            ship.shield -= t::PARRY_COST;
+            ship.shield -= self.tune.parry_cost;
             // Spending shield holds off its recharge like any other drain.
             ship.since_hit = 0.0;
         }
-        self.parry.window = t::PARRY_WINDOW;
+        self.parry.window = self.tune.parry_window;
         self.parry.age = 0.0;
         self.parry.cooldown = self.loadout.skills.parry_cooldown(&self.tune);
         self.feel.used[0] = true;
@@ -87,15 +86,15 @@ impl Game {
         Some((
             ship.position,
             ship.angle,
-            t::PARRY_HALF_ARC,
-            t::PARRY_RADIUS,
+            self.tune.parry_half_arc,
+            self.tune.parry_radius,
             self.parry.age < self.loadout.skills.parry_perfect(&self.tune),
         ))
     }
 
     /// Brightness of the perfect-parry flash in 0..=1 (zero when none), for drawing.
     pub fn parry_flash(&self) -> f32 {
-        (self.parry.flash / t::PARRY_FLASH).clamp(0.0, 1.0)
+        (self.parry.flash / self.tune.parry_flash).clamp(0.0, 1.0)
     }
 
     /// Freezes the simulation for `seconds` (the hit-stop budget lives in `feel`).
@@ -154,10 +153,10 @@ impl Game {
         {
             let offset = bullet.position - origin;
             let distance = offset.length();
-            if distance > t::PARRY_RADIUS + bullet.radius || distance < 1e-3 {
+            if distance > self.tune.parry_radius + bullet.radius || distance < 1e-3 {
                 continue;
             }
-            if forward.angle_to(offset / distance).abs() > t::PARRY_HALF_ARC {
+            if forward.angle_to(offset / distance).abs() > self.tune.parry_half_arc {
                 continue;
             }
             bullet.parried = true;
@@ -167,13 +166,13 @@ impl Game {
             if perfect {
                 let normal = offset / distance;
                 bullet.velocity -= 2.0 * bullet.velocity.dot(normal) * normal;
-                aim_back(bullet, &targets);
+                aim_back(bullet, &targets, &self.tune);
                 bullet.friendly = true;
                 bullet.damage *= reflect;
                 bullet.remaining = bullet.remaining.max(1.5);
                 bullet.fragile = false;
-                bullet.homing = bullet.homing.max(t::PARRY_REFLECT_HOMING);
-                refund += t::PARRY_REFUND;
+                bullet.homing = bullet.homing.max(self.tune.parry_reflect_homing);
+                refund += self.tune.parry_refund;
                 turned += 1;
             } else {
                 bullet.remaining = 0.0;
@@ -185,7 +184,7 @@ impl Game {
         }
         // Only the first perfect parry of a raise pays out its time and its freeze, and the
         // shield it gives back never exceeds what the raise cost.
-        refund = refund.min((t::PARRY_REFUND_CAP - self.parry.refunded).max(0.0));
+        refund = refund.min((self.tune.parry_cost - self.parry.refunded).max(0.0));
         self.parry.refunded += refund;
         if refund > 0.0
             && let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
@@ -196,9 +195,10 @@ impl Game {
             self.parry.perfected = true;
             self.run.perfect_parries += 1;
             self.streak.link();
-            self.parry.cooldown = (self.parry.cooldown - t::PARRY_PERFECT_COOLDOWN_REFUND).max(0.0);
-            self.request_hit_stop(t::PARRY_HITSTOP);
-            self.parry.flash = t::PARRY_FLASH;
+            self.parry.cooldown =
+                (self.parry.cooldown - self.tune.parry_perfect_cooldown_refund).max(0.0);
+            self.request_hit_stop(self.tune.parry_hitstop);
+            self.parry.flash = self.tune.parry_flash;
             self.shake_off();
             cues.push(Cue::PerfectParry { at: origin });
         }
@@ -212,7 +212,7 @@ impl Game {
 
 /// Turns a reflected shot toward the nearest target within reach and the cone around the way
 /// it is already going, keeping its speed. With none in the cone it keeps the mirror heading.
-fn aim_back(bullet: &mut Bullet, targets: &[Vec2]) {
+fn aim_back(bullet: &mut Bullet, targets: &[Vec2], tune: &Tunables) {
     let speed = bullet.velocity.length();
     let heading = bullet.velocity.normalize_or_zero();
     if speed < 1e-3 || heading == Vec2::ZERO {
@@ -224,8 +224,8 @@ fn aim_back(bullet: &mut Bullet, targets: &[Vec2]) {
         .filter(|d| {
             let len = d.length();
             len > 1.0
-                && len < t::PARRY_AIM_RANGE
-                && heading.angle_to(*d / len).abs() < t::PARRY_AIM_CONE
+                && len < tune.parry_aim_range
+                && heading.angle_to(*d / len).abs() < tune.parry_aim_cone
         })
         .min_by(|a, b| a.length_squared().total_cmp(&b.length_squared()));
     if let Some(toward) = best {
@@ -272,12 +272,12 @@ mod tests {
     #[test]
     fn it_costs_shield_and_needs_it() {
         let mut game = unlocked(1);
-        game.bodies[0].shield = t::PARRY_COST - 1.0;
+        game.bodies[0].shield = DEFAULT_TUNING.parry_cost - 1.0;
         assert!(!game.parry(), "too little shield");
         assert!(!game.parry_active());
         game.bodies[0].shield = 40.0;
         assert!(game.parry());
-        assert!((game.bodies[0].shield - (40.0 - t::PARRY_COST)).abs() < 1e-4);
+        assert!((game.bodies[0].shield - (40.0 - DEFAULT_TUNING.parry_cost)).abs() < 1e-4);
     }
 
     #[test]
@@ -285,14 +285,14 @@ mod tests {
         let mut game = unlocked(1);
         assert!(game.parry());
         assert!(!game.parry(), "already up");
-        for _ in 0..(t::PARRY_WINDOW / DT) as usize + 2 {
+        for _ in 0..(DEFAULT_TUNING.parry_window / DT) as usize + 2 {
             game.step(DT, Input::default());
         }
         assert!(!game.parry_active());
         assert!(game.parry_cooldown() > 0.0);
         game.bodies[0].shield = 60.0;
         assert!(!game.parry(), "cooling down");
-        for _ in 0..(t::PARRY_COOLDOWN / DT) as usize {
+        for _ in 0..(DEFAULT_TUNING.parry_cooldown / DT) as usize {
             game.step(DT, Input::default());
         }
         game.bodies[0].shield = 60.0;
@@ -301,7 +301,7 @@ mod tests {
         // Levels shorten the cooldown.
         let mut high = unlocked(4);
         high.parry();
-        assert!(high.parry_cooldown() < t::PARRY_COOLDOWN);
+        assert!(high.parry_cooldown() < DEFAULT_TUNING.parry_cooldown);
     }
 
     /// Fires `count` shots into the arc after the perfect window and counts how many are stopped.
@@ -322,7 +322,10 @@ mod tests {
         let n = 2000;
         let stopped = blocked(1, n);
         let share = stopped as f32 / n as f32;
-        assert!((share - t::PARRY_CHANCE).abs() < 0.04, "{share}");
+        assert!(
+            (share - DEFAULT_TUNING.parry_chance).abs() < 0.04,
+            "{share}"
+        );
         assert!(stopped < n, "a barrage is never blocked whole");
         // Higher levels block more but never everything.
         let better = blocked(4, n) as f32 / n as f32;
@@ -456,7 +459,10 @@ mod tests {
             .filter(|c| matches!(c, Cue::PerfectParry { .. }))
             .count();
         assert_eq!(perfects, 1, "one reward however many shots");
-        assert!((game.parry_cooldown() - (base - t::PARRY_PERFECT_COOLDOWN_REFUND)).abs() < 1e-4);
+        assert!(
+            (game.parry_cooldown() - (base - DEFAULT_TUNING.parry_perfect_cooldown_refund)).abs()
+                < 1e-4
+        );
         assert!(game.hit_stopped() && game.parry_flash() > 0.99);
         // The shield never ends up above what it was before the raise.
         assert!(game.bodies[0].shield <= 60.0 + 1e-4);
@@ -496,7 +502,7 @@ mod tests {
         let t0 = game.time;
         game.step(DT, Input::default());
         assert_eq!(game.time, t0, "frozen");
-        for _ in 0..(t::PARRY_HITSTOP / DT) as usize + 2 {
+        for _ in 0..(DEFAULT_TUNING.parry_hitstop / DT) as usize + 2 {
             game.step(DT, Input::default());
         }
         assert!(!game.hit_stopped());
@@ -535,7 +541,7 @@ mod tests {
         let want = (game.body(shooter).unwrap().position - bullet.position).normalize();
         assert!(bullet.velocity.normalize().dot(want) > 0.999);
         assert!((bullet.velocity.length() - 400.0_f32.hypot(30.0)).abs() < 1e-2);
-        assert!(bullet.homing >= t::PARRY_REFLECT_HOMING);
+        assert!(bullet.homing >= DEFAULT_TUNING.parry_reflect_homing);
     }
 
     #[test]
@@ -551,7 +557,7 @@ mod tests {
         let (a, b) = (&one.loadout.skills, &four.loadout.skills);
         assert!(b.parry_perfect(&DEFAULT_TUNING) > a.parry_perfect(&DEFAULT_TUNING));
         assert!(b.parry_reflect(&DEFAULT_TUNING) > a.parry_reflect(&DEFAULT_TUNING));
-        assert!((a.parry_reflect(&DEFAULT_TUNING) - t::PARRY_REFLECT).abs() < 1e-6);
+        assert!((a.parry_reflect(&DEFAULT_TUNING) - DEFAULT_TUNING.parry_reflect).abs() < 1e-6);
         assert_eq!(
             unlocked(0).loadout.skills.parry_perfect(&DEFAULT_TUNING),
             0.0
