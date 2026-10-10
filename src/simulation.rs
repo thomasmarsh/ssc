@@ -981,6 +981,7 @@ impl Game {
         self.sync_latches();
         // After contacts, so an impact cannot leave a joint stretched past its limit.
         self.constrain_chains();
+        self.damage_drone_contacts(dt);
         self.update_parry(dt);
         self.update_dash(dt);
         self.move_bullets(dt);
@@ -1815,8 +1816,13 @@ impl Game {
                                 .is_some_and(|unit| unit.health > 0.0)
                         })
                         .filter_map(|&d| {
-                            segment_circle(previous, next, d.position, 12.0 + bullet.radius)
-                                .map(|t| (d, t))
+                            segment_circle(
+                                previous,
+                                next,
+                                d.position,
+                                fleet::DRONE_RADIUS + bullet.radius,
+                            )
+                            .map(|t| (d, t))
                         })
                         .min_by(|a, b| a.1.total_cmp(&b.1));
                     if let Some((drone, fraction)) = drone_hit
@@ -2027,16 +2033,7 @@ impl Game {
             shot_paths[shot_index] = paths;
         }
         for drone in drone_losses {
-            self.effect(drone.position, 28.0, 0.5, EffectKind::Impact);
-            self.notify(
-                format!(
-                    "DRONE #{} LOST - WRECK AT {:.0},{:.0}; REBUILD AT HOME DOCK",
-                    drone.slot + 1,
-                    drone.position.x,
-                    drone.position.y
-                ),
-                upgrades::Rarity::Common,
-            );
+            self.note_drone_loss(drone);
         }
         for egg in egg_losses {
             self.effect(egg.position, 12.0, 0.2, EffectKind::Impact);
@@ -2115,6 +2112,9 @@ impl Game {
         let invulnerability = self.guard_time();
         let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();
         for (at, radius, amount, direct, friendly) in blasts {
+            if !friendly {
+                self.damage_drone_blast(at, radius, amount);
+            }
             for body in self.bodies.iter_mut().filter(|b| {
                 b.active && b.id != direct && !(friendly && apexes::is_part(&self.apexes, b))
             }) {

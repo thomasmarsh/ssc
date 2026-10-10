@@ -45,7 +45,7 @@ Decide per slice, and say which in one line.
 The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; finite delivery/survey/pest jobs and a stock-backed player-haul agreement, Automation, and four-unit fleets with nearby known-planetoid/free-lode orders, cargo/mining dock retrofits and cross-pad blueprint reuse are built; further machine jobs, merchant transport and later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit fleet and nearby deposit orders - further modules, active targeting, blast/contact damage, scavengers and early recall beyond built loaded shot losses/repair/replacement/player wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
+1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit fleet and nearby deposit orders - further modules, active targeting, kinetic impacts, scavengers and early recall beyond built loaded shot/blast/contact losses/repair/replacement/player wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 2. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 3. Alongside: remaining D machine jobs, DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
@@ -56,6 +56,8 @@ Other backlog: density/feeling view-model and measurements, weaver rock care, hy
 Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; tankers for any material with compatible local storage; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Loaded fleet hazards: hostile mines/missile/area bursts and dt-scaled hostile creature overlap share saved hull and finite wreck losses; friendly/calm/phased exclusions and conservation covered. Targeting, kinetic impacts, early recall and remote incidents remain next.
 
 - Loaded fleet recovery: saved hull, swept hostile-shot losses, finite partial wreck salvage, paid dock repairs and stable-slot template-priced replacements; compact status/repair and loaded flight captures checked. Targeting/combat modules/scavengers/remote incidents remain next.
 
@@ -70,5 +72,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Planetoid designation: free saved fleet orders for known deposits within 6000 units, travel-aware flight and shared depletion; old cargo unloads before redirection. Roles/combat remain next.
 
 - Cross-pad blueprint: one saved overwriteable fleet configuration, atomic missing-module merge pricing, queued fitting and future-build costs; knowledge survives source/world loss. Designation/custom roles/combat remain next.
-
-- Pad fleet templates: saved cargo/mining choices pay atomically only for missing modules, queue existing trips until unload, and price/fit future builds; custom roles/designation/combat remain next.

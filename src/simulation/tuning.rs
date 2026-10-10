@@ -647,3 +647,7 @@ pub const POOL_NONE_THREAT: f32 = 3.7;
 pub const POOL_FLOOR: f32 = 0.15;
 pub const POOL_DRIFT: f32 = 2.5;
 pub const POOL_FLING: f32 = 70.0;
+
+/// Sustained hostile creature overlap applies one ordinary sting per this many seconds.
+/// Drones follow their work ledger, so contact causes damage without displacement.
+pub const DRONE_CONTACT_SECONDS: f32 = 0.65;

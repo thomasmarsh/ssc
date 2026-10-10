@@ -1570,8 +1570,10 @@ fn smoke_run(
         if !designated && seconds >= 15.0 {
             game.step(1.0 / 60.0, Input::default());
         }
-        if std::env::var("SSC_FLEET_LOSS").as_deref() == Ok("1") {
-            game.stage_drone_loss_smoke();
+        match std::env::var("SSC_FLEET_LOSS").as_deref() {
+            Ok("1") => game.stage_drone_loss_smoke(),
+            Ok("blast") => game.stage_drone_blast_smoke(),
+            _ => {}
         }
         run.hold = true;
     }

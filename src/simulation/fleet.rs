@@ -8,6 +8,7 @@ const WORK_SECONDS: f32 = 10.0;
 const RETURN_SECONDS: f32 = 5.0;
 const DRONE_SPEED: f32 = 300.0;
 pub const DRONE_HEALTH: f32 = 80.0;
+pub(super) const DRONE_RADIUS: f32 = 12.0;
 const MAX_WRECKS: usize = 64;
 
 fn drone_health() -> f32 {
@@ -749,6 +750,70 @@ impl Game {
         views
     }
 
+    pub(super) fn note_drone_loss(&mut self, drone: DroneView) {
+        self.effect(drone.position, 28.0, 0.5, EffectKind::Impact);
+        self.notify(
+            format!(
+                "DRONE #{} LOST - WRECK AT {:.0},{:.0}; REBUILD AT HOME DOCK",
+                drone.slot + 1,
+                drone.position.x,
+                drone.position.y
+            ),
+            upgrades::Rarity::Common,
+        );
+    }
+
+    pub(super) fn damage_drone_blast(&mut self, at: Vec2, radius: f32, amount: f32) {
+        for drone in self.mining_drone_views() {
+            if drone.position.distance(at) < radius + DRONE_RADIUS
+                && damage_drone(&mut self.pad, drone, amount)
+            {
+                self.note_drone_loss(drone);
+            }
+        }
+    }
+
+    /// Ledger-driven workers do not participate in body impulses. Sustained hostile
+    /// overlap deals the creature's ordinary sting at the ship's contact cadence.
+    pub(super) fn damage_drone_contacts(&mut self, dt: f32) {
+        for drone in self.mining_drone_views() {
+            let amount: f32 = self
+                .bodies
+                .iter()
+                .filter(|body| {
+                    body.active
+                        && body.health > 0.0
+                        && !body.phased
+                        && body.kind == BodyKind::Creature
+                        && (body.alert
+                            || (body.root.is_some()
+                                && body.genome.root_defense >= crate::genome::ROOT_ARMED))
+                        && self.civ_of(body).is_none_or(|(id, _)| self.civ_hostile(id))
+                        && body.position.distance(drone.position) < hit_radius(body) + DRONE_RADIUS
+                })
+                .map(contact_damage)
+                .sum::<f32>()
+                * dt
+                / tuning::DRONE_CONTACT_SECONDS;
+            if amount > 0.0 && damage_drone(&mut self.pad, drone, amount) {
+                self.note_drone_loss(drone);
+            }
+        }
+    }
+
+    pub fn stage_drone_blast_smoke(&mut self) {
+        self.update_mining_drones(5.0);
+        for (slot, amount) in [(0, 100.0), (1, 50.0)] {
+            if let Some(view) = self
+                .mining_drone_views()
+                .into_iter()
+                .find(|v| v.slot == slot)
+            {
+                self.explode(view.position, 1.0, amount, false);
+            }
+        }
+    }
+
     pub fn stage_drone_loss_smoke(&mut self) {
         self.update_mining_drones(5.0);
         for (slot, damage) in [(0, 100.0), (1, 50.0)] {
@@ -1386,6 +1451,155 @@ mod tests {
             .push(Bullet::hostile(view.position, Vec2::ZERO, 1.0, damage));
         game.move_bullets(1.0 / 60.0);
         view
+    }
+
+    #[test]
+    fn hostile_blast_loss_saves_finite_wreck_and_never_delivers_reserved_ore() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        game.pad.pads.get_mut(&key).unwrap().drone_paused = true;
+        let view = game.mining_drone_views()[0];
+        let ore = game.mined[&key];
+        let fuel = game.pad.pads[&key].stash.fuel;
+        game.explode(view.position, 20.0, 30.0, true);
+        game.explode(view.position + Vec2::X * 100.0, 20.0, 30.0, false);
+        assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        game.explode(view.position, 20.0, 30.0, false);
+        assert_eq!(game.pad.pads[&key].drones[0].health, 50.0);
+        // Even without power the visible worker remains exposed.
+        game.pad.pads.get_mut(&key).unwrap().power = false;
+        game.explode(view.position, 20.0, 60.0, false);
+        game.explode(view.position, 20.0, 60.0, false);
+        assert_eq!(game.drone_wrecks().len(), 1);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        loaded.pad.pads.get_mut(&key).unwrap().power = true;
+        loaded.teleport(Vec2::new(120_000.0, 0.0));
+        loaded.update_mining_drones(100.0);
+        assert_eq!(loaded.pad.pads[&key].drones[0].health, 0.0);
+        assert_eq!(loaded.pad.pads[&key].stash.fuel, fuel);
+        assert_eq!(loaded.mined[&key], ore);
+        assert_eq!(loaded.drone_wrecks(), game.drone_wrecks());
+        assert_eq!(loaded.pad.pads[&key].stash.metal, 0.0);
+        assert_eq!(loaded.pad.pads[&key].stash.crystal, 0.0);
+    }
+
+    #[test]
+    fn hostile_mines_and_expiring_or_direct_missiles_reach_fleet_hull() {
+        for mode in 0..3 {
+            let (mut game, key, _) = setup();
+            game.bench_confirm();
+            game.update_mining_drones(5.0);
+            let view = game.mining_drone_views()[0];
+            if mode == 0 {
+                game.mines.push(weapons::Mine {
+                    sigil: None,
+                    position: view.position,
+                    velocity: Vec2::ZERO,
+                    friendly: false,
+                    age: 10.0,
+                    fuse: Some(0.0),
+                    damage: 30.0,
+                    blast: 20.0,
+                });
+                game.update_mines(1.0 / 60.0);
+            } else {
+                let at = view.position + Vec2::X * if mode == 1 { 30.0 } else { 0.0 };
+                let mut shot = Bullet::hostile(at, Vec2::ZERO, 1.0, 20.0);
+                shot.burst = 40.0;
+                shot.shape = weapons::Shape::Missile;
+                shot.remaining = if mode == 1 { 0.001 } else { 1.0 };
+                game.bullets.push(shot);
+                game.move_bullets(1.0 / 60.0);
+            }
+            let expected = match mode {
+                0 => 50.0,
+                1 => 68.0,
+                _ => 48.0,
+            };
+            assert_eq!(
+                game.pad.pads[&key].drones[0].health, expected,
+                "mode {mode}"
+            );
+        }
+    }
+
+    fn touching_creature(game: &mut Game) -> u64 {
+        let at = game.mining_drone_views()[0].position;
+        let id = super::super::tests::spawn(game, &Species::bogey(), at);
+        let body = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+        body.alert = true;
+        body.genome.contact_damage = 20.0;
+        id
+    }
+
+    #[test]
+    fn contact_respects_calm_phasing_diplomacy_distance_and_loaded_host() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        let id = touching_creature(&mut game);
+        for excluded in 0..5 {
+            let body = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+            body.alert = excluded != 0;
+            body.phased = excluded == 1;
+            body.active = excluded != 2;
+            body.health = if excluded == 3 { 0.0 } else { body.max_health };
+            if excluded == 4 {
+                body.position += Vec2::X * 1000.0;
+            }
+            game.damage_drone_contacts(0.65);
+            assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        }
+        let civ = crate::territory::outpost(game.seed);
+        let territory = civ.id;
+        game.civ_territories.insert(territory, civ);
+        let at = game.mining_drone_views()[0].position;
+        let body = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+        body.position = at;
+        game.civ_lineages
+            .insert(body.species, (territory, CivRole::Member));
+        game.set_regard(territory, 80.0);
+        game.damage_drone_contacts(0.65);
+        assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        game.set_regard(territory, -80.0);
+        game.damage_drone_contacts(0.65);
+        let health = game.pad.pads[&key].drones[0].health;
+        assert!(health < DRONE_HEALTH);
+        game.bodies.retain(|b| b.origin != Some(key));
+        game.damage_drone_contacts(10.0);
+        assert_eq!(game.pad.pads[&key].drones[0].health, health);
+    }
+
+    #[test]
+    fn sustained_contact_is_partition_independent_and_step_applies_it() {
+        let (mut whole, key, _) = setup();
+        whole.bench_confirm();
+        whole.update_mining_drones(5.0);
+        let id = touching_creature(&mut whole);
+        let (mut split, _, _) = setup();
+        split.bench_confirm();
+        split.update_mining_drones(5.0);
+        touching_creature(&mut split);
+        whole.damage_drone_contacts(0.65);
+        for _ in 0..10 {
+            split.damage_drone_contacts(0.065);
+        }
+        assert!(
+            (whole.pad.pads[&key].drones[0].health - split.pad.pads[&key].drones[0].health).abs()
+                < 0.001
+        );
+        whole.pad.bench = None;
+        let creature = whole.bodies.iter_mut().find(|b| b.id == id).unwrap();
+        creature.velocity = Vec2::ZERO;
+        creature.provoked = 1.0;
+        let before = whole.pad.pads[&key].drones[0].health;
+        whole.step(1.0 / 60.0, Input::default());
+        assert!(whole.pad.pads[&key].drones[0].health < before);
+        whole.damage_drone_contacts(100.0);
+        whole.damage_drone_contacts(100.0);
+        assert_eq!(whole.drone_wrecks().len(), 1);
     }
 
     #[test]
