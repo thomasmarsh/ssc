@@ -90,8 +90,8 @@ impl Snapshot {
                 s.label(),
                 self.loadout.skills.level(s),
                 game.loadout.skills.level(s),
-                skill_value(s, &self.loadout.skills),
-                skill_value(s, &game.loadout.skills)
+                skill_value(s, &self.loadout.skills, &game.tune),
+                skill_value(s, &game.loadout.skills, &game.tune)
             ),
             BenchAction::Organ(o) => {
                 let before = self.loadout.organs.fitted();
@@ -239,33 +239,42 @@ fn part_changes(before: &Part, after: &Part) -> String {
     )
 }
 
-fn skill_value(s: Skill, skills: &Skills) -> String {
+fn skill_value(s: Skill, skills: &Skills, tune: &Tunables) -> String {
     match s {
-        Skill::BeamPower => format!("x{:.2} beam rate", skills.beam_power()),
-        Skill::BeamRange => format!("{:.0} beam reach", skills.beam_range()),
-        Skill::Yield => format!("x{:.2} ore yield", skills.yield_mult()),
-        Skill::Magnet => format!("{:.0} extra pickup pull", skills.magnet_bonus()),
-        Skill::Cargo => format!("{:.0} hold each", mining::CAP + skills.cargo_bonus()),
-        Skill::Dash => format!("{:.0} jump", skills.dash_distance()),
-        Skill::Parry => format!("{:.0}% block", skills.parry_chance() * 100.0),
-        Skill::PingReach => format!("{:.0} ping reach", skills.ping_range(ping::PING_RANGE)),
-        Skill::PingSpeed => format!("{:.0} ring speed", skills.ping_speed(ping::RING_SPEED)),
+        Skill::BeamPower => format!("x{:.2} beam rate", skills.beam_power(tune)),
+        Skill::BeamRange => format!("{:.0} beam reach", skills.beam_range(tune)),
+        Skill::Yield => format!("x{:.2} ore yield", skills.yield_mult(tune)),
+        Skill::Magnet => format!("{:.0} extra pickup pull", skills.magnet_bonus(tune)),
+        Skill::Cargo => format!("{:.0} hold each", mining::CAP + skills.cargo_bonus(tune)),
+        Skill::Dash => format!("{:.0} jump", skills.dash_distance(tune)),
+        Skill::Parry => format!("{:.0}% block", skills.parry_chance(tune) * 100.0),
+        Skill::PingReach => format!(
+            "{:.0} ping reach",
+            skills.ping_range(ping::PING_RANGE, tune)
+        ),
+        Skill::PingSpeed => format!(
+            "{:.0} ring speed",
+            skills.ping_speed(ping::RING_SPEED, tune)
+        ),
         Skill::PingCooldown => {
-            format!("{:.1}s recharge", skills.ping_cooldown(ping::PING_COOLDOWN))
+            format!(
+                "{:.1}s recharge",
+                skills.ping_cooldown(ping::PING_COOLDOWN, tune)
+            )
         }
-        Skill::PingTargets => format!("{} extra echoes/kind", skills.ping_extra_targets()),
-        Skill::Beacon => format!("{} beacon limit", skills.beacon_limit()),
-        Skill::Shove => format!("x{:.2} ram push", skills.shove_mult()),
+        Skill::PingTargets => format!("{} extra echoes/kind", skills.ping_extra_targets(tune)),
+        Skill::Beacon => format!("{} beacon limit", skills.beacon_limit(tune)),
+        Skill::Shove => format!("x{:.2} ram push", skills.shove_mult(tune)),
         Skill::ShovePlating => format!(
             "{:.0}% own impact damage",
-            skills.plating_factor(true) * 100.0
+            skills.plating_factor(true, tune) * 100.0
         ),
         Skill::Symbiosis => format!("{} organ slots", skills.organ_slots()),
         _ => {
             if skills.level(s) == 0 {
                 "Hidden".into()
             } else {
-                format!("Reveals {}", s.summary())
+                format!("Reveals {}", s.summary(tune))
             }
         }
     }
@@ -565,7 +574,7 @@ mod tests {
         let initial = game.cargo;
         for level in 1..=3 {
             let before = game.cargo;
-            let price = Skill::BeamPower.price(level - 1).unwrap();
+            let price = Skill::BeamPower.price(level - 1, &DEFAULT_TUNING).unwrap();
             game.bench_confirm();
             assert_eq!(game.loadout.skills.level(Skill::BeamPower), level);
             assert!(result(&game).contains(&format!("LEVEL {} -> {level}", level - 1)));
@@ -670,7 +679,10 @@ mod tests {
             .find(|r| r.selected)
             .unwrap();
         assert_eq!(selected.action, BenchAction::Skill(Skill::Parry));
-        assert_eq!(selected.costs, Skill::Parry.price(0).unwrap());
+        assert_eq!(
+            selected.costs,
+            Skill::Parry.price(0, &DEFAULT_TUNING).unwrap()
+        );
     }
     #[test]
     fn losing_a_required_part_clears_guidance_and_refitting_does_not_repeat_it() {

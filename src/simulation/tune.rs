@@ -131,7 +131,7 @@ impl Game {
     /// Re-derives what is cached from the tunables and records a pending regeneration.
     fn tune_changed(&mut self, regen: bool) {
         self.tune_regen |= regen;
-        self.cargo.extra = self.loadout.skills.cargo_bonus();
+        self.cargo.extra = self.loadout.skills.cargo_bonus(&self.tune);
     }
 
     /// A one-line console: `list [group|modified]`, `groups`, `get <name>`, `set <name> <value>`,
@@ -327,6 +327,18 @@ mod tests {
         let mut tune = Tunables::default();
         tune.set("relic_one_in", 20.0).unwrap();
         assert!(!Game::with_tuning(MASTER_SEED, tune).tuning_needs_regen());
+    }
+
+    #[test]
+    fn live_entries_take_effect_on_the_next_tick() {
+        let mut game = Game::new(MASTER_SEED);
+        let before = game.cargo.extra;
+        game.loadout.skills.raise(skills::Skill::Cargo);
+        game.refresh_stats();
+        let one = game.cargo.extra;
+        assert!(one > before);
+        game.tune_set("cargo_step", 100.0).unwrap();
+        assert_eq!(game.cargo.extra, 2.0 * one);
     }
 
     #[test]

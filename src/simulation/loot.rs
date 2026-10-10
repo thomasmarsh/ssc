@@ -131,7 +131,7 @@ impl Game {
         self.guide_fitted_unlocks();
         let stats = self.loadout.stats();
         self.stats = stats;
-        self.cargo.extra = self.loadout.skills.cargo_bonus();
+        self.cargo.extra = self.loadout.skills.cargo_bonus(&self.tune);
         let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
             return;
         };
@@ -447,7 +447,7 @@ impl Game {
     /// Pickups drift and slow, are drawn in by the ship's magnet, and are taken on contact.
     pub(super) fn update_pickups(&mut self, dt: f32) {
         let ship = self.player().map(|p| (p.position, p.radius));
-        let magnet = self.stats.magnet + self.loadout.skills.magnet_bonus();
+        let magnet = self.stats.magnet + self.loadout.skills.magnet_bonus(&self.tune);
         let mut taken = Vec::new();
         for (index, pickup) in self.pickups.iter_mut().enumerate() {
             pickup.age += dt;

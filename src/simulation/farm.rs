@@ -750,7 +750,7 @@ impl Game {
             self.shift_regard(tended, -THEFT_REGARD);
         }
         let ripe = live.growth >= RIPE;
-        let gain = self.loadout.skills.yield_mult() * self.realm_effects().mining;
+        let gain = self.loadout.skills.yield_mult(&self.tune) * self.realm_effects().mining;
         let genes = self.farm.plants[live.index].genes;
         let amount = if ripe {
             CROP_YIELD * nutrition

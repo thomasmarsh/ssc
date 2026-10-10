@@ -1123,6 +1123,7 @@ mod tests {
             -800.0,
             1000.0,
             &g.loadout.skills,
+            &DEFAULT_TUNING,
         );
         assert_eq!(stone.rift_redirected, 5.0);
         ship.velocity = Vec2::X * 800.0;
@@ -1133,6 +1134,7 @@ mod tests {
             -800.0,
             1000.0,
             &g.loadout.skills,
+            &DEFAULT_TUNING,
         );
         assert_eq!(stone.rift_redirected, 0.0);
         assert!(stone.shoved > 0.0);

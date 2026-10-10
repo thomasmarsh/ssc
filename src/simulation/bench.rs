@@ -630,8 +630,8 @@ impl Game {
                 };
                 let level = self.loadout.skills.level(s);
                 row.text = format!("{}   {level}/{}", s.label(), s.max_level());
-                row.detail = s.summary();
-                if let Some(price) = s.price(level) {
+                row.detail = s.summary(&self.tune);
+                if let Some(price) = s.price(level, &self.tune) {
                     row.costs = price;
                     row.detail += &format!(". Level {level} -> {}.", level + 1);
                     if let Some(need) = self.skill_gate(s) {
@@ -1277,7 +1277,7 @@ mod tests {
             funds(&mut game);
             game.bench_select(BenchAction::Skill(skill));
             let level = game.loadout.skills.level(skill);
-            let price = skill.price(level).unwrap();
+            let price = skill.price(level, &DEFAULT_TUNING).unwrap();
             let before = game.cargo;
             assert!(selected(&game).ok);
             game.bench_confirm();

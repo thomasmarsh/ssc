@@ -1496,7 +1496,7 @@ impl Game {
             return;
         };
         let level = self.loadout.skills.level(skill);
-        let Some(price) = skill.price(level) else {
+        let Some(price) = skill.price(level, &self.tune) else {
             self.bench_failed(format!("{} IS AT MAX", skill.label()));
             return;
         };
@@ -2392,7 +2392,7 @@ mod tests {
         assert_eq!(game.loadout.skills.level(Skill::PingReach), 0);
         // Reach is first on the tab: buy it, and it costs what the price said.
         stock(&mut game, 100.0, 100.0, 100.0);
-        let price = Skill::PingReach.price(0).unwrap();
+        let price = Skill::PingReach.price(0, &DEFAULT_TUNING).unwrap();
         game.bench_confirm();
         assert_eq!(game.loadout.skills.level(Skill::PingReach), 1);
         assert_eq!(game.cargo.metal, 100.0 - price[0].1);
@@ -2457,7 +2457,7 @@ mod tests {
             game.bench_move(1);
         }
         stock(&mut game, 100.0, 50.0, 0.0);
-        let price = Skill::Cargo.price(0).unwrap();
+        let price = Skill::Cargo.price(0, &DEFAULT_TUNING).unwrap();
         game.bench_confirm();
         assert_eq!(game.loadout.skills.level(Skill::Cargo), 1);
         assert_eq!(game.cargo.metal, 100.0 - price[0].1);

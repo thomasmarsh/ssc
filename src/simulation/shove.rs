@@ -51,6 +51,7 @@ pub(super) fn on_contact(
     closing_speed: f32,
     impulse: f32,
     skills: &Skills,
+    tune: &Tunables,
 ) {
     let (ship, other, toward) = match (a.kind, b.kind) {
         (BodyKind::Player, _) => (&*a, b, normal),
@@ -84,19 +85,21 @@ pub(super) fn on_contact(
     if other.kind == BodyKind::Asteroid {
         other.shoved = other.shoved.max(t::SHOVE_TAG);
     }
-    let mult = skills.shove_mult();
+    let mult = skills.shove_mult(tune);
     if mult > 1.0 && closing >= t::SHOVE_MIN_CLOSING && other.shove_clock <= 0.0 {
         let travel = ship.velocity.normalize_or_zero();
         let mut dir = (toward * (1.0 - t::SHOVE_AIM) + travel * t::SHOVE_AIM).normalize_or_zero();
         if dir.dot(toward) < 0.3 {
             dir = toward;
         }
-        let dv = ((mult - 1.0) * impulse / other.mass).min(skills.shove_bonus_dv());
+        let dv = ((mult - 1.0) * impulse / other.mass).min(skills.shove_bonus_dv(tune));
         other.velocity += dir * dv;
         other.shove_clock = t::SHOVE_COOLDOWN;
     }
     if other.kind == BodyKind::Asteroid {
-        other.velocity = other.velocity.clamp_length_max(skills.shove_speed_cap());
+        other.velocity = other
+            .velocity
+            .clamp_length_max(skills.shove_speed_cap(tune));
     }
 }
 
@@ -124,7 +127,7 @@ impl Game {
         }
         let offset = ship_at - rock.position;
         let gap = offset.length() - rock.radius - ship_r;
-        if gap > skills.grip_reach() {
+        if gap > skills.grip_reach(&self.tune) {
             // Breakaway: too far to hold; it stays off for a moment.
             rock.grip_free = t::GRIP_RETRY;
             return;
@@ -135,7 +138,7 @@ impl Game {
             return;
         }
         let heft = (t::GRIP_REF_MASS / rock.mass).clamp(0.25, 1.5);
-        let pull = (t::GRIP_PULL * over).min(skills.grip_accel()) * heft;
+        let pull = (t::GRIP_PULL * over).min(skills.grip_accel(&self.tune)) * heft;
         let dir = offset.normalize_or_zero();
         let before = rock.velocity;
         let mut next = before + dir * pull * dt;
@@ -182,9 +185,9 @@ impl Game {
         kick(
             rock,
             dir,
-            skills.whip_impulse(),
+            skills.whip_impulse(&self.tune),
             t::WHIP_DV,
-            skills.shove_speed_cap(),
+            skills.shove_speed_cap(&self.tune),
         );
         rock.sling_thrown = 0.0;
         rock.rune_pushed = 0.0;
@@ -313,16 +316,16 @@ mod tests {
             let (game, id) = ram(level, 14.0, 460.0);
             let v = body(&game, id).velocity.length();
             assert!(v > last, "level {level}: {v} vs {last}");
-            assert!(v <= game.loadout.skills.shove_speed_cap() + 1e-2);
+            assert!(v <= game.loadout.skills.shove_speed_cap(&DEFAULT_TUNING) + 1e-2);
             last = v;
         }
         // The caps themselves rise by level and stay bounded.
         let mut skills = Skills::default();
-        let mut cap = skills.shove_speed_cap();
+        let mut cap = skills.shove_speed_cap(&DEFAULT_TUNING);
         for _ in 0..4 {
             skills.raise(Skill::Shove);
-            assert!(skills.shove_speed_cap() > cap);
-            cap = skills.shove_speed_cap();
+            assert!(skills.shove_speed_cap(&DEFAULT_TUNING) > cap);
+            cap = skills.shove_speed_cap(&DEFAULT_TUNING);
         }
         assert!(cap <= 1000.0);
         // A very light rock at top level hits the speed cap, not infinity.
@@ -370,7 +373,8 @@ mod tests {
         assert!(body(&game, first).shoved > 0.0 || body(&game, first).velocity.length() < 700.0);
         for id in [first, second] {
             assert!(
-                body(&game, id).velocity.length() <= game.loadout.skills.shove_speed_cap() + 1.0
+                body(&game, id).velocity.length()
+                    <= game.loadout.skills.shove_speed_cap(&DEFAULT_TUNING) + 1.0
             );
         }
     }
@@ -518,7 +522,7 @@ mod tests {
             let (g, i) = dash_into(level, 25.0);
             let s = body(&g, i).velocity.length();
             assert!(s > last, "{level}");
-            assert!(s <= g.loadout.skills.shove_speed_cap() + 1e-2);
+            assert!(s <= g.loadout.skills.shove_speed_cap(&DEFAULT_TUNING) + 1e-2);
             last = s;
         }
         let (heavy, hid) = dash_into(2, 120.0);
@@ -597,7 +601,7 @@ mod tests {
     fn plating_needs_shove_and_both_start_locked_survive_death_and_clear_on_restart() {
         let mut game = with_levels(0, 0);
         assert!(Skill::Shove.starts_locked() && Skill::ShovePlating.starts_locked());
-        assert_eq!(game.loadout.skills.shove_mult(), 1.0);
+        assert_eq!(game.loadout.skills.shove_mult(&DEFAULT_TUNING), 1.0);
         assert!(game.skill_gate(Skill::ShovePlating).is_some());
         game.loadout.skills.raise(Skill::Shove);
         assert!(game.skill_gate(Skill::ShovePlating).is_none());

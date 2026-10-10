@@ -4,6 +4,7 @@
 use super::Material;
 use super::tuning as t;
 use super::upgrades::{Rarity, Slot};
+use crate::simulation::Tunables;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Skill {
@@ -154,72 +155,133 @@ impl Skill {
     }
 
     /// What one level gives, for the bench.
-    pub fn summary(self) -> String {
+    pub fn summary(self, tune: &Tunables) -> String {
         match self {
-            Self::BeamPower => format!("+{:.0}% beam rate", t::POWER_STEP * 100.0),
-            Self::BeamRange => format!("+{:.0} reach", t::RANGE_STEP),
-            Self::Yield => format!("+{:.0}% per ore", t::YIELD_STEP * 100.0),
-            Self::Magnet => format!("+{:.0} pickup pull", t::MAGNET_STEP),
-            Self::Cargo => format!("+{:.0} hold each", t::CARGO_STEP),
+            Self::BeamPower => format!("+{:.0}% beam rate", tune.power_step * 100.0),
+            Self::BeamRange => format!("+{:.0} reach", tune.range_step),
+            Self::Yield => format!("+{:.0}% per ore", tune.yield_step * 100.0),
+            Self::Magnet => format!("+{:.0} pickup pull", tune.magnet_step),
+            Self::Cargo => format!("+{:.0} hold each", tune.cargo_step),
             Self::Dash => format!(
                 "{:.0} unit jump, brief invulnerability; dashing through fire or a flinger boosts damage (+{:.0} a level)",
-                t::DASH_DISTANCE,
-                t::DASH_DISTANCE_STEP
+                tune.dash_distance, tune.dash_distance_step
             ),
             Self::Parry => format!(
                 "arc shield, {:.0}% block, perfect timing reflects (+{:.0}% block, longer perfect window, harder reflect a level)",
-                t::PARRY_CHANCE * 100.0,
-                t::PARRY_CHANCE_STEP * 100.0
+                tune.parry_chance * 100.0,
+                tune.parry_chance_step * 100.0
             ),
-            Self::PingReach => format!("+{:.0} reach", t::PING_REACH_STEP),
-            Self::PingSpeed => format!("+{:.0} ring speed", t::PING_SPEED_STEP),
-            Self::PingCooldown => format!("-{:.1}s recharge", t::PING_COOLDOWN_STEP),
-            Self::PingTargets => format!("+{} echo of every kind", t::PING_TARGETS_STEP),
+            Self::PingReach => format!("+{:.0} reach", tune.ping_reach_step),
+            Self::PingSpeed => format!("+{:.0} ring speed", tune.ping_speed_step),
+            Self::PingCooldown => format!("-{:.1}s recharge", tune.ping_cooldown_step),
+            Self::PingTargets => format!("+{} echo of every kind", tune.ping_targets_step),
             Self::EchoPads => "pads the enemy has found ping as alerts".to_string(),
             Self::EchoLodes => "rich lodes, renewables and sealed organs".to_string(),
             Self::EchoNests => "nests and egg clusters".to_string(),
             Self::EchoPredators => "how many predators roam a sector".to_string(),
             Self::Shove => format!(
                 "ram a held rock to fling it: +{:.0}% push, longer grip, bigger dash whip",
-                t::SHOVE_MULT_STEP * 100.0
+                tune.shove_mult_step * 100.0
             ),
             Self::ShovePlating => format!(
                 "-{:.0}% damage from your own rams; level {}+ cuts every collision",
-                t::PLATING_CAUSED_STEP * 100.0,
-                t::PLATING_ALL_FROM
+                tune.plating_caused_step * 100.0,
+                tune.plating_all_from
             ),
             Self::Symbiosis => format!(
                 "one organ slot a level; grafts cost crystal and fuel, upkeep {:.1} biomass a minute",
-                t::ORGAN_UPKEEP
+                tune.organ_upkeep
             ),
             Self::Beacon => format!(
                 "deploy beacons (H) and jump back to one from the chart; {} more standing a level",
-                t::BEACONS_PER_LEVEL
+                tune.beacons_per_level
             ),
         }
     }
 
-    fn base_price(self) -> &'static [(Material, f32)] {
+    fn base_price(self, tune: &Tunables) -> Vec<(Material, f32)> {
+        use Material::{Crystal, Metal, Volatiles};
         match self {
-            Self::BeamPower => &t::PRICE_POWER,
-            Self::BeamRange => &t::PRICE_RANGE,
-            Self::Yield => &t::PRICE_YIELD,
-            Self::Magnet => &t::PRICE_MAGNET,
-            Self::Cargo => &t::PRICE_CARGO,
-            Self::Parry => &t::PRICE_PARRY,
-            Self::Dash => &t::PRICE_DASH,
-            Self::PingReach => &t::PRICE_PING_REACH,
-            Self::PingSpeed => &t::PRICE_PING_SPEED,
-            Self::PingCooldown => &t::PRICE_PING_COOLDOWN,
-            Self::PingTargets => &t::PRICE_PING_TARGETS,
-            Self::EchoPads => &t::PRICE_ECHO_PADS,
-            Self::EchoLodes => &t::PRICE_ECHO_LODES,
-            Self::EchoNests => &t::PRICE_ECHO_NESTS,
-            Self::EchoPredators => &t::PRICE_ECHO_PREDATORS,
-            Self::Beacon => &t::PRICE_BEACON,
-            Self::Shove => &t::PRICE_SHOVE,
-            Self::ShovePlating => &t::PRICE_SHOVE_PLATING,
-            Self::Symbiosis => &t::PRICE_SYMBIOSIS,
+            Self::BeamPower => vec![
+                (Metal, tune.price_power_metal),
+                (Crystal, tune.price_power_crystal),
+            ],
+            Self::BeamRange => vec![
+                (Metal, tune.price_range_metal),
+                (Crystal, tune.price_range_crystal),
+            ],
+            Self::Yield => vec![
+                (Volatiles, tune.price_yield_volatiles),
+                (Crystal, tune.price_yield_crystal),
+            ],
+            Self::Magnet => vec![
+                (Volatiles, tune.price_magnet_volatiles),
+                (Crystal, tune.price_magnet_crystal),
+            ],
+            Self::Cargo => vec![
+                (Metal, tune.price_cargo_metal),
+                (Volatiles, tune.price_cargo_volatiles),
+            ],
+            Self::Parry => vec![
+                (Metal, tune.price_parry_metal),
+                (Crystal, tune.price_parry_crystal),
+                (Volatiles, tune.price_parry_volatiles),
+            ],
+            Self::Dash => vec![
+                (Metal, tune.price_dash_metal),
+                (Crystal, tune.price_dash_crystal),
+                (Volatiles, tune.price_dash_volatiles),
+            ],
+            Self::PingReach => vec![
+                (Metal, tune.price_ping_reach_metal),
+                (Crystal, tune.price_ping_reach_crystal),
+            ],
+            Self::PingSpeed => vec![
+                (Volatiles, tune.price_ping_speed_volatiles),
+                (Crystal, tune.price_ping_speed_crystal),
+            ],
+            Self::PingCooldown => vec![
+                (Volatiles, tune.price_ping_cooldown_volatiles),
+                (Crystal, tune.price_ping_cooldown_crystal),
+            ],
+            Self::PingTargets => vec![
+                (Metal, tune.price_ping_targets_metal),
+                (Volatiles, tune.price_ping_targets_volatiles),
+            ],
+            Self::EchoPads => vec![
+                (Metal, tune.price_echo_pads_metal),
+                (Crystal, tune.price_echo_pads_crystal),
+            ],
+            Self::EchoLodes => vec![
+                (Metal, tune.price_echo_lodes_metal),
+                (Crystal, tune.price_echo_lodes_crystal),
+            ],
+            Self::EchoNests => vec![
+                (Volatiles, tune.price_echo_nests_volatiles),
+                (Crystal, tune.price_echo_nests_crystal),
+            ],
+            Self::EchoPredators => vec![
+                (Metal, tune.price_echo_predators_metal),
+                (Volatiles, tune.price_echo_predators_volatiles),
+                (Crystal, tune.price_echo_predators_crystal),
+            ],
+            Self::Beacon => vec![
+                (Metal, tune.price_beacon_metal),
+                (Crystal, tune.price_beacon_crystal),
+                (Volatiles, tune.price_beacon_volatiles),
+            ],
+            Self::Shove => vec![
+                (Metal, tune.price_shove_metal),
+                (Crystal, tune.price_shove_crystal),
+            ],
+            Self::ShovePlating => vec![
+                (Metal, tune.price_shove_plating_metal),
+                (Crystal, tune.price_shove_plating_crystal),
+            ],
+            Self::Symbiosis => vec![
+                (Volatiles, tune.price_symbiosis_volatiles),
+                (Crystal, tune.price_symbiosis_crystal),
+            ],
         }
     }
 
@@ -247,15 +309,15 @@ impl Skill {
     }
 
     /// Price of the step from `level` to the next; None at the top.
-    pub fn price(self, level: u8) -> Option<Vec<(Material, f32)>> {
+    pub fn price(self, level: u8, tune: &Tunables) -> Option<Vec<(Material, f32)>> {
         if level >= self.max_level() {
             return None;
         }
         let k = t::PRICE_GROWTH.powi(i32::from(level));
         Some(
-            self.base_price()
-                .iter()
-                .map(|&(m, a)| (m, (a * k).round()))
+            self.base_price(tune)
+                .into_iter()
+                .map(|(m, a)| (m, (a * k).round()))
                 .collect(),
         )
     }
@@ -287,131 +349,131 @@ impl Skills {
     }
 
     /// Beam rate multiplier.
-    pub fn beam_power(&self) -> f32 {
-        1.0 + t::POWER_STEP * self.steps(Skill::BeamPower)
+    pub fn beam_power(&self, tune: &Tunables) -> f32 {
+        1.0 + tune.power_step * self.steps(Skill::BeamPower)
     }
 
-    pub fn beam_range(&self) -> f32 {
-        t::BEAM_RANGE + t::RANGE_STEP * self.steps(Skill::BeamRange)
+    pub fn beam_range(&self, tune: &Tunables) -> f32 {
+        tune.beam_range + tune.range_step * self.steps(Skill::BeamRange)
     }
 
     /// Material gained per unit of ore worked.
-    pub fn yield_mult(&self) -> f32 {
-        1.0 + t::YIELD_STEP * self.steps(Skill::Yield)
+    pub fn yield_mult(&self, tune: &Tunables) -> f32 {
+        1.0 + tune.yield_step * self.steps(Skill::Yield)
     }
 
-    pub fn magnet_bonus(&self) -> f32 {
-        t::MAGNET_STEP * self.steps(Skill::Magnet)
+    pub fn magnet_bonus(&self, tune: &Tunables) -> f32 {
+        tune.magnet_step * self.steps(Skill::Magnet)
     }
 
     /// Chance a hostile shot in the arc is stopped; zero while locked.
-    pub fn parry_chance(&self) -> f32 {
+    pub fn parry_chance(&self, tune: &Tunables) -> f32 {
         match self.level(Skill::Parry) {
             0 => 0.0,
-            n => (t::PARRY_CHANCE + t::PARRY_CHANCE_STEP * f32::from(n - 1)).min(0.95),
+            n => (tune.parry_chance + tune.parry_chance_step * f32::from(n - 1)).min(0.95),
         }
     }
 
     /// Dash reach; zero while locked.
-    pub fn dash_distance(&self) -> f32 {
+    pub fn dash_distance(&self, tune: &Tunables) -> f32 {
         match self.level(Skill::Dash) {
             0 => 0.0,
-            n => t::DASH_DISTANCE + t::DASH_DISTANCE_STEP * f32::from(n - 1),
+            n => tune.dash_distance + tune.dash_distance_step * f32::from(n - 1),
         }
     }
 
-    pub fn dash_cooldown(&self) -> f32 {
+    pub fn dash_cooldown(&self, tune: &Tunables) -> f32 {
         let n = self.level(Skill::Dash).max(1);
-        t::DASH_COOLDOWN - t::DASH_COOLDOWN_STEP * f32::from(n - 1)
+        tune.dash_cooldown - tune.dash_cooldown_step * f32::from(n - 1)
     }
 
-    pub fn parry_cooldown(&self) -> f32 {
+    pub fn parry_cooldown(&self, tune: &Tunables) -> f32 {
         let n = self.level(Skill::Parry).max(1);
-        t::PARRY_COOLDOWN - t::PARRY_COOLDOWN_STEP * f32::from(n - 1)
+        tune.parry_cooldown - tune.parry_cooldown_step * f32::from(n - 1)
     }
 
     /// Seconds of the parry's opening that count as perfect (zero while locked).
-    pub fn parry_perfect(&self) -> f32 {
+    pub fn parry_perfect(&self, tune: &Tunables) -> f32 {
         match self.level(Skill::Parry) {
             0 => 0.0,
-            n => t::PARRY_PERFECT + t::PARRY_PERFECT_STEP * f32::from(n - 1),
+            n => tune.parry_perfect + tune.parry_perfect_step * f32::from(n - 1),
         }
     }
 
     /// Damage multiple of a reflected shot (one while locked).
-    pub fn parry_reflect(&self) -> f32 {
+    pub fn parry_reflect(&self, tune: &Tunables) -> f32 {
         match self.level(Skill::Parry) {
             0 => 1.0,
-            n => t::PARRY_REFLECT + t::PARRY_REFLECT_STEP * f32::from(n - 1),
+            n => tune.parry_reflect + tune.parry_reflect_step * f32::from(n - 1),
         }
     }
 
-    pub fn cargo_bonus(&self) -> f32 {
-        t::CARGO_STEP * self.steps(Skill::Cargo)
+    pub fn cargo_bonus(&self, tune: &Tunables) -> f32 {
+        tune.cargo_step * self.steps(Skill::Cargo)
     }
 
     /// Sonar reach, ring speed, recharge and echoes per kind beyond the base ping.
-    pub fn ping_range(&self, base: f32) -> f32 {
-        base + t::PING_REACH_STEP * self.steps(Skill::PingReach)
+    pub fn ping_range(&self, base: f32, tune: &Tunables) -> f32 {
+        base + tune.ping_reach_step * self.steps(Skill::PingReach)
     }
 
-    pub fn ping_speed(&self, base: f32) -> f32 {
-        base + t::PING_SPEED_STEP * self.steps(Skill::PingSpeed)
+    pub fn ping_speed(&self, base: f32, tune: &Tunables) -> f32 {
+        base + tune.ping_speed_step * self.steps(Skill::PingSpeed)
     }
 
-    pub fn ping_cooldown(&self, base: f32) -> f32 {
-        (base - t::PING_COOLDOWN_STEP * self.steps(Skill::PingCooldown))
-            .max(t::PING_COOLDOWN_FLOOR.min(base))
+    pub fn ping_cooldown(&self, base: f32, tune: &Tunables) -> f32 {
+        (base - tune.ping_cooldown_step * self.steps(Skill::PingCooldown))
+            .max(tune.ping_cooldown_floor.min(base))
     }
 
     /// Beacons that may stand at once; zero while locked.
-    pub fn beacon_limit(&self) -> usize {
-        t::BEACONS_PER_LEVEL * usize::from(self.level(Skill::Beacon))
+    pub fn beacon_limit(&self, tune: &Tunables) -> usize {
+        tune.beacons_per_level * usize::from(self.level(Skill::Beacon))
     }
 
     /// Share of the charge-up that remains at this beacon level (one at level 1).
-    pub fn travel_charge_factor(&self) -> f32 {
+    pub fn travel_charge_factor(&self, tune: &Tunables) -> f32 {
         let n = self.level(Skill::Beacon).max(1);
-        1.0 - t::TRAVEL_CHARGE_LEVEL_CUT * f32::from(n - 1)
+        1.0 - tune.travel_charge_level_cut * f32::from(n - 1)
     }
 
     /// Multiplier on the momentum a ram imparts to a free body (one while locked).
-    pub fn shove_mult(&self) -> f32 {
-        1.0 + t::SHOVE_MULT_STEP * self.steps(Skill::Shove)
+    pub fn shove_mult(&self, tune: &Tunables) -> f32 {
+        1.0 + tune.shove_mult_step * self.steps(Skill::Shove)
     }
 
     /// Most speed one ram can add to a free body on top of the ordinary contact.
-    pub fn shove_bonus_dv(&self) -> f32 {
-        t::SHOVE_BONUS_DV + t::SHOVE_BONUS_DV_STEP * self.steps(Skill::Shove)
+    pub fn shove_bonus_dv(&self, tune: &Tunables) -> f32 {
+        tune.shove_bonus_dv + tune.shove_bonus_dv_step * self.steps(Skill::Shove)
     }
 
     /// Speed limit of a body the ship shoved.
-    pub fn shove_speed_cap(&self) -> f32 {
-        t::SHOVE_SPEED_CAP + t::SHOVE_SPEED_CAP_STEP * self.steps(Skill::Shove)
+    pub fn shove_speed_cap(&self, tune: &Tunables) -> f32 {
+        tune.shove_speed_cap + tune.shove_speed_cap_step * self.steps(Skill::Shove)
     }
 
     /// The beam grip: open space past which it pulls, its pull cap and where it breaks away.
-    pub fn grip_accel(&self) -> f32 {
-        t::GRIP_ACCEL + t::GRIP_ACCEL_STEP * self.steps(Skill::Shove)
+    pub fn grip_accel(&self, tune: &Tunables) -> f32 {
+        tune.grip_accel + tune.grip_accel_step * self.steps(Skill::Shove)
     }
 
-    pub fn grip_reach(&self) -> f32 {
-        t::GRIP_REACH + t::GRIP_REACH_STEP * self.steps(Skill::Shove)
+    pub fn grip_reach(&self, tune: &Tunables) -> f32 {
+        tune.grip_reach + tune.grip_reach_step * self.steps(Skill::Shove)
     }
 
     /// Impulse of a dash whip.
-    pub fn whip_impulse(&self) -> f32 {
-        t::WHIP_IMPULSE * (1.0 + t::WHIP_STEP * self.steps(Skill::Shove))
+    pub fn whip_impulse(&self, tune: &Tunables) -> f32 {
+        tune.whip_impulse * (1.0 + tune.whip_step * self.steps(Skill::Shove))
     }
 
     /// Share of an impact the ship takes, as a multiple of the ordinary share, when the ship
     /// caused it (`caused`) or not.
-    pub fn plating_factor(&self, caused: bool) -> f32 {
+    pub fn plating_factor(&self, caused: bool, tune: &Tunables) -> f32 {
         let level = self.level(Skill::ShovePlating);
         let cut = if caused {
-            t::PLATING_CAUSED_STEP * f32::from(level)
+            tune.plating_caused_step * f32::from(level)
         } else {
-            t::PLATING_ALL_STEP * f32::from(level.saturating_sub(t::PLATING_ALL_FROM - 1))
+            tune.plating_all_step * f32::from(level.saturating_sub(tune.plating_all_from - 1))
         };
         (1.0 - cut).max(0.0)
     }
@@ -421,14 +483,15 @@ impl Skills {
         usize::from(self.level(Skill::Symbiosis))
     }
 
-    pub fn ping_extra_targets(&self) -> usize {
-        t::PING_TARGETS_STEP * usize::from(self.level(Skill::PingTargets))
+    pub fn ping_extra_targets(&self, tune: &Tunables) -> usize {
+        tune.ping_targets_step * usize::from(self.level(Skill::PingTargets))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::simulation::DEFAULT_TUNING;
 
     #[test]
     fn skills_only_go_up_and_stop_at_the_cap() {
@@ -446,21 +509,34 @@ mod tests {
     #[test]
     fn effects_grow_with_level_and_prices_climb() {
         let mut skills = Skills::default();
-        assert_eq!(skills.beam_power(), 1.0);
-        assert_eq!(skills.beam_range(), t::BEAM_RANGE);
-        assert_eq!(skills.yield_mult(), 1.0);
-        assert_eq!(skills.magnet_bonus(), 0.0);
-        assert_eq!(skills.cargo_bonus(), 0.0);
+        assert_eq!(skills.beam_power(&DEFAULT_TUNING), 1.0);
+        assert_eq!(
+            skills.beam_range(&DEFAULT_TUNING),
+            DEFAULT_TUNING.beam_range
+        );
+        assert_eq!(skills.yield_mult(&DEFAULT_TUNING), 1.0);
+        assert_eq!(skills.magnet_bonus(&DEFAULT_TUNING), 0.0);
+        assert_eq!(skills.cargo_bonus(&DEFAULT_TUNING), 0.0);
         for skill in Skill::ALL {
             skills.raise(skill);
         }
-        assert!(skills.beam_power() > 1.0 && skills.beam_range() > t::BEAM_RANGE);
-        assert!(skills.yield_mult() > 1.0 && skills.magnet_bonus() > 0.0);
-        assert!(skills.cargo_bonus() > 0.0);
+        assert!(
+            skills.beam_power(&DEFAULT_TUNING) > 1.0
+                && skills.beam_range(&DEFAULT_TUNING) > DEFAULT_TUNING.beam_range
+        );
+        assert!(
+            skills.yield_mult(&DEFAULT_TUNING) > 1.0 && skills.magnet_bonus(&DEFAULT_TUNING) > 0.0
+        );
+        assert!(skills.cargo_bonus(&DEFAULT_TUNING) > 0.0);
         for skill in Skill::ALL {
-            let first: f32 = skill.price(0).unwrap().iter().map(|p| p.1).sum();
+            let first: f32 = skill
+                .price(0, &DEFAULT_TUNING)
+                .unwrap()
+                .iter()
+                .map(|p| p.1)
+                .sum();
             let last: f32 = skill
-                .price(skill.max_level() - 1)
+                .price(skill.max_level() - 1, &DEFAULT_TUNING)
                 .unwrap()
                 .iter()
                 .map(|p| p.1)
@@ -468,7 +544,7 @@ mod tests {
             if skill.max_level() > 1 {
                 assert!(last > first);
             }
-            assert!(skill.price(skill.max_level()).is_none());
+            assert!(skill.price(skill.max_level(), &DEFAULT_TUNING).is_none());
         }
     }
 }

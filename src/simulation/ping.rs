@@ -312,7 +312,7 @@ pub(super) fn sites_of(seed: u64, id: SectorId) -> Vec<Site> {
 impl Game {
     /// Seconds a ping takes to recharge with the rig as it is.
     pub fn ping_recharge(&self) -> f32 {
-        self.loadout.skills.ping_cooldown(PING_COOLDOWN)
+        self.loadout.skills.ping_cooldown(PING_COOLDOWN, &self.tune)
     }
 
     /// Sends a ping from the ship. Refused (false) while recharging, dead or over.
@@ -329,11 +329,11 @@ impl Game {
             return false;
         };
         let skills = self.loadout.skills;
-        let range = skills.ping_range(PING_RANGE) * self.realm_effects().sensor;
-        let speed = skills.ping_speed(RING_SPEED);
+        let range = skills.ping_range(PING_RANGE, &self.tune) * self.realm_effects().sensor;
+        let speed = skills.ping_speed(RING_SPEED, &self.tune);
         let owns = |kind: EchoKind| kind.unlocked_by().is_none_or(|s| skills.level(s) > 0);
         if !free {
-            self.ping.cooldown = skills.ping_cooldown(PING_COOLDOWN);
+            self.ping.cooldown = skills.ping_cooldown(PING_COOLDOWN, &self.tune);
         }
         self.ping.ring = Some(Ring {
             origin,
@@ -448,7 +448,7 @@ impl Game {
         }
         found.extend(self.discovery_candidates(self.ping.ring.unwrap()));
         found.sort_by(|a, b| a.born.total_cmp(&b.born));
-        let extra = skills.ping_extra_targets();
+        let extra = skills.ping_extra_targets(&self.tune);
         let mut taken: HashMap<EchoKind, usize> = HashMap::new();
         found.retain(|echo| {
             let n = taken.entry(echo.kind).or_default();

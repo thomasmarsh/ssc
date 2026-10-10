@@ -362,7 +362,7 @@ impl Game {
         if !tick.drones_before.is_empty() {
             tick.impact_before = self.bodies.iter().map(|b| (b.id, b.position)).collect();
         }
-        let shove_cap = self.loadout.skills.shove_speed_cap();
+        let shove_cap = self.loadout.skills.shove_speed_cap(&self.tune);
         integrate_bodies(&mut self.bodies, dt, shove_cap, &self.tune);
     }
 

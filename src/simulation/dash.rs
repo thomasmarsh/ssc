@@ -98,7 +98,7 @@ impl Game {
         let dir = direction
             .filter(|d| d.is_finite() && d.length_squared() > 1e-4)
             .map_or_else(|| Vec2::from_angle(facing), Vec2::normalize);
-        let reach = self.loadout.skills.dash_distance();
+        let reach = self.loadout.skills.dash_distance(&self.tune);
         let mut travel = reach;
         // The Skipjack node hops obstacles thinner than its reach (and still lands clear).
         let skip = self.skip_thickness();
@@ -143,7 +143,7 @@ impl Game {
         }
         self.focus = to;
         self.player_invulnerability = self.player_invulnerability.max(t::DASH_INVULN);
-        self.dash.cooldown = self.loadout.skills.dash_cooldown();
+        self.dash.cooldown = self.loadout.skills.dash_cooldown(&self.tune);
         self.feel.used[1] = true;
         self.dash.trail = Some((from, to, 0.0));
         self.dash.window = t::DASH_INVULN;

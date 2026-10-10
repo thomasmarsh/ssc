@@ -665,7 +665,7 @@ impl Game {
             return 0.0;
         }
         let seed = self.seed;
-        let reach = self.loadout.skills.beam_range();
+        let reach = self.loadout.skills.beam_range(&self.tune);
         let crop = self.harvest_candidate(origin, reach);
         let mut best: Option<(f32, usize)> = None;
         let mut blocked: Option<Material> = None;
@@ -743,8 +743,8 @@ impl Game {
 
         let rock = &self.bodies[index];
         let kind = rock.rock;
-        let power = self.loadout.skills.beam_power();
-        let gain = self.loadout.skills.yield_mult() * self.realm_effects().mining;
+        let power = self.loadout.skills.beam_power(&self.tune);
+        let gain = self.loadout.skills.yield_mult(&self.tune) * self.realm_effects().mining;
         let contents = rock.contents(seed);
         let available = rock.available_contents(seed);
         let work = rate(kind) * power * dt;

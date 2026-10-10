@@ -131,7 +131,7 @@ pub use society::{CivilTarget, EngagementRule};
 pub use song::SongRing;
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 pub use titles::{TitleFacts, title, title_case};
-#[cfg(test)]
+#[allow(unused_imports)]
 pub(crate) use tuning::DEFAULT as DEFAULT_TUNING;
 pub use tuning::Tunables;
 use upgrades::{Item, Loadout, Stats};
@@ -1392,7 +1392,15 @@ impl Game {
                     let impulse = normal * (-1.7 * closing_speed / inverse_sum);
                     a.velocity -= impulse * inverse_a;
                     b.velocity += impulse * inverse_b;
-                    shove::on_contact(a, b, normal, closing_speed, impulse.length(), &skills);
+                    shove::on_contact(
+                        a,
+                        b,
+                        normal,
+                        closing_speed,
+                        impulse.length(),
+                        &skills,
+                        &self.tune,
+                    );
                     // Fast strikes hurt both by speed and mass; a pair just struck is quiet.
                     let key = impact::pair_key(a.id, b.id);
                     let raw = if self.impact_gap.contains_key(&key) {
@@ -1403,7 +1411,7 @@ impl Game {
                     if raw > 0.0 {
                         self.impact_gap
                             .insert(key, self.time + self.tune.impact_pair_cooldown);
-                        let factor = skills.plating_factor(caused);
+                        let factor = skills.plating_factor(caused, &self.tune);
                         rammed += impact::strike(a, b, raw, invulnerability, factor, &self.tune);
                         struck.push((a.position.lerp(b.position, 0.5), raw));
                     }

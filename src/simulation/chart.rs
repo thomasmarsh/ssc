@@ -697,7 +697,7 @@ impl Game {
 
     /// Beacons the rig allows standing at once.
     pub fn beacon_limit(&self) -> usize {
-        self.loadout.skills.beacon_limit()
+        self.loadout.skills.beacon_limit(&self.tune)
     }
 
     /// H: sets a beacon down where the ship is.
@@ -764,7 +764,7 @@ impl Game {
         let sectors = ship.distance(beacon.position) / SECTOR_SIZE;
         let charge = (t::TRAVEL_CHARGE_BASE + t::TRAVEL_CHARGE_PER_SECTOR * sectors)
             .min(t::TRAVEL_CHARGE_MAX)
-            * self.loadout.skills.travel_charge_factor();
+            * self.loadout.skills.travel_charge_factor(&self.tune);
         Some(TravelQuote {
             sectors,
             volatiles: (t::TRAVEL_VOLATILES_BASE + t::TRAVEL_VOLATILES_PER_SECTOR * sectors).ceil(),

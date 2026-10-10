@@ -59,7 +59,7 @@ impl Game {
         }
         self.parry.window = t::PARRY_WINDOW;
         self.parry.age = 0.0;
-        self.parry.cooldown = self.loadout.skills.parry_cooldown();
+        self.parry.cooldown = self.loadout.skills.parry_cooldown(&self.tune);
         self.feel.used[0] = true;
         self.parry.perfected = false;
         self.parry.refunded = 0.0;
@@ -89,7 +89,7 @@ impl Game {
             ship.angle,
             t::PARRY_HALF_ARC,
             t::PARRY_RADIUS,
-            self.parry.age < self.loadout.skills.parry_perfect(),
+            self.parry.age < self.loadout.skills.parry_perfect(&self.tune),
         ))
     }
 
@@ -130,9 +130,9 @@ impl Game {
             self.parry.window = 0.0;
             return;
         };
-        let chance = self.loadout.skills.parry_chance();
-        let perfect = self.parry.age < self.loadout.skills.parry_perfect();
-        let reflect = self.loadout.skills.parry_reflect();
+        let chance = self.loadout.skills.parry_chance(&self.tune);
+        let perfect = self.parry.age < self.loadout.skills.parry_perfect(&self.tune);
+        let reflect = self.loadout.skills.parry_reflect(&self.tune);
         let forward = Vec2::from_angle(facing);
         // Where a reflected shot may go: the creatures and bases it could be sent back at.
         let targets: Vec<Vec2> = if perfect {
@@ -308,7 +308,7 @@ mod tests {
     fn blocked(level: u8, count: usize) -> usize {
         let mut game = unlocked(level);
         game.parry();
-        game.parry.age = game.loadout.skills.parry_perfect() + 0.01;
+        game.parry.age = game.loadout.skills.parry_perfect(&DEFAULT_TUNING) + 0.01;
         for k in 0..count {
             let y = (k as f32 / count as f32 - 0.5) * 40.0;
             shot(&mut game, Vec2::new(60.0, y));
@@ -380,7 +380,11 @@ mod tests {
             let bullet = &game.bullets[0];
             if bullet.friendly {
                 assert!(bullet.velocity.x > 0.0, "sent back");
-                assert!((bullet.damage - 10.0 * game.loadout.skills.parry_reflect()).abs() < 1e-4);
+                assert!(
+                    (bullet.damage - 10.0 * game.loadout.skills.parry_reflect(&DEFAULT_TUNING))
+                        .abs()
+                        < 1e-4
+                );
                 assert!(game.bodies[0].shield > after_cost);
                 assert_eq!(game.run.perfect_parries, 1, "counted for the summary");
                 assert!(game.cues.iter().any(|c| matches!(
@@ -442,7 +446,7 @@ mod tests {
 
     #[test]
     fn a_perfect_parry_pays_out_once_per_raise() {
-        let base = unlocked(1).loadout.skills.parry_cooldown();
+        let base = unlocked(1).loadout.skills.parry_cooldown(&DEFAULT_TUNING);
         let game = perfect_volley(1, 3);
         let turned = game.bullets.iter().filter(|b| b.friendly).count();
         assert!(turned >= 1, "the seeded roll turns at least one of three");
@@ -462,7 +466,7 @@ mod tests {
     fn a_late_parry_earns_no_reward() {
         let mut game = unlocked(4);
         game.parry();
-        game.parry.age = game.loadout.skills.parry_perfect() + 0.01;
+        game.parry.age = game.loadout.skills.parry_perfect(&DEFAULT_TUNING) + 0.01;
         let cooldown = game.parry_cooldown();
         for _ in 0..10 {
             game.bullets.push(Bullet::hostile(
@@ -545,14 +549,17 @@ mod tests {
     fn levels_widen_the_perfect_window_and_hit_harder() {
         let (one, four) = (unlocked(1), unlocked(4));
         let (a, b) = (&one.loadout.skills, &four.loadout.skills);
-        assert!(b.parry_perfect() > a.parry_perfect());
-        assert!(b.parry_reflect() > a.parry_reflect());
-        assert!((a.parry_reflect() - t::PARRY_REFLECT).abs() < 1e-6);
-        assert_eq!(unlocked(0).loadout.skills.parry_perfect(), 0.0);
+        assert!(b.parry_perfect(&DEFAULT_TUNING) > a.parry_perfect(&DEFAULT_TUNING));
+        assert!(b.parry_reflect(&DEFAULT_TUNING) > a.parry_reflect(&DEFAULT_TUNING));
+        assert!((a.parry_reflect(&DEFAULT_TUNING) - t::PARRY_REFLECT).abs() < 1e-6);
+        assert_eq!(
+            unlocked(0).loadout.skills.parry_perfect(&DEFAULT_TUNING),
+            0.0
+        );
         let game = perfect_volley(4, 1);
         let bullet = &game.bullets[0];
         if bullet.friendly {
-            assert!((bullet.damage - 10.0 * b.parry_reflect()).abs() < 1e-3);
+            assert!((bullet.damage - 10.0 * b.parry_reflect(&DEFAULT_TUNING)).abs() < 1e-3);
         }
     }
 }
