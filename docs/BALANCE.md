@@ -219,7 +219,7 @@ Today `P = sqrt(firepower * volley * staying) * agility^0.3` with each stat clam
 
 ### 5.7 Required tech for an island
 
-`G_req(lambda) = 0.85 * lambda^0.8 / K_typical`, with `K_typical` of about 1.7 (the 14-roll kit of 3.1): the grade a player must be able to buy is a bit under `lambda^0.8`, and the society that sells it must itself sit at `lambda_s >= lambda_island^1.0 / 1.35` (one island step below). Express it as a path, not a number: from the player's current best society grade `G0` to an island at `lambda`, the plan is the chain of societies whose grades step by at most the island step (section 6): `G0 -> G1 <= 1.35 G0 -> ...`. Each society is reachable through its island, so "what tech do I need for the Veil" is "which society offers grade lambda_veil^0.8 and is itself reachable". The tech graph nodes (`research::Tech`, six today) gate capabilities (Protection for parry, Propulsion for dash, OrganSupport for organs) and `Frontier` gates the grade service; extra realm requirements are axis requirements (FLOW.md): an island whose stress is Range needs the Range counter (a long-reach profile or a sensor tier), whose stress is Mobility needs dash or handling at the level's `m(n)`, and the island banner names the missing axis.
+`G_req(lambda) = 0.85 * lambda^0.8 / K_typical`, with `K_typical` of about 1.7 (the 14-roll kit of 3.1): the grade a player must be able to buy is a bit under `lambda^0.8`, and the society that sells it must itself sit at `lambda_s >= lambda_island^1.0 / 1.35` (one island step below). Express it as a path, not a number: from the player's current best society grade `G0` to an island at `lambda`, the plan is the chain of societies whose grades step by at most the island step (section 6): `G0 -> G1 <= 1.35 G0 -> ...`. Each society is reachable from some easier area (a path exists, not a mandatory one), so "what tech do I need for the Veil" is "which society offers grade lambda_veil^0.8 and is itself reachable". The tech graph nodes (`research::Tech`, six today) gate capabilities (Protection for parry, Propulsion for dash, OrganSupport for organs) and `Frontier` gates the grade service; extra realm requirements are axis requirements (FLOW.md): an island whose stress is Range needs the Range counter (a long-reach profile or a sensor tier), whose stress is Mobility needs dash or handling at the level's `m(n)`, and the island banner names the missing axis. The axes are refined into thirteen counter channels with strict, partial and soft requirements, a computable "can this build proceed here" verdict and the apex-elder acquisition loop in [CAPABILITIES.md](CAPABILITIES.md); the `IslandReadout` below is extended there as `AreaReadout`.
 
 ### 5.8 Novelty axes versus the difficulty dial
 
@@ -239,15 +239,16 @@ Rule of order: new danger first comes from a new row on the left (a weapon patte
 
 Belong in `src/simulation/tuning*.rs` (`Live` unless noted): `balance_ref_exponent` (0.8), `balance_volley_cap` (0.35), `balance_window_cap` (0.7), `balance_hit_cap` (0.08), `balance_telegraph_cap` (1.0), `balance_flight_min` (0.45), `balance_windup_min` (0.6), `balance_speed_pool_product` (0.6), `upgrade_effect_a` (0.35), `upgrade_effect_h` (3.0), `upgrade_tech_nu` (4.0), `balance_margin` (1.25). Generation parameters (`Regen`, in `tuning_gen.rs`): `gen_island_*` (section 6). Stay const: role weights (model data in `threat.rs`), the `Class` and `Role` enums, salts.
 
-## 6. Islands (replaces "harder with distance")
+## 6. Islands: easier and harder areas (supplements "harder with distance")
 
-Design shift: difficulty is a property of an island, not of ring distance. The world is islands of progressively higher level separated by enchanting wilds and desolate expanses transited only by occasional tankers and stoic armadas. The tool and all caps above are unchanged (they are per level); what changes is where `lambda` comes from.
+Design shift: difficulty is a property of an area, not only of ring distance. The world has easier and harder areas ("islands") of different levels with gentler wild between them. An island is a soft field, not a wall and not a forced chain: the player may skirt any hard area, may cross easy wild to reach somewhere else, or may push a hard area early with a good build. Nothing here replaces the start rings by strict ring replacement; the ring rules remain a floor near HOME and the level layers over them (6.6). What a player must *carry* to go through a hard area (wards against EMP, pull, shielding, blindness) is in [CAPABILITIES.md](CAPABILITIES.md); this section is how hard it is and where it sits. The tool and all caps above are unchanged (they are per level); what changes is where `lambda` comes from.
 
 ### 6.1 Definitions
 
 - **Island**: a connected blob (the same `range::blob_reach` noisy-disc technique civilization territories use) with a level `lambda_i`, a realm flavor (stress axes, `realm.rs`), and usually one or more societies (so the supplier grade at its capital is `lambda_i`). Radius 4 to 14 sectors.
-- **Wild**: sectors between islands, level `lambda_w = min(adjacent lambda) * 0.6`, population density 0.15 to 0.35 of an island, mostly transit traffic (tankers, armadas as friendly or neutral fleets) and scenery.
+- **Wild**: sectors between islands, level `lambda_w = min(adjacent lambda) * 0.6`, population density 0.15 to 0.35 of an island, mostly traffic that crosses it (tankers, armadas as friendly or neutral fleets) and scenery. It is the easy way around a hard island, never a required corridor.
 - **Expanse**: sparse deep space: level `lambda_w`, density near zero apart from fleets, wells and spectacle; transit takes tens of seconds with fast travel charge.
+- **Skirting**: every island above level 1 can be bypassed through wild at or below the lower neighbor's level, and the readout names the open heading (CAPABILITIES 3.4). Reaching an island is never a prerequisite to reaching the next one except through the on-ramp guarantee below, which says an easier path *exists*, not that it must be taken.
 - **Level**: continuous, unbounded, `lambda >= 1`. `lambda_island = 1 * (1 + delta)^h`, `delta = 0.35`, and `h` a real number the generator assigns.
 
 ### 6.2 Placement and grading (a pure function of seed and coordinates)
@@ -274,7 +275,7 @@ One struct for the HUD, the star map and sonar, `IslandReadout { level: f32, rat
 1. **Edge ramp**: levels change over at least 2 sectors at an island border (not a cliff), so the readout can say "level 7.4, 1.6x your rating" while there is still room to turn back; no creature of a level above `1.5x` the band the player was just in is placed within 1.5 sectors of the border.
 2. **Banner and map**: an `ENTERING` banner with the level, the ratio band and the stress axes ("Level 7.4, outclassed, tests RANGE and SENSORS"); the star map colors islands by band for the player's current `P` and draws the edge ramp; sonar ping reports `top_threat` and `flagged`.
 3. **Approach cues**: ambient audio and field cues (the existing "approach cues" hook) scale with `sigma`, so the world looks and sounds more dangerous before it is, never after.
-4. **Wilds and expanses are never lethal**: `sigma <= 0.5` of the lower adjacent island, and no sector in them may contain an organism above the `lambda_w` budget; this keeps transit safe and makes risk a choice made at a border.
+4. **Wilds and expanses are never lethal**: `sigma <= 0.5` of the lower adjacent island, and no sector in them may contain an organism above the `lambda_w` budget; this keeps the way around safe and makes risk a choice made at a border, not a toll.
 5. **Never a surprise**: any single organism above `2x` the island's `lambda_o` budget (an elder, a rare genome) is a `flagged` sector with a visible marker at the island's edge and a sonar entry.
 
 ### 6.6 What owns what in worldgen
@@ -283,7 +284,7 @@ One struct for the HUD, the star map and sonar, `IslandReadout { level: f32, rat
 | --- | --- | --- |
 | Island centers, radii, levels (new) | new `src/island.rs`, `gen_island_*` in `tuning_gen.rs` | pure function `island_at(seed, sector) -> IslandInfo`, the Lipschitz envelope |
 | Level in place of depth | `src/world.rs` (`latent`, `threat`, `phenotype_of`) | `SectorParams.depth` keeps its geometric meaning; a new `level` field feeds `Phenotype::threat` |
-| Species phasing by ring | `src/range.rs` (`min_ring`, `wild_min_ring`, `depth_profile`, `power_ring`) | rings become levels: a species debuts at a level, not a ring; ring 1 to 3 rules become level 1.0 to 1.35 |
+| Species phasing by ring | `src/range.rs` (`min_ring`, `wild_min_ring`, `depth_profile`, `power_ring`) | the level layers over the ring rules rather than replacing them: a species debuts at the later of its ring rule and its level rule, so the start rings (ring 1 Fatsos, ring 2 Bogeys, Lunatics on 3) stay hard floors near HOME and far areas gain a level |
 | Biome character | `src/biome.rs` | stays geometric; island flavor chooses the biome mix (wild = scenery biomes) |
 | Realm flavor and effects | `src/realm.rs` | per-island instead of per-region; `starter_rings` and `far_ramp` (ring-keyed) become level-keyed |
 | Societies and grade | `src/territory.rs`, `simulation/research.rs` | a civilization's capital sits on an island of its level; `supplier_grade` reads the island level |
