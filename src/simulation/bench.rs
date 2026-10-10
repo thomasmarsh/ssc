@@ -2,9 +2,7 @@
 use super::arsenal::Profile;
 use super::organs::Organ;
 use super::organs::graft_price;
-use super::pads::{
-    REPAIR_FUEL, REPAIR_METAL, STASH_STEP, level_price, reforge_price, upgrade_price,
-};
+use super::pads::{level_price, reforge_price, upgrade_price};
 use super::skills::{Skill, SkillTab};
 use super::upgrades::{Rarity, Slot};
 use super::*;
@@ -506,12 +504,12 @@ impl Game {
                 row.group = "REPAIR";
                 row.text = "REPAIR HULL + SHIELD".into();
                 if let Some(ship) = self.player() {
-                    let hull = (ship.max_health - ship.health)
-                        .max(0.0)
-                        .min(self.cargo.metal * self.equipment_grade() / REPAIR_METAL);
+                    let hull = (ship.max_health - ship.health).max(0.0).min(
+                        self.cargo.metal * self.equipment_grade() / self.tune.pad_repair_metal,
+                    );
                     let shield = (ship.max_shield - ship.shield)
                         .max(0.0)
-                        .min(self.cargo.fuel * self.equipment_grade() / REPAIR_FUEL);
+                        .min(self.cargo.fuel * self.equipment_grade() / self.tune.pad_repair_fuel);
                     row.detail = format!(
                         "Hull {:.0} -> {:.0}   Shield {:.0} -> {:.0}. Repairs only what you can pay.",
                         ship.health,
@@ -522,11 +520,11 @@ impl Game {
                     row.costs = vec![
                         (
                             Material::Metal,
-                            hull * REPAIR_METAL / self.equipment_grade(),
+                            hull * self.tune.pad_repair_metal / self.equipment_grade(),
                         ),
                         (
                             Material::Fuel,
-                            shield * REPAIR_FUEL / self.equipment_grade(),
+                            shield * self.tune.pad_repair_fuel / self.equipment_grade(),
                         ),
                     ];
                     row.ok = hull >= 1e-3 || shield >= 1e-3;
@@ -728,7 +726,10 @@ impl Game {
                     } else {
                         refinery.status(
                             &self.landed_pad().unwrap().stash,
-                            self.landed_pad().unwrap().stash_cap(Material::Fuel),
+                            self.landed_pad()
+                                .unwrap()
+                                .stash_cap(Material::Fuel, &self.tune),
+                            &self.tune,
                         )
                     };
                 } else {
@@ -748,7 +749,7 @@ impl Game {
                     row.ok = false;
                     row.state = if !pad.power {
                         "NEEDS LOCAL POWER"
-                    } else if pad.stash.water >= pad.stash_cap(Material::Water) {
+                    } else if pad.stash.water >= pad.stash_cap(Material::Water, &self.tune) {
                         "WATER TANK FULL"
                     } else {
                         "EXTRACTING 1W/s"
@@ -772,7 +773,7 @@ impl Game {
                     row.text = format!(
                         "BUILD MINING DRONE   {}/{}",
                         pad.drones.iter().filter(|d| d.health > 0.0).count(),
-                        fleet::MAX_DRONES
+                        self.tune.fleet_max_drones
                     );
                 }
                 if let Some(why) = self.mining_drone_block() {
@@ -824,7 +825,7 @@ impl Game {
                     && let Some(drone) = pad.drones.get(slot)
                 {
                     let (material, detail) = self.drone_status_detail(pad, slot);
-                    row.state = drone.status(pad, material);
+                    row.state = drone.status(pad, material, &self.tune);
                     row.detail = detail;
                 }
             }
@@ -939,8 +940,7 @@ impl Game {
                 row.text = "BUILD WAREHOUSE".into();
                 row.detail = format!(
                     "Raises this pad's M/V/C/B/F storage from {:.0} to {:.0} each. Water uses a separate tank. No research or power needed; store with Enter and take with Q / X.",
-                    pads::STASH_CAP,
-                    pads::WAREHOUSE_CAP
+                    self.tune.pad_stash_cap, self.tune.pad_warehouse_cap
                 );
                 if self.landed_pad().is_some_and(|p| p.warehouse) {
                     row.text = "WAREHOUSE".into();
@@ -957,8 +957,7 @@ impl Game {
                 row.text = "BUILD WATER TANK".into();
                 row.detail = format!(
                     "Raises this pad's water storage from {:.0} to {:.0}. No research or power needed; store water with Enter and take it with Q / X.",
-                    pads::STASH_CAP,
-                    pads::WATER_TANK_CAP
+                    self.tune.pad_stash_cap, self.tune.pad_water_tank_cap
                 );
                 if self.landed_pad().is_some_and(|p| p.water_tank) {
                     row.text = "WATER TANK".into();
@@ -975,13 +974,16 @@ impl Game {
                 let stash = self.landed_pad().map(|p| p.stash).unwrap_or_default();
                 let cap = self
                     .landed_pad()
-                    .map_or(pads::STASH_CAP, |p| p.stash_cap(m));
+                    .map_or(self.tune.pad_stash_cap, |p| p.stash_cap(m, &self.tune));
                 let store = self
                     .cargo
                     .amount(m)
-                    .min(STASH_STEP)
+                    .min(self.tune.pad_stash_step)
                     .min((cap - stash.amount(m)).max(0.0));
-                let take = stash.amount(m).min(STASH_STEP).min(self.cargo.room(m));
+                let take = stash
+                    .amount(m)
+                    .min(self.tune.pad_stash_step)
+                    .min(self.cargo.room(m));
                 row.text = format!(
                     "STORE {}   hold {:.0} / stash {:.0}",
                     m.label(),

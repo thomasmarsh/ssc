@@ -22,114 +22,41 @@ use crate::flora::{self, CropGenes, Flora, SHIP_PALATE, SeedKind};
 use crate::world::{Rng, hash2};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// How close (gap to the planetoid's surface) the ship must be to plant.
-pub const PLANT_RANGE: f32 = 160.0;
-/// Planting needs a gentle ship.
-pub const PLANT_SPEED: f32 = 60.0;
-/// Least distance along the surface between two plants, or a plant and a pad.
-pub const SPACING: f32 = 90.0;
-/// Growth at which a plant is ripe.
-pub const RIPE: f32 = 0.9;
-/// Below this growth the beam ignores a plant (too small to cut).
-pub const SPROUT: f32 = 0.5;
-/// A harvested ripe plant regrows from here.
-pub const STUMP: f32 = 0.4;
-/// Grazers leave at least this much standing.
-pub const GRAZE_FLOOR: f32 = 0.45;
-/// World units per plan unit: a full plant is a few dozen to a hundred units tall.
-pub const PLANT_SCALE: f32 = 16.0;
-/// Seconds of beam on a plant to cut it.
-pub const HARVEST_TIME: f32 = 1.0;
-/// Biomass from a ripe harvest of a perfect (nutrition 1) crop.
-pub const CROP_YIELD: f32 = 6.0;
-/// Harvest luck (Minecraft style: sometimes food, sometimes seeds). A ripe cut pays its biomass
-/// with this chance, and seeds by the cumulative table below.
-pub const RIPE_FOOD_CHANCE: f32 = 0.85;
-/// A ripe cut yields 0 seeds below the first, 1 below the second, else 2. Expected seeds
-/// 0.25*0 + 0.45*1 + 0.30*2 = 1.05 a ripe harvest, so replanting is sustainable on average.
-pub const RIPE_SEED_CUM: [f32; 2] = [0.25, 0.70];
-/// An unripe cut (the plant dies) pays its small biomass with this chance, and one seed with
-/// `UNRIPE_SEED_CHANCE`, never a guaranteed pair. Expected seeds 0.35.
-pub const UNRIPE_FOOD_CHANCE: f32 = 0.5;
-pub const UNRIPE_SEED_CHANCE: f32 = 0.35;
-
-/// Chance a generated creature's death leaves a seed of something its lineage eats.
-pub const GUT_SEED_CHANCE: f32 = 0.12;
-/// Biomass spent per hull point in the field repair (metal costs more, see `pads`).
-pub const BIOMASS_PER_HULL: f32 = 0.35;
-/// Growth a grazer takes per second at its table, and the energy a unit of growth gives a
-/// grazer of nutrition 1.
-const GRAZE_RATE: f32 = 0.03;
-const GRAZE_ENERGY: f32 = 120.0;
-/// How far a plant's reach is for the beam and for mouths.
-const PLANT_BODY: f32 = 40.0;
 /// Own stream for blight rolls: a pure hash of (game seed, plant id, epoch).
 const BLIGHT_SALT: u64 = 0xFA12_3000_0000_0004;
-/// Blight is rolled once per epoch (seconds) so a roll is a pure function of the clock.
-pub const BLIGHT_EPOCH: f32 = 5.0;
-/// Chance per epoch that a planted crop falls ill with no sick neighbor (about one in 30
-/// minutes of loaded time), and that one sick same-species neighbor in range infects it.
-pub const BLIGHT_OUTBREAK: f32 = 0.0028;
-pub const BLIGHT_SPREAD: f32 = 0.06;
-/// Growth a sick plant loses per second (on top of its own growth); the hardy gene scales it.
-pub const BLIGHT_DRAIN: f32 = 0.008;
-/// Seconds a pruned plant resists blight.
-pub const BLIGHT_IMMUNE: f32 = 150.0;
 /// Salt for the crops a farming civilization tends in the field and under glass.
 const TEND_SALT: u64 = 0xFA12_3000_0000_0005;
-/// Seconds between a civilization's rounds of its crops (harvest the ripe, prune the sick).
-pub const TEND_EPOCH: f32 = 10.0;
-/// The share of a ripe cut's yield that reaches the civilization's granary (the player cuts
-/// the whole yield).
-pub const TEND_SHARE: f32 = 0.8;
-/// Most biomass a civilization stores; ripe crops wait on the stalk once it is full.
-pub const GRANARY_CAP: f32 = 60.0;
-/// Chance per round that tenders prune a sick crop: thriving, then weakened (a fallen
-/// civilization tends nothing).
-pub const PRUNE_CHANCE: [f32; 2] = [0.3, 0.12];
-/// Regard lost for each tended crop the ship cuts, and gained for pruning its blight.
-pub const THEFT_REGARD: f32 = 4.0;
-pub const PRUNE_FAVOR: f32 = 1.5;
-/// Fields: tended crops per planetoid (by radius), and the spread of their bred genes.
-pub const FIELD_CROPS: (u32, u32) = (1, 3);
-pub const TEND_GENE_SPREAD: i32 = 40;
-/// A greenhouse: glass radius around its station, the ring its plots stand on, how many
-/// plots, how far the interact key reaches a plot, and the gap that makes two plots one.
-pub const GREENHOUSE_RADIUS: f32 = 240.0;
-pub const GREENHOUSE_RING: f32 = 190.0;
-pub const GREENHOUSE_PLOTS: u32 = 6;
-pub const GREENHOUSE_REACH: f32 = 220.0;
-const PLOT_GAP: f32 = 60.0;
-/// How near a bare station hull the key still answers (with a refusal).
-pub const BARE_HULL_REACH: f32 = 320.0;
 const FARM_SALT: u64 = 0xFA12_3000_0000_0001;
 /// Own stream for harvest rolls: a pure hash of (game seed, plant id, harvest count).
 const HARVEST_SALT: u64 = 0xFA12_3000_0000_0002;
 /// Own stream for the genes of the seeds a cut pays: a pure hash of (game seed, plant id,
 /// harvest count, seed number).
 const BREED_SALT: u64 = 0xFA12_3000_0000_0003;
-/// Along the surface, how near a mature plant of the same species must stand to cross with
-/// the one being cut (a little under three plantings apart).
-pub const POLLEN_RANGE: f32 = 260.0;
 
 /// What one cut yields: whether the biomass pays, and how many seeds. Deterministic in the
 /// plant's id and how many times it was harvested, so replays and reloads roll the same.
-pub fn harvest_roll(seed: u64, plant: u32, harvests: u32, ripe: bool) -> (bool, u32) {
+pub fn harvest_roll(
+    seed: u64,
+    plant: u32,
+    harvests: u32,
+    ripe: bool,
+    tune: &Tunables,
+) -> (bool, u32) {
     let mut rng = Rng::new(hash2(seed ^ HARVEST_SALT, plant as i32, harvests as i32));
     if ripe {
-        let food = rng.chance(RIPE_FOOD_CHANCE);
+        let food = rng.chance(tune.farm_ripe_food_chance);
         let r = rng.f32();
-        let seeds = if r < RIPE_SEED_CUM[0] {
+        let seeds = if r < tune.farm_ripe_seed_cum_none {
             0
-        } else if r < RIPE_SEED_CUM[1] {
+        } else if r < tune.farm_ripe_seed_cum_one {
             1
         } else {
             2
         };
         (food, seeds)
     } else {
-        let food = rng.chance(UNRIPE_FOOD_CHANCE);
-        (food, u32::from(rng.chance(UNRIPE_SEED_CHANCE)))
+        let food = rng.chance(tune.farm_unripe_food_chance);
+        (food, u32::from(rng.chance(tune.farm_unripe_seed_chance)))
     }
 }
 
@@ -344,19 +271,24 @@ impl Farm {
 
     /// Plants loaded and standing, nearest first to `to`, with the gap from `to` to their
     /// reach.
-    fn nearest_live(&self, to: Vec2, ok: impl Fn(&Live) -> bool) -> Option<(f32, Live)> {
+    fn nearest_live(
+        &self,
+        to: Vec2,
+        ok: impl Fn(&Live) -> bool,
+        tune: &Tunables,
+    ) -> Option<(f32, Live)> {
         self.live
             .iter()
             .filter(|l| ok(l))
-            .map(|l| (l.position.distance(to) - PLANT_BODY, *l))
+            .map(|l| (l.position.distance(to) - tune.farm_plant_body, *l))
             .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.index.cmp(&b.1.index)))
     }
 
     /// Plants a grazer of lineage `lineage` would eat, for steering: position and growth.
-    pub fn forage_for(&self, palate: &flora::Palate) -> Vec<Vec2> {
+    pub fn forage_for(&self, palate: &flora::Palate, tune: &Tunables) -> Vec<Vec2> {
         self.live
             .iter()
-            .filter(|l| l.growth >= GRAZE_FLOOR + 0.05 && !self.plants[l.index].housed)
+            .filter(|l| l.growth >= tune.farm_graze_floor + 0.05 && !self.plants[l.index].housed)
             .filter(|l| {
                 self.flora(l.species)
                     .is_some_and(|f| palate.eats(&f.chemistry))
@@ -478,7 +410,7 @@ impl Game {
             let species = menu[n as usize % menu.len()];
             let base = if home { 1.0 } else { rng.range(0.4, 1.0) };
             let seed = rng.next_u64();
-            if pad_anchor.is_some_and(|a| arc(anchor, a, radius) < SPACING) {
+            if pad_anchor.is_some_and(|a| arc(anchor, a, radius) < self.tune.farm_spacing) {
                 continue;
             }
             let id = self.farm.next_id;
@@ -539,10 +471,10 @@ impl Game {
             return bare(self);
         };
         let (position, radius) = (host.position, host.radius);
-        if ship.position.distance(position) - radius > PLANT_RANGE {
+        if ship.position.distance(position) - radius > self.tune.farm_plant_range {
             return bare(self);
         }
-        if ship.velocity.length() > PLANT_SPEED {
+        if ship.velocity.length() > self.tune.farm_plant_speed {
             return PlantHint::TooFast;
         }
         let key = host.origin.expect("filtered");
@@ -553,12 +485,12 @@ impl Game {
             .plants
             .iter()
             .filter(|p| p.planet == key)
-            .any(|p| arc(anchor, p.anchor, radius) < SPACING)
+            .any(|p| arc(anchor, p.anchor, radius) < self.tune.farm_spacing)
             || self
                 .pad
                 .pads
                 .get(&key)
-                .is_some_and(|p| arc(anchor, p.anchor, radius) < SPACING * 1.5);
+                .is_some_and(|p| arc(anchor, p.anchor, radius) < self.tune.farm_spacing * 1.5);
         if crowded {
             return PlantHint::Crowded;
         }
@@ -569,9 +501,9 @@ impl Game {
     /// creatures (no generated origin) are poor foragers.
     pub(super) fn gut_seed(&self, body: &Body, rng: &mut Rng) -> Option<Item> {
         let chance = if body.origin.is_some() {
-            GUT_SEED_CHANCE
+            self.tune.farm_gut_seed_chance
         } else {
-            GUT_SEED_CHANCE / 3.0
+            self.tune.farm_gut_seed_chance / 3.0
         };
         if !rng.chance(chance) {
             return None;
@@ -623,7 +555,7 @@ impl Game {
             })
             .map(|b| {
                 if b.kind == BodyKind::Base {
-                    (b.position, GREENHOUSE_RING, true)
+                    (b.position, self.tune.farm_greenhouse_ring, true)
                 } else {
                     (b.position, b.radius, false)
                 }
@@ -669,14 +601,18 @@ impl Game {
     /// any sick plant (a cut prunes it, whatever its size or use).
     pub(super) fn harvest_candidate(&self, origin: Vec2, reach: f32) -> Option<(f32, Live)> {
         self.farm
-            .nearest_live(origin, |l| {
-                self.farm.plants[l.index].blighted
-                    || (l.growth >= SPROUT
-                        && self
-                            .farm
-                            .flora(l.species)
-                            .is_some_and(|f| SHIP_PALATE.eats(&f.chemistry)))
-            })
+            .nearest_live(
+                origin,
+                |l| {
+                    self.farm.plants[l.index].blighted
+                        || (l.growth >= self.tune.farm_sprout
+                            && self
+                                .farm
+                                .flora(l.species)
+                                .is_some_and(|f| SHIP_PALATE.eats(&f.chemistry)))
+                },
+                &self.tune,
+            )
             .filter(|(gap, _)| *gap <= reach)
     }
 
@@ -721,11 +657,11 @@ impl Game {
             target: host,
             end: live.position,
             material: Material::Biomass,
-            progress: (progress / HARVEST_TIME).min(1.0),
+            progress: (progress / self.tune.farm_harvest_time).min(1.0),
             crop: true,
         });
         let _ = ship;
-        if progress < HARVEST_TIME {
+        if progress < self.tune.farm_harvest_time {
             return drained;
         }
         self.farm.cut = None;
@@ -734,9 +670,9 @@ impl Game {
         if self.farm.plants[live.index].blighted {
             let plant = &mut self.farm.plants[live.index];
             plant.blighted = false;
-            plant.immune_until = self.time + BLIGHT_IMMUNE;
+            plant.immune_until = self.time + self.tune.farm_blight_immune;
             if tended != 0 && self.civ_standing(tended) != crate::territory::Standing::Fallen {
-                self.shift_regard(tended, PRUNE_FAVOR);
+                self.shift_regard(tended, self.tune.farm_prune_favor);
             }
             self.notify(
                 format!("{name} PRUNED  BLIGHT CUT OUT"),
@@ -747,19 +683,19 @@ impl Game {
         }
         if tended != 0 && self.civ_standing(tended) != crate::territory::Standing::Fallen {
             // Their crop, their granary: the people mind the theft.
-            self.shift_regard(tended, -THEFT_REGARD);
+            self.shift_regard(tended, -self.tune.farm_theft_regard);
         }
-        let ripe = live.growth >= RIPE;
+        let ripe = live.growth >= self.tune.farm_ripe;
         let gain = self.loadout.skills.yield_mult(&self.tune) * self.realm_effects().mining;
         let genes = self.farm.plants[live.index].genes;
         let amount = if ripe {
-            CROP_YIELD * nutrition
+            self.tune.farm_crop_yield * nutrition
         } else {
-            CROP_YIELD * nutrition * live.growth * live.growth * 0.5
+            self.tune.farm_crop_yield * nutrition * live.growth * live.growth * 0.5
         } * gain
             * genes.yield_mult();
         let harvests = self.farm.plants[live.index].harvests;
-        let (food, seeds) = harvest_roll(self.seed, id, harvests, ripe);
+        let (food, seeds) = harvest_roll(self.seed, id, harvests, ripe, &self.tune);
         let got = if food {
             self.cargo.add(Material::Biomass, amount)
         } else {
@@ -787,7 +723,7 @@ impl Game {
         };
         if ripe {
             let plant = &mut self.farm.plants[live.index];
-            plant.base = STUMP;
+            plant.base = self.tune.farm_stump;
             plant.since = now;
             plant.harvests += 1;
             self.notify(
@@ -821,8 +757,8 @@ impl Game {
                 *i != index
                     && other.species == plant.species
                     && other.planet == plant.planet
-                    && arc(plant.anchor, other.anchor, plant.radius) <= POLLEN_RANGE
-                    && self.farm.growth_of(other, now) >= SPROUT
+                    && arc(plant.anchor, other.anchor, plant.radius) <= self.tune.farm_pollen_range
+                    && self.farm.growth_of(other, now) >= self.tune.farm_sprout
             })
             .min_by(|a, b| {
                 let gap = |p: &Plant| arc(plant.anchor, p.anchor, plant.radius);
@@ -863,20 +799,24 @@ impl Game {
                 && b.energy_fraction() < 0.9
         }) {
             let palate = flora::creature_palate(seed, body.species);
-            let reach = body.radius + PLANT_BODY;
-            let Some((_, live)) = farm.nearest_live(body.position, |l| {
-                l.growth > GRAZE_FLOOR
-                    && !farm.plants[l.index].housed
-                    && !(farm.plants[l.index].tended != 0
-                        && crate::territory::is_people_of(
-                            farm.plants[l.index].tended,
-                            body.species,
-                        ))
-                    && farm
-                        .flora(l.species)
-                        .is_some_and(|f| palate.eats(&f.chemistry))
-                    && !bites.iter().any(|(i, _)| *i == l.index)
-            }) else {
+            let reach = body.radius + self.tune.farm_plant_body;
+            let Some((_, live)) = farm.nearest_live(
+                body.position,
+                |l| {
+                    l.growth > self.tune.farm_graze_floor
+                        && !farm.plants[l.index].housed
+                        && !(farm.plants[l.index].tended != 0
+                            && crate::territory::is_people_of(
+                                farm.plants[l.index].tended,
+                                body.species,
+                            ))
+                        && farm
+                            .flora(l.species)
+                            .is_some_and(|f| palate.eats(&f.chemistry))
+                        && !bites.iter().any(|(i, _)| *i == l.index)
+                },
+                &self.tune,
+            ) else {
                 continue;
             };
             if live.position.distance(body.position) > reach {
@@ -886,8 +826,9 @@ impl Game {
                 .flora(live.species)
                 .map_or(0.0, |f| palate.nutrition(&f.chemistry));
             let hardy = farm.plants[live.index].genes.bite_mult();
-            let eaten = (GRAZE_RATE * dt * hardy).min(live.growth - GRAZE_FLOOR);
-            body.feed(eaten * GRAZE_ENERGY * nutrition);
+            let eaten = (self.tune.farm_graze_rate * dt * hardy)
+                .min(live.growth - self.tune.farm_graze_floor);
+            body.feed(eaten * self.tune.farm_graze_energy * nutrition);
             bites.push((live.index, eaten));
         }
         for (index, eaten) in bites {
@@ -931,8 +872,8 @@ impl Game {
             if !plant.blighted {
                 continue;
             }
-            let grow =
-                self.farm.growth_of(plant, now) - BLIGHT_DRAIN * dt * plant.genes.bite_mult();
+            let grow = self.farm.growth_of(plant, now)
+                - self.tune.farm_blight_drain * dt * plant.genes.bite_mult();
             if grow <= 0.0 {
                 dead.push(i);
             } else {
@@ -941,9 +882,9 @@ impl Game {
                 plant.since = now;
             }
         }
-        let epoch = (now / BLIGHT_EPOCH).floor();
+        let epoch = (now / self.tune.farm_blight_epoch).floor();
         let mut ill: Vec<usize> = Vec::new();
-        if epoch != ((now - dt) / BLIGHT_EPOCH).floor() {
+        if epoch != ((now - dt) / self.tune.farm_blight_epoch).floor() {
             for &i in &at_risk {
                 let plant = &self.farm.plants[i];
                 if plant.blighted || now < plant.immune_until {
@@ -956,11 +897,13 @@ impl Game {
                         other.blighted
                             && other.species == plant.species
                             && other.planet == plant.planet
-                            && arc(plant.anchor, other.anchor, plant.radius) <= POLLEN_RANGE
+                            && arc(plant.anchor, other.anchor, plant.radius)
+                                <= self.tune.farm_pollen_range
                     })
                     .count();
-                let chance =
-                    (BLIGHT_OUTBREAK + BLIGHT_SPREAD * sick as f32) * plant.genes.bite_mult();
+                let chance = (self.tune.farm_blight_outbreak
+                    + self.tune.farm_blight_spread * sick as f32)
+                    * plant.genes.bite_mult();
                 let mut rng = Rng::new(hash2(
                     self.seed ^ BLIGHT_SALT,
                     plant.id as i32,
@@ -1003,8 +946,8 @@ impl Game {
         let grade = self.equipment_grade();
         let hull = (rate * grade * dt)
             .min(want)
-            .min(self.cargo.biomass * grade / BIOMASS_PER_HULL);
-        self.cargo.biomass -= hull * BIOMASS_PER_HULL / grade;
+            .min(self.cargo.biomass * grade / self.tune.farm_biomass_per_hull);
+        self.cargo.biomass -= hull * self.tune.farm_biomass_per_hull / grade;
         hull
     }
 
@@ -1217,7 +1160,8 @@ mod tests {
         game.farm.plants.clear();
         let crop = species_with(&game, flora::Role::CropOnly);
         let at = plant(&mut game, crop, 1.0);
-        let (food, seeds) = harvest_roll(game.seed, game.farm.plants[at].id, 0, true);
+        let (food, seeds) =
+            harvest_roll(game.seed, game.farm.plants[at].id, 0, true, &DEFAULT_TUNING);
         beam(&mut game, 2.5);
         if food {
             assert!(game.cargo.biomass > 1.0, "{}", game.cargo.biomass);
@@ -1236,29 +1180,38 @@ mod tests {
 
     #[test]
     fn harvest_rolls_are_deterministic_and_replanting_is_sustainable() {
-        assert_eq!(harvest_roll(7, 3, 2, true), harvest_roll(7, 3, 2, true));
+        assert_eq!(
+            harvest_roll(7, 3, 2, true, &DEFAULT_TUNING),
+            harvest_roll(7, 3, 2, true, &DEFAULT_TUNING)
+        );
         let n = 20_000u32;
         let (mut seeds, mut food, mut pairs, mut useq) = (0u32, 0u32, 0u32, 0u32);
         let mut zero_runs = 0;
         let mut run = 0;
         for i in 0..n {
-            let (f, s) = harvest_roll(42, i % 97, i / 97, true);
+            let (f, s) = harvest_roll(42, i % 97, i / 97, true, &DEFAULT_TUNING);
             seeds += s;
             food += u32::from(f);
             pairs += u32::from(s == 2);
             run = if s == 0 { run + 1 } else { 0 };
             zero_runs = zero_runs.max(run);
-            let (_, u) = harvest_roll(42, i % 97, i / 97, false);
+            let (_, u) = harvest_roll(42, i % 97, i / 97, false, &DEFAULT_TUNING);
             assert!(u <= 1);
             useq += u;
         }
         let mean = seeds as f32 / n as f32;
         assert!((1.0..1.12).contains(&mean), "ripe seeds per harvest {mean}");
         let f = food as f32 / n as f32;
-        assert!((f - RIPE_FOOD_CHANCE).abs() < 0.02, "food rate {f}");
+        assert!(
+            (f - DEFAULT_TUNING.farm_ripe_food_chance).abs() < 0.02,
+            "food rate {f}"
+        );
         assert!(pairs > 0 && zero_runs < 20, "luck varies but never starves");
         let u = useq as f32 / n as f32;
-        assert!((u - UNRIPE_SEED_CHANCE).abs() < 0.02, "unripe seeds {u}");
+        assert!(
+            (u - DEFAULT_TUNING.farm_unripe_seed_chance).abs() < 0.02,
+            "unripe seeds {u}"
+        );
     }
 
     #[test]
@@ -1267,7 +1220,7 @@ mod tests {
         // pay a seed whatever the luck: the dry spell is bounded.
         let seed = crate::config::MASTER_SEED;
         for id in 0..40 {
-            let first = (0..30).find(|h| harvest_roll(seed, id, *h, true).1 > 0);
+            let first = (0..30).find(|h| harvest_roll(seed, id, *h, true, &DEFAULT_TUNING).1 > 0);
             assert!(
                 first.is_some_and(|h| h < 30),
                 "plant {id} never paid a seed"
@@ -1284,7 +1237,8 @@ mod tests {
         assert_eq!(game.farm.plants.len(), 1, "a sprout is ignored");
         game.farm.plants[0].base = 0.7;
         game.farm.plants[0].since = game.time;
-        let (food, seeds) = harvest_roll(game.seed, game.farm.plants[0].id, 0, false);
+        let (food, seeds) =
+            harvest_roll(game.seed, game.farm.plants[0].id, 0, false, &DEFAULT_TUNING);
         beam(&mut game, 2.5);
         assert!(game.farm.plants.is_empty(), "over-harvest kills");
         assert!(seeds <= 1, "never a pair from an unripe cut");
@@ -1357,7 +1311,7 @@ mod tests {
         }
         let rate = drops as f32 / n as f32;
         assert!(
-            (rate - GUT_SEED_CHANCE).abs() < 0.03 || drops == 0,
+            (rate - DEFAULT_TUNING.farm_gut_seed_chance).abs() < 0.03 || drops == 0,
             "gut seed rate {rate}"
         );
     }
@@ -1432,7 +1386,10 @@ mod tests {
             fed[n] = after.map_or(0.0, |b| b.energy - before);
             let g = game.farm.growth_of(&game.farm.plants[at], game.time);
             if eats {
-                assert!((GRAZE_FLOOR - 0.01..1.0).contains(&g), "grazed down to {g}");
+                assert!(
+                    (DEFAULT_TUNING.farm_graze_floor - 0.01..1.0).contains(&g),
+                    "grazed down to {g}"
+                );
             } else {
                 assert!(g > 0.99, "ignored plant untouched, {g}");
             }
@@ -1605,7 +1562,7 @@ mod tests {
             g(fast)
         );
         assert!(
-            g(fast) >= RIPE,
+            g(fast) >= DEFAULT_TUNING.farm_ripe,
             "a vigorous plant is ripe at 70 percent of the time"
         );
     }
@@ -1620,7 +1577,7 @@ mod tests {
             // A cut whose roll pays food, whatever the luck of this plant's id.
             let id = game.farm.plants[at].id;
             let h = (0..50)
-                .find(|h| harvest_roll(game.seed, id, *h, true).0)
+                .find(|h| harvest_roll(game.seed, id, *h, true, &DEFAULT_TUNING).0)
                 .unwrap();
             game.farm.plants[at].harvests = h;
             beam(&mut game, 2.5);
@@ -1725,10 +1682,10 @@ mod tests {
         let _mate = plant_with(&mut game, crop, 1.0, beside(150.0), RICH);
         let id = game.farm.plants[a].id;
         let h = (0..60)
-            .find(|h| harvest_roll(game.seed, id, *h, true).1 > 0)
+            .find(|h| harvest_roll(game.seed, id, *h, true, &DEFAULT_TUNING).1 > 0)
             .unwrap();
         game.farm.plants[a].harvests = h;
-        let (_, n) = harvest_roll(game.seed, id, h, true);
+        let (_, n) = harvest_roll(game.seed, id, h, true, &DEFAULT_TUNING);
         let want: Vec<CropGenes> = (0..n).map(|k| game.seed_genes(a, k)).collect();
         beam(&mut game, 2.5);
         assert_eq!(game.farm.seed_count(), n);
@@ -1843,13 +1800,13 @@ mod tests {
         // Sick neighbors on both sides of the pruned plant keep trying to reinfect it.
         game.farm.plants[at[2]].blighted = true;
         let pruned = game.farm.plants[at[0]].id;
-        beam(&mut game, HARVEST_TIME + 0.3);
+        beam(&mut game, DEFAULT_TUNING.farm_harvest_time + 0.3);
         let plant = game.farm.plants.iter().find(|p| p.id == pruned).unwrap();
         assert!(!plant.blighted, "the cut took the blight out");
         assert!(plant.immune_until > game.time);
         assert!(plant.harvests == 0 && game.cargo.biomass == 0.0, "no pay");
         let id = plant.id;
-        run(&mut game, BLIGHT_IMMUNE - 20.0);
+        run(&mut game, DEFAULT_TUNING.farm_blight_immune - 20.0);
         let plant = game.farm.plants.iter().find(|p| p.id == id).unwrap();
         assert!(!plant.blighted, "immune while the spell lasts");
     }
@@ -1947,7 +1904,11 @@ mod tests {
             game.farm.plants.clone()
         };
         let a = stock(&yes, key);
-        assert!((FIELD_CROPS.0 as usize..=FIELD_CROPS.1 as usize).contains(&a.len()));
+        assert!(
+            (DEFAULT_TUNING.farm_field_crops_min as usize
+                ..=DEFAULT_TUNING.farm_field_crops_max as usize)
+                .contains(&a.len())
+        );
         assert_eq!(a, stock(&yes, key), "a pure function of seed and place");
         let game = empty_game();
         let crops = game.farm.civ_crops(crate::config::MASTER_SEED, &yes);
@@ -1959,7 +1920,7 @@ mod tests {
                 game.farm.flora(p.species).is_some_and(Flora::is_crop),
                 "tended crops are ones the ship can use"
             );
-            let spread = TEND_GENE_SPREAD;
+            let spread = DEFAULT_TUNING.farm_tend_gene_spread;
             assert!(
                 [p.genes.yield_, p.genes.vigor, p.genes.hardy, p.genes.hue]
                     .iter()
@@ -1969,7 +1930,7 @@ mod tests {
         // Apart from one another.
         for (i, x) in a.iter().enumerate() {
             for y in &a[i + 1..] {
-                assert!(arc(x.anchor, y.anchor, 330.0) >= SPACING);
+                assert!(arc(x.anchor, y.anchor, 330.0) >= DEFAULT_TUNING.farm_spacing);
             }
         }
         // A civilization that does not farm leaves the planetoid to the wild.
@@ -1984,8 +1945,8 @@ mod tests {
         let species = game.farm.plants[at].species;
         let nutrition = game.farm.flora(species).unwrap().ship_nutrition();
         game.farm.plants[at].genes = CropGenes::BASELINE;
-        run(&mut game, TEND_EPOCH + 1.0);
-        let expect = CROP_YIELD * nutrition * TEND_SHARE;
+        run(&mut game, DEFAULT_TUNING.farm_tend_epoch + 1.0);
+        let expect = DEFAULT_TUNING.farm_crop_yield * nutrition * DEFAULT_TUNING.farm_tend_share;
         assert!(
             (game.farm.stored(t.id) - expect).abs() < 1e-3,
             "{}",
@@ -1994,17 +1955,19 @@ mod tests {
         let plant = &game.farm.plants[at];
         assert_eq!(plant.harvests, 1);
         assert!(
-            game.farm.growth_of(plant, game.time) < RIPE,
+            game.farm.growth_of(plant, game.time) < DEFAULT_TUNING.farm_ripe,
             "back to a stump"
         );
         assert_eq!(game.cargo.biomass, 0.0, "the ship got none of it");
         let _ = seed;
         // A full granary leaves the crop ripe on the stalk.
         let (mut game, at) = tended_rig(&t, 1.0);
-        game.farm.granary.insert(t.id, GRANARY_CAP);
-        run(&mut game, TEND_EPOCH * 3.0);
+        game.farm
+            .granary
+            .insert(t.id, DEFAULT_TUNING.farm_granary_cap);
+        run(&mut game, DEFAULT_TUNING.farm_tend_epoch * 3.0);
         assert_eq!(game.farm.plants[at].harvests, 0);
-        assert_eq!(game.farm.stored(t.id), GRANARY_CAP);
+        assert_eq!(game.farm.stored(t.id), DEFAULT_TUNING.farm_granary_cap);
         // A fallen civilization tends nothing.
         let (mut game, at) = tended_rig(&t, 1.0);
         game.civs.fall.insert(
@@ -2014,7 +1977,7 @@ mod tests {
                 elder: true,
             },
         );
-        run(&mut game, TEND_EPOCH * 3.0);
+        run(&mut game, DEFAULT_TUNING.farm_tend_epoch * 3.0);
         assert_eq!(game.farm.plants[at].harvests, 0);
         assert_eq!(game.farm.stored(t.id), 0.0);
     }
@@ -2023,16 +1986,18 @@ mod tests {
     fn tenders_prune_blight_while_thriving_and_not_once_fallen() {
         let t = territory_that(true);
         let (mut game, at) = tended_rig(&t, 1.0);
-        game.farm.granary.insert(t.id, GRANARY_CAP);
+        game.farm
+            .granary
+            .insert(t.id, DEFAULT_TUNING.farm_granary_cap);
         game.farm.plants[at].blighted = true;
         game.farm.plants[at].base = 1.0;
         let id = game.farm.plants[at].id;
         let mut pruned = false;
         for _ in 0..40 {
-            run(&mut game, TEND_EPOCH);
+            run(&mut game, DEFAULT_TUNING.farm_tend_epoch);
             let p = game.farm.plants.iter().find(|p| p.id == id).unwrap();
             if !p.blighted {
-                assert!(p.immune_until > game.time - TEND_EPOCH);
+                assert!(p.immune_until > game.time - DEFAULT_TUNING.farm_tend_epoch);
                 pruned = true;
                 break;
             }
@@ -2047,7 +2012,7 @@ mod tests {
             },
         );
         game.farm.plants[at].blighted = true;
-        run(&mut game, TEND_EPOCH * 6.0);
+        run(&mut game, DEFAULT_TUNING.farm_tend_epoch * 6.0);
         assert!(game.farm.plants.is_empty() || game.farm.plants[0].blighted);
     }
 
@@ -2059,7 +2024,9 @@ mod tests {
             let mut game = rig();
             game.register_territory(t);
             // A full granary: the tenders leave the ripe crop on the stalk.
-            game.farm.granary.insert(t.id, GRANARY_CAP);
+            game.farm
+                .granary
+                .insert(t.id, DEFAULT_TUNING.farm_granary_cap);
             let palate = flora::creature_palate(game.seed, t.id);
             let liked = game
                 .farm
@@ -2100,7 +2067,7 @@ mod tests {
         let given = DEFAULT_TUNING.tithe_amount;
         let cool = biomass_offer(100.0, friendly, given, &DEFAULT_TUNING);
         let warm = biomass_offer(100.0, max, given, &DEFAULT_TUNING);
-        assert!((cool - given * tend::TRADE_BIOMASS).abs() < 1e-4);
+        assert!((cool - given * DEFAULT_TUNING.farm_trade_biomass).abs() < 1e-4);
         assert!((warm - 2.0 * cool).abs() < 1e-4);
         assert_eq!(
             biomass_offer(5.0, max, given, &DEFAULT_TUNING),
@@ -2194,20 +2161,20 @@ mod tests {
         let t = territory_that(true);
         let (mut game, _) = tended_rig(&t, 1.0);
         game.set_regard(t.id, 10.0);
-        beam(&mut game, HARVEST_TIME + 0.3);
+        beam(&mut game, DEFAULT_TUNING.farm_harvest_time + 0.3);
         assert!(game.cargo.biomass > 0.0);
-        assert!((game.civ_regard(t.id) - (10.0 - THEFT_REGARD)).abs() < 0.01);
+        assert!((game.civ_regard(t.id) - (10.0 - DEFAULT_TUNING.farm_theft_regard)).abs() < 0.01);
         // Wild or planted crops cost nothing.
         let mut game = rig();
         let crop = species_with(&game, flora::Role::CropOnly);
         plant(&mut game, crop, 1.0);
-        beam(&mut game, HARVEST_TIME + 0.3);
+        beam(&mut game, DEFAULT_TUNING.farm_harvest_time + 0.3);
         assert!(game.cargo.biomass > 0.0);
         // Pruning a tended crop's blight is a favor.
         let (mut game, at) = tended_rig(&t, 1.0);
         game.set_regard(t.id, 10.0);
         game.farm.plants[at].blighted = true;
-        beam(&mut game, HARVEST_TIME + 0.3);
+        beam(&mut game, DEFAULT_TUNING.farm_harvest_time + 0.3);
         assert!(game.civ_regard(t.id) > 10.0);
     }
 
@@ -2239,7 +2206,10 @@ mod tests {
                 .any(|g| g.key == key && g.territory == outpost.id)
         );
         let housed: Vec<&Plant> = game.farm.plants.iter().filter(|p| p.housed).collect();
-        assert_eq!(housed.len(), (GREENHOUSE_PLOTS / 2) as usize);
+        assert_eq!(
+            housed.len(),
+            (DEFAULT_TUNING.farm_greenhouse_plots / 2) as usize
+        );
         assert!(
             housed
                 .iter()
@@ -2258,7 +2228,7 @@ mod tests {
             .collect();
         assert_eq!(live.len(), housed.len());
         for l in live {
-            assert!((l.position.distance(seat) - GREENHOUSE_RING).abs() < 1.0);
+            assert!((l.position.distance(seat) - DEFAULT_TUNING.farm_greenhouse_ring).abs() < 1.0);
             assert!(l.normal.dot((seat - l.position).normalize()) > 0.99);
         }
         // A non-farming civilization's seat has no glass.
@@ -2279,11 +2249,13 @@ mod tests {
         game.farm.seeds.clear();
         game.farm.add_seeds(SeedKind::wild(crop), 5);
         // Inside the glass: free plots take seeds, up to the plots the people left.
-        let free = (GREENHOUSE_PLOTS - GREENHOUSE_PLOTS / 2) as usize;
+        let free = (DEFAULT_TUNING.farm_greenhouse_plots - DEFAULT_TUNING.farm_greenhouse_plots / 2)
+            as usize;
         let mut planted = 0;
-        for n in 0..GREENHOUSE_PLOTS {
-            let angle = plot_angle(seed, key, n);
-            let spot = seat + Vec2::from_angle(angle) * (GREENHOUSE_RING - 70.0);
+        for n in 0..DEFAULT_TUNING.farm_greenhouse_plots {
+            let angle = plot_angle(seed, key, n, &DEFAULT_TUNING);
+            let spot =
+                seat + Vec2::from_angle(angle) * (DEFAULT_TUNING.farm_greenhouse_ring - 70.0);
             hold_at(&mut game, spot, 0.2);
             let before = game.farm.plants.len();
             match game.plant_hint() {
@@ -2310,14 +2282,17 @@ mod tests {
             .count();
         assert!(sealed >= planted);
         assert!(
-            game.farm.forage_for(&flora::Palate([1.0; 5])).len() <= game.farm.live.len() - sealed
+            game.farm
+                .forage_for(&flora::Palate([1.0; 5]), &DEFAULT_TUNING)
+                .len()
+                <= game.farm.live.len() - sealed
         );
         // A hostile civilization's glass turns the ship away.
         game.set_regard(outpost.id, -90.0);
         game.farm.add_seeds(SeedKind::wild(crop), 1);
         hold_at(
             &mut game,
-            seat + Vec2::new(GREENHOUSE_RING - 70.0, 0.0),
+            seat + Vec2::new(DEFAULT_TUNING.farm_greenhouse_ring - 70.0, 0.0),
             0.2,
         );
         assert_eq!(game.plant_hint(), PlantHint::Unwelcome);

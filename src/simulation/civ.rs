@@ -19,33 +19,6 @@ use super::Tier;
 use super::*;
 use crate::territory::{CivRole, CivTag, Fall, Standing, Territory, civ_phenotype};
 
-/// Seconds of lingering before the first war party, the first big raid, and the gap between
-/// big raids after that.
-pub const WAR_AT: f32 = 60.0;
-pub const RAID_AT: f32 = 180.0;
-pub const RAID_EVERY: f32 = 120.0;
-/// Seconds outside a territory before its raid clock forgets the ship.
-pub const RAID_GRACE: f32 = 10.0;
-/// Raiders in a war party: this plus two per point of strength; a big raid doubles it and a
-/// weakened civilization halves it.
-const PARTY_BASE: f32 = 3.0;
-/// Most living creatures of one civilization (raiders included) that a raid may add to.
-pub const CIV_CAP: usize = 24;
-/// How far a called-up member answers a raid.
-const CALL_RANGE: f32 = 2400.0;
-/// How far a comrade's alarm carries, and how far from the ship it still holds a member.
-const COORD_RANGE: f32 = 1600.0;
-/// Members see and give up on the ship this much further inside their own territory.
-const DOMAIN_SIGHT: f32 = 1.3;
-/// Wildlife within this of a civil creature moves off.
-pub const SHOO_RANGE: f32 = 650.0;
-/// Seconds between doctrine passes and the strength of each pull.
-const SHARE_PERIOD: f32 = 1.5;
-const TABLE_PULL: f32 = 0.2;
-const MEMBER_PULL: f32 = 0.25;
-/// An elder's hull on top of its genome's, and its bonus score (times threat).
-pub const ELDER_HULL: f32 = 2.0;
-const ELDER_SCORE: f32 = 1500.0;
 /// Where raiders appear relative to the ship: off screen, inside the loaded region.
 const ARRIVAL: Vec2 = Vec2::new(1700.0, 1300.0);
 
@@ -78,12 +51,14 @@ impl Raid {
 
     /// Linger time at which the next party goes out. A weakened civilization sends only the
     /// war party.
-    pub fn next_at(&self, standing: Standing) -> Option<f32> {
+    pub fn next_at(&self, standing: Standing, tune: &Tunables) -> Option<f32> {
         match (self.waves, standing) {
             (_, Standing::Fallen) => None,
-            (0, _) => Some(WAR_AT),
-            (1, _) => (standing == Standing::Thriving).then_some(RAID_AT),
-            (k, Standing::Thriving) => Some(RAID_AT + (k - 1) as f32 * RAID_EVERY),
+            (0, _) => Some(tune.civ_war_at),
+            (1, _) => (standing == Standing::Thriving).then_some(tune.civ_raid_at),
+            (k, Standing::Thriving) => {
+                Some(tune.civ_raid_at + (k - 1) as f32 * tune.civ_raid_every)
+            }
             _ => None,
         }
     }
@@ -152,6 +127,7 @@ impl Snapshot {
         at: Vec2,
         player_distance: f32,
         lose: f32,
+        tune: &Tunables,
     ) -> Posture {
         let neutral = Posture {
             reach: 1.0,
@@ -171,11 +147,13 @@ impl Snapshot {
         let comrades = in_domain
             && player_distance < lose * 1.2
             && self.alarms.iter().any(|&(t, other, p)| {
-                t == tid && other != id && p.distance_squared(at) < COORD_RANGE * COORD_RANGE
+                t == tid
+                    && other != id
+                    && p.distance_squared(at) < tune.civ_coord_range * tune.civ_coord_range
             });
         let called = self.raid.is_some_and(|(raid, stage)| {
             raid == tid
-                && player_distance < CALL_RANGE
+                && player_distance < tune.civ_call_range
                 && match stage {
                     RaidStage::Patrol => false,
                     RaidStage::WarParty => role != CivRole::Elder,
@@ -184,7 +162,11 @@ impl Snapshot {
         });
         let calm = !self.permitted.contains(&tid);
         Posture {
-            reach: if in_domain { DOMAIN_SIGHT } else { 1.0 },
+            reach: if in_domain {
+                tune.civ_domain_sight
+            } else {
+                1.0
+            },
             rallied: !calm && (comrades || called),
             calm,
         }
@@ -272,14 +254,15 @@ impl Game {
         let (stage, next_in) = match &self.raid {
             Some(raid) if raid.territory == t.id => (
                 raid.stage(),
-                raid.next_at(standing).map(|at| (at - raid.linger).max(0.0)),
+                raid.next_at(standing, &self.tune)
+                    .map(|at| (at - raid.linger).max(0.0)),
             ),
             _ => (
                 RaidStage::Patrol,
                 (standing != Standing::Fallen
                     && !t.peaceful()
                     && self.civilization_engagement(t.id) == EngagementRule::TotalWar)
-                    .then_some(WAR_AT),
+                    .then_some(self.tune.civ_war_at),
             ),
         };
         let menace = if standing == Standing::Fallen {
@@ -348,7 +331,7 @@ impl Game {
         }
         body.home = Some(body.position);
         if tag.role == CivRole::Elder {
-            body.max_health *= ELDER_HULL;
+            body.max_health *= self.tune.civ_elder_hull;
             body.health = body.max_health;
         }
         if body.brain.is_some()
@@ -399,7 +382,7 @@ impl Game {
         self.update_raid(dt);
         self.civs.clock -= dt;
         if self.civs.clock <= 0.0 {
-            self.civs.clock = SHARE_PERIOD;
+            self.civs.clock = self.tune.civ_share_period;
             self.share_doctrine();
         }
     }
@@ -429,7 +412,7 @@ impl Game {
             }
             (None, Some(raid)) => {
                 raid.away += dt;
-                if raid.away > RAID_GRACE {
+                if raid.away > self.tune.civ_raid_grace {
                     self.raid = None;
                 }
             }
@@ -442,7 +425,10 @@ impl Game {
             return;
         };
         let standing = self.civ_standing(t.id);
-        if raid.next_at(standing).is_some_and(|at| raid.linger >= at) {
+        if raid
+            .next_at(standing, &self.tune)
+            .is_some_and(|at| raid.linger >= at)
+        {
             let big = raid.waves >= 1;
             if let Some(raid) = self.raid.as_mut() {
                 raid.waves += 1;
@@ -457,7 +443,7 @@ impl Game {
         let Some(ship) = self.player().map(|p| p.position) else {
             return;
         };
-        let mut count = (PARTY_BASE + 2.0 * t.strength) * if big { 2.0 } else { 1.0 };
+        let mut count = (self.tune.civ_party_base + 2.0 * t.strength) * if big { 2.0 } else { 1.0 };
         if standing == Standing::Weakened {
             count *= 0.5;
         }
@@ -472,7 +458,7 @@ impl Game {
         };
         let heading = Vec2::from_angle(self.civs.rng.f32() * TAU) * ARRIVAL;
         let mut sent = 0;
-        for k in 0..count.min(CIV_CAP.saturating_sub(alive)) {
+        for k in 0..count.min(self.tune.civ_cap.saturating_sub(alive)) {
             let escorts = t.shape != crate::territory::CivShape::Horde && k % 3 == 2;
             let species = if escorts || (big && k % 4 == 3) {
                 warrior
@@ -538,7 +524,7 @@ impl Game {
             }
         }
         for tid in territories {
-            let pull = TABLE_PULL * self.doctrine_pull(tid);
+            let pull = self.tune.civ_table_pull * self.doctrine_pull(tid);
             let mut table = self.civs.brains.remove(&tid);
             for body in self.bodies.iter().filter(|b| b.active) {
                 let Some(brain) = body.brain.as_deref() else {
@@ -563,7 +549,7 @@ impl Game {
                         continue;
                     }
                     if let Some(brain) = body.brain.as_deref_mut() {
-                        brain.blend_toward(&table, MEMBER_PULL);
+                        brain.blend_toward(&table, self.tune.civ_member_pull);
                     }
                 }
                 self.civs.brains.insert(tid, table);
@@ -610,7 +596,7 @@ impl Game {
             self.spill_cache(tid, body.position);
         }
         if elder && !body.hostile_rock_kill {
-            let bonus = (ELDER_SCORE * body.genes.threat) as u64;
+            let bonus = (self.tune.civ_elder_score * body.genes.threat) as u64;
             self.score = self.score.saturating_add(bonus);
         }
         let name = t.name(self.seed);
@@ -793,7 +779,7 @@ mod tests {
         let mut game = visit(SEED, spot);
         game.provoke_all();
         assert!(!members(&game, t.id).is_empty());
-        hold(&mut game, spot, WAR_AT - 5.0);
+        hold(&mut game, spot, DEFAULT_TUNING.civ_war_at - 5.0);
         assert_eq!(game.raid.as_ref().unwrap().stage(), RaidStage::Patrol);
         let patrol = members(&game, t.id).len();
         hold(&mut game, spot, 10.0);
@@ -802,11 +788,15 @@ mod tests {
         let report = game.territory_report().unwrap();
         assert_eq!(report.stage, RaidStage::WarParty);
         assert!(report.next_in.unwrap() > 100.0);
-        hold(&mut game, spot, RAID_AT - WAR_AT);
+        hold(
+            &mut game,
+            spot,
+            DEFAULT_TUNING.civ_raid_at - DEFAULT_TUNING.civ_war_at,
+        );
         assert_eq!(game.raid.as_ref().unwrap().stage(), RaidStage::Raid);
-        assert!(game.civ_strength(t.id) <= CIV_CAP + 40);
+        assert!(game.civ_strength(t.id) <= DEFAULT_TUNING.civ_cap + 40);
         // Leaving for longer than the grace period forgets the ship.
-        hold(&mut game, Vec2::ZERO, RAID_GRACE + 2.0);
+        hold(&mut game, Vec2::ZERO, DEFAULT_TUNING.civ_raid_grace + 2.0);
         assert!(game.raid.is_none(), "the clock stops when the ship leaves");
         hold(&mut game, spot, 3.0);
         let raid = game.raid.as_ref().unwrap();
@@ -824,7 +814,7 @@ mod tests {
         let spot = t.capital.center() + Vec2::new(0.0, 2500.0);
         let run = || {
             let mut game = visit(SEED, spot);
-            hold(&mut game, spot, WAR_AT + 15.0);
+            hold(&mut game, spot, DEFAULT_TUNING.civ_war_at + 15.0);
             let mut ids: Vec<(u64, i32, i32)> = game
                 .bodies
                 .iter()
@@ -848,7 +838,7 @@ mod tests {
             .map(|b| b.id)
             .expect("the capital sector has an elder");
         let elder = game.body(elder_id).unwrap().clone();
-        assert!(elder.max_health >= elder.genome.hull * ELDER_HULL - 1.0);
+        assert!(elder.max_health >= elder.genome.hull * DEFAULT_TUNING.civ_elder_hull - 1.0);
         assert!(elder.brain.is_some() && elder.genome.learner == 1.0);
         let score = game.score;
         game.pickups.clear();
@@ -858,7 +848,7 @@ mod tests {
             .unwrap()
             .health = 0.0;
         game.step(DT, Input::default());
-        assert!(game.score >= score + (ELDER_SCORE * elder.genes.threat) as u64);
+        assert!(game.score >= score + (DEFAULT_TUNING.civ_elder_score * elder.genes.threat) as u64);
         let parts: Vec<_> = game
             .pickups
             .iter()
@@ -1010,8 +1000,11 @@ mod tests {
             away: 0.0,
             waves: 1,
         };
-        assert_eq!(raid.next_at(Standing::Weakened), None);
-        assert_eq!(raid.next_at(Standing::Thriving), Some(RAID_AT));
+        assert_eq!(raid.next_at(Standing::Weakened, &DEFAULT_TUNING), None);
+        assert_eq!(
+            raid.next_at(Standing::Thriving, &DEFAULT_TUNING),
+            Some(DEFAULT_TUNING.civ_raid_at)
+        );
     }
 
     #[test]

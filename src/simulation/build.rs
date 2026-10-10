@@ -56,21 +56,8 @@ pub(super) struct Structure {
     pub blocks: BTreeMap<u16, Block>,
 }
 
-/// Most structures under construction at once, across the loaded world.
-pub const MAX_WORKS: usize = 6;
-/// A builder places a block only when it is within this of the site.
-pub const REACH: f32 = 260.0;
-/// A wandering builder is drawn back toward its site beyond this distance (see `home_pull`).
-pub const LEASH: f32 = 130.0;
-/// Most civilization structures under construction at once, across the loaded world (their
-/// own cap, so civilizations never starve wild builders of slots, nor the reverse).
-pub const MAX_CIV_WORKS: usize = 4;
-/// Structures one civilization starts in a session: a few landmarks, not an endless sprawl.
-pub const CIV_STRUCTURES: u8 = 3;
 /// Salt for a territory's building style.
 const CIV_SALT: u64 = 0xC171_B01D_0000_0051;
-/// Seconds a site may stay blocked before the builder gives the structure up as it stands.
-pub const STALL: f32 = 90.0;
 
 /// One structure in progress: its blueprint, where it stands and how far it has got.
 #[derive(Clone, Debug, PartialEq)]
@@ -150,7 +137,7 @@ impl Game {
                 .iter()
                 .filter(|w| !w.done && w.civ.is_none())
                 .count()
-                >= MAX_WORKS
+                >= self.tune.build_max_works
             {
                 break;
             }
@@ -212,10 +199,12 @@ impl Game {
             let at = origin + site.offset;
             let radius = Builder::block_radius(site.radius);
             let work = &self.builds.works[w];
-            if body.position.distance(at) > REACH || self.site_occupied(at, radius, &work.placed) {
+            if body.position.distance(at) > self.tune.build_reach
+                || self.site_occupied(at, radius, &work.placed)
+            {
                 let work = &mut self.builds.works[w];
                 work.stalled += dt;
-                work.done = work.stalled >= STALL;
+                work.done = work.stalled >= self.tune.build_stall;
                 continue;
             }
             let mut block = self.block_body(builder.material, at, radius);
@@ -249,7 +238,7 @@ impl Game {
                 .filter(|w| !w.done && w.civ.is_some())
                 .count()
         };
-        if live(self) >= MAX_CIV_WORKS {
+        if live(self) >= self.tune.build_max_civ_works {
             return;
         }
         let mut starts: Vec<(u64, u64, Vec2)> = Vec::new();
@@ -274,7 +263,7 @@ impl Game {
                 .get(&tid)
                 .is_some_and(|m| m.miners.iter().any(|m| m.body == body.id));
             let has_work = self.builds.works.iter().any(|w| w.builder == body.id);
-            if n >= CIV_STRUCTURES
+            if n >= self.tune.build_civ_structures
                 || busy
                 || digging
                 || has_work
@@ -291,7 +280,7 @@ impl Game {
             starts.push((tid, body.id, body.position));
         }
         for (tid, id, at) in starts {
-            if live(self) >= MAX_CIV_WORKS {
+            if live(self) >= self.tune.build_max_civ_works {
                 break;
             }
             let n = self.builds.civ_started.entry(tid).or_insert(0);
@@ -497,12 +486,12 @@ pub fn civ_style(territory: u64) -> Builder {
 /// The steering a builder with a structure in progress adds to its wandering: nothing within
 /// `LEASH` of its site, then a pull back that grows with the distance, to twice its cruise
 /// speed. It keeps the builder within `REACH` so it can place its blocks, without pinning it.
-pub(super) fn home_pull(at: Vec2, home: Vec2, cruise: f32) -> Vec2 {
+pub(super) fn home_pull(at: Vec2, home: Vec2, cruise: f32, tune: &Tunables) -> Vec2 {
     let gap = at.distance(home);
-    if !gap.is_finite() || gap <= LEASH {
+    if !gap.is_finite() || gap <= tune.build_leash {
         return Vec2::ZERO;
     }
-    (home - at) / gap * cruise * ((gap - LEASH) / LEASH).min(2.0)
+    (home - at) / gap * cruise * ((gap - tune.build_leash) / tune.build_leash).min(2.0)
 }
 
 /// A creature that is up and about and may lay a block. A civilization's worker also stops
@@ -645,7 +634,7 @@ mod tests {
         let mut rock = game.make_body(BodyKind::Asteroid, origin + site.offset);
         rock.radius = 30.0;
         game.bodies.push(rock);
-        run(&mut game, STALL - 10.0);
+        run(&mut game, DEFAULT_TUNING.build_stall - 10.0);
         assert!(!game.builds.works[0].done);
         assert!(game.builder_homes().contains_key(&id));
         run(&mut game, 20.0);
@@ -660,7 +649,7 @@ mod tests {
         let (mut game, _) = builder_game(Genome::builder(), 5);
         run(&mut game, 400.0);
         assert!(game.builds.works[0].done);
-        for k in 0..MAX_WORKS {
+        for k in 0..DEFAULT_TUNING.build_max_works {
             let mut body =
                 game.make_creature(&species, Vec2::new(900.0 + 300.0 * k as f32, 3000.0));
             body.velocity = Vec2::ZERO;
@@ -668,21 +657,37 @@ mod tests {
         }
         game.update_builders(DT);
         let live = game.builds.works.iter().filter(|w| !w.done).count();
-        assert_eq!(live, MAX_WORKS);
+        assert_eq!(live, DEFAULT_TUNING.build_max_works);
     }
 
     #[test]
     fn the_leash_pulls_a_wanderer_home_and_leaves_a_near_builder_alone() {
         let home = Vec2::new(100.0, 100.0);
         assert_eq!(
-            home_pull(home + Vec2::new(LEASH - 1.0, 0.0), home, 40.0),
+            home_pull(
+                home + Vec2::new(DEFAULT_TUNING.build_leash - 1.0, 0.0),
+                home,
+                40.0,
+                &DEFAULT_TUNING
+            ),
             Vec2::ZERO
         );
-        let pull = home_pull(home + Vec2::new(LEASH * 2.0, 0.0), home, 40.0);
+        let pull = home_pull(
+            home + Vec2::new(DEFAULT_TUNING.build_leash * 2.0, 0.0),
+            home,
+            40.0,
+            &DEFAULT_TUNING,
+        );
         assert!(pull.x < 0.0 && pull.y.abs() < 1e-3);
         assert!(pull.length() <= 80.0 + 1e-3);
-        assert!(home_pull(home + Vec2::new(1.0e9, 0.0), home, 40.0).length() <= 80.0 + 1e-3);
-        assert_eq!(home_pull(Vec2::NAN, home, 40.0), Vec2::ZERO);
+        assert!(
+            home_pull(home + Vec2::new(1.0e9, 0.0), home, 40.0, &DEFAULT_TUNING).length()
+                <= 80.0 + 1e-3
+        );
+        assert_eq!(
+            home_pull(Vec2::NAN, home, 40.0, &DEFAULT_TUNING),
+            Vec2::ZERO
+        );
     }
 
     #[test]
@@ -715,7 +720,7 @@ mod tests {
             game.bodies.push(body);
         }
         run(&mut game, 5.0);
-        assert!(game.builds.works.len() <= MAX_WORKS);
+        assert!(game.builds.works.len() <= DEFAULT_TUNING.build_max_works);
     }
 
     #[test]
@@ -809,7 +814,7 @@ mod tests {
             .map(|s| s.offset.length())
             .fold(0.0, f32::max);
         assert!(
-            farthest > LEASH,
+            farthest > DEFAULT_TUNING.build_leash,
             "plan reaches beyond the leash, so walking matters"
         );
     }
@@ -863,7 +868,7 @@ mod tests {
             .filter(|w| w.civ == Some(t.id))
             .collect();
         assert!(!mine.is_empty(), "the horde started a structure");
-        assert!(mine.len() <= usize::from(CIV_STRUCTURES));
+        assert!(mine.len() <= usize::from(DEFAULT_TUNING.build_civ_structures));
         assert!(
             mine.iter().filter(|w| !w.done).count() <= 1,
             "one at a time"
@@ -885,7 +890,7 @@ mod tests {
                 .iter()
                 .filter(|w| !w.done && w.civ.is_some())
                 .count()
-                <= MAX_CIV_WORKS
+                <= DEFAULT_TUNING.build_max_civ_works
         );
     }
 

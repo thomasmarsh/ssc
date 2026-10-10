@@ -100,7 +100,7 @@ pub use chart::{
     Beacon, BeaconError, ChartEntry, ChartGeometry, ChartGeometryKind, CivReading, PinLabel,
     Threat, Travel, TravelError, TravelQuote,
 };
-pub use civ::{CIV_CAP, Raid, RaidStage, TerritoryReport, verdict};
+pub use civ::{Raid, RaidStage, TerritoryReport, verdict};
 pub use civmine::Cache;
 pub use cues::Cue;
 pub use diplomacy::{Regard, Tier, TitheError, TitheHint};
@@ -118,10 +118,7 @@ pub use loot::{Notice, Pickup};
 pub use mimic::Disguise;
 pub use mining::{Beam, Cargo, Lode, Material, renewable};
 pub use ooze::{Engulf, INSIDE as OOZE_INSIDE, SKIN as OOZE_SKIN, skin_radius};
-pub use pads::{
-    HIDE_SIGHT, KIT_PRICE, LAND_RANGE, MAX_PADS, PAD_HP, Pad, PadHint, PadKey, PadState, STASH_CAP,
-    price_text,
-};
+pub use pads::{KIT_PRICE, Pad, PadHint, PadKey, PadState, price_text};
 pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RANGE, RING_SPEED};
 pub use powers::{BlinkTell, JamKind, JamTell, OozeView, PowerView};
 pub use realms::RealmState;
@@ -908,7 +905,7 @@ impl Game {
             // Fortresses give way before the body cap: pieces are left out (opening the
             // wall, never closing it) once the world is nearly full.
             if spawn.fort.is_some()
-                && self.bodies.len() + self.food.len() + self.eggs.len() + fortress::RESERVE
+                && self.bodies.len() + self.food.len() + self.eggs.len() + self.tune.fort_reserve
                     >= MAX_BODIES
             {
                 continue;
@@ -1606,7 +1603,7 @@ impl Game {
                                 previous,
                                 next,
                                 d.position,
-                                fleet::DRONE_RADIUS + bullet.radius,
+                                self.tune.fleet_drone_radius + bullet.radius,
                             )
                             .map(|t| (d, t))
                         })
@@ -1614,7 +1611,7 @@ impl Game {
                     if let Some((drone, fraction)) = drone_hit
                         && hit.is_none_or(|(_, best)| fraction < best)
                     {
-                        if fleet::damage_drone(&mut self.pad, drone, bullet.damage) {
+                        if fleet::damage_drone(&mut self.pad, drone, bullet.damage, &self.tune) {
                             drone_losses.push(drone);
                         }
                         bullet.position = previous.lerp(next, fraction);

@@ -6,20 +6,22 @@ pub(super) fn outfit_price() -> Vec<(Material, f32)> {
     vec![(Material::Metal, 30.0), (Material::Crystal, 10.0)]
 }
 pub(super) const RAW_INPUT_PRICE: [(Material, f32); 1] = [(Material::Metal, 10.0)];
-const RAW_INPUT_LOT: f32 = 20.0;
-const RAW_INPUT_ORDERS: u8 = 10;
 
 impl Game {
     pub(super) fn home_input_stock(&self) -> f32 {
-        f32::from(RAW_INPUT_ORDERS.saturating_sub(self.home_input_orders)) * RAW_INPUT_LOT
+        f32::from(
+            self.tune
+                .procurement_raw_input_orders
+                .saturating_sub(self.home_input_orders),
+        ) * self.tune.procurement_raw_input_lot
     }
 
     pub(super) fn raw_input_block(&self) -> Option<&'static str> {
         if !self.starter_workshop() {
             Some("VISIT HOME WORKSHOP")
-        } else if self.home_input_orders >= RAW_INPUT_ORDERS {
+        } else if self.home_input_orders >= self.tune.procurement_raw_input_orders {
             Some("HOME VOLATILES SOLD OUT")
-        } else if self.cargo.room(Material::Volatiles) < RAW_INPUT_LOT {
+        } else if self.cargo.room(Material::Volatiles) < self.tune.procurement_raw_input_lot {
             Some("NEEDS 20V HOLD SPACE")
         } else if !self.cargo.can_afford(&RAW_INPUT_PRICE) {
             Some("NEEDS 10M")
@@ -33,10 +35,10 @@ impl Game {
             self.bench_failed(why.into());
             return;
         }
-        if self
-            .cargo
-            .exchange(&RAW_INPUT_PRICE, &[(Material::Volatiles, RAW_INPUT_LOT)])
-        {
+        if self.cargo.exchange(
+            &RAW_INPUT_PRICE,
+            &[(Material::Volatiles, self.tune.procurement_raw_input_lot)],
+        ) {
             self.home_input_orders += 1;
             self.bench_done(
                 format!("VOLATILES +20 - HOME STOCK {:.0}V", self.home_input_stock()),
@@ -210,7 +212,7 @@ mod tests {
         game.bench_alt();
         assert_eq!(game.cargo.fuel, 25.0);
         game.bench_select(BenchAction::RawInput);
-        for _ in 1..RAW_INPUT_ORDERS {
+        for _ in 1..DEFAULT_TUNING.procurement_raw_input_orders {
             game.bench_confirm();
         }
         assert_eq!(game.home_input_stock(), 0.0);

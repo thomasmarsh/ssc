@@ -2,7 +2,6 @@
 //! nothing here asks what species a creature is. Tuning constants that used to belong to
 //! one kind of enemy are now genes (sight, standoff, rage, fire period, ...).
 
-use super::civ as civil;
 use super::wildlife::Mode;
 use super::*;
 use crate::genome::{Diet, Fear, Social, Trigger, Weapon};
@@ -71,7 +70,10 @@ impl Game {
         // A ship landed on a pad and unseen is noticed at a fraction of the distance, and
         // creatures lose it for good once it has stayed hidden long enough; creatures that
         // know of a pad go for it instead (see `pads`).
-        let (hide, hidden_long) = (self.pad.sight_mult(), self.pad.lost_track());
+        let (hide, hidden_long) = (
+            self.pad.sight_mult(&self.tune),
+            self.pad.lost_track(&self.tune),
+        );
         let hidden = hide > 1.0;
         // A quiet ship in a dim field is noticed at a fraction of the distance.
         let dim = self.dim_notice();
@@ -135,7 +137,7 @@ impl Game {
             .farm
             .live
             .iter()
-            .filter(|l| l.growth >= farm::GRAZE_FLOOR + 0.05)
+            .filter(|l| l.growth >= self.tune.farm_graze_floor + 0.05)
             .map(|l| (l.position, l.species))
             .collect();
         let farm = &self.farm;
@@ -250,7 +252,7 @@ impl Game {
                 if other.civil
                     && civ.is_none()
                     && pull.is_none()
-                    && distance_squared < civil::SHOO_RANGE * civil::SHOO_RANGE
+                    && distance_squared < self.tune.civ_shoo_range * self.tune.civ_shoo_range
                     && civil_near.is_none_or(|(best, _)| distance_squared < best)
                 {
                     civil_near = Some((distance_squared, -offset));
@@ -280,6 +282,7 @@ impl Game {
                 body.position,
                 player_distance,
                 g.lose * phenotype.sensor_acuity,
+                &self.tune,
             );
             let (sight, lose) = (
                 g.sight * phenotype.sensor_acuity * posture.reach,
@@ -537,7 +540,7 @@ impl Game {
             }
             // A builder in the middle of a structure stays within reach of it.
             if let (false, Some(home)) = (body.alert, homes.get(&body.id)) {
-                desired += super::build::home_pull(body.position, *home, cruise);
+                desired += super::build::home_pull(body.position, *home, cruise, &self.tune);
             }
             let chasing = !body.alert && prey.is_some();
             if let (true, Some((_, toward))) = (chasing, prey) {

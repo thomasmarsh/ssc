@@ -2,9 +2,6 @@
 use super::upgrades::Rarity;
 use super::*;
 
-const INTERVAL: f32 = 60.0;
-const LOTS: u8 = 10;
-const ACTIVE_CAP: usize = 4;
 const RECORD_CAP: usize = 128;
 const PRICE: [(Material, f32); 1] = [(Material::Metal, 10.0)];
 const OUTPUT: [(Material, f32); 1] = [(Material::Volatiles, 20.0)];
@@ -116,7 +113,9 @@ impl Game {
             if self.jobs.agreements.len() >= RECORD_CAP {
                 return Some("AGREEMENT RECORD LIMIT".into());
             }
-            if self.jobs.agreements.values().filter(|a| a.open()).count() >= ACTIVE_CAP {
+            if self.jobs.agreements.values().filter(|a| a.open()).count()
+                >= self.tune.agreement_active_cap
+            {
                 return Some("FOUR ACTIVE AGREEMENTS MAX".into());
             }
         }
@@ -154,7 +153,7 @@ impl Game {
                 Agreement {
                     capital,
                     dock,
-                    lots: LOTS,
+                    lots: self.tune.agreement_lots,
                     cooldown: 0.0,
                     paused: false,
                     end: None,
@@ -167,7 +166,7 @@ impl Game {
         } else if self.cargo.exchange(&PRICE, &OUTPUT) {
             let a = self.jobs.agreements.get_mut(&id).unwrap();
             a.lots -= 1;
-            a.cooldown = INTERVAL;
+            a.cooldown = self.tune.agreement_interval;
             let lots = a.lots;
             self.bench_done(
                 format!("PAID 10M; VOLATILES +20 - {lots} LOTS LEFT"),
@@ -260,7 +259,7 @@ impl Game {
                 "CONTACT ({},{}) -> pad ({endpoint}). Player hauls. 10M buys 20V; 60s/lot; {} lots, no restock. No rewards/alliance. Dock loss closes; relations suspend.",
                 capital.x,
                 capital.y,
-                a.map_or(LOTS, |a| a.lots)
+                a.map_or(self.tune.agreement_lots, |a| a.lots)
             ),
             ok: if control {
                 a.is_some_and(Agreement::open)
@@ -416,9 +415,9 @@ mod tests {
             game.act_agreement(id);
             match end {
                 None => {
-                    for _ in 0..LOTS {
+                    for _ in 0..DEFAULT_TUNING.agreement_lots {
                         game.cargo.volatiles = 0.0;
-                        game.update_agreements(INTERVAL);
+                        game.update_agreements(DEFAULT_TUNING.agreement_interval);
                         game.act_agreement(id);
                     }
                     assert_eq!(game.cargo.metal, 0.0);
@@ -459,7 +458,7 @@ mod tests {
         game.pad.pads.get_mut(&dock).unwrap().warehouse = true;
         game.act_agreement(id);
         let record = game.jobs.agreements.remove(&id).unwrap();
-        for other in 0..ACTIVE_CAP as u64 {
+        for other in 0..DEFAULT_TUNING.agreement_active_cap as u64 {
             game.jobs.agreements.insert(other, record.clone());
         }
         assert!(game.agreement_block(id).unwrap().contains("FOUR"));

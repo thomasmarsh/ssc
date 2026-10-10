@@ -283,7 +283,7 @@ impl Game {
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.health = ship.max_health * 0.4;
         }
-        self.farm.granary.insert(actor, farm::GRANARY_CAP);
+        self.farm.granary.insert(actor, self.tune.farm_granary_cap);
         self.cargo.biomass = 0.0;
         self.bench_select(BenchAction::Tithe);
         self.bench_confirm();

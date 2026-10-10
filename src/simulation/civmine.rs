@@ -24,34 +24,6 @@ use super::*;
 use crate::territory::{CivRole, Standing};
 use std::collections::BTreeSet;
 
-/// The most the stash holds, all materials together.
-pub const STOCK_CAP: f32 = 150.0;
-pub const MAX_MINERS: usize = 2;
-/// Ore a territory may work in one session: this, plus `ORE_PER_STRENGTH` times its strength.
-pub const ORE_BUDGET: f32 = 450.0;
-const ORE_PER_STRENGTH: f32 = 200.0;
-/// A miner works within this of a rock's surface, and looks this far for a rock.
-const WORK_RANGE: f32 = 190.0;
-const SEARCH: f32 = 2600.0;
-/// The ship this close sends an unescorted miner running; an escort within `ESCORT_RANGE` of
-/// the miner keeps it working.
-pub const FLEE_RANGE: f32 = 900.0;
-const ESCORT_RANGE: f32 = 520.0;
-/// The ore a miner works per second relative to the beam (the stash is a civilization's, with
-/// many hands).
-const YIELD: f32 = 1.5;
-/// Units a capital base takes from the stash per second while it can build.
-pub const FEED_RATE: f32 = 1.4;
-/// Share of the stash a fallen capital spills as pickups.
-pub const SPILL: f32 = 0.5;
-/// Seconds before another miner is looked for after a failed search, and a fleeing miner's rest.
-const RETRY: f32 = 5.0;
-const REST: f32 = 6.0;
-/// How long a miner may spend reaching a rock (walls and crowds can trap it).
-const PATIENCE: f32 = 25.0;
-/// The stash shows a marker above this much.
-pub const MARK_AT: f32 = 8.0;
-
 #[derive(Clone, Debug)]
 pub struct Miner {
     pub body: u64,
@@ -83,8 +55,8 @@ impl Mining {
         self.stock.iter().sum()
     }
 
-    fn room(&self) -> f32 {
-        (STOCK_CAP - self.total()).max(0.0)
+    fn room(&self, tune: &Tunables) -> f32 {
+        (tune.civmine_stock_cap - self.total()).max(0.0)
     }
 
     /// Takes up to `amount` from the richest material, returning what came out.
@@ -121,8 +93,8 @@ pub struct Cache {
 
 impl Game {
     pub fn ore_budget(&self, territory: u64) -> f32 {
-        ORE_BUDGET
-            + ORE_PER_STRENGTH
+        self.tune.civmine_ore_budget
+            + self.tune.civmine_ore_per_strength
                 * self
                     .civs
                     .territories
@@ -167,13 +139,13 @@ impl Game {
                 continue;
             };
             let total = mining.total();
-            if total < MARK_AT {
+            if total < self.tune.civmine_mark_at {
                 continue;
             }
             let mix = mining.stock.map(|v| v / total);
             out.push(Cache {
                 at: body.position + Vec2::new(body.radius * 1.5, -body.radius * 1.5),
-                fill: (total / STOCK_CAP).clamp(0.0, 1.0),
+                fill: (total / self.tune.civmine_stock_cap).clamp(0.0, 1.0),
                 tint: self.civs.colors.get(&tid).copied().unwrap_or([1.0; 3]),
                 mix,
             });
@@ -190,7 +162,7 @@ impl Game {
         mining.active = false;
         let mut spilled = 0.0;
         for (k, kind) in Material::MINERALS.into_iter().enumerate() {
-            let amount = (stock[k] * SPILL).floor();
+            let amount = (stock[k] * self.tune.civmine_spill).floor();
             if amount >= 1.0 {
                 spilled += amount;
                 let drift = Vec2::from_angle(2.1 * k as f32 + 0.4) * 55.0;
@@ -254,14 +226,16 @@ impl Game {
             })
             .map(|b| b.position)
             .collect();
-        let escorted = |at: Vec2| escorts.iter().any(|e| e.distance(at) < ESCORT_RANGE);
-        let hunted = |at: Vec2| ship.is_some_and(|s| s.distance(at) < FLEE_RANGE);
+        let (escort_range, flee_range) =
+            (self.tune.civmine_escort_range, self.tune.civmine_flee_range);
+        let escorted = |at: Vec2| escorts.iter().any(|e| e.distance(at) < escort_range);
+        let hunted = |at: Vec2| ship.is_some_and(|s| s.distance(at) < flee_range);
 
         // A new miner, if there is a slot, ore left to work, room in the stash and quiet.
-        if mining.miners.len() < MAX_MINERS
+        if mining.miners.len() < self.tune.civmine_max_miners
             && mining.retry <= 0.0
             && mining.spent < budget
-            && mining.room() > 1.0
+            && mining.room(&self.tune) > 1.0
         {
             self.assign_miner(tid, &mut mining, &escorted, &hunted, seed);
         }
@@ -280,7 +254,7 @@ impl Game {
             mining.miners[slot].working = false;
             if hunted(at) && !escorted(at) {
                 // Run from the ship; resume once it is gone.
-                mining.miners[slot].fled = REST;
+                mining.miners[slot].fled = self.tune.civmine_rest;
                 let away = ship.map_or(Vec2::X, |s| (at - s).normalize_or_zero());
                 self.bodies[bi].velocity = away * speed * 0.9;
                 continue;
@@ -291,11 +265,11 @@ impl Game {
             let rock = &self.bodies[ri];
             let offset = rock.position - at;
             let gap = offset.length() - rock.radius;
-            if gap > WORK_RANGE {
+            if gap > self.tune.civmine_work_range {
                 mining.miners[slot].patience -= dt;
                 if mining.miners[slot].patience <= 0.0 {
                     ended.push(slot);
-                    mining.retry = RETRY;
+                    mining.retry = self.tune.civmine_retry;
                 }
                 self.bodies[bi].velocity = offset.normalize_or_zero() * speed * 0.6;
                 continue;
@@ -318,14 +292,14 @@ impl Game {
                 .sum();
             let end = rock.position - offset.normalize_or_zero() * radius;
             self.bodies[bi].velocity *= 0.8;
-            let want = rate(kind, &self.tune) * YIELD * dt;
+            let want = rate(kind, &self.tune) * self.tune.civmine_yield * dt;
             let left = (budget - mining.spent).max(0.0);
             let mined = want
                 .min(ore)
-                .min(mining.room() / fraction.max(1e-6))
+                .min(mining.room(&self.tune) / fraction.max(1e-6))
                 .min(left / fraction.max(1e-6));
             if mined <= 1e-6 {
-                if left <= 1e-6 || mining.room() <= 1e-6 {
+                if left <= 1e-6 || mining.room(&self.tune) <= 1e-6 {
                     ended.push(slot);
                 }
                 continue;
@@ -338,7 +312,7 @@ impl Game {
             }
             mining.spent += mined * fraction;
             mining.miners[slot].working = true;
-            mining.miners[slot].patience = PATIENCE;
+            mining.miners[slot].patience = self.tune.civmine_patience;
             mining.miners[slot].end = end;
             let extracted = super::mining::Contents(std::array::from_fn(|i| {
                 if Material::MINERALS.contains(&super::mining::Contents::MATERIALS[i]) {
@@ -350,7 +324,7 @@ impl Game {
             if let Some(leftover) = self.drain_rock_contents(ri, extracted) {
                 for (material, amount) in leftover.amounts() {
                     if Material::MINERALS.contains(&material) {
-                        mining.stock[material as usize] += amount.min(mining.room());
+                        mining.stock[material as usize] += amount.min(mining.room(&self.tune));
                     } else {
                         self.drop_item(end, Vec2::ZERO, Item::Material(material, amount));
                     }
@@ -426,7 +400,7 @@ impl Game {
                         )
                         && !taken.contains(&r.id)
                         && r.origin.is_some()
-                        && r.position.distance(at) - r.radius < SEARCH
+                        && r.position.distance(at) - r.radius < self.tune.civmine_search
                         && self.clear_shot(at, r.position)
                 })
                 .filter(|r| {
@@ -448,12 +422,12 @@ impl Game {
                 rock: rocks[pick].3,
                 fled: 0.0,
                 working: false,
-                patience: PATIENCE,
+                patience: self.tune.civmine_patience,
                 end: at,
             });
             return;
         }
-        mining.retry = RETRY;
+        mining.retry = self.tune.civmine_retry;
     }
 }
 
@@ -510,8 +484,12 @@ mod tests {
             hold(&mut game, spot, 10.0);
             let m = game.civs.mining.get(&t.id).expect("a horde mines");
             seen_miners = seen_miners.max(m.miners.len());
-            assert!(m.miners.len() <= MAX_MINERS);
-            assert!(m.total() <= STOCK_CAP + 1e-3, "stash {}", m.total());
+            assert!(m.miners.len() <= DEFAULT_TUNING.civmine_max_miners);
+            assert!(
+                m.total() <= DEFAULT_TUNING.civmine_stock_cap + 1e-3,
+                "stash {}",
+                m.total()
+            );
             assert!(m.spent <= game.ore_budget(t.id) + 1e-3);
             let rocks: Vec<u64> = m.miners.iter().map(|x| x.rock).collect();
             let mut unique = rocks.clone();
@@ -576,7 +554,7 @@ mod tests {
             game.step(0.05, Input::default());
         }
         assert!(game.civs.mining[&t.id].miners.is_empty());
-        assert!(game.civs.mining[&t.id].total() <= STOCK_CAP + 1e-3);
+        assert!(game.civs.mining[&t.id].total() <= DEFAULT_TUNING.civmine_stock_cap + 1e-3);
         // A ship on top of the capital sends unescorted miners running, and nobody starts.
         game.civs.mining.insert(t.id, Mining::default());
         let heart = t.capital.center();
@@ -587,7 +565,10 @@ mod tests {
             let m = &game.civs.mining[&t.id];
             for miner in m.miners.iter().filter(|x| x.working) {
                 let at = game.body(miner.body).unwrap().position;
-                assert!(at.distance(heart) >= FLEE_RANGE || game.civ_strength(t.id) > 0);
+                assert!(
+                    at.distance(heart) >= DEFAULT_TUNING.civmine_flee_range
+                        || game.civ_strength(t.id) > 0
+                );
             }
         }
     }

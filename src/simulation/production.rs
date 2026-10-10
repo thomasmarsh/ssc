@@ -8,7 +8,6 @@ pub const WAREHOUSE_PRICE: [(Material, f32); 1] = [(Material::Metal, 30.0)];
 pub const WATER_TANK_PRICE: [(Material, f32); 1] = [(Material::Metal, 20.0)];
 pub const WATER_EXTRACTOR_PRICE: [(Material, f32); 2] =
     [(Material::Metal, 30.0), (Material::Crystal, 10.0)];
-const WATER_PER_SECOND: f32 = 1.0;
 
 /// Renewable aquifers are independent of ore composition and existing generation draws.
 /// HOME guarantees a useful first homestead; half of other planetoids are dry.
@@ -22,10 +21,6 @@ fn has_aquifer(seed: u64, key: pads::PadKey) -> bool {
             == 0
 }
 
-const INPUT: f32 = 10.0;
-const OUTPUT: f32 = 25.0;
-const SECONDS: f32 = 10.0;
-
 /// One machine per pad, with one reserved batch at most.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Refinery {
@@ -33,33 +28,35 @@ pub struct Refinery {
     remaining: Option<f32>,
 }
 impl Refinery {
-    pub(super) fn status(&self, stash: &Cargo, cap: f32) -> String {
+    pub(super) fn status(&self, stash: &Cargo, cap: f32, tune: &Tunables) -> String {
         if let Some(seconds) = self.remaining.filter(|s| *s > 0.0) {
             format!("REFINING {seconds:.1}s")
-        } else if stash.fuel + OUTPUT > cap {
+        } else if stash.fuel + tune.production_refinery_output > cap {
             "FUEL STASH FULL".into()
         } else if self.remaining.is_some() {
             "BATCH READY".into()
-        } else if stash.volatiles < INPUT {
+        } else if stash.volatiles < tune.production_refinery_input {
             "NEEDS 10V IN STASH".into()
         } else {
             "READY".into()
         }
     }
 
-    fn tick(&mut self, stash: &mut Cargo, dt: f32, cap: f32) {
+    fn tick(&mut self, stash: &mut Cargo, dt: f32, cap: f32, tune: &Tunables) {
         if self.remaining.is_none() {
-            if stash.fuel + OUTPUT > cap || stash.volatiles < INPUT {
+            if stash.fuel + tune.production_refinery_output > cap
+                || stash.volatiles < tune.production_refinery_input
+            {
                 return;
             }
             // Site stocks always pay, including when developer free ship purchases are on.
-            stash.take(Material::Volatiles, INPUT);
-            self.remaining = Some(SECONDS);
+            stash.take(Material::Volatiles, tune.production_refinery_input);
+            self.remaining = Some(tune.production_refinery_seconds);
         }
         let remaining = self.remaining.as_mut().unwrap();
         *remaining = (*remaining - dt).max(0.0);
-        if *remaining == 0.0 && stash.fuel + OUTPUT <= cap {
-            stash.add_capped(Material::Fuel, OUTPUT, cap);
+        if *remaining == 0.0 && stash.fuel + tune.production_refinery_output <= cap {
+            stash.add_capped(Material::Fuel, tune.production_refinery_output, cap);
             self.remaining = None;
         }
     }
@@ -203,13 +200,16 @@ impl Game {
                 continue;
             }
             if pad.water_extractor {
-                let cap = pad.stash_cap(Material::Water);
-                pad.stash
-                    .add_capped(Material::Water, WATER_PER_SECOND * dt, cap);
+                let cap = pad.stash_cap(Material::Water, &self.tune);
+                pad.stash.add_capped(
+                    Material::Water,
+                    self.tune.production_water_per_second * dt,
+                    cap,
+                );
             }
-            let fuel_cap = pad.stash_cap(Material::Fuel);
+            let fuel_cap = pad.stash_cap(Material::Fuel, &self.tune);
             if let Some(refinery) = &mut pad.refinery {
-                refinery.tick(&mut pad.stash, dt, fuel_cap);
+                refinery.tick(&mut pad.stash, dt, fuel_cap, &self.tune);
             }
         }
     }
@@ -367,7 +367,10 @@ mod tests {
         assert_eq!(game.cargo.metal, 10.0);
         game.bench_confirm();
         assert_eq!(game.cargo.metal, 10.0);
-        assert_eq!(game.pad.pads[&key].stash_cap(Material::Water), 100.0);
+        assert_eq!(
+            game.pad.pads[&key].stash_cap(Material::Water, &DEFAULT_TUNING),
+            100.0
+        );
         for material in Material::ALL.into_iter().filter(|m| *m != Material::Water) {
             game.pad
                 .pads
@@ -401,7 +404,10 @@ mod tests {
         let (loaded, _) = Game::from_save(state, generator);
         assert!(loaded.pad.pads[&key].warehouse);
         assert_eq!(loaded.pad.pads[&key].stash.fuel, 275.0);
-        assert_eq!(loaded.pad.pads[&key].stash_cap(Material::Fuel), 300.0);
+        assert_eq!(
+            loaded.pad.pads[&key].stash_cap(Material::Fuel, &DEFAULT_TUNING),
+            300.0
+        );
         game.pad.landed = None;
         let before = game.cargo.metal;
         game.buy_warehouse();
@@ -433,10 +439,11 @@ mod tests {
         assert_eq!(loaded.pad.pads[&key].stash.volatiles, 10.0);
         let pad = &loaded.pad.pads[&key];
         assert_eq!(
-            pad.refinery
-                .as_ref()
-                .unwrap()
-                .status(&pad.stash, pad.stash_cap(Material::Fuel)),
+            pad.refinery.as_ref().unwrap().status(
+                &pad.stash,
+                pad.stash_cap(Material::Fuel, &DEFAULT_TUNING),
+                &DEFAULT_TUNING
+            ),
             "FUEL STASH FULL"
         );
     }
@@ -534,8 +541,8 @@ mod tests {
         game.bench_confirm();
         assert_eq!(game.cargo.metal, 20.0);
         assert_eq!(
-            game.pad.pads[&key].stash_cap(Material::Metal),
-            pads::STASH_CAP
+            game.pad.pads[&key].stash_cap(Material::Metal, &DEFAULT_TUNING),
+            DEFAULT_TUNING.pad_stash_cap
         );
         game.pad.pads.get_mut(&key).unwrap().stash.water = 290.0;
         game.cargo.water = 30.0;
@@ -561,7 +568,10 @@ mod tests {
         let (loaded, _) = Game::from_save(state, generator);
         assert!(loaded.pad.pads[&key].water_tank);
         assert_eq!(loaded.pad.pads[&key].stash.water, 290.0);
-        assert_eq!(loaded.pad.pads[&key].stash_cap(Material::Water), 300.0);
+        assert_eq!(
+            loaded.pad.pads[&key].stash_cap(Material::Water, &DEFAULT_TUNING),
+            300.0
+        );
         game.pad.landed = None;
         game.buy_water_tank();
         assert_eq!(game.cargo.metal, 20.0);
@@ -619,19 +629,39 @@ mod tests {
             fuel: 76.0,
             ..Default::default()
         };
-        refinery.tick(&mut stash, 0.05, pads::STASH_CAP);
+        refinery.tick(
+            &mut stash,
+            0.05,
+            DEFAULT_TUNING.pad_stash_cap,
+            &DEFAULT_TUNING,
+        );
         assert_eq!(stash.volatiles, 30.0);
         stash.fuel = 75.0;
-        refinery.tick(&mut stash, 0.05, pads::STASH_CAP);
+        refinery.tick(
+            &mut stash,
+            0.05,
+            DEFAULT_TUNING.pad_stash_cap,
+            &DEFAULT_TUNING,
+        );
         assert_eq!(stash.volatiles, 20.0);
         stash.fuel = 100.0;
         for _ in 0..250 {
-            refinery.tick(&mut stash, 0.05, pads::STASH_CAP);
+            refinery.tick(
+                &mut stash,
+                0.05,
+                DEFAULT_TUNING.pad_stash_cap,
+                &DEFAULT_TUNING,
+            );
         }
         assert_eq!(refinery.remaining, Some(0.0));
         assert_eq!(stash.fuel, 100.0);
         stash.fuel = 75.0;
-        refinery.tick(&mut stash, 0.05, pads::STASH_CAP);
+        refinery.tick(
+            &mut stash,
+            0.05,
+            DEFAULT_TUNING.pad_stash_cap,
+            &DEFAULT_TUNING,
+        );
         assert_eq!(stash.fuel, 100.0);
         assert_eq!(stash.volatiles, 20.0);
         assert!(refinery.remaining.is_none());

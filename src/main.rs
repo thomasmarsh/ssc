@@ -1873,19 +1873,19 @@ fn smoke_run(
                 .game
                 .bench_select(ssc::simulation::BenchAction::ApplyDroneBlueprint),
             "mining-fleet-retrofit" => {
+                let last = session.game.tune.fleet_max_drones - 1;
                 session
                     .game
                     .bench_select(ssc::simulation::BenchAction::DroneUpgrade(
-                        ssc::simulation::fleet::MAX_DRONES - 1,
+                        last,
                         ssc::simulation::fleet::DroneUpgrade::Cargo,
                     ))
             }
             "mining-fleet-status" => {
+                let last = session.game.tune.fleet_max_drones - 1;
                 session
                     .game
-                    .bench_select(ssc::simulation::BenchAction::MiningDroneStatus(
-                        ssc::simulation::fleet::MAX_DRONES - 1,
-                    ))
+                    .bench_select(ssc::simulation::BenchAction::MiningDroneStatus(last))
             }
             _ => {}
         }
@@ -2349,7 +2349,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
             }
             game.bench_select(BenchAction::MiningDrone);
             if mode.starts_with("mining-fleet") {
-                for _ in 0..ssc::simulation::fleet::MAX_DRONES - 1 {
+                for _ in 0..game.tune.fleet_max_drones - 1 {
                     game.cargo.metal = 40.0;
                     game.cargo.crystal = 10.0;
                     game.bench_confirm();
@@ -2371,7 +2371,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 ) {
                     game.bench_confirm();
                     game.bench_select(BenchAction::MiningDroneStatus(
-                        ssc::simulation::fleet::MAX_DRONES - 1,
+                        game.tune.fleet_max_drones - 1,
                     ));
                     if matches!(mode, "mining-fleet-retrofit" | "mining-fleet-template") {
                         game.cargo.fuel = 4.0;
@@ -2382,7 +2382,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                         game.cargo.metal = if template { 80.0 } else { 20.0 };
                         game.cargo.crystal = if template { 20.0 } else { 5.0 };
                         game.bench_select(BenchAction::DroneUpgrade(
-                            ssc::simulation::fleet::MAX_DRONES - 1,
+                            game.tune.fleet_max_drones - 1,
                             ssc::simulation::fleet::DroneUpgrade::Cargo,
                         ));
                     }

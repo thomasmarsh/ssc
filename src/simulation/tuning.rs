@@ -935,6 +935,36 @@ fn validate(t: &Tunables) -> Result<(), String> {
             && t.elder_escort_cap_calm <= t.elder_escort_cap_enraged,
         "an enraged elder acts at least as often as a calm one"
     );
+    rule!(
+        t.civ_war_at <= t.civ_raid_at,
+        "civ_war_at {} (first war party) cannot come after civ_raid_at {} (first big raid)",
+        t.civ_war_at,
+        t.civ_raid_at
+    );
+    rule!(
+        t.farm_sprout <= t.farm_ripe
+            && t.farm_stump <= t.farm_ripe
+            && t.farm_graze_floor <= t.farm_ripe,
+        "plant growth marks (sprout, stump, graze floor) must not exceed the ripe mark"
+    );
+    rule!(
+        t.farm_ripe_seed_cum_none <= t.farm_ripe_seed_cum_one,
+        "the seed table's cumulative marks must stay ordered: none {} <= one {}",
+        t.farm_ripe_seed_cum_none,
+        t.farm_ripe_seed_cum_one
+    );
+    rule!(
+        t.farm_field_crops_min <= t.farm_field_crops_max,
+        "farm_field_crops_min {} cannot exceed farm_field_crops_max {}",
+        t.farm_field_crops_min,
+        t.farm_field_crops_max
+    );
+    rule!(
+        t.pad_reload_raid_damage_min <= t.pad_reload_raid_damage_max,
+        "pad_reload_raid_damage_min {} cannot exceed pad_reload_raid_damage_max {}",
+        t.pad_reload_raid_damage_min,
+        t.pad_reload_raid_damage_max
+    );
     Ok(())
 }
 

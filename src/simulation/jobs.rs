@@ -5,7 +5,6 @@ use super::*;
 use crate::territory::Standing;
 use std::collections::BTreeSet;
 
-const ACTIVE_CAP: usize = 4;
 const RECORD_CAP: usize = 128;
 const DELIVERY: [(Material, f32); 1] = [(Material::Fuel, 25.0)];
 
@@ -346,7 +345,7 @@ impl Game {
             if kind == JobKind::Pest && !job.pest.as_ref().is_some_and(|p| self.pest_removed(p)) {
                 return Some("ACTIVE - REMOVE THE MARKED PEST");
             }
-        } else if self.jobs.active().len() >= ACTIVE_CAP {
+        } else if self.jobs.active().len() >= self.tune.jobs_active_cap {
             return Some("FOUR ACTIVE JOBS - SETTLE OR CANCEL");
         } else if self.jobs.records.len() >= RECORD_CAP {
             return Some("CONTRACT LOG FULL (128)");
@@ -965,7 +964,7 @@ mod tests {
         let mut game = Game::new(42);
         let civ = contact(&mut game);
         let offer = game.job_offer(&civ, JobKind::Fuel);
-        for id in 0..ACTIVE_CAP as u64 {
+        for id in 0..DEFAULT_TUNING.jobs_active_cap as u64 {
             game.jobs.records.insert((id, JobKind::Fuel), offer.clone());
         }
         assert_eq!(

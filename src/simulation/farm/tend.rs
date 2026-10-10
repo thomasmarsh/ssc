@@ -32,12 +32,6 @@ pub struct Greenhouse {
     pub tint: [f32; 3],
 }
 
-/// Biomass a tithe of `tithe_amount` buys from a friendly farm at regard `friendly_at`, and
-/// the extra warmth adds (up to this much again at maximum regard).
-pub const TRADE_BIOMASS: f32 = 0.6;
-/// Chance a trade also gives a seed: this at friendly regard, plus this much more at maximum.
-pub const SEED_GIFT: (f32, f32) = (0.35, 0.35);
-
 /// Salt of the seed-gift roll.
 const GIFT_SALT: u64 = 0xFA12_3000_0000_0006;
 
@@ -49,23 +43,23 @@ pub fn warmth(regard: f32, tune: &Tunables) -> f32 {
 /// Biomass a friendly farm sells for a tithe of `given` material at `regard`, from a granary
 /// holding `store` (never more than it has).
 pub fn biomass_offer(store: f32, regard: f32, given: f32, tune: &Tunables) -> f32 {
-    (given * TRADE_BIOMASS * (1.0 + warmth(regard, tune))).min(store.max(0.0))
+    (given * tune.farm_trade_biomass * (1.0 + warmth(regard, tune))).min(store.max(0.0))
 }
 
 /// Chance a trade at `regard` also gives a seed.
 pub fn seed_gift_chance(regard: f32, tune: &Tunables) -> f32 {
-    SEED_GIFT.0 + SEED_GIFT.1 * warmth(regard, tune)
+    tune.farm_seed_gift_base + tune.farm_seed_gift_warmth * warmth(regard, tune)
 }
 
 /// Where plot `n` of the greenhouse of station `key` points: a world-frame angle. Pure.
-pub fn plot_angle(seed: u64, key: PadKey, n: u32) -> f32 {
+pub fn plot_angle(seed: u64, key: PadKey, n: u32, tune: &Tunables) -> f32 {
     let offset = Rng::new(hash2(
         seed ^ TEND_SALT ^ 0x6E,
         key.0.x.wrapping_mul(31).wrapping_add(key.1 as i32),
         key.0.y,
     ))
     .range(0.0, std::f32::consts::TAU);
-    offset + n as f32 * std::f32::consts::TAU / GREENHOUSE_PLOTS as f32
+    offset + n as f32 * std::f32::consts::TAU / tune.farm_greenhouse_plots as f32
 }
 
 impl Farm {
@@ -132,23 +126,25 @@ impl Game {
     pub fn greenhouse_around(&self, at: Vec2) -> Option<Greenhouse> {
         self.greenhouses()
             .into_iter()
-            .find(|g| g.center.distance(at) <= GREENHOUSE_RADIUS)
+            .find(|g| g.center.distance(at) <= self.tune.farm_greenhouse_radius)
     }
 
     /// The nearest free plot of a greenhouse within the ship's reach: its angle.
     fn free_plot(&self, house: &Greenhouse, ship: Vec2) -> Option<f32> {
-        (0..GREENHOUSE_PLOTS)
-            .map(|n| plot_angle(self.seed, house.key, n))
+        (0..self.tune.farm_greenhouse_plots)
+            .map(|n| plot_angle(self.seed, house.key, n, &self.tune))
             .filter(|&angle| {
                 !self.farm.plants.iter().any(|p| {
-                    p.planet == house.key && arc(p.anchor, angle, GREENHOUSE_RING) < PLOT_GAP
+                    p.planet == house.key
+                        && arc(p.anchor, angle, self.tune.farm_greenhouse_ring)
+                            < self.tune.farm_plot_gap
                 })
             })
             .map(|angle| {
-                let at = house.center + Vec2::from_angle(angle) * GREENHOUSE_RING;
+                let at = house.center + Vec2::from_angle(angle) * self.tune.farm_greenhouse_ring;
                 (at.distance(ship), angle)
             })
-            .filter(|(gap, _)| *gap <= GREENHOUSE_REACH)
+            .filter(|(gap, _)| *gap <= self.tune.farm_greenhouse_reach)
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, angle)| angle)
     }
@@ -160,7 +156,7 @@ impl Game {
         if standing != Standing::Fallen && self.civ_hostile(house.territory) {
             return Some(PlantHint::Unwelcome);
         }
-        if ship.velocity.length() > PLANT_SPEED {
+        if ship.velocity.length() > self.tune.farm_plant_speed {
             return Some(PlantHint::TooFast);
         }
         Some(match self.free_plot(&house, ship.position) {
@@ -175,7 +171,7 @@ impl Game {
             b.kind == BodyKind::Base
                 && b.active
                 && b.fort.is_none()
-                && b.position.distance(ship) - b.radius <= BARE_HULL_REACH
+                && b.position.distance(ship) - b.radius <= self.tune.farm_bare_hull_reach
         })
     }
 
@@ -210,14 +206,14 @@ impl Game {
             }
             let mut rng = Rng::new(hash2(self.seed ^ TEND_SALT ^ 0x68, key.0.x, key.0.y));
             let phase = rng.int(0, 1);
-            for n in (0..GREENHOUSE_PLOTS).filter(|n| n % 2 == phase) {
+            for n in (0..self.tune.farm_greenhouse_plots).filter(|n| n % 2 == phase) {
                 let plant = self.tended_plant(
                     &mut rng,
                     crops[n as usize % crops.len()],
                     key,
-                    plot_angle(self.seed, key, n),
+                    plot_angle(self.seed, key, n, &self.tune),
                     center,
-                    GREENHOUSE_RING,
+                    self.tune.farm_greenhouse_ring,
                     tid,
                     true,
                 );
@@ -252,7 +248,7 @@ impl Game {
             seed: rng.next_u64(),
             wild: false,
             harvests: 0,
-            genes: CropGenes::spread(rng, TEND_GENE_SPREAD),
+            genes: CropGenes::spread(rng, self.tune.farm_tend_gene_spread),
             blighted: false,
             immune_until: 0.0,
             tended: tid,
@@ -280,7 +276,10 @@ impl Game {
             key.0.x,
             key.0.y,
         ));
-        let want = ((radius / 110.0).round() as u32).clamp(FIELD_CROPS.0, FIELD_CROPS.1);
+        let want = ((radius / 110.0).round() as u32).clamp(
+            self.tune.farm_field_crops_min,
+            self.tune.farm_field_crops_max,
+        );
         let pad_anchor = self.pad.pads.get(&key).map(|p| p.anchor);
         for n in 0..want {
             let anchor = rng.range(0.0, std::f32::consts::TAU);
@@ -289,8 +288,9 @@ impl Game {
                 .plants
                 .iter()
                 .filter(|p| p.planet == key)
-                .all(|p| arc(anchor, p.anchor, radius) >= SPACING)
-                && pad_anchor.is_none_or(|a| arc(anchor, a, radius) >= SPACING * 1.5);
+                .all(|p| arc(anchor, p.anchor, radius) >= self.tune.farm_spacing)
+                && pad_anchor
+                    .is_none_or(|a| arc(anchor, a, radius) >= self.tune.farm_spacing * 1.5);
             if !clear {
                 continue;
             }
@@ -306,8 +306,8 @@ impl Game {
     /// civilization tends nothing.
     pub(in crate::simulation) fn update_tending(&mut self, dt: f32) {
         let now = self.time;
-        let epoch = (now / TEND_EPOCH).floor();
-        if epoch == ((now - dt) / TEND_EPOCH).floor() {
+        let epoch = (now / self.tune.farm_tend_epoch).floor();
+        if epoch == ((now - dt) / self.tune.farm_tend_epoch).floor() {
             return;
         }
         let mut rounds: Vec<usize> = self
@@ -326,7 +326,11 @@ impl Game {
             }
             let plant = &self.farm.plants[i];
             if plant.blighted {
-                let chance = PRUNE_CHANCE[usize::from(standing == Standing::Weakened)];
+                let chance = if standing == Standing::Weakened {
+                    self.tune.farm_prune_chance_weakened
+                } else {
+                    self.tune.farm_prune_chance_thriving
+                };
                 let mut rng = Rng::new(hash2(
                     self.seed ^ TEND_SALT ^ 0x70,
                     plant.id as i32,
@@ -335,26 +339,29 @@ impl Game {
                 if rng.chance(chance) {
                     let plant = &mut self.farm.plants[i];
                     plant.blighted = false;
-                    plant.immune_until = now + BLIGHT_IMMUNE;
+                    plant.immune_until = now + self.tune.farm_blight_immune;
                 }
                 continue;
             }
-            if self.farm.growth_of(plant, now) < RIPE {
+            if self.farm.growth_of(plant, now) < self.tune.farm_ripe {
                 continue;
             }
             let stored = self.farm.stored(tid);
-            if stored >= GRANARY_CAP - 1e-3 {
+            if stored >= self.tune.farm_granary_cap - 1e-3 {
                 continue;
             }
             let Some(nutrition) = self.farm.flora(plant.species).map(Flora::ship_nutrition) else {
                 continue;
             };
-            let amount = CROP_YIELD * nutrition * plant.genes.yield_mult() * TEND_SHARE;
+            let amount = self.tune.farm_crop_yield
+                * nutrition
+                * plant.genes.yield_mult()
+                * self.tune.farm_tend_share;
             self.farm
                 .granary
-                .insert(tid, (stored + amount).min(GRANARY_CAP));
+                .insert(tid, (stored + amount).min(self.tune.farm_granary_cap));
             let plant = &mut self.farm.plants[i];
-            plant.base = STUMP;
+            plant.base = self.tune.farm_stump;
             plant.since = now;
             plant.harvests += 1;
         }
@@ -413,16 +420,17 @@ impl Game {
             self.farm.seeds.clear();
             self.farm.add_seeds(SeedKind::wild(crop), 3);
         }
-        let angle =
-            (0..GREENHOUSE_PLOTS)
-                .map(|n| plot_angle(self.seed, house.key, n))
-                .find(|&a| {
-                    !self.farm.plants.iter().any(|p| {
-                        p.planet == house.key && arc(p.anchor, a, GREENHOUSE_RING) < PLOT_GAP
-                    })
+        let angle = (0..self.tune.farm_greenhouse_plots)
+            .map(|n| plot_angle(self.seed, house.key, n, &self.tune))
+            .find(|&a| {
+                !self.farm.plants.iter().any(|p| {
+                    p.planet == house.key
+                        && arc(p.anchor, a, self.tune.farm_greenhouse_ring)
+                            < self.tune.farm_plot_gap
                 })
-                .unwrap_or(0.0);
-        let spot = house.center + Vec2::from_angle(angle) * (GREENHOUSE_RING - 60.0);
+            })
+            .unwrap_or(0.0);
+        let spot = house.center + Vec2::from_angle(angle) * (self.tune.farm_greenhouse_ring - 60.0);
         self.teleport(spot);
         Some(spot)
     }

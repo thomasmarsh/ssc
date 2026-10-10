@@ -166,7 +166,7 @@ impl Game {
                 _ => false,
             };
             let feed = match capital.and_then(|t| self.civs.mining.get_mut(&t)) {
-                Some(mining) if can_build => mining.withdraw(civmine::FEED_RATE * dt),
+                Some(mining) if can_build => mining.withdraw(self.tune.civmine_feed_rate * dt),
                 _ => 0.0,
             };
             let trickle = if mining_on {

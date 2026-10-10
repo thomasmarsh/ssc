@@ -34,56 +34,7 @@ pub type PadKey = (SectorId, u32);
 
 /// A pad kit: metal and crystal. At most `KIT_CAP` are carried.
 pub const KIT_PRICE: [(Material, f32); 2] = [(Material::Metal, 40.0), (Material::Crystal, 10.0)];
-pub const KIT_CAP: u32 = 2;
-/// Deploying needs the ship this close to the planetoid's surface and slower than this.
-pub const DEPLOY_RANGE: f32 = 120.0;
-pub const DEPLOY_SPEED: f32 = 60.0;
-pub const MAX_PADS: usize = 6;
-/// Share of the kit price returned when the oldest pad is dismantled for a new one.
-pub const REFUND: f32 = 0.5;
-pub const PAD_HP: f32 = 200.0;
-/// Landing: how close to the pad, how slow, and how near a hostile tenant forbids it.
-pub const LAND_RANGE: f32 = 80.0;
-pub const LAND_SPEED: f32 = 80.0;
-pub const LAND_REFUSE: f32 = 150.0;
-/// Speed given on lifting off.
-pub const TAKEOFF_IMPULSE: f32 = 140.0;
-/// Mending while landed and unseen, per second.
-pub const LANDED_HULL: f32 = 8.0;
-pub const LANDED_SHIELD: f32 = 20.0;
-/// Creatures notice a hidden ship at this multiple of the distance.
-pub const HIDE_SIGHT: f32 = 3.0;
-/// Seconds landed and unseen before alert creatures lose the ship outright.
-pub const LOSE_AFTER: f32 = 4.0;
-/// Seconds cover stays broken after firing, damage or a hostile tenant.
-pub const COVER_BREAK: f32 = 10.0;
-/// Base capacity per material before dedicated site storage.
-pub const STASH_CAP: f32 = 100.0;
-pub const WAREHOUSE_CAP: f32 = 300.0;
-pub const WATER_TANK_CAP: f32 = 300.0;
-/// How much one bench press moves in or out of the stash.
-pub const STASH_STEP: f32 = 25.0;
-/// Field repair: hull per second and metal per hull point; shield per second and fuel
-/// per shield point (2 metal per 10 hull, 2 fuel per 15 shield).
-pub const REPAIR_HULL_RATE: f32 = 5.0;
-pub const REPAIR_METAL: f32 = 0.2;
-pub const REPAIR_SHIELD_RATE: f32 = 6.0;
-pub const REPAIR_FUEL: f32 = 2.0 / 15.0;
-/// Metal that buys back the best part on a death, with a pad on the map.
-pub const INSURANCE: f32 = 10.0;
-/// Hostile creatures that know a pad come for it from this far, and gnaw at it from this near.
-const SIEGE_REACH: f32 = 1500.0;
-const SIEGE_RANGE: f32 = 300.0;
-/// Pad damage per second per attacker (at most `SIEGE_CROWD` count), and the share of that
-/// the landed ship takes too.
-const SIEGE_DPS: f32 = 4.0;
-const SIEGE_CROWD: usize = 5;
-const SIEGE_SHIP: f32 = 0.5;
-/// A pad the enemy knows suffers a raid on reload with this chance, for this much damage.
-pub const RELOAD_RAID_CHANCE: f32 = 0.5;
-pub const RELOAD_RAID_DAMAGE: (f32, f32) = (60.0, 220.0);
 const PAD_SALT: u64 = 0x9AD0_5EED_0000_0021;
-const NOTE_GAP: f32 = 2.5;
 
 /// What a pad stands for: where it is on its planetoid, how hurt it is, what it keeps.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -124,13 +75,13 @@ pub struct Pad {
 }
 
 impl Pad {
-    pub fn stash_cap(&self, material: Material) -> f32 {
+    pub fn stash_cap(&self, material: Material, tune: &Tunables) -> f32 {
         if material == Material::Water && self.water_tank {
-            WATER_TANK_CAP
+            tune.pad_water_tank_cap
         } else if material != Material::Water && self.warehouse {
-            WAREHOUSE_CAP
+            tune.pad_warehouse_cap
         } else {
-            STASH_CAP
+            tune.pad_stash_cap
         }
     }
 }
@@ -259,13 +210,17 @@ impl PadState {
     }
 
     /// Multiplier on the distance at which creatures notice the ship.
-    pub fn sight_mult(&self) -> f32 {
-        if self.hidden() { HIDE_SIGHT } else { 1.0 }
+    pub fn sight_mult(&self, tune: &Tunables) -> f32 {
+        if self.hidden() {
+            tune.pad_hide_sight
+        } else {
+            1.0
+        }
     }
 
     /// Alert creatures lose the ship for good once it has stayed hidden long enough.
-    pub fn lost_track(&self) -> bool {
-        self.hidden() && self.hidden_for >= LOSE_AFTER
+    pub fn lost_track(&self, tune: &Tunables) -> bool {
+        self.hidden() && self.hidden_for >= tune.pad_lose_after
     }
 
     fn known_any(&self, key: PadKey) -> bool {
@@ -386,7 +341,7 @@ impl Game {
                 anchor,
                 center,
                 radius,
-                hp: PAD_HP,
+                hp: self.tune.pad_hp,
                 stash: Cargo::default(),
                 order: 0,
                 home: true,
@@ -475,7 +430,7 @@ impl Game {
         if self
             .bodies
             .iter()
-            .any(|b| hostile_tenant(b) && b.position.distance(at) < LAND_REFUSE)
+            .any(|b| hostile_tenant(b) && b.position.distance(at) < self.tune.pad_land_refuse)
         {
             return Some(PadHint::Unsafe);
         }
@@ -483,7 +438,7 @@ impl Game {
         if self.well_mid_hop_near(at, crate::well::HOP_PAD_REFUSE) {
             return Some(PadHint::Unsafe);
         }
-        if speed > LAND_SPEED {
+        if speed > self.tune.pad_land_speed {
             return Some(PadHint::TooFast);
         }
         None
@@ -498,14 +453,14 @@ impl Game {
             return PadHint::Landed;
         }
         if let Some((key, distance)) = self.nearest_pad()
-            && distance <= LAND_RANGE
+            && distance <= self.tune.pad_land_range
         {
             return self.landing_block(key).unwrap_or(PadHint::Land);
         }
         let Some((key, gap)) = self.nearest_planetoid() else {
             return PadHint::None;
         };
-        if gap > DEPLOY_RANGE {
+        if gap > self.tune.pad_deploy_range {
             return PadHint::None;
         }
         if self.pad.pads.contains_key(&key) {
@@ -515,7 +470,7 @@ impl Game {
             return PadHint::None;
         }
         match self.ship_state() {
-            Some((_, speed, _)) if speed > DEPLOY_SPEED => PadHint::TooFast,
+            Some((_, speed, _)) if speed > self.tune.pad_deploy_speed => PadHint::TooFast,
             _ if self.pad.kits == 0 => PadHint::Build,
             _ => PadHint::Deploy,
         }
@@ -635,13 +590,13 @@ impl Game {
         let (mut hull, mut shield) = (0.0, 0.0);
         if hull_missing > 1e-3 && self.cargo.biomass > 1e-4 {
             // Biomass is the renewable mend: it goes first, metal covers the rest.
-            hull = self.repair_with_biomass(hull_missing, REPAIR_HULL_RATE, dt);
+            hull = self.repair_with_biomass(hull_missing, self.tune.pad_repair_hull_rate, dt);
         } else if hull_missing > 1e-3 && self.cargo.metal > 1e-4 {
-            hull = (REPAIR_HULL_RATE * grade * dt)
+            hull = (self.tune.pad_repair_hull_rate * grade * dt)
                 .min(hull_missing)
-                .min(self.cargo.metal * grade / REPAIR_METAL);
+                .min(self.cargo.metal * grade / self.tune.pad_repair_metal);
             self.cargo
-                .take(Material::Metal, hull * REPAIR_METAL / grade);
+                .take(Material::Metal, hull * self.tune.pad_repair_metal / grade);
         } else if shield_missing > 1e-3
             && self.cargo.fuel
                 > if auto {
@@ -650,11 +605,11 @@ impl Game {
                     1e-4
                 }
         {
-            shield = (REPAIR_SHIELD_RATE * grade * dt)
+            shield = (self.tune.pad_repair_shield_rate * grade * dt)
                 .min(shield_missing)
-                .min(self.cargo.fuel * grade / REPAIR_FUEL);
+                .min(self.cargo.fuel * grade / self.tune.pad_repair_fuel);
             self.cargo
-                .take(Material::Fuel, shield * REPAIR_FUEL / grade);
+                .take(Material::Fuel, shield * self.tune.pad_repair_fuel / grade);
         }
         if hull > 0.0 || shield > 0.0 {
             if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
@@ -687,9 +642,9 @@ impl Game {
         if self.game_over || self.player().is_none() {
             return false;
         }
-        if self.pad.kits >= KIT_CAP {
+        if self.pad.kits >= self.tune.pad_kit_cap {
             self.notify(
-                format!("ALREADY CARRYING {KIT_CAP} PAD KITS"),
+                format!("ALREADY CARRYING {} PAD KITS", self.tune.pad_kit_cap),
                 Rarity::Common,
             );
             return false;
@@ -765,7 +720,7 @@ impl Game {
         };
         let (center, radius, angle) = (host.position, host.radius, host.angle);
         let anchor = (at - center).to_angle() - angle;
-        if self.pad_count() >= MAX_PADS {
+        if self.pad_count() >= self.tune.pad_max_pads {
             let oldest = self
                 .pad
                 .pads
@@ -788,7 +743,7 @@ impl Game {
                 anchor,
                 center,
                 radius,
-                hp: PAD_HP,
+                hp: self.tune.pad_hp,
                 stash: Cargo::default(),
                 order,
                 home: false,
@@ -825,7 +780,7 @@ impl Game {
             let refund = KIT_PRICE
                 .iter()
                 .filter(|(k, _)| *k == kind)
-                .map(|(_, a)| a * REFUND)
+                .map(|(_, a)| a * self.tune.pad_refund)
                 .sum::<f32>();
             let total = refund + pad.stash.amount(kind);
             let kept = self.cargo.add(kind, total);
@@ -913,7 +868,7 @@ impl Game {
                 None => (Vec2::from_angle(ship.angle), Vec2::ZERO),
             };
             ship.root = None;
-            ship.velocity = base + away * TAKEOFF_IMPULSE;
+            ship.velocity = base + away * self.tune.pad_takeoff_impulse;
             let at = ship.position;
             self.cue(Cue::Takeoff { at });
         }
@@ -933,7 +888,7 @@ impl Game {
         if self.pad.cover_broken <= 0.0 {
             self.notify("EXPOSED  cover broken".into(), Rarity::Uncommon);
         }
-        self.pad.cover_broken = COVER_BREAK;
+        self.pad.cover_broken = self.tune.pad_cover_break;
         self.pad.hidden_for = 0.0;
     }
 
@@ -1015,8 +970,10 @@ impl Game {
         self.pad.hidden_for += dt;
         let grade = self.equipment_grade();
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
-            ship.health = (ship.health + LANDED_HULL * grade * dt).min(ship.max_health);
-            ship.shield = (ship.shield + LANDED_SHIELD * grade * dt).min(ship.max_shield);
+            ship.health =
+                (ship.health + self.tune.pad_landed_hull * grade * dt).min(ship.max_health);
+            ship.shield =
+                (ship.shield + self.tune.pad_landed_shield * grade * dt).min(ship.max_shield);
         }
     }
 
@@ -1124,7 +1081,8 @@ impl Game {
             let near = pads
                 .iter()
                 .filter(|&&(key, at)| {
-                    body.position.distance(at) < SIEGE_REACH && self.knows_pad(body, key)
+                    body.position.distance(at) < self.tune.pad_siege_reach
+                        && self.knows_pad(body, key)
                 })
                 .min_by(|a, b| {
                     body.position
@@ -1157,17 +1115,17 @@ impl Game {
                             && b.alert
                             && b.root.is_none()
                             && !b.follower
-                            && b.position.distance(at) < SIEGE_RANGE
+                            && b.position.distance(at) < self.tune.pad_siege_range
                             && self.knows_pad(b, pad.key)
                     })
                     .count();
-                (pad.key, n.min(SIEGE_CROWD))
+                (pad.key, n.min(self.tune.pad_siege_crowd))
             })
             .filter(|&(_, n)| n > 0)
             .collect();
         let mut lost = Vec::new();
         for (key, n) in hits {
-            let harm = SIEGE_DPS * n as f32 * dt;
+            let harm = self.tune.pad_siege_dps * n as f32 * dt;
             if let Some(pad) = self.pad.pads.get_mut(&key) {
                 pad.hp -= harm;
                 if pad.hp <= 0.0 {
@@ -1177,11 +1135,16 @@ impl Game {
             if self.pad.landed == Some(key) {
                 let invulnerability = self.guard_time();
                 if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
-                    damage(ship, harm * SIEGE_SHIP, invulnerability, &self.tune);
+                    damage(
+                        ship,
+                        harm * self.tune.pad_siege_ship,
+                        invulnerability,
+                        &self.tune,
+                    );
                 }
             }
             if self.pad.note <= 0.0 {
-                self.pad.note = NOTE_GAP * 2.0;
+                self.pad.note = self.tune.pad_note_gap * 2.0;
                 self.notify("PAD UNDER ATTACK".into(), Rarity::Epic);
             }
         }
@@ -1217,10 +1180,13 @@ impl Game {
                 id.y.wrapping_add(reloads as i32),
             );
             let chance = (roll & 0xFFFF) as f32 / 65535.0;
-            if chance >= RELOAD_RAID_CHANCE {
+            if chance >= self.tune.pad_reload_raid_chance {
                 continue;
             }
-            let (low, high) = RELOAD_RAID_DAMAGE;
+            let (low, high) = (
+                self.tune.pad_reload_raid_damage_min,
+                self.tune.pad_reload_raid_damage_max,
+            );
             let harm = low + (high - low) * ((roll >> 16) & 0xFFFF) as f32 / 65535.0;
             let lost = {
                 let Some(pad) = self.pad.pads.get_mut(&key) else {
@@ -1250,7 +1216,8 @@ impl Game {
         };
         let text = if self.pad.insured {
             format!(
-                "INSURANCE ON  part {INSURANCE:.0}M with a pad; legacy {:.0}% of ore (max {cap:.0}){weapon}",
+                "INSURANCE ON  part {:.0}M with a pad; legacy {:.0}% of ore (max {cap:.0}){weapon}",
+                self.tune.pad_insurance,
                 share * 100.0
             )
         } else {
@@ -1266,7 +1233,9 @@ impl Game {
     pub(super) fn insurance_pays(&mut self) -> bool {
         self.has_return_pad()
             && self.pad.insured
-            && self.cargo.spend(&[(Material::Metal, INSURANCE)])
+            && self
+                .cargo
+                .spend(&[(Material::Metal, self.tune.pad_insurance)])
     }
 
     /// Last landed pad, or HOME when that pad is gone or no pad was visited.
@@ -1361,16 +1330,16 @@ impl Game {
             self.bench_failed("NOTHING TO REPAIR".into());
             return;
         }
-        let hull = hull_missing.min(self.cargo.metal * grade / REPAIR_METAL);
-        let shield = shield_missing.min(self.cargo.fuel * grade / REPAIR_FUEL);
+        let hull = hull_missing.min(self.cargo.metal * grade / self.tune.pad_repair_metal);
+        let shield = shield_missing.min(self.cargo.fuel * grade / self.tune.pad_repair_fuel);
         if hull < 1e-3 && shield < 1e-3 {
             self.bench_failed("REPAIR NEEDS METAL (HULL) OR FUEL (SHIELD)".into());
             return;
         }
         self.cargo
-            .take(Material::Metal, hull * REPAIR_METAL / grade);
+            .take(Material::Metal, hull * self.tune.pad_repair_metal / grade);
         self.cargo
-            .take(Material::Fuel, shield * REPAIR_FUEL / grade);
+            .take(Material::Fuel, shield * self.tune.pad_repair_fuel / grade);
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.health = (ship.health + hull).min(ship.max_health);
             ship.shield = (ship.shield + shield).min(ship.max_shield);
@@ -1533,19 +1502,19 @@ impl Game {
         let Some(pad) = self.pad.pads.get_mut(&key) else {
             return;
         };
-        let cap = pad.stash_cap(kind);
+        let cap = pad.stash_cap(kind, &self.tune);
         let moved = if deposit {
             self.cargo.transfer(
                 &mut pad.stash,
                 kind,
-                STASH_STEP,
+                self.tune.pad_stash_step,
                 super::mining::Storage::Site(cap),
             )
         } else {
             pad.stash.transfer(
                 &mut self.cargo,
                 kind,
-                STASH_STEP,
+                self.tune.pad_stash_step,
                 super::mining::Storage::Ship,
             )
         };
@@ -1820,7 +1789,7 @@ mod tests {
         assert!(game.craft_kit() && game.craft_kit());
         assert_eq!((game.cargo.metal, game.cargo.crystal), (120.0, 180.0));
         assert!(!game.craft_kit(), "at most two kits");
-        assert_eq!(game.pad.kits, KIT_CAP);
+        assert_eq!(game.pad.kits, DEFAULT_TUNING.pad_kit_cap);
     }
 
     #[test]
@@ -1851,7 +1820,10 @@ mod tests {
         assert_eq!(game.pad.pads.len(), 1);
         assert_eq!(game.pad.kits, 1);
         assert_eq!(game.run.pads, 1);
-        assert_eq!(game.pad.pads[&(SectorId { x: 0, y: 0 }, 7)].hp, PAD_HP);
+        assert_eq!(
+            game.pad.pads[&(SectorId { x: 0, y: 0 }, 7)].hp,
+            DEFAULT_TUNING.pad_hp
+        );
         assert!(game.body(id).is_some());
         // One per planetoid: a second kit is not spent.
         game.pad_action();
@@ -1863,7 +1835,7 @@ mod tests {
     fn the_seventh_pad_dismantles_the_oldest_for_half_a_kit_and_its_stash() {
         let mut game = empty_game();
         stock(&mut game, 0.0, 0.0, 0.0);
-        for index in 0..MAX_PADS as u32 {
+        for index in 0..DEFAULT_TUNING.pad_max_pads as u32 {
             game.pad.pads.insert(
                 (SectorId { x: 0, y: 0 }, index + 100),
                 Pad {
@@ -1871,7 +1843,7 @@ mod tests {
                     anchor: 0.0,
                     center: Vec2::new(5000.0, 5000.0),
                     radius: 200.0,
-                    hp: PAD_HP,
+                    hp: DEFAULT_TUNING.pad_hp,
                     stash: Cargo {
                         metal: if index == 0 { 30.0 } else { 0.0 },
                         ..Cargo::default()
@@ -1891,14 +1863,18 @@ mod tests {
                 },
             );
         }
-        game.pad.next_order = MAX_PADS as u64;
+        game.pad.next_order = DEFAULT_TUNING.pad_max_pads as u64;
         world(&mut game, 7);
         stock(&mut game, 40.0, 0.0, 10.0);
         game.craft_kit();
         stock(&mut game, 0.0, 0.0, 0.0);
         set_player(&mut game, Vec2::new(0.0, 640.0), Vec2::ZERO);
         game.pad_action();
-        assert_eq!(game.pad.pads.len(), MAX_PADS, "still six");
+        assert_eq!(
+            game.pad.pads.len(),
+            DEFAULT_TUNING.pad_max_pads,
+            "still six"
+        );
         assert!(!game.pad.pads.contains_key(&(SectorId { x: 0, y: 0 }, 100)));
         assert!(game.pad.pads.contains_key(&(SectorId { x: 0, y: 0 }, 7)));
         assert_eq!(game.cargo.metal, 20.0 + 30.0, "half the kit and the stash");
@@ -2092,7 +2068,7 @@ mod tests {
         let at = ship(&game).position;
         let c = spawn(&mut game, &watcher(), at + Vec2::new(-500.0, -300.0));
         // 583 away: inside sight 800 in the open.
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         run(&mut game, 0.5);
         assert!(body(&game, c).alert, "seen in the open");
         // Hidden: the effective distance is three times that, so beyond sight.
@@ -2113,7 +2089,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         let at = ship(&game).position;
         // 700 away: seen in the open, and inside lose range too.
         let c = spawn(&mut game, &watcher(), at + Vec2::new(-700.0, 0.0));
@@ -2161,7 +2137,7 @@ mod tests {
             "called to arms, still hunting"
         );
         run(&mut game, 4.0);
-        assert!(game.pad.lost_track());
+        assert!(game.pad.lost_track(&DEFAULT_TUNING));
         assert!(
             !body(&game, c).alert,
             "lost the ship after four hidden seconds: known {:?} {:?} enraged {} provoked {} hit {}",
@@ -2220,7 +2196,7 @@ mod tests {
         landed(&mut game);
         stock(&mut game, 20.0, 15.0, 0.0);
         hurt(&mut game, 50.0, 30.0);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         bench(&mut game, 0);
         let (h, s) = (ship(&game).health, ship(&game).shield);
         game.bench_confirm();
@@ -2261,7 +2237,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         game.loadout.parts.push(part("Plate", Rarity::Common, 0.2));
         game.refresh_stats();
         stock(&mut game, 30.0, 0.0, 9.0);
@@ -2293,7 +2269,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         let source = upgrades::Source::plain(3.0, game.params());
         let mut rng = Rng::new(5);
         for _ in 0..12 {
@@ -2327,7 +2303,7 @@ mod tests {
         for game in [&mut a, &mut b] {
             world(game, 7);
             landed(game);
-            game.pad.cover_broken = COVER_BREAK;
+            game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
             game.loadout.parts.push(part("Plate", Rarity::Rare, 0.3));
             stock(game, 400.0, 0.0, 100.0);
         }
@@ -2350,7 +2326,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         game.loadout.arsenal.acquire(Profile::Spread, 1);
         bench(&mut game, 3);
         stock(&mut game, 39.0, 0.0, 100.0);
@@ -2383,7 +2359,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         bench(&mut game, 6);
         let panel = game.bench_panel().unwrap();
         assert_eq!(panel.tab, BenchTab::Skills);
@@ -2447,7 +2423,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         bench(&mut game, 5);
         let panel = game.bench_panel().unwrap();
         assert_eq!(panel.tab, BenchTab::Skills);
@@ -2495,7 +2471,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         bench(&mut game, 5);
         for _ in 0..Skill::Parry.index() {
             game.bench_move(1);
@@ -2530,7 +2506,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         bench(&mut game, 5);
         for _ in 0..Skill::Dash.index() {
             game.bench_move(1);
@@ -2556,14 +2532,17 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         stock(&mut game, 200.0, 0.0, 0.0);
         bench(&mut game, 4);
         for _ in 0..8 {
             game.bench_confirm();
         }
         let key = game.pad.landed.unwrap();
-        assert_eq!(game.pad.pads[&key].stash.metal, STASH_CAP);
+        assert_eq!(
+            game.pad.pads[&key].stash.metal,
+            DEFAULT_TUNING.pad_stash_cap
+        );
         assert_eq!(game.cargo.metal, 100.0, "the rest stayed in the hold");
         for _ in 0..4 {
             game.bench_alt();
@@ -2582,7 +2561,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         let key = landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         game.pad.pads.get_mut(&key).unwrap().stash.metal = 100.0;
         stock(&mut game, 190.0, 0.0, 0.0);
         bench(&mut game, 4);
@@ -2614,7 +2593,7 @@ mod tests {
                 anchor: 0.0,
                 center,
                 radius: 200.0,
-                hp: PAD_HP,
+                hp: DEFAULT_TUNING.pad_hp,
                 stash: Cargo::default(),
                 order: u64::from(key.1),
                 home: false,
@@ -2901,7 +2880,7 @@ mod tests {
         spawn(&mut game, &dull, at + Vec2::new(-400.0, -300.0));
         run(&mut game, 4.0);
         assert!(!game.pad.exposed(key));
-        assert_eq!(game.pad.pads[&key].hp, PAD_HP);
+        assert_eq!(game.pad.pads[&key].hp, DEFAULT_TUNING.pad_hp);
     }
 
     #[test]
@@ -2933,7 +2912,10 @@ mod tests {
         for _ in 0..30 {
             game.reload_pads(SectorId { x: 0, y: 0 });
         }
-        assert_eq!(game.pad.pads[&(SectorId { x: 0, y: 0 }, 9)].hp, PAD_HP);
+        assert_eq!(
+            game.pad.pads[&(SectorId { x: 0, y: 0 }, 9)].hp,
+            DEFAULT_TUNING.pad_hp
+        );
         // Known ones suffer a deterministic number of raids.
         let outcome = |n: usize| {
             let mut game = make();
@@ -2975,7 +2957,7 @@ mod tests {
             .pads
             .get(&(SectorId { x: 0, y: 0 }, 9))
             .map_or(0.0, |p| p.hp);
-        assert!(hp >= PAD_HP - RELOAD_RAID_DAMAGE.1 - 1e-3);
+        assert!(hp >= DEFAULT_TUNING.pad_hp - DEFAULT_TUNING.pad_reload_raid_damage_max - 1e-3);
     }
 
     fn civ_game() -> (Game, crate::territory::Territory) {
@@ -3089,7 +3071,7 @@ mod tests {
         let (mut game, t) = civ_game();
         world(&mut game, 7);
         let key = landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         game.player_invulnerability = 0.0;
         game.pad.known_civ.entry(t.id).or_default().insert(key);
         let at = game.pad_position(&game.pad.pads[&key]);
@@ -3122,7 +3104,7 @@ mod tests {
         let mut game = empty_game();
         world(&mut game, 7);
         landed(&mut game);
-        game.pad.cover_broken = COVER_BREAK;
+        game.pad.cover_broken = DEFAULT_TUNING.pad_cover_break;
         stock(&mut game, 150.0, 90.0, 60.0);
         let total = |g: &Game| {
             let hold = g.cargo.total();
@@ -3243,7 +3225,7 @@ mod tests {
     fn the_home_pad_is_not_counted_and_is_the_fallback_recovery_point() {
         let mut game = Game::new(42);
         let home = game.pads().next().unwrap().key;
-        for index in 0..MAX_PADS as u32 {
+        for index in 0..DEFAULT_TUNING.pad_max_pads as u32 {
             game.pad.pads.insert(
                 (SectorId { x: 4, y: 4 }, index),
                 Pad {
@@ -3251,7 +3233,7 @@ mod tests {
                     anchor: 0.0,
                     center: Vec2::ZERO,
                     radius: 100.0,
-                    hp: PAD_HP,
+                    hp: DEFAULT_TUNING.pad_hp,
                     stash: Cargo::default(),
                     order: 10 + u64::from(index),
                     home: false,
@@ -3268,7 +3250,11 @@ mod tests {
                 },
             );
         }
-        assert_eq!(game.pad_count(), MAX_PADS, "the home pad is not counted");
+        assert_eq!(
+            game.pad_count(),
+            DEFAULT_TUNING.pad_max_pads,
+            "the home pad is not counted"
+        );
         assert!(game.pad.pads.contains_key(&home));
         assert_eq!(game.respawn_pad(Vec2::ZERO), Some(home));
         game.pad.pads.retain(|_, p| p.home);

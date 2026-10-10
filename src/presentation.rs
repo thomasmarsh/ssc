@@ -11,8 +11,8 @@ use ssc::simulation::arsenal::Profile;
 use ssc::simulation::skills::{Skill, SkillTab};
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
-    Beam, Body, BodyKind, Cache, EchoKind, EffectKind, Game, GuideKind, LAND_RANGE, MAX_PADS,
-    Material, Pad, PadHint, Pickup, Shape, TetherKind, Tunables, fertility, price_text,
+    Beam, Body, BodyKind, Cache, EchoKind, EffectKind, Game, GuideKind, Material, Pad, PadHint,
+    Pickup, Shape, TetherKind, Tunables, fertility, price_text,
 };
 use ssc::world::{BaseKind, RockKind, SECTOR_SIZE, SectorId, hash2};
 
@@ -822,7 +822,7 @@ fn pad_lines(game: &Game) -> [(String, Color); 2] {
         format!(
             "\nPADS {}/{}   KITS {}   {insured}\n",
             game.pad_count(),
-            MAX_PADS,
+            game.tune.pad_max_pads,
             game.pad_kits()
         ),
         PAD_GREEN,
@@ -836,7 +836,7 @@ fn pad_lines(game: &Game) -> [(String, Color); 2] {
             format!(
                 "LANDED  PAD {:.0}/{:.0}  STASH {}\n",
                 pad.hp,
-                ssc::simulation::PAD_HP,
+                game.tune.pad_hp,
                 stash.join(" ")
             ),
             PAD_GREEN,
@@ -889,10 +889,7 @@ fn pad_banner(game: &Game) -> (String, Color) {
         PadHint::Landed => {
             if game.is_hidden() {
                 (
-                    format!(
-                        "HIDDEN  x{:.0}\nthrust lifts off",
-                        ssc::simulation::HIDE_SIGHT
-                    ),
+                    format!("HIDDEN  x{:.0}\nthrust lifts off", game.tune.pad_hide_sight),
                     PAD_GREEN,
                 )
             } else {
@@ -2673,7 +2670,7 @@ pub fn draw(
         let p = drone.position;
         let forward = drone.heading;
         let side = forward.perp();
-        let color = if drone.health < ssc::simulation::fleet::DRONE_HEALTH * 0.5 {
+        let color = if drone.health < game.tune.fleet_drone_health * 0.5 {
             Color::srgb(1.0, 0.45, 0.15)
         } else if drone.powered {
             CYAN
@@ -3733,7 +3730,7 @@ fn draw_pad(gizmos: &mut Gizmos, game: &Game, pad: &Pad, at: Vec2) {
     let landed = game.landed_pad().is_some_and(|p| p.key == pad.key);
     let near = game
         .player()
-        .is_some_and(|ship| ship.position.distance(at) < LAND_RANGE * 2.0);
+        .is_some_and(|ship| ship.position.distance(at) < game.tune.pad_land_range * 2.0);
     // Platform, its lower deck and the legs.
     gizmos.line_2d(at + n * 3.0 - t * 26.0, at + n * 3.0 + t * 26.0, tint);
     gizmos.line_2d(
@@ -3775,13 +3772,13 @@ fn draw_pad(gizmos: &mut Gizmos, game: &Game, pad: &Pad, at: Vec2) {
             continue;
         }
         gizmos.line_2d(
-            at + Vec2::from_angle(a0) * LAND_RANGE,
-            at + Vec2::from_angle(a0 + 0.24) * LAND_RANGE,
+            at + Vec2::from_angle(a0) * game.tune.pad_land_range,
+            at + Vec2::from_angle(a0 + 0.24) * game.tune.pad_land_range,
             tint.with_alpha(alpha),
         );
     }
-    if pad.hp < ssc::simulation::PAD_HP {
-        let fraction = (pad.hp / ssc::simulation::PAD_HP).clamp(0.0, 1.0);
+    if pad.hp < game.tune.pad_hp {
+        let fraction = (pad.hp / game.tune.pad_hp).clamp(0.0, 1.0);
         let from = at + n * 34.0 - t * 20.0;
         gizmos.line_2d(from, at + n * 34.0 + t * 20.0, DRY_RED.with_alpha(0.4));
         gizmos.line_2d(from, from + t * 40.0 * fraction, tint);
@@ -4593,7 +4590,7 @@ pub struct PlantCache(std::collections::HashMap<(u32, u16), ssc::grammar::Plan>)
 /// glance; forage (which the ship cannot use) does not.
 fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
     use ssc::grammar::PartKind;
-    use ssc::simulation::farm::{GREENHOUSE_RADIUS, PLANT_SCALE, RIPE};
+
     let farm = game.farm();
     let Some(ship) = game.player() else { return };
     if cache.0.len() > 160 {
@@ -4608,7 +4605,7 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
         let [r, g, b] = house.tint;
         let glass = Color::srgb(0.55 + 0.15 * r, 0.85 + 0.1 * g, 0.8 + 0.1 * b);
         let shimmer = 0.5 + 0.15 * (game.time * 0.8 + house.center.x * 0.01).sin();
-        let radius = GREENHOUSE_RADIUS;
+        let radius = game.tune.farm_greenhouse_radius;
         gizmos
             .circle_2d(house.center, radius, glass.with_alpha(0.55 * shimmer))
             .resolution(72);
@@ -4645,7 +4642,7 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
         let place = |p: Vec2| {
             live.position
                 + Vec2::from_angle(turn).rotate(Vec2::new(p.x + lean * p.y.max(0.0), p.y))
-                    * PLANT_SCALE
+                    * game.tune.farm_plant_scale
         };
         let [tr, tg, tb] = plant.genes.tinted(flora.tint);
         // A tended crop carries a small stake in its people's color at the root.
@@ -4653,10 +4650,18 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
             let [sr, sg, sb] = game.tender_tint(plant.tended).unwrap_or([1.0; 3]);
             let stake = Color::srgb(sr, sg, sb);
             let side = Vec2::new(-live.normal.y, live.normal.x);
-            let foot = live.position + side * (PLANT_SCALE * 1.1);
-            gizmos.line_2d(foot, foot + live.normal * (PLANT_SCALE * 1.4), stake);
+            let foot = live.position + side * (game.tune.farm_plant_scale * 1.1);
+            gizmos.line_2d(
+                foot,
+                foot + live.normal * (game.tune.farm_plant_scale * 1.4),
+                stake,
+            );
             gizmos
-                .circle_2d(foot + live.normal * (PLANT_SCALE * 1.6), 3.0, stake)
+                .circle_2d(
+                    foot + live.normal * (game.tune.farm_plant_scale * 1.6),
+                    3.0,
+                    stake,
+                )
                 .resolution(6);
         }
         // Blight dulls the leaves toward a mottled grey-brown and leaves a few spots drifting.
@@ -4684,7 +4689,7 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
                     gizmos
                         .circle_2d(
                             a,
-                            (part.radius * PLANT_SCALE).max(2.0),
+                            (part.radius * game.tune.farm_plant_scale).max(2.0),
                             if plant.blighted {
                                 Color::srgb(0.5, 0.38, 0.35)
                             } else {
@@ -4697,19 +4702,19 @@ fn draw_plants(gizmos: &mut Gizmos, game: &Game, cache: &mut PlantCache) {
             }
         }
         if plant.blighted {
-            let tip = live.position + live.normal * (PLANT_SCALE * 2.0);
+            let tip = live.position + live.normal * (game.tune.farm_plant_scale * 2.0);
             for k in 0..5 {
                 let t = game.time * 0.7 + k as f32 * 1.9 + plant.id as f32;
                 let spot = tip
                     + Vec2::new(t.sin() * 1.5, (t * 1.3).cos())
-                        * PLANT_SCALE
+                        * game.tune.farm_plant_scale
                         * (0.6 + 0.15 * k as f32);
                 gizmos
                     .circle_2d(spot, 2.5, Color::srgba(0.75, 0.45, 0.85, 0.7))
                     .resolution(6);
             }
-        } else if live.growth >= RIPE && flora.is_crop() {
-            let tip = live.position + live.normal * (PLANT_SCALE * 4.5);
+        } else if live.growth >= game.tune.farm_ripe && flora.is_crop() {
+            let tip = live.position + live.normal * (game.tune.farm_plant_scale * 4.5);
             let pulse = 0.6 + 0.4 * (game.time * 3.0 + plant.id as f32).sin();
             gizmos
                 .circle_2d(tip, 4.0, Color::srgba(0.45, 1.0, 0.7, 0.8 * pulse))

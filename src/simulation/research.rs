@@ -482,10 +482,12 @@ mod tests {
         ship.shield -= shield;
         game.bench_repair();
         assert!(
-            (game.cargo.metal - (20.0 - hull / 40.0 * super::pads::REPAIR_METAL)).abs() < 0.001
+            (game.cargo.metal - (20.0 - hull / 40.0 * DEFAULT_TUNING.pad_repair_metal)).abs()
+                < 0.001
         );
         assert!(
-            (game.cargo.fuel - (20.0 - shield / 40.0 * super::pads::REPAIR_FUEL)).abs() < 0.001
+            (game.cargo.fuel - (20.0 - shield / 40.0 * DEFAULT_TUNING.pad_repair_fuel)).abs()
+                < 0.001
         );
         assert_eq!(game.player().unwrap().health, game.stats.max_hull);
         assert_eq!(game.player().unwrap().shield, game.stats.max_shield);

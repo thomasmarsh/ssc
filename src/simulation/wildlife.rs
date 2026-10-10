@@ -880,7 +880,7 @@ mod tests {
             game.step(0.05, Input::default());
         }
         assert!(game.bodies.len() < MAX_BODIES);
-        assert!(game.civ_strength(capital.id) <= 3 * crate::simulation::civ::CIV_CAP);
+        assert!(game.civ_strength(capital.id) <= 3 * DEFAULT_TUNING.civ_cap);
     }
 
     /// Stages a creature of `want` disposition beside a member, scans, and has the ship kill it.

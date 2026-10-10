@@ -907,12 +907,12 @@ mod tests {
         assert!(game.set_civilization_war(t.id, true));
         hold(&mut game, spot, 8.0);
         assert!(members(&game, t.id).iter().any(|b| b.alert), "they hunt");
-        hold(&mut game, spot, crate::simulation::civ::WAR_AT);
+        hold(&mut game, spot, DEFAULT_TUNING.civ_war_at);
         assert!(game.raid.as_ref().is_some_and(|r| r.waves >= 1));
         // Goodwill does not end a declared war. Explicit peace stops the raid clock.
         game.set_regard(t.id, 5.0);
         assert!(game.set_civilization_war(t.id, false));
-        hold(&mut game, spot, crate::simulation::civ::RAID_GRACE + 5.0);
+        hold(&mut game, spot, DEFAULT_TUNING.civ_raid_grace + 5.0);
         assert!(game.raid.is_none());
         assert!(members(&game, t.id).iter().all(|b| !b.alert));
     }
@@ -1176,7 +1176,9 @@ mod tests {
         assert!(game.trade_back(&civ, 20.0).contains("mends the ship"));
         assert_eq!(game.farm.stored(civ.id), 1.0);
         pilot(&mut game).health = health;
-        game.farm.granary.insert(civ.id, farm::GRANARY_CAP);
+        game.farm
+            .granary
+            .insert(civ.id, DEFAULT_TUNING.farm_granary_cap);
         let text = game.save_state().to_text();
         let (state, generator) = save::SaveState::from_text(&text).unwrap();
         let (mut loaded, _) = Game::from_save(state, generator);
@@ -1185,7 +1187,10 @@ mod tests {
         assert_eq!(returned, loaded.trade_back(&civ, 20.0));
         assert_eq!(game.cargo.biomass, loaded.cargo.biomass);
         assert_eq!(game.farm.stored(civ.id), loaded.farm.stored(civ.id));
-        assert!((game.cargo.biomass + game.farm.stored(civ.id) - farm::GRANARY_CAP).abs() < 1e-5);
+        assert!(
+            (game.cargo.biomass + game.farm.stored(civ.id) - DEFAULT_TUNING.farm_granary_cap).abs()
+                < 1e-5
+        );
         assert_eq!(game.civilization_profile(civ.id), profile);
         // Critical hull and a full hold cannot be bypassed by culture or imperfection.
         pilot(&mut game).health = pilot(&mut game).max_health * 0.4;

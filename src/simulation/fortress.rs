@@ -17,21 +17,6 @@ use super::*;
 use crate::fortress::{FortPart, MUZZLE_GAP, PartKind};
 use crate::territory::Standing;
 
-/// Fortress pieces are not placed within this many bodies of the cap, so shattering,
-/// breeding and raids always have room.
-pub const RESERVE: usize = 220;
-/// How far a turret shoots, and how fast its shots fly.
-pub const TURRET_REACH: f32 = 950.0;
-const SHOT_SPEED: f32 = 380.0;
-/// Seconds between a turret's volleys at neutral aggression, and how fast its barrel turns.
-const PERIOD: f32 = 3.2;
-const TURN: f32 = 5.0;
-/// A gate turret lays a mine when the ship is within this of the spot, at most two stand
-/// there at once, and it lays no faster than every `LAY_PERIOD` seconds.
-const LAY_SIGHT: f32 = 1500.0;
-const LAY_PERIOD: f32 = 9.0;
-const LAY_MAX: usize = 2;
-
 /// Shortest signed angle from `from` to `to`.
 fn turn_between(from: f32, to: f32) -> f32 {
     (to - from + PI).rem_euclid(TAU) - PI
@@ -78,7 +63,7 @@ impl Game {
                 });
             let aggression = genes.aggression.max(0.3);
             // The barrel follows the ship inside its arc and rests facing out otherwise.
-            let aim_at = ship.filter(|s| s.distance(position) < TURRET_REACH);
+            let aim_at = ship.filter(|s| s.distance(position) < self.tune.fort_turret_reach);
             let want = match aim_at {
                 Some(s) => {
                     let delta = turn_between(facing, (s - position).to_angle());
@@ -88,7 +73,8 @@ impl Game {
             };
             let rest = want.unwrap_or(facing);
             let angle = self.bodies[index].angle;
-            let step = turn_between(angle, rest).clamp(-TURN * dt, TURN * dt);
+            let step = turn_between(angle, rest)
+                .clamp(-self.tune.fort_turn * dt, self.tune.fort_turn * dt);
             self.bodies[index].angle = angle + step;
             let Some(state) = self.bodies[index].base.as_mut() else {
                 continue;
@@ -117,26 +103,26 @@ impl Game {
                         origin,
                         aim: direction,
                         velocity: Vec2::ZERO,
-                        reach: TURRET_REACH,
-                        shot_speed: SHOT_SPEED,
+                        reach: self.tune.fort_turret_reach,
+                        shot_speed: self.tune.fort_shot_speed,
                         sharpness: genes.sharpness(),
                         pith: 0.0,
                     };
                     let spin = self.discharge(weapon, volley, &muzzle, spin);
                     self.bodies[index].spin = spin;
                     if let Some(state) = self.bodies[index].base.as_mut() {
-                        state.turrets[0] = PERIOD * pace(weapon) / aggression;
+                        state.turrets[0] = self.tune.fort_period * pace(weapon) / aggression;
                     }
                 }
             }
             if let (true, Some(spot), Some(target)) = (lay_ready, lay, ship) {
-                let near = spot.distance(target) < LAY_SIGHT;
+                let near = spot.distance(target) < self.tune.fort_lay_sight;
                 let standing = self
                     .mines
                     .iter()
                     .filter(|m| !m.friendly && m.position.distance(spot) < 130.0)
                     .count();
-                if near && standing < LAY_MAX {
+                if near && standing < self.tune.fort_lay_max {
                     let nudge =
                         Vec2::from_angle(2.4 * standing as f32 + 0.7) * 34.0 * standing as f32;
                     self.lay_mine(Mine {
@@ -151,7 +137,7 @@ impl Game {
                     });
                 }
                 if let Some(state) = self.bodies[index].base.as_mut() {
-                    state.turrets[1] = LAY_PERIOD / aggression;
+                    state.turrets[1] = self.tune.fort_lay_period / aggression;
                 }
             }
         }
@@ -608,7 +594,7 @@ mod tests {
         let mut game = Game::new(SEED);
         game.player_invulnerability = 1e9;
         // Fill the world to just under the reserve line with dummy rocks.
-        while game.bodies.len() + fortress::RESERVE < MAX_BODIES {
+        while game.bodies.len() + fortress::DEFAULT_TUNING.fort_reserve < MAX_BODIES {
             let id = crate::simulation::tests::add(
                 &mut game,
                 BodyKind::Asteroid,
