@@ -196,6 +196,7 @@ impl Game {
 
     /// Remembers a territory (and its tint) the first time it is met.
     pub(super) fn register_territory(&mut self, t: Territory) {
+        self.societies.register(t);
         if self.civ_territories.insert(t.id, t).is_none() {
             self.civ_colors.insert(t.id, t.color(self.seed));
         }

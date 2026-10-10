@@ -1411,7 +1411,7 @@ fn describe(
             Align::Center,
         ),
         Tag::Dev => {
-            if !game.dev.active() {
+            if !game.dev.active() && !game.culture_modified() {
                 return None;
             }
             (

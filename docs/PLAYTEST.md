@@ -228,9 +228,11 @@ Do not judge these until GAME_LOOP sections 9.2/9.3 land. Run the same scenarios
 
 Political thresholds, warning grace, garrison reach, transfer/tribute terms, and aid/force caps are proposed tuning surfaces, not implemented knobs. H2 aggregate community politics does not require J's voluntary citizens.
 
-## Procedural societies and drift (proposed E2p checks, unbuilt)
+## Procedural societies and drift (E2p built; broader consumers proposed)
 
-[GAME_LOOP.md](GAME_LOOP.md) section 9.4 owns this model. Start all ordinary checks with drift temperature exactly 0. Per-faction values come from Perlin fields; do not hand-tune individual civilizations into preset buckets.
+E2p contact check (built): at a friendly farming seat, select TITHE / FRIENDLY TRADE and check the contact estimate and last response cause. With moderate hull damage, compare a depleted versus stocked granary: does the repair/trade explanation make sense? Below 50% hull, repair remains mandatory. Chart estimates should stay unknown until actual contact and remain stale while away; no raw vector appears. Culture stays frozen in normal play; drift adjustment currently requires the headless API, not an in-game row. E2a independent opinion/authorization and broader commerce/report behavior remain proposed.
+
+Broader checks below include proposed E2a/E2b/E2c/H2 relationships, commerce, reports, and conquered communities; these are not built behavior yet. [GAME_LOOP.md](GAME_LOOP.md) section 9.4 owns this model. Start all ordinary checks with drift temperature exactly 0. Per-faction values come from Perlin fields; do not hand-tune individual civilizations into preset buckets.
 
 - Do nearby generated profiles show coherent similarities without every coordinate matching or all neighbors becoming automatic allies? Does the same seed/anchor yield the same profile regardless of discovery order?
 - Can shared values, complementary useful supplies and honored dealings each explain a partnership? Can similar resource-starved societies compete, and different cultures establish dependable trust?

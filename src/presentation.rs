@@ -1580,6 +1580,15 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
                 ),
                 lifted(Some(c.tint)),
             ));
+            if let Some(culture) = c.culture {
+                detail.push((
+                    format!("Tends toward {} (contact estimate)\n", culture.tendency),
+                    light,
+                ));
+                if let Some(reason) = culture.last_response {
+                    detail.push((format!("Last response: {reason}\n"), light));
+                }
+            }
         }
         if e.relics > 0 || e.dynamic_wells > 0 {
             let mut discoveries = Vec::new();
@@ -4940,6 +4949,27 @@ mod bench_layout_tests {
                     game.bench_move(1);
                 }
             }
+        }
+    }
+    #[test]
+    fn culture_estimate_and_response_fit_compact_contact() {
+        let mut game = game();
+        game.pose_frontier_contact();
+        game.pose_contact_culture();
+        let text = bench_lines(&game, 600.0, 278.0)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<String>();
+        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 278.0, "{text}");
+        assert!(!text.contains("details shortened"), "{text}");
+        let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for expected in [
+            "Offer 20 goods",
+            "contact estimate",
+            "Last response: solidarity",
+            "TITHE SETTLED",
+        ] {
+            assert!(terms.contains(expected), "{expected}: {text}");
         }
     }
     #[test]

@@ -503,6 +503,7 @@ impl Game {
         };
         let friendly = self.civ_tier(civ.id) == Tier::Friendly;
         let given = self.cargo.take(kind, t::TITHE_AMOUNT);
+        self.assess_culture(civ.id);
         self.run.tithes += 1;
         self.run.tithed += given;
         if let Some(r) = self.regard_mut(civ.id) {
@@ -525,22 +526,69 @@ impl Game {
         Ok(())
     }
 
-    /// What a friend gives back for a tithe: a field repair if the ship is hurt, else some of
-    /// the scarcest material.
+    /// Culture ranks available repair and finite granary responses. Critical hull keeps repair
+    /// mandatory; the legacy abstract barter service remains the fallback.
     fn trade_back(&mut self, civ: &Territory, given: f32) -> String {
-        if let Some(ship) = self
-            .bodies
-            .iter_mut()
-            .find(|b| b.kind == BodyKind::Player)
-            .filter(|s| s.health < s.max_health * t::TRADE_REPAIR_BELOW)
-        {
+        use crate::culture::Candidate;
+        let health = self.player().map_or(1.0, |s| s.health / s.max_health);
+        let offer = if self.civ_trades_biomass(civ.id) {
+            farm::biomass_offer(self.farm.stored(civ.id), self.civ_regard(civ.id), given)
+                .min(self.cargo.room(Material::Biomass))
+        } else {
+            0.0
+        };
+        let repair = Candidate {
+            action: 1,
+            feasible: health < t::TRADE_REPAIR_BELOW,
+            // Known benefit to a friendly partner; own security/demand remain unknown.
+            outcomes: [
+                None,
+                None,
+                None,
+                None,
+                Some(0.3),
+                Some(f64::from((1.0 - health).max(0.0) * 1.5).min(1.0)),
+                None,
+            ],
+            delayed: 0.0,
+            risk: 0.0,
+            uncertainty: 0.1,
+            cost: 0.0,
+        };
+        let granary = Candidate {
+            action: 2,
+            feasible: offer >= 1.0 && health >= 0.5,
+            outcomes: [
+                None,
+                Some(-f64::from(offer / self.farm.stored(civ.id).max(1.0)).min(1.0)),
+                None,
+                None,
+                Some(0.3),
+                Some(f64::from(offer / (given * t::TRADE_RATE).max(1.0)).min(1.0)),
+                None,
+            ],
+            delayed: 0.0,
+            risk: 0.0,
+            uncertainty: 0.1,
+            cost: 0.0,
+        };
+        let decision = self.society_choose(civ.id, &[repair, granary]);
+        if decision.is_some_and(|d| d.action == 1) {
+            let ship = self
+                .bodies
+                .iter_mut()
+                .find(|b| b.kind == BodyKind::Player)
+                .unwrap();
             ship.health = ship.max_health;
             ship.shield = ship.max_shield;
-            return "mends the ship".to_string();
+            return format!("mends the ship ({})", decision.unwrap().reason);
         }
-        if let Some(sold) = self.sell_biomass(civ, given) {
-            return sold;
+        if decision.is_some_and(|d| d.action == 2)
+            && let Some(sold) = self.sell_biomass(civ, given)
+        {
+            return format!("{sold} ({})", decision.unwrap().reason);
         }
+        self.society_legacy_response(civ.id);
         let scarce = Material::ALL
             .into_iter()
             .min_by(|a, b| self.cargo.fraction(*a).total_cmp(&self.cargo.fraction(*b)))
@@ -1043,6 +1091,53 @@ mod tests {
         game.bench_select(BenchAction::Tithe);
         game.bench_confirm();
         assert_eq!(game.run.tithes, tithes + 1);
+    }
+
+    #[test]
+    fn frozen_culture_responds_to_real_granary_stock_and_preserves_settlement_on_reload() {
+        let civ = (-40..=40)
+            .flat_map(|x| (-40..=40).map(move |y| SectorId { x, y }))
+            .filter_map(|s| world::territory(SEED, s))
+            .find(|t| {
+                let p = crate::culture::profile(
+                    SEED,
+                    crate::culture::Origin::new(t.id, t.capital),
+                    0.0,
+                );
+                t.farms(SEED) && p.values[5] > p.values[1] + 0.03
+            })
+            .unwrap();
+        let mut game = visit(civ.capital.center());
+        game.register_territory(civ);
+        game.regard_mut(civ.id).unwrap().value = 100.0;
+        game.regard_mut(civ.id).unwrap().tier = Tier::Friendly;
+        game.cargo.biomass = 0.0;
+        game.farm.granary.insert(civ.id, 1.0);
+        let health = pilot(&mut game).max_health * 0.6;
+        pilot(&mut game).health = health;
+        let profile = game.civilization_profile(civ.id);
+        assert!(game.trade_back(&civ, 20.0).contains("mends the ship"));
+        assert_eq!(game.farm.stored(civ.id), 1.0);
+        pilot(&mut game).health = health;
+        game.farm.granary.insert(civ.id, farm::GRANARY_CAP);
+        let text = game.save_state().to_text();
+        let (state, generator) = save::SaveState::from_text(&text).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        let returned = game.trade_back(&civ, 20.0);
+        assert!(returned.contains("BIOMASS"), "{returned}");
+        assert_eq!(returned, loaded.trade_back(&civ, 20.0));
+        assert_eq!(game.cargo.biomass, loaded.cargo.biomass);
+        assert_eq!(game.farm.stored(civ.id), loaded.farm.stored(civ.id));
+        assert!((game.cargo.biomass + game.farm.stored(civ.id) - farm::GRANARY_CAP).abs() < 1e-5);
+        assert_eq!(game.civilization_profile(civ.id), profile);
+        // Critical hull and a full hold cannot be bypassed by culture or imperfection.
+        pilot(&mut game).health = pilot(&mut game).max_health * 0.4;
+        let before = game.farm.stored(civ.id);
+        assert!(game.trade_back(&civ, 20.0).contains("mends the ship"));
+        assert_eq!(before, game.farm.stored(civ.id));
+        game.cargo.biomass = game.cargo.cap(Material::Biomass);
+        let _ = game.trade_back(&civ, 20.0);
+        assert_eq!(before, game.farm.stored(civ.id));
     }
 
     #[test]

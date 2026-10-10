@@ -502,9 +502,9 @@ pub const MINE_COST_FRIEND: f32 = 0.25;
 pub const MINE_WARN_EVERY: f32 = 15.0;
 /// The tithe: fly within `TITHE_RANGE` of a seat (past its hull) and press the key. It takes
 /// `TITHE_AMOUNT` of the material the hold has most of, raises regard by `TITHE_GAIN` and may be
-/// repeated after `TITHE_COOLDOWN` seconds. A friend gives something back instead: a repair if
-/// the hull is below `TRADE_REPAIR_BELOW` of full, else `TRADE_RATE` of the amount in the material
-/// the hold has least of.
+/// repeated after `TITHE_COOLDOWN` seconds. A friend ranks available repair and finite granary trade
+/// through culture (critical hull requires repair); the legacy fallback gives `TRADE_RATE`
+/// of the amount in the material the hold has least of.
 pub const TITHE_RANGE: f32 = 420.0;
 pub const TITHE_AMOUNT: f32 = 20.0;
 pub const TITHE_GAIN: f32 = 9.0;

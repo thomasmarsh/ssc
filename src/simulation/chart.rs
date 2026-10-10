@@ -134,6 +134,7 @@ pub struct CivReading {
     pub tint: [f32; 3],
     /// How it stands toward the ship, once the ship has dealt with it.
     pub regard: Option<super::Tier>,
+    pub culture: Option<super::CultureReading>,
 }
 
 /// Everything known about one sector, for drawing and the detail panel.
@@ -477,6 +478,7 @@ impl Game {
             fallen: self.civ_standing(territory) == Standing::Fallen,
             tint: t.color(self.seed),
             regard: self.civ_met(territory),
+            culture: self.culture_reading(territory),
         })
     }
 

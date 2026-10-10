@@ -81,6 +81,8 @@ struct Streams {
 #[derive(Serialize, Deserialize)]
 pub struct SaveState {
     seed: u64,
+    #[serde(default)]
+    societies: society::Societies,
     time: f32,
     score: u64,
     lives: u32,
@@ -215,6 +217,7 @@ impl Game {
         relics.sort();
         SaveState {
             seed: self.seed,
+            societies: self.societies.clone(),
             time: self.time,
             score: self.score,
             lives: self.lives,
@@ -255,6 +258,7 @@ impl Game {
     pub fn from_save(state: SaveState, generator: u32) -> (Game, LoadReport) {
         let keep = generator == GENERATOR_VERSION;
         let mut game = Game::blank(state.seed);
+        game.societies = state.societies.restore(keep);
         game.time = state.time;
         game.score = state.score;
         game.lives = state.lives.max(1);

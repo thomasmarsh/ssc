@@ -434,8 +434,11 @@ impl Game {
             BenchAction::Tithe => {
                 row.group = "CONTACT";
                 row.text = "TITHE / FRIENDLY TRADE".into();
-                row.detail =
-                    "Offer 20 goods. Existing relation and granary trade terms apply.".into();
+                row.detail = "Offer 20 goods. Existing relation/granary terms apply.".into();
+                if let Some(actor) = self.pad.contact {
+                    row.detail.push('\n');
+                    row.detail.push_str(&self.contact_culture_text(actor));
+                }
             }
             BenchAction::Research(tech) => {
                 row.group = "RESEARCH";

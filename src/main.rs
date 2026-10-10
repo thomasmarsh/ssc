@@ -1745,7 +1745,9 @@ fn smoke_run(
             session.game = Game::new(42);
         }
         session.game.pose_frontier_contact();
-        if view == "agreement" {
+        if view == "culture" {
+            session.game.pose_contact_culture();
+        } else if view == "agreement" {
             session.game.pose_contact_agreement();
         } else if view == "partnership" {
             session.game.pose_contact_partnership();

@@ -67,6 +67,7 @@ pub mod save;
 mod shove;
 pub mod skills;
 mod sling;
+mod society;
 mod song;
 mod split;
 mod tether;
@@ -119,6 +120,7 @@ pub use rift::{Rift, RiftTrace};
 pub use root::{Root, STAND as ROOT_STAND};
 pub use rune::{Payload, RuneField, Sigil};
 pub use sling::SlingTell;
+pub use society::CultureReading;
 pub use song::SongRing;
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 pub use titles::{TitleFacts, title, title_case};
@@ -548,6 +550,7 @@ pub struct Game {
     /// (body, damage) awaiting the end of the step, and when each body was last struck; see
     /// `diplomacy`.
     civ_regard: BTreeMap<u64, Regard>,
+    societies: society::Societies,
     civ_hits: Vec<(u64, f32)>,
     civ_struck: HashMap<u64, f32>,
     /// Wildlife stances toward civilizations; see `wildlife`.
@@ -697,6 +700,7 @@ impl Game {
             civ_fall: HashMap::new(),
             civ_brains: HashMap::new(),
             civ_regard: BTreeMap::new(),
+            societies: society::Societies::default(),
             civ_hits: Vec::new(),
             civ_struck: HashMap::new(),
             fauna: wildlife::Fauna::default(),
@@ -823,6 +827,7 @@ impl Game {
         let mut ship_before = self.player().map(|p| (p.shield, p.health));
         let sources = self.incoming_sources();
         self.time += dt;
+        self.societies.advance(dt);
         self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
         self.streak.tick(dt);
         self.feel.tick(dt);

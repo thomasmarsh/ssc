@@ -139,6 +139,9 @@ impl Game {
             Verb::Bench | Verb::CloseBench => self.bench_toggle(),
             Verb::Contact => {
                 self.pad.contact = self.friendly_supplier().map(|c| c.id);
+                if let Some(actor) = self.pad.contact {
+                    self.assess_culture(actor);
+                }
                 self.bench_toggle();
             }
             Verb::Land | Verb::Deploy | Verb::Build => self.pad_action(),
