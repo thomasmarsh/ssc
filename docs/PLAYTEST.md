@@ -154,9 +154,9 @@ Check `slinger`, `longslinger`, and `softslinger` smoke/dev specimens: the famil
 - Do extra-power warnings remain readable and escapable alongside the original capability? Knobs: `MULTI_POWER_CHANCE` (0.02), `EXTRA_POWER_CONTINUE_CHANCE` (0.10), `MAX_SAMPLED_POWERS` (3). The telegraph minima and existing source budgets remain fixed.
 - Does a varied body feel too large or too busy? Knob: `MAX_SAMPLED_CARRIER_BODIES` (16), depth-zero weighted anatomy grammar. Founder percentages do not predict local encounter density.
 
-## Game-loop checkpoints (A/B/narrow C built; later slices TODO)
+## Game-loop checkpoints (A/B/narrow C/D/E built; later slices TODO)
 
-[GAME_LOOP.md](GAME_LOOP.md) section 13 defines the slices. A, B and narrow C are built and ready for these player checks. D onward remain planned; do not infer those features exist from this table.
+[GAME_LOOP.md](GAME_LOOP.md) section 13 defines the slices. A, B and narrow C/D/E are built and ready for player checks; further relations/machines and F onward remain planned.
 
 | Checkpoint | What to try | What would fail the design |
 | --- | --- | --- |
@@ -164,7 +164,7 @@ Check `slinger`, `longslinger`, and `softslinger` smoke/dev specimens: the famil
 | B/C: peaceful first frontier | Start fresh, never kill, earn/buy parts and support tech, advance grade and depth | Parry/dash/symbiosis or a required realm counter has a hidden kill gate; no affordable early supplier |
 | B/C: warlike first frontier | Fight wildlife, inspect raw/organ drops, raid a civilization, then push outward | Wildlife still pays cannons; one raid teaches everything; removing loot creates a stalled early game |
 | C: power and realm access | Compare prepared builds through several depths; try bare (100,100); pursue a marked counter | Grade saturates at the old cap, late repair becomes starter-mining grind, required source is inside its own inaccessible realm |
-| D/E: working home (refinery built; farm/delivery proposed) | Build a refinery/farm, leave, complete a delivery, come back | Waiting is the best action; water/fuel has circular startup needs; research cooperation pays less access than conquest |
+| D/E: working home (local modules, crops, delivery/survey built) | Refine 25F, accept/settle delivery, survey after accepting, reload before/after settlement; check HOME cancellation and credit price | Waiting is the best action; water/fuel has circular startup needs; research cooperation pays less access than conquest |
 | F/G: remote industry | Lose drones, salvage a shared wreck, ship a selected material between established pads (including water to a dry pad), block a dock | Losses require constant babysitting; ore or cargo duplicates; ship bulk hauling is easier than tankers; transport ignores endpoints/fuel |
 | H/I: home payoff | Observe a trade arrival, receive a raid warning, upgrade escorts/turrets, follow a shortage across hubs | The network feels invisible, reload changes a settled loss, one incident erases the economy, next useful project is unclear |
 

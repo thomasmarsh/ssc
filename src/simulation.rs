@@ -38,6 +38,7 @@ pub mod hud;
 mod impact;
 pub mod interact;
 mod jam;
+pub mod jobs;
 mod legacy;
 mod loot;
 pub mod lure;
@@ -464,6 +465,7 @@ pub struct Game {
     pub loadout: Loadout,
     /// Finite HOME raw-input orders settled in this run.
     home_input_orders: u8,
+    jobs: jobs::Jobs,
     pub stats: Stats,
     /// Recent things worth telling the player about (pickups, wrecks).
     pub notices: Vec<Notice>,
@@ -635,6 +637,7 @@ impl Game {
             arsenal_flash: 0.0,
             loadout: Loadout::default(),
             home_input_orders: 0,
+            jobs: jobs::Jobs::default(),
             stats: Stats::BASE,
             notices: Vec::new(),
             bench_feedback: None,
@@ -1005,6 +1008,7 @@ impl Game {
         self.prune_slings();
         self.cleanup_rifts();
         self.update_ping(dt);
+        self.update_jobs();
         self.cue_player_damage(ship_before, sources);
         self.cue_heartbeat(dt);
     }

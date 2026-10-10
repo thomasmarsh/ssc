@@ -4900,6 +4900,45 @@ mod bench_layout_tests {
         }
     }
     #[test]
+    fn contact_job_terms_remain_reviewable_in_the_compact_panel() {
+        for survey in [false, true] {
+            let mut game = game();
+            game.pose_frontier_contact();
+            game.loadout
+                .research
+                .known
+                .remove(&ssc::simulation::research::Tech::Frontier);
+            game.pose_contact_job(survey);
+            let text = bench_lines(&game, 600.0, 278.0)
+                .into_iter()
+                .map(|(s, _)| s)
+                .collect::<String>();
+            assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 278.0, "{text}");
+            assert!(!text.contains("details shortened"), "{text}");
+            let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            for required in [
+                "Return friendly",
+                "25%",
+                "nonstacking",
+                "+10 regard",
+                "chart lead",
+                "No expiry/alliance",
+                "Cancel ends offer; cargo kept",
+            ] {
+                assert!(terms.contains(required), "missing {required}: {text}");
+            }
+            assert!(
+                terms.contains(if survey {
+                    "visit after accept, no kill"
+                } else {
+                    "Pay 25F from ship at settlement"
+                }),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
     fn purchase_receipts_guidance_and_refusals_fit_the_small_panel() {
         for mode in [
             "upgrade",

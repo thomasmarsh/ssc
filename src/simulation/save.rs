@@ -89,6 +89,8 @@ pub struct SaveState {
     loadout: Loadout,
     #[serde(default)]
     home_input_orders: u8,
+    #[serde(default)]
+    jobs: jobs::Jobs,
     pad: PadState,
     chart: chart::ChartState,
     run: run::RunStats,
@@ -220,6 +222,7 @@ impl Game {
             cargo: self.cargo,
             loadout: self.loadout.clone(),
             home_input_orders: self.home_input_orders,
+            jobs: self.jobs.clone(),
             pad: self.pad.clone(),
             chart: self.chart.clone(),
             run: self.run.clone(),
@@ -258,6 +261,10 @@ impl Game {
         game.cargo = state.cargo;
         game.loadout = state.loadout;
         game.home_input_orders = state.home_input_orders;
+        game.jobs = state.jobs;
+        if !keep {
+            game.jobs.invalidate_world();
+        }
         game.chart = state.chart;
         game.run = state.run;
         game.legacy = state.legacy;

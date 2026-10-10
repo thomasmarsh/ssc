@@ -128,6 +128,8 @@ impl Snapshot {
             | BenchAction::Supply(_)
             | BenchAction::Outfit(_)
             | BenchAction::Tithe
+            | BenchAction::Job(_, _)
+            | BenchAction::CancelJob(_, _)
             | BenchAction::Research(_)
             | BenchAction::WaterExtractor
             | BenchAction::Warehouse

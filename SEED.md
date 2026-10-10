@@ -42,10 +42,10 @@ Decide per slice, and say which in one line.
 
 ## Queue (revised 2026-10-09: expand the game loop)
 
-The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; further machine jobs and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
+The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; finite peaceful delivery/survey jobs are built; further machine jobs, relations and later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, working home: narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Paid saved local power, refinery, warehouse, water tank, aquifer extractor and finite HOME bought-input route are built; further D machine jobs remain open. Stock-backed barter first; no complete galactic market required.
+1. [L] NEXT, working home: remaining E negotiated research access, service boons, pest jobs and a simple agreement. Finite delivery/survey jobs with saved research credit, regard and chart leads are built. Paid saved local power, refinery, warehouse, water tank, aquifer extractor and finite HOME bought-input route are built; further D machine jobs remain open. Stock-backed barter first; no complete galactic market required.
 2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 3. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 4. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
@@ -58,7 +58,9 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 
 ## Recently done
 
-- Local power: 30M 10C after Fabrication builds saved renewable supply for both pad machines; unpowered stocks/work pause, unloaded/save resume stays local. Narrow E is next.
+- Narrow peaceful jobs: friendly CONTACT offers saved finite 25F delivery and post-acceptance sector survey; one-time research credit/regard/chart leads, HOME cancellation, supplier-loss and generator invalidation. Further E relations remain open.
+
+- Local power: 30M 10C after Fabrication builds saved renewable supply for both pad machines; unpowered stocks/work pause, unloaded/save resume stays local. Remaining E relations are next.
 
 - Narrow local warehouse: 30M builds saved 300-unit M/V/C/B/F site storage; stash previews/transfers and refinery output share caps. Water remains tank-backed.
 
@@ -71,5 +73,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Narrow water storage: paid saved pad tank, 20M for 300 local water capacity; stash previews/transfers respect the tank and fixed 30 ship reserve. Aquifer extraction is now built.
 
 - Narrow local production: paid pad fuel refinery, Fabrication gate, local stash inputs/output, bounded unloaded simulation, and saved reserved batches. Bought-input trade is now built.
-
-- Narrow frontier progression (generator 33): five saved research dependencies, independently salted supplier specialties, capped one-time captures and one-use archive grade claims, continuing source-bound offense/durability grades with preserved handling/pattern bounds and normalized repair costs. Peaceful and conquest paths share the tested frontier ceiling.

@@ -16,6 +16,7 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 | player body (position, velocity, angle, hull, shield) | delta | health is clamped to at least 1 on load, shield time is re-granted |
 | `stats` | derived | `refresh_stats` from the loadout |
 | `loadout` (parts, arsenal, boosts, skills, organs, research, equipment grade) | delta | incl. boost `running` flags |
+| `jobs` (supplier/kind, capital, target, credit, survey progress, outcome) | delta | Four active / 128 lifetime records; accepted, settled and canceled contracts survive reload. Generator mismatch cancels active records, preserving terminal outcomes and earned research; no reserved cargo or refunds. Supplier dock loss cancels active work while unloaded. |
 | `cargo` | delta | `dev_free` is a dev toggle and is not saved |
 | `pad` (placed pads and their stash, kits, insured, auto repair, deploy order) | delta | pads are keyed by spawn: dropped on a generator change, the home pad is planted afresh. The last pad actually landed on is saved (`last_visited`); landed state, cover timers and which pads the enemy knows are ephemeral |
 | `chart` (known marks, visited, pins, beacons, beacon counter) | delta | travel charge, cooldown, last visit are ephemeral |

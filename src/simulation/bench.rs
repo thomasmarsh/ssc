@@ -44,6 +44,8 @@ pub enum BenchAction {
     Grade,
     Outfit(Slot),
     Tithe,
+    Job(u64, jobs::JobKind),
+    CancelJob(u64, jobs::JobKind),
     Supply(Material),
     Reforge(usize),
     Upgrade(usize),
@@ -121,6 +123,18 @@ impl Game {
                 .chain(std::iter::once(BenchAction::RawInput))
                 .chain([Slot::Plating, Slot::Engine, Slot::Core].map(BenchAction::Outfit))
                 .chain(self.pad.contact.map(|_| BenchAction::Tithe))
+                .chain(
+                    self.pad
+                        .contact
+                        .into_iter()
+                        .flat_map(|id| jobs::JobKind::ALL.map(|kind| BenchAction::Job(id, kind))),
+                )
+                .chain(
+                    self.jobs
+                        .active()
+                        .into_iter()
+                        .map(|(id, kind)| BenchAction::CancelJob(id, kind)),
+                )
                 .chain(self.pad.landed.into_iter().flat_map(|_| {
                     [
                         BenchAction::Power,
@@ -203,6 +217,8 @@ impl Game {
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
             Some(BenchAction::Grade) => self.buy_grade(),
+            Some(BenchAction::Job(id, kind)) => self.act_job(id, kind),
+            Some(BenchAction::CancelJob(id, kind)) => self.cancel_job(id, kind),
             Some(BenchAction::Outfit(slot)) => self.buy_outfit(slot),
             Some(BenchAction::Tithe) => match self.tithe() {
                 Ok(()) => self.bench_done("TITHE SETTLED".into(), Rarity::Common),
@@ -284,6 +300,15 @@ impl Game {
             ok: true,
         };
         match action {
+            BenchAction::Job(id, kind) => return self.job_row(id, kind, selected),
+            BenchAction::CancelJob(id, kind) => {
+                row = self.job_row(id, kind, selected);
+                row.action = action;
+                row.text = format!("CANCEL {}", kind.label());
+                row.state = "CANCEL PERMANENTLY - CARGO KEPT".into();
+                row.costs.clear();
+                row.ok = true;
+            }
             BenchAction::RawInput => {
                 row.group = "RAW INPUTS";
                 row.text = "BUY VOLATILES +20".into();
