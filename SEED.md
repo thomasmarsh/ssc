@@ -46,7 +46,7 @@ The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow 
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
 1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit fleet and nearby deposit orders - further modules, active targeting, kinetic impacts, scavengers and early recall beyond built loaded shot/blast/contact losses/repair/replacement/player wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
-2. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
+2. [L] E2 independent diplomacy before H: directional trust/friction, posture/ROE and shared authorization, then explicit commerce/tariff terms; H visiting civilization trade ships, real supply dependency, attributed privateering and sensors/turrets/escorts with bounded saved remote incidents (GAME_LOOP section 9.1); I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 3. Alongside: remaining D machine jobs, DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
 Creature backlog remains open: Foamback; Oozer small prey/nucleus/pinch/spit/gap/path and continuous perimeter/reach tuning; remaining organs and realm-discovery follow-ups; swarms/rally dispatch and herd map/sonar; elder weak points if needed. Builders still need visible gathering and player interaction. See BESTIARY/WORKSTREAMS for their built status. These do not block the first economy milestone.
@@ -56,6 +56,8 @@ Other backlog: density/feeling view-model and measurements, weaver rock care, hy
 Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; tankers for any material with compatible local storage; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Diplomacy target reconciled: independent trust/friction, posture/ROE, commercial terms and asymmetric real supply dependency; E2a/E2b/H1 gates documented, implementation remains TODO.
 
 - Loaded fleet hazards: hostile mines/missile/area bursts and dt-scaled hostile creature overlap share saved hull and finite wreck losses; friendly/calm/phased exclusions and conservation covered. Targeting, kinetic impacts, early recall and remote incidents remain next.
 
@@ -70,5 +72,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Free-lode fleet orders: saved mixed depletion and trip material, full-store skipping, remote exhaustion and target-loss policies; fixed generated flight anchors, combat/salvage still pending.
 
 - Planetoid designation: free saved fleet orders for known deposits within 6000 units, travel-aware flight and shared depletion; old cargo unloads before redirection. Roles/combat remain next.
-
-- Cross-pad blueprint: one saved overwriteable fleet configuration, atomic missing-module merge pricing, queued fitting and future-build costs; knowledge survives source/world loss. Designation/custom roles/combat remain next.

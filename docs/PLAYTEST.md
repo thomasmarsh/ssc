@@ -199,3 +199,15 @@ Built planetoid designation: discover nearby planetoids by visit, sonar or share
 - Fleet dispatch hold (built): PAUSE FLEET at the dock, leave and save/reload. Paid trips should unload once, then fuel and ore should stop changing. Full storage keeps cargo until room opens; power loss freezes return. RESUME FLEET should use the latest designated deposit. This does not recall units early or protect them from future combat.
 
 Built loaded fleet recovery: hostile shots, blasts, and sustained hostile creature contact can damage 80 hull and destroy units; below half hull looks orange, wrecks amber. Check that a destroyed unit never unloads, E/B/Select within 80 units below speed 80 salvages only hold room, and save/reload retains leftovers. At home, REPAIR costs 1M per 10 hull; BUILD replaces the first destroyed slot at full current-template cost. Units do not attract enemy aim yet; remote incidents, shields/weapons, and scavengers remain proposed. Check hostile mines/missile bursts and alert-creature overlap, including docked/power-paused workers; friendly blasts and calm/friendly/phased creatures must spare them. Contact deals one ordinary sting per 0.65s of overlap without pushing either body. Human loss frequency, warning clarity, salvage feel, and replacement pacing remain unverified.
+
+## Independent diplomacy and trade (proposed E2/H checks, unbuilt)
+
+Do not judge these until GAME_LOOP section 9.1 lands. Verify hostile defensive trade, a trusted but tense border, opportunistic convoy skirmishes, and asymmetric dependence as distinct situations.
+
+- Can the contact/chart readout explain why a neighbor dislikes you, whether it will initiate force, what it may target, and which goods it will trade?
+- Does settling a grievance ease tension sooner than rebuilding lost trust? Can repeated gifts or circular trade cheaply erase betrayal?
+- Is a hostile tariff clear before confirming, with accepted lots retaining their terms? Is an embargo distinguishable from an expensive offer or missing stock?
+- Do fuel deliveries create useful leverage only when actually consumed? Do reserves and alternate suppliers visibly reduce it without making dependency guaranteed protection?
+- Can sensors/evidence reveal a privateer sponsor, and do escorts, rerouting or negotiation offer useful responses? Are remote losses warned, bounded and stable after reload?
+
+Tuning proposals live in section 9.1; no diplomacy-axis knobs are implemented yet. HOME and peaceful suppliers must still support essential zero-kill progression.
