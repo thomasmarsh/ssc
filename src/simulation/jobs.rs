@@ -1,4 +1,4 @@
-//! Finite peaceful contracts. Acceptance reserves no cargo; settlement pays once at a seat.
+//! Finite contracts. Acceptance reserves no cargo; settlement pays once at a seat.
 use super::research::Tech;
 use super::upgrades::Rarity;
 use super::*;
@@ -15,13 +15,15 @@ const DELIVERY: [(Material, f32); 1] = [(Material::Fuel, 25.0)];
 pub enum JobKind {
     Fuel,
     Survey,
+    Pest,
 }
 impl JobKind {
-    pub const ALL: [Self; 2] = [Self::Fuel, Self::Survey];
+    pub const ALL: [Self; 3] = [Self::Fuel, Self::Survey, Self::Pest];
     pub fn label(self) -> &'static str {
         match self {
             Self::Fuel => "FUEL DELIVERY",
             Self::Survey => "SECTOR SURVEY",
+            Self::Pest => "PEST CONTROL",
         }
     }
 }
@@ -42,6 +44,15 @@ struct Contract {
     credit: Tech,
     surveyed: bool,
     status: Status,
+    #[serde(default)]
+    pest: Option<Pest>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Pest {
+    origin: (SectorId, u32),
+    name: String,
+    removed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -124,32 +135,106 @@ impl Game {
     }
 
     /// Bounded smoke selection; the adapter stages a friendly seat first.
-    pub fn pose_contact_job(&mut self, survey: bool) {
+    pub fn pose_contact_job(&mut self, kind: JobKind) {
         if let Some(id) = self.pad.contact {
-            self.bench_select(BenchAction::Job(
-                id,
-                if survey {
-                    JobKind::Survey
-                } else {
-                    JobKind::Fuel
-                },
-            ));
+            self.bench_select(BenchAction::Job(id, kind));
         }
     }
 
     fn job_offer(&self, civ: &Territory, kind: JobKind) -> Contract {
+        let pest = (kind == JobKind::Pest)
+            .then(|| self.pest_offer(civ))
+            .flatten();
         Contract {
             capital: civ.capital,
-            target: SectorId {
-                x: civ.capital.x.saturating_add(1),
-                y: civ.capital.y,
+            target: if kind == JobKind::Pest {
+                civ.capital
+            } else {
+                SectorId {
+                    x: civ.capital.x.saturating_add(1),
+                    y: civ.capital.y,
+                }
             },
             credit: match kind {
                 JobKind::Fuel => self.supplier_profile(civ)[3],
                 JobKind::Survey => Tech::Frontier,
+                JobKind::Pest => Tech::OrganSupport,
             },
             surveyed: false,
             status: Status::Active,
+            pest,
+        }
+    }
+
+    /// Designate one living generated wild creature hostile to this supplier. Dynamic births,
+    /// allies, elders and already-contracted targets cannot become repeatable pest rewards.
+    fn pest_offer(&self, civ: &Territory) -> Option<Pest> {
+        use crate::affinity::{Disposition, affinity};
+        self.bodies
+            .iter()
+            .filter(|b| {
+                b.kind == BodyKind::Creature
+                    && b.health > 0.0
+                    && !b.follower
+                    && self.apex_of(b).is_none()
+                    && self.civ_of(b).is_none()
+                    && SectorId::containing(b.position) == civ.capital
+                    && b.origin.is_some_and(|origin| {
+                        origin.0 == civ.capital
+                            && !self
+                                .jobs
+                                .records
+                                .values()
+                                .any(|j| j.pest.as_ref().is_some_and(|p| p.origin == origin))
+                    })
+                    && Disposition::of(affinity(
+                        self.seed,
+                        b.species,
+                        &b.genome,
+                        civ,
+                        b.position / world::SECTOR_SIZE,
+                    )) == Disposition::Hostile
+            })
+            .min_by_key(|b| b.origin)
+            .map(|b| Pest {
+                origin: b.origin.unwrap(),
+                name: b.genome.name(),
+                removed: false,
+            })
+    }
+
+    fn pest_removed(&self, pest: &Pest) -> bool {
+        pest.removed
+            || self
+                .fallen
+                .get(&pest.origin.0)
+                .is_some_and(|s| s.contains(&pest.origin.1))
+    }
+
+    /// Read-only target identities for the desktop marker, including all surviving chain parts.
+    pub fn pest_targets(&self) -> Vec<u64> {
+        let origins: Vec<_> = self
+            .jobs
+            .records
+            .values()
+            .filter(|j| j.status == Status::Active)
+            .filter_map(|j| j.pest.as_ref().filter(|p| !p.removed).map(|p| p.origin))
+            .collect();
+        self.bodies
+            .iter()
+            .filter(|b| b.origin.is_some_and(|o| origins.contains(&o)))
+            .map(|b| b.id)
+            .collect()
+    }
+
+    pub fn pose_pest_target(&mut self) {
+        self.pose_contact_job(JobKind::Pest);
+        self.bench_confirm();
+        if let Some(target) = self.pest_targets().first().and_then(|id| self.body(*id)) {
+            let at = target.position;
+            self.pad.contact = None;
+            self.pad.bench = None;
+            self.teleport(at + Vec2::new(180.0, 0.0));
         }
     }
 
@@ -157,7 +242,9 @@ impl Game {
     pub(super) fn job_row(&self, supplier: u64, kind: JobKind, selected: bool) -> bench::BenchRow {
         let civ = self.friendly_supplier().filter(|c| c.id == supplier);
         let saved = self.jobs.records.get(&(supplier, kind));
-        let offer = civ.map(|c| self.job_offer(&c, kind));
+        let offer = civ
+            .filter(|_| saved.is_none())
+            .map(|c| self.job_offer(&c, kind));
         let job = saved.or(offer.as_ref());
         let mut row = bench::BenchRow {
             action: BenchAction::Job(supplier, kind),
@@ -190,6 +277,20 @@ impl Game {
                     } else {
                         "visit after accept, no kill"
                     }
+                ),
+                JobKind::Pest => job.pest.as_ref().map_or_else(
+                    || "No local hostile target.".into(),
+                    |p| format!(
+                        "Remove {} ({},{}), all parts: {}. Any actor counts; amber marks.",
+                        p.name,
+                        job.target.x,
+                        job.target.y,
+                        if self.pest_removed(p) {
+                            "removed"
+                        } else {
+                            "designated"
+                        }
+                    ),
                 ),
             },
             job.capital.x,
@@ -237,10 +338,19 @@ impl Game {
             if kind == JobKind::Fuel && !self.cargo.can_afford(&DELIVERY) {
                 return Some("ACTIVE - NEEDS 25F IN SHIP HOLD");
             }
+            if kind == JobKind::Pest && !job.pest.as_ref().is_some_and(|p| self.pest_removed(p)) {
+                return Some("ACTIVE - REMOVE THE MARKED PEST");
+            }
         } else if self.jobs.active().len() >= ACTIVE_CAP {
             return Some("FOUR ACTIVE JOBS - SETTLE OR CANCEL");
         } else if self.jobs.records.len() >= RECORD_CAP {
             return Some("CONTRACT LOG FULL (128)");
+        } else if kind == JobKind::Pest
+            && self
+                .pest_offer(&self.friendly_supplier().unwrap())
+                .is_none()
+        {
+            return Some("NO LOCAL HOSTILE TARGET");
         }
         None
     }
@@ -254,8 +364,8 @@ impl Game {
         if !self.jobs.records.contains_key(&key) {
             let civ = self.friendly_supplier().unwrap();
             let job = self.job_offer(&civ, kind);
-            if kind == JobKind::Survey {
-                self.chart_reveal(job.target, false);
+            if kind == JobKind::Survey || kind == JobKind::Pest {
+                self.chart_reveal(job.pest.as_ref().map_or(job.target, |p| p.origin.0), false);
             }
             self.jobs.records.insert(key, job);
             self.bench_done(
@@ -331,6 +441,16 @@ impl Game {
         let here = self.player().map(|p| SectorId::containing(p.position));
         for key in self.jobs.active() {
             let lost = self.job_supplier_lost(key.0, &self.jobs.records[&key]);
+            let position = self.jobs.records[&key].pest.as_ref().and_then(|p| {
+                self.bodies
+                    .iter()
+                    .find(|b| b.origin == Some(p.origin))
+                    .map(|b| SectorId::containing(b.position))
+            });
+            let removed = self.jobs.records[&key]
+                .pest
+                .as_ref()
+                .is_some_and(|p| !p.removed && self.pest_removed(p));
             let job = self.jobs.records.get_mut(&key).unwrap();
             if lost {
                 job.status = Status::SupplierLost;
@@ -344,6 +464,17 @@ impl Game {
                     "SURVEY COMPLETE - RETURN TO SUPPLIER FOR SETTLEMENT".into(),
                     Rarity::Rare,
                 );
+            } else if removed {
+                job.pest.as_mut().unwrap().removed = true;
+                self.notify(
+                    "PEST REMOVED - RETURN TO SUPPLIER FOR SETTLEMENT".into(),
+                    Rarity::Rare,
+                );
+            } else if let Some(sector) = position
+                && sector != job.target
+            {
+                job.target = sector;
+                self.chart_reveal(sector, false);
             }
         }
     }
@@ -385,6 +516,205 @@ mod tests {
     fn act(game: &mut Game, id: u64, kind: JobKind) {
         game.bench_select(BenchAction::Job(id, kind));
         game.bench_confirm();
+    }
+
+    fn pest_contact() -> (Game, Territory) {
+        // Use an actual generated hostile, with no staged creature or affinity override.
+        let mut game = Game::new(42);
+        game.player_invulnerability = 1e9;
+        let civ = contact(&mut game);
+        assert!(
+            game.pest_offer(&civ).is_some(),
+            "fixture supplier needs a generated pest"
+        );
+        (game, civ)
+    }
+
+    #[test]
+    fn designated_pest_survives_unload_and_settles_once_after_natural_removal() {
+        let (mut game, civ) = pest_contact();
+        act(&mut game, civ.id, JobKind::Pest);
+        let key = (civ.id, JobKind::Pest);
+        let pest = game.jobs.records[&key].pest.clone().unwrap();
+        let accepted = game.jobs.clone();
+        assert!(!game.pest_targets().is_empty());
+        act(&mut game, civ.id, JobKind::Pest);
+        assert_eq!(game.jobs, accepted);
+        let across = SectorId {
+            x: civ.capital.x + 1,
+            y: civ.capital.y,
+        };
+        for body in game
+            .bodies
+            .iter_mut()
+            .filter(|b| b.origin == Some(pest.origin))
+        {
+            body.position = across.center();
+        }
+        game.update_jobs();
+        assert_eq!(game.jobs.records[&key].target, across);
+        game.pad.contact = None;
+        game.pad.bench = None;
+        game.teleport(Vec2::ZERO);
+        game.step(1.0 / 60.0, Input::default());
+        assert!(game.pest_targets().is_empty());
+        assert!(!game.jobs.records[&key].pest.as_ref().unwrap().removed);
+        game = reload(&game);
+        contact(&mut game);
+        assert_eq!(
+            game.jobs.records[&key].pest.as_ref().unwrap().origin,
+            pest.origin
+        );
+        // Eaten, starved or killed by a defender: normal cleanup, without ship kill credit.
+        for body in game
+            .bodies
+            .iter_mut()
+            .filter(|b| b.origin == Some(pest.origin))
+        {
+            body.health = 0.0;
+            body.consumed = true;
+        }
+        game.step(1.0 / 60.0, Input::default());
+        assert!(game.jobs.records[&key].pest.as_ref().unwrap().removed);
+        assert!(game.pest_targets().is_empty());
+        assert_eq!(game.run.kills, 0);
+        game = reload(&game);
+        contact(&mut game);
+        let (cargo, regard) = (game.cargo, game.civ_regard(civ.id));
+        act(&mut game, civ.id, JobKind::Pest);
+        assert_eq!(game.cargo, cargo);
+        assert_eq!(game.civ_regard(civ.id), regard + 10.0);
+        assert_eq!(game.loadout.research.fragments[&Tech::OrganSupport], 0.25);
+        assert_eq!(game.jobs.records[&key].status, Status::Settled);
+        game = reload(&game);
+        contact(&mut game);
+        let (research, regard) = (game.loadout.research.clone(), game.civ_regard(civ.id));
+        act(&mut game, civ.id, JobKind::Pest);
+        assert_eq!(game.loadout.research, research);
+        assert_eq!(game.civ_regard(civ.id), regard);
+    }
+
+    #[test]
+    fn pest_only_accepts_hostile_generated_targets_and_tracks_the_whole_chain() {
+        let (mut game, civ) = pest_contact();
+        let pest = game.pest_offer(&civ).unwrap();
+        let victim = game
+            .bodies
+            .iter()
+            .find(|b| b.origin == Some(pest.origin))
+            .unwrap()
+            .clone();
+        assert_eq!(
+            crate::affinity::Disposition::of(game.fauna_affinity(&victim, civ.id).unwrap()),
+            crate::affinity::Disposition::Hostile
+        );
+        act(&mut game, civ.id, JobKind::Pest);
+        let mut other = victim.clone();
+        other.id = game.next_id;
+        game.next_id += 1;
+        other.origin = None;
+        other.health = 0.0;
+        other.consumed = true;
+        game.add_body(other);
+        game.remove_destroyed();
+        game.update_jobs();
+        assert!(
+            !game.jobs.records[&(civ.id, JobKind::Pest)]
+                .pest
+                .as_ref()
+                .unwrap()
+                .removed
+        );
+        // An origin is complete only after every segment falls, even with the head gone.
+        game.bodies
+            .retain(|b| b.origin != Some(pest.origin) || b.id == victim.id);
+        let chain = u32::MAX;
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == victim.id)
+            .unwrap()
+            .chain = Some(chain);
+        let mut tail = victim.clone();
+        tail.id = game.next_id;
+        game.next_id += 1;
+        tail.chain = Some(chain);
+        tail.follower = true;
+        let tail_id = game.add_body(tail);
+        game.bodies
+            .iter_mut()
+            .find(|b| b.id == victim.id)
+            .unwrap()
+            .health = 0.0;
+        game.remove_destroyed();
+        game.update_jobs();
+        assert_eq!(game.pest_targets(), vec![tail_id]);
+        assert!(!game.pest_removed(&pest));
+        for b in game
+            .bodies
+            .iter_mut()
+            .filter(|b| b.origin == Some(pest.origin))
+        {
+            b.health = 0.0;
+        }
+        game.remove_destroyed();
+        game.update_jobs();
+        assert!(game.pest_removed(&pest));
+        // With no wild generated bodies left, a supplier still offers peaceful work.
+        game.jobs.records.clear();
+        game.bodies.retain(|b| {
+            b.kind != BodyKind::Creature
+                || b.origin.is_none_or(|o| o.0 != civ.capital)
+                || game.civ_lineages.contains_key(&b.species)
+        });
+        assert!(game.pest_offer(&civ).is_none());
+        let mut ineligible = victim.clone();
+        ineligible.id = game.next_id;
+        game.next_id += 1;
+        ineligible.origin = None;
+        game.bodies.push(ineligible.clone());
+        assert!(
+            game.pest_offer(&civ).is_none(),
+            "dynamic births are ineligible"
+        );
+        game.bodies.pop();
+        ineligible.origin = Some(pest.origin);
+        ineligible.follower = true;
+        game.bodies.push(ineligible);
+        assert!(game.pest_offer(&civ).is_none(), "followers are ineligible");
+        assert_eq!(
+            game.job_block(civ.id, JobKind::Pest),
+            Some("NO LOCAL HOSTILE TARGET")
+        );
+        assert!(game.job_block(civ.id, JobKind::Fuel).is_none());
+        assert!(game.job_block(civ.id, JobKind::Survey).is_none());
+    }
+
+    #[test]
+    fn pest_cancellation_supplier_loss_and_world_change_close_saved_targets() {
+        for ending in [Status::Canceled, Status::SupplierLost, Status::WorldChanged] {
+            let (mut game, civ) = pest_contact();
+            act(&mut game, civ.id, JobKind::Pest);
+            let key = (civ.id, JobKind::Pest);
+            match ending {
+                Status::Canceled => {
+                    game.bench_select(BenchAction::CancelJob(civ.id, JobKind::Pest));
+                    game.bench_confirm();
+                }
+                Status::SupplierLost => {
+                    game.civ_fall.entry(civ.id).or_default().capital = true;
+                    game.update_jobs();
+                }
+                Status::WorldChanged => {
+                    let (state, version) =
+                        save::SaveState::from_text(&game.save_state().to_text()).unwrap();
+                    game = Game::from_save(state, version + 1).0;
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(game.jobs.records[&key].status, ending);
+            assert!(game.pest_targets().is_empty());
+            assert_eq!(reload(&game).jobs, game.jobs);
+        }
     }
 
     #[test]

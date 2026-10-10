@@ -1654,11 +1654,20 @@ fn smoke_run(
     if run.frames == 0
         && let Ok(view) = std::env::var("SSC_CONTACT_JOB")
     {
+        if view == "pest" || view == "pest-target" {
+            session.game = Game::new(42);
+        }
         session.game.pose_frontier_contact();
         if view == "partnership" {
             session.game.pose_contact_partnership();
+        } else if view == "pest-target" {
+            session.game.pose_pest_target();
         } else {
-            session.game.pose_contact_job(view == "survey");
+            session.game.pose_contact_job(match view.as_str() {
+                "survey" => ssc::simulation::jobs::JobKind::Survey,
+                "pest" => ssc::simulation::jobs::JobKind::Pest,
+                _ => ssc::simulation::jobs::JobKind::Fuel,
+            });
         }
     }
     // SSC_OUTPOST=1: start at the early outpost's capital (standing meter, tithe seat).

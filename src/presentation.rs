@@ -1014,7 +1014,9 @@ fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
     }
     // Keep a row and heading available even when a long part description meets a receipt.
     let visible = ((height - 24.0) / 18.0).floor() as usize;
-    let detail_budget = visible.saturating_sub(8 + response.len() + 2).max(2);
+    let compact = height < 278.0;
+    let fixed = if compact { 7 } else { 8 };
+    let detail_budget = visible.saturating_sub(fixed + response.len() + 2).max(2);
     let shortened = details.len() > detail_budget;
     if shortened {
         let tail = details.split_off(details.len() - 2);
@@ -1025,7 +1027,7 @@ fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
         details.extend(tail);
     }
     // Reserve the selected action, description, costs, hold, and controls before the list.
-    let reserved = 8 + details.len() + response.len();
+    let reserved = fixed + details.len() + response.len();
     let available = visible.saturating_sub(reserved);
     let mut count = available.clamp(1, 12);
     while count > 1 {
@@ -1077,7 +1079,14 @@ fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
         );
         lines.push((format!("{}\n", clip_bench(&text, columns)), tint));
     }
-    lines.push((format!("\n{}\n", clip_bench(&row.text, columns)), CYAN));
+    lines.push((
+        format!(
+            "{}{}\n",
+            if compact { "" } else { "\n" },
+            clip_bench(&row.text, columns)
+        ),
+        CYAN,
+    ));
     lines.push((
         format!(
             "{}  |  {}{}\n",
@@ -2467,6 +2476,7 @@ pub fn draw(
     };
     let jam = game.jam_view();
     draw_backdrop(&mut gizmos, camera, half, &sky, dark);
+    let pests = game.pest_targets();
     for body in game.bodies.iter().filter(|b| {
         // Cull on the body's full extent, not its center: a planetoid is hundreds of units
         // wide and must stay drawn while only its edge (or halo) is on screen.
@@ -2474,6 +2484,18 @@ pub fn draw(
     }) {
         let p = body.position;
         let r = body.radius;
+        if pests.contains(&body.id) {
+            let mark = Color::srgb(1.0, 0.65, 0.15);
+            let size = r + 14.0;
+            for sign in [-1.0, 1.0] {
+                let at = p + Vec2::new(sign * size, size);
+                gizmos.line_2d(at, at - Vec2::Y * 10.0, mark);
+                gizmos.line_2d(at, at - Vec2::X * sign * 10.0, mark);
+                let at = p + Vec2::new(sign * size, -size);
+                gizmos.line_2d(at, at + Vec2::Y * 10.0, mark);
+                gizmos.line_2d(at, at - Vec2::X * sign * 10.0, mark);
+            }
+        }
         let direction = Vec2::from_angle(body.angle);
         let color = if body.kind == BodyKind::Asteroid && body.pinned {
             // A civilization's blocks wear its tint; other pinned stone is plain tan.
@@ -4925,19 +4947,27 @@ mod bench_layout_tests {
 
     #[test]
     fn contact_job_terms_remain_reviewable_in_the_compact_panel() {
-        for survey in [false, true] {
-            let mut game = game();
+        for kind in ssc::simulation::jobs::JobKind::ALL {
+            let mut game = if kind == ssc::simulation::jobs::JobKind::Pest {
+                Game::new(42)
+            } else {
+                game()
+            };
             game.pose_frontier_contact();
             game.loadout
                 .research
                 .known
                 .remove(&ssc::simulation::research::Tech::Frontier);
-            game.pose_contact_job(survey);
-            let text = bench_lines(&game, 600.0, 278.0)
+            game.pose_contact_job(kind);
+            let height = 480.0 - DETAILS_TOP - DETAILS_BOTTOM;
+            let text = bench_lines(&game, 640.0 - 32.0, height)
                 .into_iter()
                 .map(|(s, _)| s)
                 .collect::<String>();
-            assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 278.0, "{text}");
+            assert!(
+                text.lines().count() as f32 * 18.0 + 24.0 <= height,
+                "{text}"
+            );
             assert!(!text.contains("details shortened"), "{text}");
             let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
             for required in [
@@ -4952,14 +4982,22 @@ mod bench_layout_tests {
                 assert!(terms.contains(required), "missing {required}: {text}");
             }
             assert!(
-                terms.contains(if survey {
-                    "visit after accept, no kill"
-                } else {
-                    "Pay 25F from ship at settlement"
+                terms.contains(match kind {
+                    ssc::simulation::jobs::JobKind::Survey => "visit after accept, no kill",
+                    ssc::simulation::jobs::JobKind::Fuel => "Pay 25F from ship at settlement",
+                    ssc::simulation::jobs::JobKind::Pest => "Any actor counts; amber marks",
                 }),
                 "{text}"
             );
         }
+        let mut game = game();
+        game.pose_frontier_contact();
+        game.pose_contact_job(ssc::simulation::jobs::JobKind::Pest);
+        let text = bench_lines(&game, 600.0, 278.0)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<String>();
+        assert!(text.contains("NO LOCAL HOSTILE TARGET"), "{text}");
     }
 
     #[test]

@@ -102,5 +102,5 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 - `SSC_DEV_PANEL=<row>`: in a smoke run, open the panel on that row.
 - `SSC_DEV_ON=1`: with `SSC_DEV_PANEL`, first switch on the first six toggles and double the time scale (checks the panel and DEV tag).
 
-- `SSC_CONTACT_JOB=delivery|survey|partnership`: bounded friendly outpost CONTACT pose selecting the real PARTS job offer or SKILLS partnership terms; requires `SSC_SMOKE_FRAMES`.
+- `SSC_CONTACT_JOB=delivery|survey|pest|pest-target|partnership`: bounded friendly outpost CONTACT pose selecting the real PARTS job offer or SKILLS partnership terms; pest poses use seed 42 for an eligible generated hostile; `pest-target` accepts pest control and centers the real marked creature; requires `SSC_SMOKE_FRAMES`.
 - `SSC_FRONTIER_CONTACT=1`: bounded smoke pose at the peaceful outpost, friendly CONTACT open on the real grade purchase with prerequisite knowledge and ship goods. `SSC_BENCH_VIEW=research` shows the real HOME frontier-research requirement row. Use `SSC_OFFSCREEN_SIZE=640x480` to verify compact layouts; both require `SSC_SMOKE_FRAMES`.
