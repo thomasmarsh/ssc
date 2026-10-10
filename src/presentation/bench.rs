@@ -1,637 +1,533 @@
-//! The bench panel: tabs, action rows, selected details and costs.
-use super::{
-    CYAN, DETAILS_BOTTOM, DETAILS_TOP, DRY_RED, MUTED, OWNED, PAD_GREEN, material_color,
-    rarity_color,
+//! The bench panel (slice U2): tabbed cards with cost pips and state badges, a detail pane, a
+//! receipt strip and a hint bar, drawn from `ui::screens::bench::BenchView` with the U1 theme.
+//! The view-model is pure and tested there; this file only spawns nodes and rebuilds them when
+//! the view differs from the last frame's. Transactions stay with `Game::bench_confirm` and
+//! `Game::bench_alt`, dispatched by `bench_controls` in `main.rs`.
+use super::help::{HelpBody, HelpPanel};
+use super::{DETAILS_BOTTOM, DETAILS_TOP};
+use crate::ui::glyphs::Device;
+use crate::ui::icons::Icon;
+use crate::ui::screens::bench::{
+    BORDER, BenchView, CARD_GAP, CARD_H, CardView, DETAIL_GAP, DETAIL_PAD, DetailView, GAP,
+    HEADING_H, HINT_H, HintView, ListEntry, META_H, PAD, Pip, RECEIPT_PAD, ReceiptView, TAB_H,
+    TabCell, Tint,
 };
-use bevy::ecs::query::QueryFilter;
+use crate::ui::theme::{self, Tone};
+use crate::ui::widgets;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use ssc::simulation::{Game, Material};
+use ssc::simulation::{Game, Material, RowKind};
 
 /// The bench panel's root, shown only while the bench is open.
 #[derive(Component)]
 pub(crate) struct BenchPanelNode;
-/// One line of the bench panel: the tab strip, then its rows, then a hint.
-#[derive(Component)]
-pub(crate) struct BenchLine(pub(super) usize);
 
-/// Bounded text spans for tabs, action rows, selected details, costs, and controls.
-const BENCH_LINES: usize = 64;
+/// The root node, kept disjoint from the help panel's nodes.
+type BenchRootOnly = (With<BenchPanelNode>, Without<HelpPanel>, Without<HelpBody>);
+
+type Kids<'a> = ChildSpawnerCommands<'a>;
 
 pub(super) fn spawn(commands: &mut Commands) {
-    // The bench: a panel on the right, shown while it is open.
-    commands
-        .spawn((
-            BenchPanelNode,
-            Text::new(""),
-            TextFont::from_font_size(14.0),
-            Node {
-                position_type: PositionType::Absolute,
-                right: px(16),
-                top: px(DETAILS_TOP),
-                max_width: percent(94),
-                padding: UiRect::axes(px(16), px(12)),
-                border: UiRect::all(px(1)),
-                display: Display::None,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.012, 0.022, 0.045, 0.92)),
-            BorderColor::all(Color::srgba(0.4, 1.0, 0.65, 0.4)),
-            GlobalZIndex(12),
-        ))
-        .with_children(|panel| {
-            for line in 0..BENCH_LINES {
-                panel.spawn((
-                    BenchLine(line),
-                    TextSpan::new(""),
-                    TextFont::from_font_size(14.0),
-                    TextColor(MUTED),
-                ));
-            }
-        });
+    commands.spawn((
+        BenchPanelNode,
+        Node {
+            position_type: PositionType::Absolute,
+            right: px(16),
+            top: px(DETAILS_TOP),
+            padding: UiRect::all(px(PAD)),
+            border: UiRect::all(px(BORDER)),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(GAP),
+            overflow: Overflow::clip(),
+            display: Display::None,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.012, 0.022, 0.045, 0.94)),
+        BorderColor::all(Color::srgba(0.4, 1.0, 0.65, 0.4)),
+        GlobalZIndex(12),
+    ));
 }
 
-/// Fit the panel to the window and refresh its lines; hidden when the bench is closed.
-pub(super) fn apply<F: QueryFilter>(
-    game: &Game,
-    viewport: Vec2,
-    node: &mut Node,
-    spans: &mut Query<(&mut TextSpan, &mut TextColor, &BenchLine), F>,
-) {
-    let width = (viewport.x - 32.0).min(680.0);
-    let height = viewport.y - DETAILS_TOP - DETAILS_BOTTOM;
-    node.width = px(width);
-    let panel = bench_lines(game, width, height);
-    let display = if panel.is_empty() {
-        Display::None
-    } else {
+/// Everything the bench's per-frame refresh needs: the root, a commands queue, the device last
+/// touched (for button names) and the view last drawn (a frame that changes nothing rebuilds
+/// nothing).
+#[derive(SystemParam)]
+pub(crate) struct BenchRender<'w, 's> {
+    commands: Commands<'w, 's>,
+    keys: Res<'w, ButtonInput<KeyCode>>,
+    pads: Query<'w, 's, &'static Gamepad>,
+    device: Local<'s, Device>,
+    drawn: Local<'s, Option<BenchView>>,
+    root: Single<'w, 's, (Entity, &'static mut Node), BenchRootOnly>,
+}
+
+/// Fit the panel to the window and rebuild it when its view changed; hidden when the bench is
+/// closed.
+pub(super) fn apply(game: &Game, viewport: Vec2, bench: &mut BenchRender) {
+    if bench.pads.iter().any(|p| p.get_pressed().next().is_some()) {
+        *bench.device = Device::Pad;
+    } else if bench.keys.get_just_pressed().next().is_some() {
+        *bench.device = Device::Keys;
+    }
+    let view = BenchView::build(
+        game,
+        (viewport.x, viewport.y),
+        DETAILS_TOP,
+        DETAILS_BOTTOM,
+        *bench.device,
+    );
+    if *bench.drawn == view {
+        return;
+    }
+    *bench.drawn = view.clone();
+    let (entity, node) = &mut *bench.root;
+    let entity = *entity;
+    let display = if view.is_some() {
         Display::Flex
+    } else {
+        Display::None
     };
     if node.display != display {
         node.display = display;
     }
-    for (mut span, mut color, line) in spans {
-        match panel.get(line.0) {
-            Some((text, tint)) => {
-                if span.0 != *text {
-                    span.0 = text.clone();
-                }
-                color.0 = *tint;
-            }
-            None => {
-                if !span.0.is_empty() {
-                    span.0.clear();
-                }
-            }
-        }
-    }
-}
-
-/// The bench panel's lines: tab strip, rows, hint. Empty when the bench is closed.
-pub(super) fn bench_lines(game: &Game, width: f32, height: f32) -> Vec<(String, Color)> {
-    let Some(panel) = game.bench_panel() else {
-        return Vec::new();
+    let mut entity_commands = bench.commands.entity(entity);
+    entity_commands.despawn_children();
+    let Some(view) = view else {
+        return;
     };
-    let columns = ((width - 34.0) / 8.6).floor().max(32.0) as usize;
-    let mut lines = vec![(
-        format!(
-            "{}\n",
-            ssc::simulation::BenchTab::ALL
-                .into_iter()
-                .enumerate()
-                .map(|(n, tab)| {
-                    if tab == panel.tab {
-                        format!("[{} {}]", n + 1, tab.label())
-                    } else {
-                        format!("{} {}", n + 1, tab.label())
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("  ")
-        ),
-        PAD_GREEN,
-    )];
-    let selected = panel.rows.iter().position(|r| r.selected).unwrap_or(0);
-    let row = &panel.rows[selected];
-    let mut details = wrap_bench(&row.detail, columns);
-    let mut response = Vec::new();
-    if let Some(receipt) = &game.bench_feedback {
-        let tint = if receipt.success {
-            rarity_color(receipt.rarity)
-        } else {
-            DRY_RED
-        };
-        for line in receipt.text.lines() {
-            response.extend(
-                wrap_bench(line, columns)
-                    .into_iter()
-                    .map(|line| (line, tint)),
-            );
-        }
+    node.width = px(view.width);
+    node.height = px(view.height);
+    entity_commands.with_children(|root| build(root, &view));
+}
+
+fn tint(tint: Tint) -> Color {
+    match tint {
+        Tint::Tone(tone) => tone.color(),
+        Tint::Rgb([r, g, b]) => Color::srgb(r, g, b),
     }
-    if let Some(guidance) = &game.unlock_guidance {
-        response.extend(
-            wrap_bench(&guidance.text, columns)
-                .into_iter()
-                .map(|line| (line, CYAN)),
-        );
-    }
-    // Keep a row and heading available even when a long part description meets a receipt.
-    let visible = ((height - 24.0) / 18.0).floor() as usize;
-    let compact = height < 278.0;
-    let fixed = if compact { 7 } else { 8 };
-    let detail_budget = visible.saturating_sub(fixed + response.len() + 2).max(2);
-    let shortened = details.len() > detail_budget;
-    if shortened {
-        let tail = details.split_off(details.len() - 2);
-        details.truncate(detail_budget.saturating_sub(3));
-        if detail_budget > 2 {
-            details.push("...".into());
-        }
-        details.extend(tail);
-    }
-    // Reserve the selected action, description, costs, hold, and controls before the list.
-    let reserved = fixed + details.len() + response.len();
-    let available = visible.saturating_sub(reserved);
-    let mut count = available.clamp(1, 12);
-    while count > 1 {
-        let start = selected
-            .saturating_sub(count / 2)
-            .min(panel.rows.len().saturating_sub(count));
-        let headings = panel
-            .rows
-            .iter()
-            .skip(start)
-            .take(count)
-            .enumerate()
-            .filter(|(i, entry)| *i == 0 || panel.rows[start + i - 1].group != entry.group)
-            .count();
-        if count + headings <= available {
-            break;
-        }
-        count -= 1;
-    }
-    let first = selected
-        .saturating_sub(count / 2)
-        .min(panel.rows.len().saturating_sub(count));
-    lines.push((
-        format!(
-            "rows {}-{} / {}\n",
-            first + 1,
-            (first + count).min(panel.rows.len()),
-            panel.rows.len()
-        ),
-        MUTED,
+}
+
+fn rgb(c: [f32; 3]) -> Color {
+    Color::srgb(c[0], c[1], c[2])
+}
+
+/// One line that never wraps.
+fn line(parent: &mut Kids, s: impl Into<String>, size: f32, color: Color) {
+    parent.spawn((
+        Text::new(s),
+        TextFont::from_font_size(size),
+        TextColor(color),
+        TextLayout::no_wrap(),
     ));
-    let mut group = "";
-    for entry in panel.rows.iter().skip(first).take(count) {
-        if group != entry.group {
-            lines.push((format!("{}\n", entry.group), PAD_GREEN));
-            group = entry.group;
-        }
-        let tint = match (entry.selected, entry.ok) {
-            (true, true) => CYAN,
-            (true, false) => DRY_RED,
-            (false, true) => OWNED,
-            _ => MUTED,
-        };
-        let text = format!(
-            "{} {}  [{}]",
-            if entry.selected { ">" } else { " " },
-            entry.text,
-            entry.state
-        );
-        lines.push((format!("{}\n", clip_bench(&text, columns)), tint));
+}
+
+fn kind_tone(kind: RowKind) -> Tone {
+    match kind {
+        RowKind::Ready => Tone::Good,
+        RowKind::Short => Tone::Warn,
+        RowKind::Locked => Tone::Bad,
+        RowKind::Maxed | RowKind::Status => Tone::Muted,
     }
-    lines.push((
-        format!(
-            "{}{}\n",
-            if compact { "" } else { "\n" },
-            clip_bench(&row.text, columns)
-        ),
-        CYAN,
-    ));
-    lines.push((
-        format!(
-            "{}  |  {}{}\n",
-            row.group,
-            row.state,
-            if shortened {
-                " (details shortened)"
-            } else {
-                ""
+}
+
+/// The badge icon: a word and an icon, never the color alone.
+fn kind_icon(kind: RowKind) -> Icon {
+    match kind {
+        RowKind::Ready => Icon::Check,
+        RowKind::Short => Icon::Warn,
+        RowKind::Locked => Icon::Cross,
+        RowKind::Maxed => Icon::Check,
+        RowKind::Status => Icon::Dot,
+    }
+}
+
+fn build(root: &mut Kids, v: &BenchView) {
+    header(root, v);
+    list_block(root, v);
+    detail_pane(root, &v.detail);
+    if let Some(receipt) = &v.receipt {
+        receipt_strip(root, receipt);
+    }
+    hint_bar(root, &v.hints);
+}
+
+/// The tab strip on the left and the hold on the right.
+fn header(root: &mut Kids, v: &BenchView) {
+    root.spawn(Node {
+        width: percent(100),
+        height: px(TAB_H),
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        overflow: Overflow::clip(),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|bar| {
+        bar.spawn(Node {
+            column_gap: px(GAP),
+            align_items: AlignItems::Center,
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|tabs| {
+            for tab in &v.tabs {
+                tab_cell(tabs, tab);
             }
-        ),
-        if row.ok { PAD_GREEN } else { DRY_RED },
-    ));
-    for detail in details {
-        lines.push((format!("{detail}\n"), OWNED));
-    }
-    lines.push(("Cost: ".into(), MUTED));
-    if row.costs.is_empty() {
-        lines.push(("none\n".into(), MUTED));
+        });
+        hold_line(bar, &v.hold);
+    });
+}
+
+fn tab_cell(parent: &mut Kids, tab: &TabCell) {
+    let (fill, ring, tone) = if tab.selected {
+        (theme::CELL_FOCUS, theme::FOCUS, Tone::Accent)
     } else {
-        for kind in Material::ALL {
-            let amount: f32 = row
-                .costs
-                .iter()
-                .filter(|(material, _)| *material == kind)
-                .map(|(_, cost)| cost)
-                .sum();
-            if amount <= 0.0 {
-                continue;
-            }
-            lines.push((
-                format!("{amount:.1} {}  ", kind.label()),
-                material_color(kind),
-            ));
-        }
-        lines.push(("\n".into(), MUTED));
-    }
-    lines.push(("Hold: ".into(), MUTED));
-    for kind in Material::ALL {
-        lines.push((
-            format!("{} {:.0}  ", kind.letter(), game.cargo.amount(kind)),
-            material_color(kind),
-        ));
-    }
-    lines.push(("\n".into(), MUTED));
-    for (response, tint) in response {
-        lines.push((format!("{response}\n"), tint));
-    }
-    lines.push((format!("{}\n", panel.footer), MUTED));
-    lines
-}
-
-pub(super) fn clip_bench(text: &str, columns: usize) -> String {
-    if text.chars().count() <= columns {
-        text.into()
-    } else {
-        format!(
-            "{}...",
-            text.chars()
-                .take(columns.saturating_sub(3))
-                .collect::<String>()
-        )
-    }
-}
-
-pub(super) fn wrap_bench(text: &str, columns: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut line = String::new();
-    for word in text.split_whitespace() {
-        if !line.is_empty() && line.chars().count() + word.chars().count() + 1 > columns {
-            lines.push(std::mem::take(&mut line));
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(word);
-    }
-    if !line.is_empty() {
-        lines.push(line);
-    }
-    lines
-}
-
-#[cfg(test)]
-mod bench_layout_tests {
-    use super::*;
-    use ssc::simulation::Material;
-    use ssc::simulation::{
-        BenchAction, Cargo,
-        organs::{Organ, Strain},
-        skills::Skill,
-        upgrades,
+        (Color::NONE, Color::NONE, Tone::Muted)
     };
-    fn game() -> Game {
-        let mut game = Game::new(5460803);
-        crate::smoke::smoke_pads(&mut game, "bench");
-        game
-    }
-    #[test]
-    fn role_name_editor_fits_narrow_panel() {
-        let mut game = game();
-        crate::smoke::smoke_bench(&mut game, "mining-fleet-name");
-        let height = 480.0 - DETAILS_TOP - DETAILS_BOTTOM;
-        let text = bench_lines(&game, 640.0 - 32.0, height)
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect::<String>();
-        assert!(
-            text.lines().count() as f32 * 18.0 + 24.0 <= height,
-            "{text}"
-        );
-        assert!(!text.contains("details shortened"), "{text}");
-        for term in [
-            "DEEP_MINER[-]1",
-            "position",
-            "character",
-            "save",
-            "cancel",
-            "Blank",
-        ] {
-            assert!(text.contains(term), "missing {term}: {text}");
-        }
-    }
-
-    #[test]
-    fn role_merge_terms_fit_narrow_preview_and_receipt() {
-        let mut game = game();
-        crate::smoke::smoke_bench(&mut game, "mining-fleet-blueprint");
-        for receipt in [false, true] {
-            if receipt {
-                game.bench_confirm();
-            }
-            let height = 480.0 - DETAILS_TOP - DETAILS_BOTTOM;
-            let text = bench_lines(&game, 640.0 - 32.0, height)
-                .into_iter()
-                .map(|(s, _)| s)
-                .collect::<String>();
-            assert!(
-                text.lines().count() as f32 * 18.0 + 24.0 <= height,
-                "{text}"
-            );
-            assert!(!text.contains("details shortened"), "{text}");
-            let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
-            for required in [
-                "ROLE B",
-                "missing unit modules",
-                "Fit after unload",
-                "future builds pay module costs",
-                "No removal/refund",
-            ] {
-                assert!(terms.contains(required), "missing {required}: {text}");
-            }
-            if receipt {
-                assert!(terms.contains("Spent: 80.0 METAL 20.0 CRYSTAL"), "{text}");
-            }
-        }
-    }
-
-    #[test]
-    fn selected_action_costs_and_controls_survive_all_list_boundaries_at_supported_sizes() {
-        let mut game = game();
-        for (width, height) in [(680.0, 582.0), (680.0, 382.0)] {
-            for tab in 0..3 {
-                game.bench_tab(tab);
-                let count = game.bench_panel().unwrap().rows.len();
-                for _ in 0..count {
-                    let panel = game.bench_panel().unwrap();
-                    let row = panel.rows.iter().find(|r| r.selected).unwrap();
-                    let spans = bench_lines(&game, width, height);
-                    assert!(spans.len() < BENCH_LINES);
-                    let text: String = spans.into_iter().map(|(text, _)| text).collect();
-                    assert!(text.contains(&row.text));
-                    assert!(text.contains(&row.state));
-                    assert!(text.contains("Cost:"));
-                    assert!(text.contains("Enter/A act"));
-                    assert_eq!(text.lines().filter(|line| line.starts_with('>')).count(), 1);
-                    assert!(
-                        text.lines().count() as f32 * 18.0 + 24.0 <= height,
-                        "{} lines in {height}: {text}",
-                        text.lines().count()
-                    );
-                    game.bench_move(1);
-                }
-            }
-        }
-    }
-    #[test]
-    fn culture_estimate_and_response_fit_compact_contact() {
-        let mut game = game();
-        game.pose_frontier_contact();
-        game.pose_contact_culture();
-        let text = bench_lines(&game, 600.0, 278.0)
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect::<String>();
-        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 278.0, "{text}");
-        assert!(!text.contains("details shortened"), "{text}");
-        let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        for expected in [
-            "Offer 20 goods",
-            "contact estimate",
-            "Last response: solidarity",
-            "Trust +5 / friction 0",
-            "fulfilled job",
-            "TITHE SETTLED",
-        ] {
-            assert!(terms.contains(expected), "{expected}: {text}");
-        }
-    }
-    #[test]
-    fn agreement_terms_fit_compact_contact() {
-        let mut game = game();
-        game.pose_frontier_contact();
-        game.pose_contact_agreement();
-        let text = bench_lines(&game, 600.0, 278.0)
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect::<String>();
-        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 278.0, "{text}");
-        assert!(!text.contains("details shortened"), "{text}");
-        let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        for required in [
-            "Player hauls",
-            "10M buys 20V",
-            "60s/lot",
-            "10 lots",
-            "no restock",
-            "No rewards/alliance",
-            "Dock loss closes",
-            "relations suspend",
-            "SIGN - NO PAYMENT",
-        ] {
-            assert!(terms.contains(required), "{required}: {text}");
-        }
-    }
-
-    #[test]
-    fn partnership_terms_fit_compact_contact() {
-        let mut game = game();
-        game.pose_frontier_contact();
-        game.pose_contact_partnership();
-        let text = bench_lines(&game, 600.0, 278.0)
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect::<String>();
-        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 278.0, "{text}");
-        assert!(!text.contains("details shortened"), "{text}");
-        let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        for required in [
-            "Settle a job",
-            "10M 10B",
-            "25%",
-            "No expiry/upkeep/alliance",
-            "Hostility/dock loss",
-            "tech kept",
-        ] {
-            assert!(terms.contains(required), "{required}: {text}");
-        }
-    }
-
-    #[test]
-    fn contact_job_terms_remain_reviewable_in_the_compact_panel() {
-        for kind in ssc::simulation::jobs::JobKind::ALL {
-            let mut game = if kind == ssc::simulation::jobs::JobKind::Pest {
-                Game::new(42)
-            } else {
-                game()
-            };
-            game.pose_frontier_contact();
-            game.loadout
-                .research
-                .known
-                .remove(&ssc::simulation::research::Tech::Frontier);
-            game.pose_contact_job(kind);
-            let height = 480.0 - DETAILS_TOP - DETAILS_BOTTOM;
-            let text = bench_lines(&game, 640.0 - 32.0, height)
-                .into_iter()
-                .map(|(s, _)| s)
-                .collect::<String>();
-            assert!(
-                text.lines().count() as f32 * 18.0 + 24.0 <= height,
-                "{text}"
-            );
-            assert!(!text.contains("details shortened"), "{text}");
-            let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
-            for required in [
-                "Return friendly",
-                "25%",
-                "nonstacking",
-                "+10 regard",
-                "chart lead",
-                "No expiry/alliance",
-                "Cancel ends offer; cargo kept",
-            ] {
-                assert!(terms.contains(required), "missing {required}: {text}");
-            }
-            assert!(
-                terms.contains(match kind {
-                    ssc::simulation::jobs::JobKind::Survey => "visit after accept, no kill",
-                    ssc::simulation::jobs::JobKind::Fuel => "Pay 25F from ship at settlement",
-                    ssc::simulation::jobs::JobKind::Pest => "Any actor counts; amber marks",
-                }),
-                "{text}"
-            );
-        }
-        let mut game = game();
-        game.pose_frontier_contact();
-        game.pose_contact_job(ssc::simulation::jobs::JobKind::Pest);
-        let text = bench_lines(&game, 600.0, 278.0)
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect::<String>();
-        assert!(text.contains("NO LOCAL HOSTILE TARGET"), "{text}");
-    }
-
-    #[test]
-    fn purchase_receipts_guidance_and_refusals_fit_the_small_panel() {
-        for mode in [
-            "upgrade",
-            "reforge-good",
-            "reforge-kept",
-            "weapons",
-            "skills",
-            "gate",
-            "organs",
-            "unlock",
-            "repeated",
-        ] {
-            let mut game = game();
-            crate::smoke::smoke_bench(&mut game, mode);
-            if mode != "gate" {
-                game.cargo = Cargo {
-                    metal: 200.0,
-                    crystal: 200.0,
-                    volatiles: 200.0,
-                    ..Default::default()
-                };
-            }
-            game.bench_confirm();
-            let receipt = game.bench_feedback.as_ref().unwrap().text.clone();
-            for height in [382.0, 582.0] {
-                let text = bench_lines(&game, 680.0, height)
-                    .into_iter()
-                    .map(|(s, _)| s)
-                    .collect::<String>();
-                assert!(
-                    text.lines().count() as f32 * 18.0 + 24.0 <= height,
-                    "{mode}: {text}"
-                );
-                assert!(
-                    text.contains(receipt.lines().next().unwrap()),
-                    "{mode}: {text}"
-                );
-                assert!(text.contains("Enter/A act"));
-                assert!(text.contains("Cost:"));
-                for line in text.lines() {
-                    assert!(line.chars().count() <= 75, "{mode}: {line}");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn dense_fitted_part_details_yield_room_to_the_complete_receipt_and_guidance() {
-        let mut game = game();
-        crate::smoke::smoke_bench(&mut game, "unlock");
-        game.loadout.parts[0].effects = upgrades::Stat::ALL
-            .into_iter()
-            .map(|s| upgrades::Effect::Stat(s, 0.2))
-            .chain(
-                upgrades::Trait::ALL
-                    .into_iter()
-                    .map(|t| upgrades::Effect::Trait(t, 1)),
-            )
-            .collect();
-        game.cargo = Cargo {
-            metal: 200.0,
-            volatiles: 200.0,
-            crystal: 200.0,
-            ..Default::default()
-        };
-        game.bench_confirm();
-        let text = bench_lines(&game, 680.0, 382.0)
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect::<String>();
-        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 382.0, "{text}");
-        assert!(text.contains("details shortened"));
-        assert!(text.contains("Spent: 60.0 METAL 20.0 CRYSTAL"));
-        assert!(text.contains("PARRY: purchase available at the bench"));
-        assert!(text.contains("positive stats x1.24"), "{text}");
-        assert!(text.contains("penalties stay"), "{text}");
-        assert!(text.contains("Enter/A act"));
-    }
-
-    #[test]
-    fn long_organ_description_is_bounded_and_material_costs_keep_their_colours() {
-        let mut game = game();
-        game.loadout.skills.raise(Skill::Symbiosis);
-        let tune = game.tune;
-        game.loadout.organs.acquire(
-            Strain {
-                organ: Organ::Skipjack,
-                level: 3,
-                magnitude: 1.6,
+    parent
+        .spawn((
+            Node {
+                padding: UiRect::axes(px(10), px(1)),
+                border: UiRect::all(px(theme::FOCUS_RING)),
+                ..default()
             },
-            &tune,
-        );
-        game.bench_select(BenchAction::Organ(Organ::Skipjack));
-        let spans = bench_lines(&game, 680.0, 382.0);
-        assert!(
-            spans
-                .iter()
-                .any(|(text, tint)| text.contains("24.0 CRYSTAL")
-                    && *tint == material_color(Material::Crystal))
-        );
-        assert!(
-            spans.iter().any(|(text, tint)| text.contains("60.0 FUEL")
-                && *tint == material_color(Material::Fuel))
-        );
-        let text: String = spans.into_iter().map(|(text, _)| text).collect();
-        assert!(text.contains("needs DASH"));
-        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 382.0);
+            BackgroundColor(fill),
+            BorderColor::all(ring),
+        ))
+        .with_children(|t| {
+            line(
+                t,
+                format!("{} {}", tab.number, tab.label),
+                theme::FONT_BODY,
+                tone.color(),
+            );
+        });
+}
+
+/// Headings and cards in the space the detail pane leaves, with a scroll bar beside them.
+fn list_block(root: &mut Kids, v: &BenchView) {
+    root.spawn(Node {
+        width: percent(100),
+        flex_grow: 1.0,
+        min_height: px(0),
+        column_gap: px(4),
+        overflow: Overflow::clip(),
+        ..default()
+    })
+    .with_children(|outer| {
+        outer
+            .spawn(Node {
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Column,
+                row_gap: px(CARD_GAP),
+                ..default()
+            })
+            .with_children(|rows| {
+                for entry in &v.list {
+                    match entry {
+                        ListEntry::Heading(h) => {
+                            rows.spawn(Node {
+                                height: px(HEADING_H),
+                                align_items: AlignItems::Center,
+                                flex_shrink: 0.0,
+                                ..default()
+                            })
+                            .with_children(|n| line(n, *h, theme::FONT_SMALL, Tone::Good.color()));
+                        }
+                        ListEntry::Card(card) => card_node(rows, card),
+                    }
+                }
+            });
+        scroll_bar(outer, v);
+    });
+}
+
+fn scroll_bar(parent: &mut Kids, v: &BenchView) {
+    let (top, size) = widgets::scroll_thumb(v.scroll);
+    parent
+        .spawn((
+            Node {
+                width: px(4),
+                align_self: AlignSelf::Stretch,
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(theme::TRACK),
+        ))
+        .with_children(|track| {
+            track.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: percent(top * 100.0),
+                    height: percent(size * 100.0),
+                    width: percent(100),
+                    ..default()
+                },
+                BackgroundColor(Tone::Muted.color()),
+            ));
+        });
+}
+
+/// A cost swatch: a filled square in the material's color, hollow when the hold falls short.
+fn swatch(parent: &mut Kids, pip: &Pip, size: f32) {
+    let color = rgb(pip.rgb);
+    let mut node = Node {
+        width: px(size),
+        height: px(size),
+        flex_shrink: 0.0,
+        ..default()
+    };
+    if pip.short {
+        node.border = UiRect::all(px(2));
+        parent.spawn((node, BorderColor::all(color)));
+    } else {
+        parent.spawn((node, BackgroundColor(color)));
     }
+}
+
+fn card_node(parent: &mut Kids, card: &CardView) {
+    let (fill, ring) = if card.selected {
+        (theme::CELL_FOCUS, theme::FOCUS)
+    } else {
+        (theme::CELL, Color::NONE)
+    };
+    let label_tone = if card.selected {
+        Tone::Accent
+    } else {
+        match card.kind {
+            RowKind::Ready | RowKind::Short => Tone::Normal,
+            _ => Tone::Muted,
+        }
+    };
+    parent
+        .spawn((
+            Node {
+                width: percent(100),
+                height: px(CARD_H),
+                align_items: AlignItems::Center,
+                column_gap: px(6),
+                padding: UiRect::horizontal(px(6)),
+                border: UiRect::all(px(theme::FOCUS_RING)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(fill),
+            BorderColor::all(ring),
+        ))
+        .with_children(|cell| {
+            if card.selected {
+                widgets::icon(cell, Icon::ChevronRight, 12.0, Tone::Accent);
+            } else {
+                cell.spawn(Node {
+                    width: px(12),
+                    flex_shrink: 0.0,
+                    ..default()
+                });
+            }
+            cell.spawn(Node {
+                flex_grow: 1.0,
+                flex_basis: px(0),
+                overflow: Overflow::clip(),
+                ..default()
+            })
+            .with_children(|l| line(l, card.label.clone(), theme::FONT_BODY, label_tone.color()));
+            cell.spawn(Node {
+                width: px(40),
+                column_gap: px(3),
+                justify_content: JustifyContent::FlexEnd,
+                align_items: AlignItems::Center,
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|pips| {
+                for pip in card.pips.iter().take(4) {
+                    swatch(pips, pip, 8.0);
+                }
+            });
+            cell.spawn(Node {
+                width: px(58),
+                column_gap: px(3),
+                justify_content: JustifyContent::FlexEnd,
+                align_items: AlignItems::Center,
+                overflow: Overflow::clip(),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|badge| {
+                let tone = kind_tone(card.kind);
+                widgets::icon(badge, kind_icon(card.kind), 10.0, tone);
+                line(badge, card.badge.clone(), theme::FONT_SMALL, tone.color());
+            });
+        });
+}
+
+fn hold_line(parent: &mut Kids, hold: &[(Material, i32)]) {
+    parent
+        .spawn(Node {
+            column_gap: px(8),
+            align_items: AlignItems::Center,
+            flex_shrink: 1.0,
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .with_children(|row| {
+            for (kind, amount) in hold {
+                let [r, g, b] = kind.color();
+                line(
+                    row,
+                    format!("{} {}", kind.letter(), amount),
+                    theme::FONT_SMALL,
+                    Color::srgb(r, g, b),
+                );
+            }
+        });
+}
+
+fn detail_pane(root: &mut Kids, d: &DetailView) {
+    root.spawn((
+        Node {
+            width: percent(100),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(DETAIL_GAP),
+            padding: UiRect::all(px(DETAIL_PAD)),
+            border: UiRect::all(px(BORDER)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(theme::CELL),
+        BorderColor::all(Tone::Muted.color()),
+    ))
+    .with_children(|pane| {
+        for title in &d.title {
+            line(pane, title.clone(), theme::FONT_BODY, Tone::Accent.color());
+        }
+        let tone = kind_tone(d.kind);
+        pane.spawn(Node {
+            width: percent(100),
+            min_height: px(META_H),
+            column_gap: px(10),
+            row_gap: px(2),
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|meta| {
+            widgets::chip(
+                meta,
+                &widgets::Chip::new(d.badge.clone(), tone).icon(kind_icon(d.kind)),
+            );
+            line(meta, d.group, theme::FONT_SMALL, Tone::Muted.color());
+            cost_pips(meta, &d.costs);
+            line(
+                meta,
+                d.position.clone(),
+                theme::FONT_SMALL,
+                Tone::Muted.color(),
+            );
+        });
+        for l in &d.state {
+            line(pane, l.clone(), theme::FONT_SMALL, tone.color());
+        }
+        for l in &d.description {
+            line(pane, l.clone(), theme::FONT_SMALL, Tone::Normal.color());
+        }
+    });
+}
+
+/// The costs as swatch and amount pairs; a shortfall reads red and hollow, never by the
+/// material color alone.
+fn cost_pips(parent: &mut Kids, costs: &[Pip]) {
+    if costs.is_empty() {
+        line(parent, "no cost", theme::FONT_SMALL, Tone::Muted.color());
+    }
+    for pip in costs {
+        parent
+            .spawn(Node {
+                column_gap: px(4),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|one| {
+                swatch(one, pip, 10.0);
+                let color = if pip.short {
+                    Tone::Bad.color()
+                } else {
+                    rgb(pip.rgb)
+                };
+                line(
+                    one,
+                    format!("{:.1} {}", pip.amount, pip.label),
+                    theme::FONT_SMALL,
+                    color,
+                );
+            });
+    }
+}
+
+fn receipt_strip(root: &mut Kids, receipt: &ReceiptView) {
+    let edge = receipt
+        .lines
+        .first()
+        .map_or(Tone::Muted.color(), |(_, t)| tint(*t));
+    root.spawn((
+        Node {
+            width: percent(100),
+            padding: UiRect::axes(px(DETAIL_PAD), px(RECEIPT_PAD)),
+            border: UiRect::left(px(3)),
+            column_gap: px(6),
+            align_items: AlignItems::FlexStart,
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(theme::CELL),
+        BorderColor::all(edge),
+    ))
+    .with_children(|strip| {
+        strip
+            .spawn(Node {
+                flex_direction: FlexDirection::Column,
+                ..default()
+            })
+            .with_children(|lines| {
+                for (text, t) in &receipt.lines {
+                    line(lines, text.clone(), theme::FONT_SMALL, tint(*t));
+                }
+            });
+    });
+}
+
+fn hint_bar(root: &mut Kids, hints: &[HintView]) {
+    root.spawn(Node {
+        width: percent(100),
+        height: px(HINT_H),
+        overflow: Overflow::clip(),
+        column_gap: px(12),
+        row_gap: px(2),
+        flex_wrap: FlexWrap::Wrap,
+        align_items: AlignItems::Center,
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|bar| {
+        for h in hints {
+            bar.spawn(Node {
+                column_gap: px(4),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|pair| {
+                pair.spawn((
+                    Node {
+                        padding: UiRect::axes(px(5), px(1)),
+                        border: UiRect::all(px(theme::BORDER)),
+                        border_radius: BorderRadius::all(px(3)),
+                        ..default()
+                    },
+                    BorderColor::all(Tone::Muted.color()),
+                ))
+                .with_children(|chip| line(chip, h.label, theme::FONT_SMALL, Tone::Accent.color()));
+                line(pair, h.text, theme::FONT_SMALL, Tone::Muted.color());
+            });
+        }
+    });
 }

@@ -187,6 +187,8 @@ pub struct Session {
     pub save_feedback: String,
     /// The developer console (SSC_DEV=1); the game waits while it is open. See `ui`.
     pub console: Option<ui::screens::console::Console>,
+    /// The bench's held-input navigation (row repeat, left stick, group jumps).
+    pub bench_nav: ui::screens::bench::BenchNav,
     /// The console took this frame's input (it was open, or opened or closed this frame), so
     /// `controls` skips it.
     pub ui_consumed: bool,
@@ -294,6 +296,7 @@ impl Default for Session {
             settings: None,
             save_feedback: String::new(),
             console: None,
+            bench_nav: Default::default(),
             ui_consumed: false,
             juice: juice::Juice::default(),
             auto_repair: true,
@@ -437,6 +440,7 @@ fn controls(
     view: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
     mut session: ResMut<Session>,
     mut stick_latch: Local<bool>,
+    time: Res<Time>,
 ) {
     let Devices {
         keys,
@@ -511,6 +515,7 @@ fn controls(
     // The bench, while landed with it open: arrows pick a row (left and right a tab), enter or
     // space does the thing, Q takes from the stash, 1-3 jump to a tab, E closes. Nothing flies.
     if !session.paused && session.game.bench_open() {
+        bench_navigation(&keys, &gamepads, time.delta_secs(), &mut session);
         bench_controls(&keys, &pad, &mut session);
         session.input = Input::default();
         return;
@@ -655,6 +660,35 @@ fn restart(session: &mut Session) {
     session.save_feedback.clear();
 }
 
+/// What `bench_controls` cannot see from just-pressed edges: a held row key repeating, the left
+/// stick as a d-pad, and LT/RT or Page Up/Down jumping between groups (`ui::screens::bench`).
+fn bench_navigation(
+    keys: &ButtonInput<KeyCode>,
+    gamepads: &Query<&Gamepad>,
+    dt: f32,
+    session: &mut Session,
+) {
+    let button = |b: GamepadButton| gamepads.iter().any(|p| p.pressed(b));
+    let stick = gamepads
+        .iter()
+        .map(ui::input::stick)
+        .find(|s| s.0.abs() > 0.2 || s.1.abs() > 0.2)
+        .unwrap_or((0.0, 0.0));
+    let held = ui::screens::bench::NavHeld {
+        up: keys.pressed(KeyCode::ArrowUp)
+            || button(GamepadButton::DPadUp)
+            || button(GamepadButton::LeftTrigger),
+        down: keys.pressed(KeyCode::ArrowDown)
+            || button(GamepadButton::DPadDown)
+            || button(GamepadButton::RightTrigger),
+        page_up: keys.pressed(KeyCode::PageUp) || button(GamepadButton::LeftTrigger2),
+        page_down: keys.pressed(KeyCode::PageDown) || button(GamepadButton::RightTrigger2),
+        stick,
+    };
+    let steps = session.bench_nav.tick(&held, dt);
+    ui::screens::bench::apply_steps(&mut session.game, steps);
+}
+
 /// The bench's keys; see `controls`.
 fn bench_controls(
     keys: &ButtonInput<KeyCode>,
@@ -680,7 +714,10 @@ fn bench_controls(
             || pad(GamepadButton::South)
         {
             game.finish_drone_name(true);
-        } else if keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::West) {
+        } else if keys.just_pressed(KeyCode::KeyQ)
+            || keys.just_pressed(KeyCode::Delete)
+            || pad(GamepadButton::West)
+        {
             game.drone_name_clear();
         }
         return;
@@ -713,7 +750,10 @@ fn bench_controls(
         || pad(GamepadButton::South)
     {
         game.bench_confirm();
-    } else if keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::West) {
+    } else if keys.just_pressed(KeyCode::KeyQ)
+        || keys.just_pressed(KeyCode::Delete)
+        || pad(GamepadButton::West)
+    {
         game.bench_alt();
     }
     if keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::East) || pad(GamepadButton::Select) {

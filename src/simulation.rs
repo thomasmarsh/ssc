@@ -92,7 +92,7 @@ mod wildlife;
 
 pub use adapt::Resist;
 pub use apexes::{ApexInfo, ApexReport};
-pub use bench::{Bench, BenchAction, BenchPanel, BenchRow, BenchTab};
+pub use bench::{Bench, BenchAction, BenchPanel, BenchRow, BenchTab, RowKind};
 pub use bench_feedback::BenchFeedback;
 pub use brain::Brain;
 pub use breakup::Pool;

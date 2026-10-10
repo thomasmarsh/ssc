@@ -1,26 +1,14 @@
 //! HUD panel systems: text updates, summary, chart and scrolling.
 use super::banners::{FeedLine, PadBanner};
-use super::bench::{BenchLine, BenchPanelNode};
+use super::bench::BenchRender;
 use super::help::{HelpBody, HelpPanel};
 use super::{DETAILS_BOTTOM, DETAILS_TOP, Overlay, Scrollable};
 use super::{banners, bench, help};
 use crate::Session;
 use bevy::prelude::*;
 
-pub(super) type BenchNodeOnly = (With<BenchPanelNode>, Without<HelpPanel>, Without<HelpBody>);
 pub(super) type HelpBodyOnly = (With<HelpBody>, Without<HelpPanel>);
-pub(super) type BenchSpan = (
-    &'static mut TextSpan,
-    &'static mut TextColor,
-    &'static BenchLine,
-);
-pub(super) type BenchOnly = Without<FeedLine>;
-pub(super) type BannerOnly = (
-    With<PadBanner>,
-    Without<BenchLine>,
-    Without<FeedLine>,
-    Without<Overlay>,
-);
+pub(super) type BannerOnly = (With<PadBanner>, Without<FeedLine>, Without<Overlay>);
 
 /// Scrolls the open details or help panel with the mouse wheel.
 pub(crate) fn scroll_panels(
@@ -52,8 +40,7 @@ pub(crate) fn update_hud(
     session: Res<Session>,
     mut feed: Query<(&mut TextSpan, &mut TextColor, &FeedLine)>,
     mut pad_text: Single<(&mut Text, &mut TextColor), BannerOnly>,
-    mut bench: Query<BenchSpan, BenchOnly>,
-    mut bench_node: Single<&mut Node, BenchNodeOnly>,
+    mut bench: BenchRender,
     mut overlay: Single<&mut Text, With<Overlay>>,
     mut help_node: Single<&mut Node, With<HelpPanel>>,
     mut help_body: Single<&mut Node, HelpBodyOnly>,
@@ -66,7 +53,7 @@ pub(crate) fn update_hud(
         .logical_viewport_size()
         .unwrap_or(Vec2::new(1280.0, 800.0))
         / ui_scale.0;
-    bench::apply(&session.game, viewport, &mut bench_node, &mut bench);
+    bench::apply(&session.game, viewport, &mut bench);
     let details = session.details_open();
     // Between the top row and the bottom cluster, whatever the window: the panels scroll.
     let room = camera

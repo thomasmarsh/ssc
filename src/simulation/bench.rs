@@ -79,6 +79,78 @@ pub struct BenchRow {
     pub selected: bool,
     pub ok: bool,
 }
+/// What a row is for a card badge: derived from its `ok`, state and costs, never a second rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowKind {
+    /// The action can be taken now.
+    Ready,
+    /// Allowed, but the hold cannot pay the listed costs yet.
+    Short,
+    /// Blocked by a requirement (research, supplier, power, room, ownership).
+    Locked,
+    /// Nothing more to buy (MAX LEVEL, MAX RARITY).
+    Maxed,
+    /// A status-only readout (a mining drone's saved state).
+    Status,
+}
+
+impl BenchRow {
+    /// The badge class of this row.
+    pub fn kind(&self) -> RowKind {
+        if self.state == "UNAFFORDABLE" {
+            RowKind::Short
+        } else if self.ok {
+            RowKind::Ready
+        } else if self.state.starts_with("MAX") {
+            RowKind::Maxed
+        } else if matches!(self.action, BenchAction::MiningDroneStatus(_)) {
+            RowKind::Status
+        } else {
+            RowKind::Locked
+        }
+    }
+
+    /// A short badge word for a card (at most seven characters, so it fits a fixed slot); the
+    /// full `state` stays in the detail pane.
+    pub fn badge(&self) -> String {
+        const WIDEST: usize = 7;
+        let fits = |s: &str| !s.is_empty() && s.chars().count() <= WIDEST;
+        match self.kind() {
+            RowKind::Ready if fits(&self.state) => self.state.clone(),
+            RowKind::Ready => "READY".into(),
+            RowKind::Short => "SHORT".into(),
+            RowKind::Maxed => "MAX".into(),
+            RowKind::Locked => "LOCKED".into(),
+            RowKind::Status => {
+                let first = self.state.split_whitespace().next().unwrap_or("");
+                if fits(&self.state) {
+                    self.state.clone()
+                } else if fits(first) {
+                    first.into()
+                } else {
+                    "STATUS".into()
+                }
+            }
+        }
+    }
+
+    /// The materials of this row's costs that the hold cannot cover, in material order.
+    pub fn short_of(&self, cargo: &Cargo) -> Vec<Material> {
+        Material::ALL
+            .into_iter()
+            .filter(|&kind| {
+                let need: f32 = self
+                    .costs
+                    .iter()
+                    .filter(|(m, _)| *m == kind)
+                    .map(|(_, c)| c)
+                    .sum();
+                need > 0.0 && !cargo.can_afford(&[(kind, need)])
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BenchPanel {
     pub tab: BenchTab,
@@ -1029,6 +1101,42 @@ fn supply_price(kind: Material) -> Vec<(Material, f32)> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn row_kinds_and_short_materials_follow_ok_state_and_hold() {
+        let mut game = setup();
+        game.cargo = Cargo::default();
+        let panel = game.bench_panel().unwrap();
+        for row in &panel.rows {
+            let kind = row.kind();
+            match kind {
+                RowKind::Short => assert_eq!(row.state, "UNAFFORDABLE"),
+                RowKind::Ready => assert!(row.ok),
+                _ => assert!(!row.ok),
+            }
+            assert!(
+                (1..=7).contains(&row.badge().chars().count()),
+                "{}",
+                row.text
+            );
+            assert_eq!(
+                !row.short_of(&game.cargo).is_empty(),
+                !game.cargo.can_afford(&row.costs),
+                "{}",
+                row.text
+            );
+        }
+        // An empty hold falls short exactly on the rows that cost something and were allowed.
+        assert!(panel.rows.iter().any(|r| r.kind() == RowKind::Short));
+        funds(&mut game);
+        let panel = game.bench_panel().unwrap();
+        assert!(
+            panel
+                .rows
+                .iter()
+                .all(|r| r.short_of(&game.cargo).is_empty())
+        );
+    }
     use super::super::organs::Strain;
     use super::*;
     use crate::genome::Genome;

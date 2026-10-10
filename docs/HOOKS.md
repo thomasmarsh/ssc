@@ -53,7 +53,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 - `SSC_FLEET_RECALL=1`: with `SSC_FLEET_FLIGHT`, issue the real recall after advancing flight and hold the returning pose; optionally combine with `SSC_FLEET_DEPOSIT=1`. Smoke-only.
 - `SSC_FLEET_LOSS=1|blast|impact`: with `SSC_FLEET_FLIGHT`, inject real hostile shots (`1`), area bursts (`blast`), or real swept rock impacts (`impact`) after staging work: destroy unit #1 and hurt unit #2. Capture saved wreck art and damaged flight; smoke-only.
 - `SSC_BENCH_VIEW=mining-fleet-repair`: powered fleet with one destroyed unit and unit #2 docked at 30/80 hull; select its 5M repair. `SSC_BENCH_RESULT=1` shows the repair receipt and full-hull refusal.
-- `SSC_BENCH_RESULT=1`: confirm the selected bench action 20 frames before capture (receipts). See [BENCH.md](BENCH.md).
+- `SSC_BENCH_RESULT=1`: confirm the selected bench action 20 frames before capture (receipts). See [BENCH.md](BENCH.md). Every bench hook above renders through the card view-model (`ui::screens::bench`); capture at `SSC_OFFSCREEN_SIZE=1280x800` and `640x480` (the compact size shows fewer cards and may shorten a long description, never a receipt, cost or state).
 - `SSC_BUY=1`: buy the bench's selected row 20 frames before capture (purchase ring).
 
 ## Creature galleries

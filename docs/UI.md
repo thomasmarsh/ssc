@@ -1,6 +1,6 @@
 # Graphical menus: UI foundation and conversion plan
 
-Status: foundation and the developer console built (slice U1, 2026-10-10); title, settings, details and run summary converted (U3, 2026-10-10); U2, U4 and U5 are in progress or TODO. The rest are still columns of text lines in a `bevy_ui` `Node` (help, bench, chart sidebar) navigated by keys and the controller; the chart map itself and the flight HUD are already vector shapes. User direction (2026-10-10): menus should become graphical and intuitive, and must not assume a mouse cursor: gamepad first wherever possible. This doc is the design contract; [SEED.md](../SEED.md) slices U1 to U5 are the work.
+Status: foundation and the developer console built (slice U1, 2026-10-10); title, settings, details and run summary converted (U3, 2026-10-10); bench and every contextual row converted (U2, 2026-10-10); U4 and U5 are in progress or TODO. The rest are still columns of text lines in a `bevy_ui` `Node` (help, chart sidebar) navigated by keys and the controller; the chart map itself and the flight HUD are already vector shapes. User direction (2026-10-10): menus should become graphical and intuitive, and must not assume a mouse cursor: gamepad first wherever possible. This doc is the design contract; [SEED.md](../SEED.md) slices U1 to U5 are the work.
 
 ## Rules
 
@@ -36,12 +36,18 @@ First consumer: the **developer tuning console** (DEVTOOLS Phase C, built), `SSC
 - **Run summary** (`screens/summary.rs`): `run_report` lines become figure chips; the LAUNCH AGAIN button is the existing Enter or A in `controls`. Under 620 logical pixels of height it runs inline and puts the button first.
 - The held-key reader, the press source that swallows the opening key and the cyan panel frame are shared helpers in `screens/title.rs`; the coordinator may promote them to `widgets.rs`. Screens set `Session::ui_consumed` while open so `controls` skips the frame.
 
+## Bench (slice U2, built)
+
+`ui/screens/bench.rs` is the pure view-model (`BenchView::build(game, viewport, top, bottom, device)`), `presentation/bench.rs` draws it with U1 theme tokens and icons and rebuilds only when the view differs. One column at every size: a tab strip with the hold, a window of cards around the selection (group headings, label, cost pips, state badge, scroll bar), the selected card's detail pane (full title, badge, group, row position, costs with amounts, state, description), a receipt strip (rarity-tinted success, red refusal, unlock guidance) and a hint bar that names the device's buttons. The detail pane and receipt are reserved first; the card window takes what is left (one card with no heading in the tightest case) and the description shortens keeping its last two lines. Pips are filled swatches; a shortfall is hollow and red with the word SHORT, a locked card carries a cross and LOCKED, a maxed one MAX: never color alone.
+
+Card classes come from the headless row (`BenchRow::kind`, `badge`, `short_of`, additive and tested); no price or gate is computed in the UI. Input is `bench_controls` (edges, unchanged bindings: arrows or d-pad rows and tabs, LB/RB rows, 1-3 tabs, Enter or A, Q/Delete or X alternate, E/B/Select close) plus `BenchNav` (held row repeat, left stick as a d-pad, LT/RT or Page Up/Down jump between groups), all through `Game::bench_move`, `bench_tab_step`, `bench_confirm`, `bench_alt`. The bench keeps its historic LB/RB-as-rows binding rather than the console's LB/RB-as-tabs; d-pad left and right switch tabs on both. The mouse wheel still moves the row; cards are not click targets.
+
 ## Conversion sequence
 
 | Slice | Screens | View-model source | Notes |
 | --- | --- | --- | --- |
 | U1 | Tuning console, dev toggles | `tune_list`, `Game::dev`, `culture_clock` | Done: foundation and Phase C |
-| U2 | Bench (PARTS/WEAPONS/SKILLS), pad services and modules, research and grade, CONTACT (equipment, tithe/trade, jobs, agreements, partnership), mining fleet orders/templates/blueprints, organs, stash; purchase receipts | `BenchPanel`/`BenchRow`, `bench_feedback` | Cards with cost pips and an always-visible detail pane; `BenchAction` stays the only transaction identity ([BENCH.md](BENCH.md)) |
+| U2 | Done: bench (PARTS/WEAPONS/SKILLS), pad services and modules, research and grade, CONTACT (equipment, tithe/trade, jobs, agreements, partnership), mining fleet orders/templates/blueprints, organs, stash; purchase receipts | `BenchPanel`/`BenchRow` (`RowKind`, `badge`, `short_of`), `bench_feedback` | Cards with cost pips and badges, an always-visible detail pane and a receipt strip; `BenchAction` stays the only transaction identity ([BENCH.md](BENCH.md)) |
 | U3 | Title menu, settings, details panel, run summary | `TitleMenu`, settings state, details/summary view-models | Done: `screens/{title,settings,details,summary}.rs`; pause and save behavior unchanged; see "Player screens (U3)" |
 | U4 | Star map sidebar and map controls | chart data in `simulation/chart.rs`, discovery | Fixes the compact sidebar overflow TODO (MIGRATION caveats); pad-first sector selection (a focus cursor moved by stick/d-pad, A for details), pan and zoom on sticks/triggers, mouse click optional |
 | U5 | Controls: one action table, on-screen glyphs by active device, help/controls reference generated from the table, contextual prompts, banners and notices as toasts | an input action table (adapter), `simulation::hud`, `guide` | Absorbs [WORKSTREAMS](WORKSTREAMS.md) section 10 (gamepad consolidation); deletes the leftover text-line plumbing |
