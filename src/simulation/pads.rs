@@ -167,6 +167,10 @@ pub struct PadState {
     pub drone_other_blueprints: [Option<super::fleet::DroneModules>; 2],
     #[serde(default)]
     pub drone_role: super::fleet::DroneRole,
+    #[serde(default)]
+    pub drone_role_names: [String; 3],
+    #[serde(skip)]
+    pub drone_name_edit: Option<super::fleet::DroneNameEdit>,
     #[serde(skip)]
     pub landed: Option<PadKey>,
     /// Field repair is running.
@@ -210,6 +214,8 @@ impl Default for PadState {
             drone_blueprint: None,
             drone_other_blueprints: [None; 2],
             drone_role: super::fleet::DroneRole::default(),
+            drone_role_names: Default::default(),
+            drone_name_edit: None,
             landed: None,
             repairing: false,
             auto_run: false,
@@ -867,6 +873,7 @@ impl Game {
         self.pad.hidden_for = 0.0;
         self.pad.cover_broken = 0.0;
         self.pad.bench = None;
+        self.pad.drone_name_edit = None;
         self.stop_beam_now();
         self.cue(Cue::Land { at: spot });
         self.notify("LANDED  HIDDEN  E opens the bench".into(), Rarity::Rare);
@@ -877,6 +884,7 @@ impl Game {
             return;
         };
         self.pad.bench = None;
+        self.pad.drone_name_edit = None;
         let host = self.pad_host(key).map(|h| (h.position, h.velocity));
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             let at = ship.position;
@@ -958,6 +966,7 @@ impl Game {
         if !held {
             self.pad.landed = None;
             self.pad.bench = None;
+            self.pad.drone_name_edit = None;
             if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
                 ship.root = None;
             }
@@ -1264,6 +1273,7 @@ impl Game {
     pub(super) fn respawn_at_pad(&mut self, death: Vec2) -> bool {
         self.pad.landed = None;
         self.pad.bench = None;
+        self.pad.drone_name_edit = None;
         self.pad.repairing = false;
         self.pad.cover_broken = 0.0;
         self.pad.hidden_for = 0.0;

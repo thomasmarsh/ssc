@@ -4940,6 +4940,32 @@ mod bench_layout_tests {
         game
     }
     #[test]
+    fn role_name_editor_fits_narrow_panel() {
+        let mut game = game();
+        crate::smoke_bench(&mut game, "mining-fleet-name");
+        let height = 480.0 - DETAILS_TOP - DETAILS_BOTTOM;
+        let text = bench_lines(&game, 640.0 - 32.0, height)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<String>();
+        assert!(
+            text.lines().count() as f32 * 18.0 + 24.0 <= height,
+            "{text}"
+        );
+        assert!(!text.contains("details shortened"), "{text}");
+        for term in [
+            "DEEP_MINER[-]1",
+            "position",
+            "character",
+            "save",
+            "cancel",
+            "Blank",
+        ] {
+            assert!(text.contains(term), "missing {term}: {text}");
+        }
+    }
+
+    #[test]
     fn role_merge_terms_fit_narrow_preview_and_receipt() {
         let mut game = game();
         crate::smoke_bench(&mut game, "mining-fleet-blueprint");

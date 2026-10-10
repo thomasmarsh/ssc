@@ -46,6 +46,7 @@ pub enum BenchAction {
     DroneUpgrade(usize, fleet::DroneUpgrade),
     DroneTemplate(fleet::DroneUpgrade),
     CycleDroneRole,
+    NameDroneRole,
     SaveDroneBlueprint,
     ApplyDroneBlueprint,
     Research(research::Tech),
@@ -89,6 +90,7 @@ impl Game {
         if self.pad.landed.is_none() && self.pad.contact.is_none() {
             return;
         }
+        self.pad.drone_name_edit = None;
         self.pad.bench = if self.pad.bench.is_some() {
             self.pad.contact = None;
             None
@@ -108,6 +110,9 @@ impl Game {
                     .is_some_and(|id| self.friendly_supplier().is_some_and(|c| c.id == id)))
     }
     pub fn bench_tab(&mut self, n: usize) {
+        if self.drone_name_editing() {
+            return;
+        }
         if let (Some(bench), Some(&tab)) = (self.pad.bench.as_mut(), BenchTab::ALL.get(n))
             && bench.tab != tab
         {
@@ -159,6 +164,7 @@ impl Game {
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Cargo),
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Mining),
                         BenchAction::CycleDroneRole,
+                        BenchAction::NameDroneRole,
                         BenchAction::SaveDroneBlueprint,
                         BenchAction::ApplyDroneBlueprint,
                     ]
@@ -223,6 +229,9 @@ impl Game {
     }
     /// Existing navigation wraps, including from the last action back to the first.
     pub fn bench_move(&mut self, step: i32) {
+        if self.drone_name_editing() {
+            return;
+        }
         let Some(bench) = self.pad.bench else { return };
         let n = self.bench_actions(bench.tab).len();
         self.pad.bench.as_mut().unwrap().cursor =
@@ -233,9 +242,17 @@ impl Game {
         self.bench_actions(bench.tab).get(bench.cursor).copied()
     }
     pub fn bench_confirm(&mut self) {
+        if self.drone_name_editing() {
+            self.finish_drone_name(true);
+            return;
+        }
         let Some(action) = self.bench_selected() else {
             return;
         };
+        if action == BenchAction::NameDroneRole {
+            self.begin_drone_name();
+            return;
+        }
         let before = super::bench_feedback::Snapshot::capture(self);
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
@@ -249,6 +266,7 @@ impl Game {
             Some(BenchAction::DroneDeposit(mark)) => self.designate_drone_deposit(mark),
             Some(BenchAction::DroneTemplate(upgrade)) => self.buy_drone_template(upgrade),
             Some(BenchAction::CycleDroneRole) => self.cycle_drone_role(),
+            Some(BenchAction::NameDroneRole) => self.begin_drone_name(),
             Some(BenchAction::SaveDroneBlueprint) => self.save_drone_blueprint(),
             Some(BenchAction::ApplyDroneBlueprint) => self.apply_drone_blueprint(),
             Some(BenchAction::DroneUpgrade(slot, upgrade)) => self.buy_drone_upgrade(slot, upgrade),
@@ -309,6 +327,10 @@ impl Game {
         before.finish(self, action);
     }
     pub fn bench_alt(&mut self) {
+        if self.drone_name_editing() {
+            self.drone_name_clear();
+            return;
+        }
         if let Some(BenchAction::Stash(m)) = self.bench_selected() {
             self.bench_stash(
                 Material::ALL.iter().position(|&kind| kind == m).unwrap(),
@@ -318,6 +340,16 @@ impl Game {
     }
     pub fn bench_panel(&self) -> Option<BenchPanel> {
         let bench = self.pad.bench.filter(|_| self.bench_open())?;
+        if self.drone_name_editing() {
+            let mut row = self.bench_row(BenchAction::NameDroneRole, true);
+            row.state = self.pad.drone_name_edit.as_ref().unwrap().preview();
+            row.detail = "Left/Right: position. Up/Down: character. Q/X: clear character. Enter/A: save. E/B: cancel. _ is blank. Blank name restores the role letter.".into();
+            return Some(BenchPanel {
+                tab: bench.tab,
+                rows: vec![row],
+                footer: "Arrows/D-pad edit  Enter/A save  E/B cancel".into(),
+            });
+        }
         let rows = self
             .bench_actions(bench.tab)
             .into_iter()
@@ -771,12 +803,18 @@ impl Game {
                     }
                 }
             }
+            BenchAction::NameDroneRole => {
+                row.group = "PAD FLEET";
+                row.text = "NAME FLEET ROLE".into();
+                row.state = self.pad.drone_role_label();
+                row.detail = "Name selected role, including an empty slot. Up to 12 letters, digits, spaces or hyphens. Blank restores A/B/C. Free; modules and trips stay unchanged.".into();
+            }
             BenchAction::CycleDroneRole => {
                 row.group = "PAD FLEET";
                 row.text = "SELECT FLEET ROLE".into();
                 row.state = format!(
                     "{} - {}",
-                    self.pad.drone_role.label(),
+                    self.pad.drone_role_label(),
                     self.pad
                         .selected_blueprint()
                         .map_or("EMPTY", fleet::DroneModules::label)
@@ -794,7 +832,7 @@ impl Game {
                 .into();
                 row.state = format!(
                     "{} - {}",
-                    self.pad.drone_role.label(),
+                    self.pad.drone_role_label(),
                     self.pad
                         .selected_blueprint()
                         .map_or("NO BLUEPRINT", fleet::DroneModules::label)
@@ -811,7 +849,7 @@ impl Game {
                     row.ok = false;
                     row.state = format!(
                         "{} - {}",
-                        self.pad.drone_role.label(),
+                        self.pad.drone_role_label(),
                         if why == "BLUEPRINT ALREADY INCLUDED" {
                             "ALREADY MERGED"
                         } else {

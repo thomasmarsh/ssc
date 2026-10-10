@@ -45,7 +45,7 @@ Decide per slice, and say which in one line.
 The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; finite delivery/survey/pest jobs and a stock-backed player-haul agreement, Automation, and four-unit fleets with nearby known-planetoid/free-lode orders, cargo/mining dock retrofits and cross-pad blueprint reuse are built; further machine jobs, merchant transport and later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit fleet and nearby deposit orders - custom role names and further modules, combat and losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
+1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit fleet and nearby deposit orders - further modules, combat and losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 2. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 3. Alongside: remaining D machine jobs, DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
@@ -57,7 +57,9 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 
 ## Recently done
 
-- Fleet role library: three independent saved module blueprints, bench selection, per-slot overwrite and atomic cross-pad merge; selection survives source/world loss. Custom names/modules/combat remain next.
+- Named fleet roles: saved 12-character A/B/C labels with keyboard/controller editor, cancel/reset and transient drafts; source/world-loss retention and compact bench verified. Further modules/combat remain next.
+
+- Fleet role library: three independent saved module blueprints, bench selection, per-slot overwrite and atomic cross-pad merge; selection survives source/world loss. Further modules/combat remain next.
 
 - Free-lode fleet orders: saved mixed depletion and trip material, full-store skipping, remote exhaustion and target-loss policies; fixed generated flight anchors, combat/salvage still pending.
 
@@ -70,5 +72,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Visible mining flight: stable slot glyphs follow saved launch/work/return/dock progress, cargo/modules and power pauses; no duplicate bodies/cargo. Designation/templates/combat/losses remain next.
 
 - Drone dock retrofits: one paid 20M 5C cargo pod and mining head per unit, saved queued/fitted modules, install after old cargo unloads; mixed-fleet conservation and compact bench verified. Designation/flight/templates/combat remain next.
-
-- Bounded mining fleet: saved Automation (20M 8C after Fabrication), four paid units per powered warehouse, per-unit status/cargo, deterministic shared handoffs; save format 4 refuses older layouts. Designation/flight/upgrades/combat remain next.

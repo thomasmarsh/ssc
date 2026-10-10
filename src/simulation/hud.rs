@@ -254,6 +254,15 @@ impl Game {
             out.push(hint("ENTER", "launch again"));
             return out;
         }
+        if self.drone_name_editing() {
+            return vec![
+                hint("UP DOWN", "character"),
+                hint("LEFT RIGHT", "position"),
+                hint("ENTER", "save"),
+                hint("Q", "clear"),
+                hint("E", "cancel"),
+            ];
+        }
         if self.bench_open() {
             out.push(hint("UP DOWN", "row"));
             out.push(hint("LEFT RIGHT", "tab"));

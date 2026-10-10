@@ -755,6 +755,29 @@ fn bench_controls(
     session: &mut Session,
 ) {
     let game = &mut session.game;
+    if game.drone_name_editing() {
+        let cursor =
+            i32::from(keys.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight))
+                - i32::from(keys.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft));
+        let character =
+            i32::from(keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp))
+                - i32::from(keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown));
+        game.drone_name_step(cursor, character);
+        if keys.just_pressed(KeyCode::KeyE)
+            || pad(GamepadButton::East)
+            || pad(GamepadButton::Select)
+        {
+            game.finish_drone_name(false);
+        } else if keys.just_pressed(KeyCode::Enter)
+            || keys.just_pressed(KeyCode::Space)
+            || pad(GamepadButton::South)
+        {
+            game.finish_drone_name(true);
+        } else if keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::West) {
+            game.drone_name_clear();
+        }
+        return;
+    }
     if keys.just_pressed(KeyCode::ArrowDown)
         || pad(GamepadButton::DPadDown)
         || pad(GamepadButton::RightTrigger)
@@ -2178,6 +2201,9 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 .arsenal
                 .acquire(Profile::Needles, Profile::Needles.max_level());
             game.bench_select(BenchAction::Weapon(Profile::Spread));
+        }
+        "mining-fleet-name" => {
+            game.stage_drone_name_smoke();
         }
         "power" => {
             game.loadout

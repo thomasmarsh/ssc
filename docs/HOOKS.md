@@ -107,3 +107,5 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 - `SSC_FRONTIER_CONTACT=1`: bounded smoke pose at the peaceful outpost, friendly CONTACT open on the real grade purchase with prerequisite knowledge and ship goods. `SSC_BENCH_VIEW=research` shows the real HOME frontier-research requirement row. Use `SSC_OFFSCREEN_SIZE=640x480` to verify compact layouts; both require `SSC_SMOKE_FRAMES`.
 
 - `SSC_BENCH_VIEW=mining-fleet-role`: powered four-unit warehouse with independent role A/B blueprints, selecting SELECT FLEET ROLE. `SSC_BENCH_RESULT=1` cycles B to empty C; the existing `mining-fleet-blueprint` gallery previews/merges selected B.
+
+- `SSC_BENCH_VIEW=mining-fleet-name`: open the real role-name editor on DEEP MINER-1 with the caret on the hyphen; no research or payment required.

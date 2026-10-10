@@ -291,6 +291,7 @@ impl Game {
             game.pad.drone_blueprint = state.pad.drone_blueprint;
             game.pad.drone_other_blueprints = state.pad.drone_other_blueprints;
             game.pad.drone_role = state.pad.drone_role;
+            game.pad.drone_role_names = state.pad.drone_role_names;
         }
         game.adopt_farm(state.farm, keep);
         game.spawn_player_exact(state.ship.position);

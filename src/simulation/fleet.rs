@@ -122,7 +122,43 @@ impl DroneRole {
     }
 }
 
+const ROLE_NAME_LEN: usize = 12;
+const ROLE_ALPHABET: &[u8] = b" ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
+
+/// Uncommitted bench edit; names use a bounded controller-friendly alphabet.
+#[derive(Clone, Debug)]
+pub struct DroneNameEdit {
+    role: DroneRole,
+    letters: [u8; ROLE_NAME_LEN],
+    cursor: usize,
+}
+
+impl DroneNameEdit {
+    pub(super) fn preview(&self) -> String {
+        self.letters
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| {
+                let glyph = if c == b' ' { '_' } else { c as char };
+                if i == self.cursor {
+                    format!("[{glyph}]")
+                } else {
+                    glyph.to_string()
+                }
+            })
+            .collect()
+    }
+}
+
 impl pads::PadState {
+    pub(super) fn drone_role_label(&self) -> String {
+        let name = &self.drone_role_names[self.drone_role as usize];
+        if name.is_empty() {
+            self.drone_role.label().into()
+        } else {
+            format!("{}: {}", self.drone_role.label(), name)
+        }
+    }
     pub(super) fn selected_blueprint(&self) -> Option<DroneModules> {
         match self.drone_role {
             DroneRole::A => self.drone_blueprint,
@@ -509,6 +545,15 @@ impl Game {
         amount
     }
 
+    /// Bounded bench gallery: committed role name with an active uncommitted caret.
+    pub fn stage_drone_name_smoke(&mut self) {
+        self.pad.drone_role = DroneRole::A;
+        self.pad.drone_role_names[0] = "DEEP MINER-1".into();
+        self.bench_select(BenchAction::NameDroneRole);
+        self.begin_drone_name();
+        self.drone_name_step(10, 0);
+    }
+
     /// Bounded bench gallery: knowledge copied at another dock, without unit hardware.
     pub fn stage_drone_blueprint_smoke(&mut self) {
         self.pad.drone_role = DroneRole::B;
@@ -737,10 +782,75 @@ impl Game {
         }
     }
 
+    pub fn drone_name_editing(&self) -> bool {
+        self.bench_open() && self.landed_pad().is_some() && self.pad.drone_name_edit.is_some()
+    }
+
+    pub(super) fn begin_drone_name(&mut self) {
+        if !self.bench_open() || self.landed_pad().is_none() {
+            return;
+        }
+        let mut letters = [b' '; ROLE_NAME_LEN];
+        for (slot, byte) in letters
+            .iter_mut()
+            .zip(self.pad.drone_role_names[self.pad.drone_role as usize].bytes())
+        {
+            *slot = if ROLE_ALPHABET.contains(&byte) {
+                byte
+            } else {
+                b' '
+            };
+        }
+        self.pad.drone_name_edit = Some(DroneNameEdit {
+            role: self.pad.drone_role,
+            letters,
+            cursor: 0,
+        });
+    }
+
+    /// Left/right moves the caret; up/down cycles a character, wrapping at both ends.
+    pub fn drone_name_step(&mut self, cursor: i32, character: i32) {
+        if !self.drone_name_editing() {
+            return;
+        }
+        let edit = self.pad.drone_name_edit.as_mut().unwrap();
+        edit.cursor =
+            (edit.cursor as i64 + cursor as i64).rem_euclid(ROLE_NAME_LEN as i64) as usize;
+        let at = ROLE_ALPHABET
+            .iter()
+            .position(|&c| c == edit.letters[edit.cursor])
+            .unwrap_or(0);
+        edit.letters[edit.cursor] = ROLE_ALPHABET
+            [(at as i64 + character as i64).rem_euclid(ROLE_ALPHABET.len() as i64) as usize];
+    }
+
+    pub fn drone_name_clear(&mut self) {
+        if self.drone_name_editing() {
+            let edit = self.pad.drone_name_edit.as_mut().unwrap();
+            edit.letters[edit.cursor] = b' ';
+        }
+    }
+
+    pub fn finish_drone_name(&mut self, save: bool) {
+        if !self.drone_name_editing() {
+            self.pad.drone_name_edit = None;
+            return;
+        }
+        let edit = self.pad.drone_name_edit.take().unwrap();
+        if save {
+            self.pad.drone_role_names[edit.role as usize] =
+                String::from_utf8(edit.letters.to_vec())
+                    .unwrap()
+                    .trim()
+                    .into();
+            self.bench_done("FLEET ROLE NAMED".into(), upgrades::Rarity::Common);
+        }
+    }
+
     pub(super) fn cycle_drone_role(&mut self) {
         self.pad.drone_role = self.pad.drone_role.next();
         self.bench_done(
-            format!("{} SELECTED", self.pad.drone_role.label()),
+            format!("{} SELECTED", self.pad.drone_role_label()),
             upgrades::Rarity::Common,
         );
     }
@@ -1377,6 +1487,70 @@ mod tests {
             game.pad.selected_blueprint().unwrap().label(),
             "CARGO POD + MINING HEAD"
         );
+    }
+
+    #[test]
+    fn role_names_edit_cancel_reset_and_survive_save_and_world_loss() {
+        let (mut game, source, _) = setup();
+        save_blueprint(&mut game);
+        let goods = game.cargo;
+        let blueprint = game.pad.selected_blueprint();
+        let units = game.pad.pads[&source].drones.clone();
+        game.bench_select(BenchAction::NameDroneRole);
+        game.bench_confirm();
+        assert!(game.drone_name_editing());
+        assert_eq!(game.bench_panel().unwrap().rows[0].state, "[_]___________");
+        assert_eq!(
+            game.context_hints()
+                .iter()
+                .map(|h| h.action.as_str())
+                .collect::<Vec<_>>(),
+            ["character", "position", "save", "clear", "cancel"]
+        );
+        game.drone_name_step(0, 13); // M
+        game.drone_name_step(1, 9); // I
+        game.drone_name_step(1, 14); // N
+        game.drone_name_step(1, 5); // E
+        assert!(
+            game.bench_panel().unwrap().rows[0]
+                .state
+                .starts_with("MIN[E]")
+        );
+        // Saving the game during an edit retains only the committed name.
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (loaded, _) = Game::from_save(state, generator);
+        assert!(loaded.pad.drone_role_names.iter().all(String::is_empty));
+        assert!(loaded.pad.drone_name_edit.is_none());
+        game.bench_confirm();
+        assert_eq!(game.pad.drone_role_label(), "ROLE A: MINE");
+        assert_eq!(game.cargo, goods);
+        assert_eq!(game.pad.selected_blueprint(), blueprint);
+        assert_eq!(game.pad.pads[&source].drones, units);
+        game.bench_confirm(); // Reopen selected name row.
+        game.drone_name_step(-1, -1); // Wrap cursor and alphabet.
+        assert!(game.bench_panel().unwrap().rows[0].state.ends_with("[-]"));
+        game.finish_drone_name(false);
+        assert_eq!(game.pad.drone_role_names[0], "MINE");
+        game.cycle_drone_role();
+        game.begin_drone_name();
+        game.drone_name_step(0, 2);
+        game.finish_drone_name(true);
+        assert_eq!(game.pad.drone_role_names, ["MINE", "B", ""]);
+        game.begin_drone_name();
+        game.drone_name_clear();
+        game.finish_drone_name(true);
+        assert_eq!(game.pad.drone_role_label(), "ROLE B");
+        game.begin_drone_name();
+        game.drone_name_step(0, 3);
+        game.bench_toggle(); // Closing cancels.
+        assert!(game.pad.drone_name_edit.is_none());
+        assert!(game.pad.drone_role_names[1].is_empty());
+        game.pad.pads.remove(&source);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (game, _) = Game::from_save(state, generator + 1);
+        assert_eq!(game.pad.drone_role_names, ["MINE", "", ""]);
+        assert_eq!(game.pad.drone_role, DroneRole::B);
+        assert!(game.pad.drone_name_edit.is_none());
     }
 
     #[test]
