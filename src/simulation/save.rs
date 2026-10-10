@@ -247,6 +247,8 @@ impl Game {
                 .tune
                 .overrides()
                 .into_iter()
+                // The culture clock is saved on its own and stays the one source of truth.
+                .filter(|(name, _)| !name.starts_with("culture_drift_"))
                 .map(|(name, value)| (name.to_string(), value))
                 .collect(),
             streams: Streams {
@@ -271,6 +273,7 @@ impl Game {
         // a newer build dropped or a value now out of range is skipped, never fatal.
         tunables::set_many(&mut game.tune, state.tuning);
         game.civs.societies = state.societies.restore(keep, &game.tune);
+        game.mirror_culture_tuning();
         game.time = state.time;
         game.score = state.score;
         game.lives = state.lives.max(1);

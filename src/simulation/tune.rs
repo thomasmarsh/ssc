@@ -37,6 +37,7 @@ impl Game {
     pub fn with_tuning(seed: u64, tune: Tunables) -> Self {
         let mut game = Self::blank(seed);
         game.tune = tune;
+        game.apply_culture_tuning();
         game.stream_sectors();
         game.spawn_player(Vec2::ZERO);
         game.seed_home_pad();
@@ -131,6 +132,7 @@ impl Game {
     /// Re-derives what is cached from the tunables and records a pending regeneration.
     fn tune_changed(&mut self, regen: bool) {
         self.tune_regen |= regen;
+        self.apply_culture_tuning();
         self.cargo.extra = self.loadout.skills.cargo_bonus(&self.tune);
     }
 
@@ -312,6 +314,70 @@ mod tests {
         // A default run writes no tuning at all.
         let plain = Game::new(MASTER_SEED).save_state().to_text();
         assert!(!plain.contains("tuning"), "{plain}");
+    }
+
+    #[test]
+    fn culture_drift_entries_route_through_the_saved_clock() {
+        let plain = Game::new(MASTER_SEED);
+        assert_eq!(plain.tune_get("culture_drift_temperature"), Some(0.0));
+        assert_eq!(plain.tune_get("culture_drift_timescale"), Some(86_400.0));
+        assert_eq!(plain.culture_clock().temperature(), 0.0);
+        assert_eq!(
+            plain.culture_clock().timescale(),
+            crate::culture::DEFAULT_TIMESCALE
+        );
+        assert!(!plain.tuning_modified() && !plain.culture_modified());
+
+        let mut game = Game::new(MASTER_SEED);
+        game.tune_set("culture_drift_temperature", 0.5).unwrap();
+        game.tune_set("culture_drift_timescale", 1000.0).unwrap();
+        assert_eq!(game.culture_clock().temperature(), 0.5);
+        assert_eq!(game.culture_clock().timescale(), 1000.0);
+        assert!(game.tuning_modified() && game.culture_modified());
+        // Out of range clamps, nonfinite and a non-positive timescale never reach the clock.
+        let a = game.tune_set("culture_drift_temperature", 7.0).unwrap();
+        assert_eq!(a.applied, 1.0);
+        assert!(game.tune_set("culture_drift_timescale", f32::NAN).is_err());
+        assert_eq!(
+            game.tune_set("culture_drift_timescale", -5.0)
+                .unwrap()
+                .applied,
+            1.0
+        );
+        assert_eq!(game.culture_clock().timescale(), 1.0);
+        game.tune_set("culture_drift_timescale", 1000.0).unwrap();
+        // The direct headless control keeps the entries in step.
+        assert!(game.configure_culture_drift(0.25, 2000.0));
+        assert_eq!(game.tune_get("culture_drift_temperature"), Some(0.25));
+        assert_eq!(game.tune_get("culture_drift_timescale"), Some(2000.0));
+        assert!(!game.configure_culture_drift(f64::NAN, 2000.0));
+        assert_eq!(game.tune_get("culture_drift_temperature"), Some(0.25));
+        // The clock is saved on its own; the overrides never carry a second copy.
+        game.civs.societies.advance(500.0, &game.tune);
+        let phase = game.culture_clock().phase();
+        assert!(phase > 0.0);
+        assert!(!game.save_state().to_text().contains("culture_drift_"));
+        let (state, generator) = save::SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (loaded, _) = Game::from_save(state, generator);
+        assert_eq!(loaded.culture_clock(), game.culture_clock());
+        assert_eq!(loaded.tune_get("culture_drift_temperature"), Some(0.25));
+        // Reset refreezes the current phase, not the original epoch.
+        game.tune_reset("culture_drift_temperature").unwrap();
+        assert_eq!(game.culture_clock().temperature(), 0.0);
+        assert_eq!(game.culture_clock().phase(), phase);
+        game.tune_reset_all();
+        assert_eq!(
+            game.culture_clock().timescale(),
+            crate::culture::DEFAULT_TIMESCALE
+        );
+        // An overrides file reaches the clock, and so does a game built with the tuning.
+        let report = game.tune_load_overrides("{\"culture_drift_temperature\": 0.75}");
+        assert!(report.ok());
+        assert_eq!(game.culture_clock().temperature(), 0.75);
+        let mut tune = Tunables::default();
+        tune.set("culture_drift_temperature", 0.1).unwrap();
+        let built = Game::with_tuning(MASTER_SEED, tune);
+        assert_eq!(built.culture_clock().temperature(), f64::from(0.1_f32));
     }
 
     #[test]

@@ -226,8 +226,33 @@ impl Game {
 
     /// Direct headless playtest controls. Callers see effective clamped values in the clock.
     /// Saves retain these controls; the desktop adapter never applies environment overrides.
+    /// The registry entries `culture_drift_temperature` and `culture_drift_timescale` route
+    /// through here: the saved clock is the one source of truth and the entries only mirror it.
     pub fn configure_culture_drift(&mut self, temperature: f64, timescale: f64) -> bool {
-        self.civs.societies.clock.configure(temperature, timescale)
+        let ok = self.civs.societies.clock.configure(temperature, timescale);
+        if ok {
+            self.mirror_culture_tuning();
+        }
+        ok
+    }
+
+    /// Copies the clock's effective controls into the mirrored registry entries.
+    pub(super) fn mirror_culture_tuning(&mut self) {
+        let clock = &self.civs.societies.clock;
+        self.tune.culture_drift_temperature = clock.temperature() as f32;
+        self.tune.culture_drift_timescale = clock.timescale() as f32;
+    }
+
+    /// Pushes changed registry entries into the clock (a no-op when they already match).
+    pub(super) fn apply_culture_tuning(&mut self) {
+        let clock = &self.civs.societies.clock;
+        let (t, s) = (
+            self.tune.culture_drift_temperature,
+            self.tune.culture_drift_timescale,
+        );
+        if clock.temperature() as f32 != t || clock.timescale() as f32 != s {
+            self.configure_culture_drift(f64::from(t), f64::from(s));
+        }
     }
 
     pub fn civilization_profile(&self, actor: u64) -> Option<Profile> {

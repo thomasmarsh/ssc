@@ -41,6 +41,13 @@ macro_rules! groups {
             civ_elder_score: f32 = 1500.0, 0.0, 20_000.0, Amount;
         }
 
+        group "culture" {
+            /// Culture drift temperature: 0 freezes the cultural phase (the default, never warmed automatically); 1 is full speed. Routed through the saved culture clock.
+            culture_drift_temperature: f32 = 0.0, 0.0, 1.0, Ratio;
+            /// Simulation seconds of cultural phase one full unit of drift covers (positive). Routed through the saved culture clock.
+            culture_drift_timescale: f32 = 86_400.0, 1.0, 3.2e8, Seconds;
+        }
+
         group "civ_mining" {
             /// The most a stash holds, all materials together.
             civmine_stock_cap: f32 = 150.0, 7.5, 2000.0, Amount;

@@ -50,7 +50,7 @@ This is the single work plan. Design and acceptance detail live in the linked do
 
 **Wave 0 (in-session, before wave 1)**
 
-- **C1 [S] Culture drift controls in the registry.** Outcome: `culture_drift_temperature` (0..1, default exactly 0) and `culture_drift_timescale` (positive, default 86,400 s) are registry entries that route through `Game::configure_culture_drift`, so the saved culture clock stays the one source of truth (the overrides map never stores a second copy). Owns: `src/simulation/society.rs` (clock setter only), `tuning_civ.rs`, `tune.rs`, DEVTOOLS culture section. Accept: `tune_set` and `SSC_TUNING` reach the clock; zero-default, refreeze and reload tests still pass; a non-default value shows DEV. Validation: goldens, save (no bump expected).
+- **C1 [S] DONE (2026-10-10) Culture drift controls in the registry.** Outcome: `culture_drift_temperature` (0..1, default exactly 0) and `culture_drift_timescale` (positive, default 86,400 s) are registry entries that route through `Game::configure_culture_drift`, so the saved culture clock stays the one source of truth (the overrides map never stores a second copy). Owns: `src/simulation/society.rs` (clock setter only), `tuning_civ.rs`, `tune.rs`, DEVTOOLS culture section. Accept: `tune_set` and `SSC_TUNING` reach the clock; zero-default, refreeze and reload tests still pass; a non-default value shows DEV. Validation: goldens, save (no bump expected).
 
 **Wave 1 (three agents in parallel)**
 
