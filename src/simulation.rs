@@ -487,6 +487,7 @@ pub struct Game {
     /// Pairs of bodies that struck recently and the time until they may strike again; see
     /// `impact`.
     impact_gap: HashMap<(u64, u64), f32>,
+    drone_impact_gap: HashMap<(PadKey, usize, u64), f32>,
     /// The rock the beam's grip is holding right now, if any; see `shove`.
     gripped: Option<u64>,
     /// Sectors whose relic has been taken this run; see `organs`.
@@ -652,6 +653,7 @@ impl Game {
             parry: parry::ParryState::default(),
             dash: dash::DashState::default(),
             impact_gap: HashMap::new(),
+            drone_impact_gap: HashMap::new(),
             gripped: None,
             relics_taken: HashSet::new(),
             farm: farm::Farm::new(seed),
@@ -873,6 +875,7 @@ impl Game {
                 body.health = (body.health + dt * DUST_HEAL).min(body.max_health);
             }
         }
+        let drones_before = self.mining_drone_views();
         self.update_farm();
         self.update_pads(dt, &input);
         let shots = (self.bullets.len(), self.mines.len());
@@ -954,6 +957,11 @@ impl Game {
         } else {
             self.bodies.iter().map(|b| (b.id, b.position)).collect()
         };
+        let impact_before: HashMap<_, _> = if drones_before.is_empty() {
+            HashMap::new()
+        } else {
+            self.bodies.iter().map(|b| (b.id, b.position)).collect()
+        };
         let shove_cap = self.loadout.skills.shove_speed_cap();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             if body.shoved > 0.0 && body.kind == BodyKind::Asteroid {
@@ -973,6 +981,7 @@ impl Game {
                 body.angle += dt * PLANETOID_SPIN;
             }
         }
+        self.damage_drone_impacts(dt, &drones_before, &impact_before);
         // Rooted life rides its host, and again after contacts have shoved the host.
         self.sync_roots();
         self.transit_bodies(&rift_before);

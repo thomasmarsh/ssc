@@ -806,6 +806,108 @@ impl Game {
         }
     }
 
+    /// Sweep relative motion before body contacts alter positions or velocities. Workers
+    /// keep their ledger path: impacts cost hull without impulses or reciprocal damage.
+    pub(super) fn damage_drone_impacts(
+        &mut self,
+        dt: f32,
+        before: &[DroneView],
+        bodies_before: &HashMap<u64, Vec2>,
+    ) {
+        self.drone_impact_gap.retain(|_, until| *until > self.time);
+        if dt <= 0.0 {
+            return;
+        }
+        for drone in self.mining_drone_views() {
+            let Some(old) = before
+                .iter()
+                .find(|v| v.home == drone.home && v.slot == drone.slot)
+            else {
+                continue;
+            };
+            let mut hits = Vec::new();
+            for body in &self.bodies {
+                if !body.active
+                    || body.health <= 0.0
+                    || body.phased
+                    || body.adrift > 0.0
+                    || is_fixed(body)
+                    || is_cloud(body)
+                    || !(body.kind == BodyKind::Asteroid
+                        || (body.kind == BodyKind::Creature
+                            && body.alert
+                            && self.civ_of(body).is_none_or(|(id, _)| self.civ_hostile(id))))
+                {
+                    continue;
+                }
+                let key = (drone.home, drone.slot, body.id);
+                if self.drone_impact_gap.contains_key(&key) {
+                    continue;
+                }
+                let Some(start) = bodies_before.get(&body.id) else {
+                    continue;
+                };
+                let relative_start = *start - old.position;
+                let relative_end = body.position - drone.position;
+                let Some(fraction) = segment_circle(
+                    relative_start,
+                    relative_end,
+                    Vec2::ZERO,
+                    hit_radius(body) + DRONE_RADIUS,
+                ) else {
+                    continue;
+                };
+                let motion = (relative_end - relative_start) / dt;
+                let normal = relative_start
+                    .lerp(relative_end, fraction)
+                    .normalize_or_zero();
+                let closing = -motion.dot(normal);
+                let amount =
+                    impact::kinetic_damage(closing, inverse_mass(body), 1.0 / (DRONE_RADIUS * 0.6));
+                if amount > 0.0 {
+                    hits.push((fraction, body.id, amount));
+                }
+            }
+            hits.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            for (fraction, id, amount) in hits {
+                self.drone_impact_gap.insert(
+                    (drone.home, drone.slot, id),
+                    self.time + tuning::IMPACT_PAIR_COOLDOWN,
+                );
+                let hit = DroneView {
+                    position: old.position.lerp(drone.position, fraction),
+                    ..drone
+                };
+                if damage_drone(&mut self.pad, hit, amount) {
+                    self.note_drone_loss(hit);
+                    break;
+                }
+            }
+        }
+    }
+
+    pub fn stage_drone_impact_smoke(&mut self) {
+        self.update_mining_drones(5.0);
+        for (slot, speed) in [(0, 1400.0), (1, 950.0)] {
+            let Some(view) = self
+                .mining_drone_views()
+                .into_iter()
+                .find(|v| v.slot == slot)
+            else {
+                continue;
+            };
+            let mut rock = self.make_body(BodyKind::Asteroid, view.position - Vec2::X * 100.0);
+            rock.radius = 12.0;
+            rock.mass = 60.0;
+            rock.velocity = Vec2::X * speed;
+            let id = rock.id;
+            let start = rock.position;
+            rock.position += rock.velocity * 0.15;
+            self.bodies.push(rock);
+            self.damage_drone_impacts(0.15, &[view], &HashMap::from([(id, start)]));
+        }
+    }
+
     pub fn stage_drone_blast_smoke(&mut self) {
         self.update_mining_drones(5.0);
         for (slot, amount) in [(0, 100.0), (1, 50.0)] {
@@ -1550,6 +1652,146 @@ mod tests {
                 "mode {mode}"
             );
         }
+    }
+
+    fn sweep_rock(game: &mut Game, speed: f32, offset: f32) -> (DroneView, u64, Vec2) {
+        let view = game.mining_drone_views()[0];
+        let start = view.position + Vec2::new(-100.0, offset);
+        let mut rock = game.make_body(BodyKind::Asteroid, start);
+        rock.radius = 12.0;
+        rock.mass = 60.0;
+        rock.velocity = Vec2::X * speed;
+        rock.position += rock.velocity * 0.2;
+        let id = rock.id;
+        game.bodies.push(rock);
+        (view, id, start)
+    }
+
+    #[test]
+    fn kinetic_sweep_catches_crossing_and_cooldown_spares_repeated_overlap() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        let (view, id, start) = sweep_rock(&mut game, 950.0, 0.0);
+        let before = HashMap::from([(id, start)]);
+        game.damage_drone_impacts(0.2, &[view], &before);
+        let health = game.pad.pads[&key].drones[0].health;
+        assert!(health > 0.0 && health < DRONE_HEALTH);
+        game.damage_drone_impacts(0.2, &[view], &before);
+        assert_eq!(game.pad.pads[&key].drones[0].health, health);
+        game.time += tuning::IMPACT_PAIR_COOLDOWN;
+        game.damage_drone_impacts(0.2, &[view], &before);
+        assert!(game.pad.pads[&key].drones[0].health < health);
+    }
+
+    #[test]
+    fn kinetic_excludes_slow_missed_separating_and_intangible_bodies() {
+        for mode in 0..9 {
+            let (mut game, key, _) = setup();
+            game.bench_confirm();
+            game.update_mining_drones(5.0);
+            let (view, id, mut start) = sweep_rock(
+                &mut game,
+                if mode == 0 { 300.0 } else { 1400.0 },
+                if mode == 1 { 100.0 } else { 0.0 },
+            );
+            let body = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+            match mode {
+                2 => body.phased = true,
+                3 => body.active = false,
+                4 => body.health = 0.0,
+                5 => body.adrift = 1.0,
+                6 => body.pinned = true,
+                7 => {
+                    start = view.position + Vec2::X * 10.0;
+                }
+                8 => {
+                    body.kind = BodyKind::Creature;
+                    body.alert = false;
+                }
+                _ => {}
+            }
+            game.damage_drone_impacts(0.2, &[view], &HashMap::from([(id, start)]));
+            assert_eq!(
+                game.pad.pads[&key].drones[0].health, DRONE_HEALTH,
+                "mode {mode}"
+            );
+            assert!(game.drone_wrecks().is_empty());
+        }
+    }
+
+    #[test]
+    fn kinetic_relative_flight_and_hostile_authorization_share_saved_hull() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        let (view, id, _) = sweep_rock(&mut game, 0.0, 0.0);
+        let body = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+        body.position = view.position;
+        body.kind = BodyKind::Creature;
+        body.alert = true;
+        let civ = crate::territory::outpost(game.seed);
+        let territory = civ.id;
+        game.civ_territories.insert(territory, civ);
+        game.civ_lineages
+            .insert(body.species, (territory, CivRole::Member));
+        let old = DroneView {
+            position: view.position - Vec2::X * 200.0,
+            ..view
+        };
+        let before = HashMap::from([(id, view.position)]);
+        game.set_regard(territory, 80.0);
+        game.damage_drone_impacts(0.2, &[old], &before);
+        assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        game.set_regard(territory, -80.0);
+        game.damage_drone_impacts(0.2, &[old], &before);
+        assert!(game.pad.pads[&key].drones[0].health < DRONE_HEALTH);
+        let health = game.pad.pads[&key].drones[0].health;
+        game.bodies.retain(|b| b.origin != Some(key));
+        game.time += 1.0;
+        game.damage_drone_impacts(0.2, &[old], &before);
+        assert_eq!(game.pad.pads[&key].drones[0].health, health);
+    }
+
+    #[test]
+    fn kinetic_step_loss_saves_one_wreck_and_cannot_deliver_reserved_cargo() {
+        let (mut game, key, material) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        game.pad.bench = None;
+        let pad = game.pad.pads.get_mut(&key).unwrap();
+        pad.power = false;
+        pad.drone_paused = true;
+        let ore = game.mined[&key];
+        let view = game.mining_drone_views()[0];
+        game.bodies
+            .retain(|b| b.kind == BodyKind::Player || b.origin == Some(key));
+        let mut rock = game.make_body(BodyKind::Asteroid, view.position - Vec2::X * 50.0);
+        rock.radius = 12.0;
+        rock.mass = 60.0;
+        rock.velocity = Vec2::X * 1400.0;
+        game.bodies.push(rock);
+        game.step(0.1, Input::default());
+        assert_eq!(game.pad.pads[&key].drones[0].health, 0.0);
+        assert_eq!(game.drone_wrecks().len(), 1);
+        assert!((game.drone_wrecks()[0].position - view.position).length() < 1.0);
+        assert_eq!(
+            game.drone_wrecks()[0].cargo.amount(material),
+            5.0 + if material == Material::Metal {
+                20.0
+            } else if material == Material::Crystal {
+                5.0
+            } else {
+                0.0
+            }
+        );
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut restored, _) = Game::from_save(state, generator);
+        restored.pad.pads.get_mut(&key).unwrap().power = true;
+        restored.update_mining_drones(100.0);
+        assert_eq!(restored.pad.pads[&key].stash.amount(material), 0.0);
+        assert_eq!(restored.mined[&key], ore);
+        assert_eq!(restored.drone_wrecks(), game.drone_wrecks());
     }
 
     fn touching_creature(game: &mut Game) -> u64 {
