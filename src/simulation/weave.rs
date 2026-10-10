@@ -179,7 +179,7 @@ impl Game {
                     && !ship.phased
                     && ship.contact_cooldown <= 0.0
                 {
-                    damage(ship, super::tether::LINK_DAMAGE, 0.0);
+                    damage(ship, super::tether::LINK_DAMAGE, 0.0, &self.tune);
                     ship.contact_cooldown = 0.65;
                     let away = if gap.length_squared() > 0.01 {
                         gap.normalize()

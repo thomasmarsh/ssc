@@ -207,7 +207,7 @@ impl Game {
             && ship.position.distance(at) < radius
         {
             let guard = ship.rig.guard;
-            damage(ship, dps * guard * dt, invulnerability);
+            damage(ship, dps * guard * dt, invulnerability, &self.tune);
         }
     }
 

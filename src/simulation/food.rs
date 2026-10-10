@@ -864,6 +864,7 @@ mod tests {
             game.bodies.iter_mut().find(|b| b.id == id).unwrap(),
             1e6,
             0.0,
+            &DEFAULT_TUNING,
         );
         assert_eq!(body(&game, id).health, body(&game, id).max_health);
         game.explode(at, 400.0, 1e5, true);

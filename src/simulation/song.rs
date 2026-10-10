@@ -157,7 +157,12 @@ impl Game {
                 && let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
             {
                 let guard = ship.rig.guard;
-                damage(ship, power::SONG_DAMAGE * guard, invulnerability);
+                damage(
+                    ship,
+                    power::SONG_DAMAGE * guard,
+                    invulnerability,
+                    &self.tune,
+                );
                 ship.velocity += out * power::SONG_SHOVE;
                 ship.velocity = ship.velocity.clamp_length_max(650.0);
                 struck = true;

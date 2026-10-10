@@ -156,7 +156,7 @@ impl Game {
         let roll = (world::hash2(self.seed ^ tuning::FIZZLE_SALT, tick, ability) >> 40) as f32
             / 16_777_216.0;
         if roll < chance {
-            self.realms.fizzle_lock[ability as usize] = self.time + tuning::FIZZLE_LOCK;
+            self.realms.fizzle_lock[ability as usize] = self.time + self.tune.fizzle_lock;
             return true;
         }
         false
@@ -395,7 +395,7 @@ mod tests {
             game.time += 0.5;
             assert!(at < 600.0, "a fizzle should happen");
         }
-        game.time += tuning::FIZZLE_LOCK * 0.5;
+        game.time += DEFAULT_TUNING.fizzle_lock * 0.5;
         assert!(game.ability_fizzles(0), "still locked");
     }
 
@@ -413,7 +413,7 @@ mod tests {
             body.shield = 100.0;
             body.health = 100.0;
             let before = body.health + body.shield * e.foe.shield;
-            damage(body, amount, 0.0);
+            damage(body, amount, 0.0, &DEFAULT_TUNING);
             (before - (body.health + body.shield * e.foe.shield)) / amount
         };
         // Against iron a light hit loses most of itself; a heavy one barely notices.
@@ -423,7 +423,7 @@ mod tests {
             "{light} {heavy}"
         );
         assert!(
-            light >= tuning::PLATING_FLOOR - 1e-3,
+            light >= DEFAULT_TUNING.plating_floor - 1e-3,
             "never entirely: {light}"
         );
         // The shield is a bigger pool: more raw damage soaks in before the hull is touched.
@@ -433,7 +433,7 @@ mod tests {
         let body = game.bodies.iter_mut().find(|b| b.id == c).unwrap();
         body.genes.foe = RealmKind::by_id("iron_tide").unwrap().spec().effects.foe;
         (body.shield, body.health) = (50.0, 50.0);
-        damage(body, 100.0, 0.0);
+        damage(body, 100.0, 0.0, &DEFAULT_TUNING);
         assert_eq!(body.health, 50.0, "2.4 x 50 of shield soaks 100 whole");
         // Glass: the same hit does more to the hull (it has less of it).
         let glass = hit("glass_seas", 40.0);

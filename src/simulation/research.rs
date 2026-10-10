@@ -447,7 +447,7 @@ mod tests {
             foe.shield = 0.0;
             let mut hits = 0;
             while foe.health > 0.0 && hits < 10000 {
-                damage(&mut foe, stats.damage, 0.0);
+                damage(&mut foe, stats.damage, 0.0, &DEFAULT_TUNING);
                 hits += 1;
             }
             (hits, stats)
@@ -460,12 +460,12 @@ mod tests {
         assert_eq!(home_stats.fire_period, frontier_stats.fire_period);
         assert_eq!(home_stats.spread, frontier_stats.spread);
         let mut naked = game.player().unwrap().clone();
-        damage(&mut naked, 10.0 * 40.0, 0.0);
+        damage(&mut naked, 10.0 * 40.0, 0.0, &DEFAULT_TUNING);
         assert!(naked.health <= 0.0);
         game.loadout.equipment_grade = 40.0;
         game.refresh_stats();
         let mut prepared = game.player().unwrap().clone();
-        damage(&mut prepared, 10.0 * 40.0, 0.0);
+        damage(&mut prepared, 10.0 * 40.0, 0.0, &DEFAULT_TUNING);
         assert!(prepared.health > 0.0);
         // Repair the same fraction at the same cost, rather than forty starter loads.
         game.cargo = Cargo::default();

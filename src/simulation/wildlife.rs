@@ -406,7 +406,7 @@ impl Game {
             self.bodies[wi].bite_clock = t::FAUNA_BITE_PERIOD;
             let at = self.bodies[ti].position;
             let tgt = &mut self.bodies[ti];
-            damage(tgt, amount, 0.0);
+            damage(tgt, amount, 0.0, &self.tune);
             if guarded {
                 tgt.health = tgt.health.max(tgt.max_health * t::FAUNA_STRUCTURE_FLOOR);
             } else if tgt.health <= 0.0 {
@@ -448,7 +448,7 @@ impl Game {
             self.bodies[si].fire_cooldown = period;
             let at = self.bodies[wi].position;
             let target = &mut self.bodies[wi];
-            damage(target, amount, 0.0);
+            damage(target, amount, 0.0, &self.tune);
             if target.health <= 0.0 {
                 target.consumed = true;
             }

@@ -673,7 +673,7 @@ impl Game {
             if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
                 && ship.rig.aura == 0
             {
-                damage(ship, sting, invulnerability);
+                damage(ship, sting, invulnerability, &self.tune);
             }
         }
     }

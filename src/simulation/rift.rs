@@ -847,7 +847,14 @@ mod tests {
         let ai = g.bodies.iter().position(|b| b.id == rock).unwrap();
         let bi = g.bodies.iter().position(|b| b.id == victim).unwrap();
         let (left, right) = g.bodies.split_at_mut(bi);
-        impact::strike(&mut left[ai], &mut right[0], 100.0, 0.0, 1.0);
+        impact::strike(
+            &mut left[ai],
+            &mut right[0],
+            100.0,
+            0.0,
+            1.0,
+            &DEFAULT_TUNING,
+        );
         g.remove_destroyed();
         assert_eq!(g.run.kills, 0);
         assert_eq!(g.score, 0);
@@ -995,7 +1002,14 @@ mod tests {
             let ai = g.bodies.iter().position(|b| b.id == rock).unwrap();
             let bi = g.bodies.iter().position(|b| b.id == victim).unwrap();
             let (left, right) = g.bodies.split_at_mut(bi);
-            impact::strike(&mut left[ai], &mut right[0], 100.0, 0.0, 1.0);
+            impact::strike(
+                &mut left[ai],
+                &mut right[0],
+                100.0,
+                0.0,
+                1.0,
+                &DEFAULT_TUNING,
+            );
             g.remove_destroyed();
             assert_eq!(g.run.kills, u32::from(claimed));
             assert_eq!(g.score > 0, claimed);
@@ -1073,7 +1087,14 @@ mod tests {
         let ai = g.bodies.iter().position(|b| b.id == rock).unwrap();
         let bi = g.bodies.iter().position(|b| b.id == secondary).unwrap();
         let (left, right) = g.bodies.split_at_mut(bi);
-        impact::strike(&mut left[ai], &mut right[0], 10.0, 0.0, 1.0);
+        impact::strike(
+            &mut left[ai],
+            &mut right[0],
+            10.0,
+            0.0,
+            1.0,
+            &DEFAULT_TUNING,
+        );
         assert_eq!(body(&g, secondary).rift_redirected, 5.0);
         let parent = body(&g, rock).clone();
         let prior = g.bodies.len();

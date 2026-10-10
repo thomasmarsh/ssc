@@ -656,7 +656,12 @@ mod tests {
             game.update_powers(power::SLING_TELL + DT);
             let index = game.bodies.iter().position(|b| b.id == rock).unwrap();
             let speed = game.bodies[index].velocity.length();
-            let raw = impact::kinetic_damage(speed, 1.0 / game.player().unwrap().mass, 1.0 / 25.0);
+            let raw = impact::kinetic_damage(
+                speed,
+                1.0 / game.player().unwrap().mass,
+                1.0 / 25.0,
+                &DEFAULT_TUNING,
+            );
             game.bodies[index].position = game.player().unwrap().position - Vec2::X * 30.0;
             game.bodies[0].angle = std::f32::consts::PI;
             if parry {

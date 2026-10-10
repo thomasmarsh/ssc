@@ -312,7 +312,12 @@ impl Game {
                         .adapt
                         .get(&body.id)
                         .map_or(1.0, |r| r.scale(super::arsenal::Family::Explosive));
-                    let dealt = damage(body, armored(body, amount * resist, true), 0.0);
+                    let dealt = damage(
+                        body,
+                        armored(body, amount * resist, true, &self.tune),
+                        0.0,
+                        &self.tune,
+                    );
                     if super::adapt::adaptive(body, &self.apexes) {
                         blast_hits.push((body.id, dealt, body.max_health + body.max_shield));
                     }
@@ -326,11 +331,11 @@ impl Game {
             } else {
                 match body.kind {
                     BodyKind::Player => {
-                        damage(body, amount, invulnerability);
+                        damage(body, amount, invulnerability, &self.tune);
                     }
                     // Enemy blasts shake rocks apart but never wear down a fortress wall.
                     BodyKind::Asteroid if body.rock != RockKind::Wall => {
-                        damage(body, amount * 0.5, 0.0);
+                        damage(body, amount * 0.5, 0.0, &self.tune);
                     }
                     _ => {}
                 }

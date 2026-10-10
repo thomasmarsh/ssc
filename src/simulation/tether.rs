@@ -407,7 +407,7 @@ impl Game {
                     let nearest = closest_on_segment(ship.position, from, to);
                     let gap = ship.position - nearest;
                     if gap.length() < ship.radius + 3.0 && ship.contact_cooldown <= 0.0 {
-                        damage(ship, LINK_DAMAGE, invulnerable);
+                        damage(ship, LINK_DAMAGE, invulnerable, &self.tune);
                         ship.contact_cooldown = 0.65;
                         let away = if gap.length_squared() > 0.01 {
                             gap.normalize()

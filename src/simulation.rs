@@ -131,6 +131,9 @@ pub use society::{CivilTarget, EngagementRule};
 pub use song::SongRing;
 pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
 pub use titles::{TitleFacts, title, title_case};
+#[cfg(test)]
+pub(crate) use tuning::DEFAULT as DEFAULT_TUNING;
+pub use tuning::Tunables;
 use upgrades::{Item, Loadout, Stats};
 pub use weapons::{Mine, Shape};
 pub use wells::{WellRun, WellView};
@@ -1175,8 +1178,8 @@ impl Game {
             // A realm of dust shortens how far a shot flies (see `realm::Effects`).
             let shot_life = stats.shot_life * reach;
             // A heavy gun is slow to leave and kicks the ship (see `tuning::RECOIL_PER_DAMAGE`).
-            let heavy = heavy_shot(stats.damage);
-            let kick = recoil_of(stats.damage, active);
+            let heavy = heavy_shot(stats.damage, &self.tune);
+            let kick = recoil_of(stats.damage, active, &self.tune);
             if kick > 0.0 {
                 player.velocity -= Vec2::from_angle(player.angle) * kick;
             }
@@ -1254,7 +1257,7 @@ impl Game {
                     && core > 0.0
                     && distance_squared < (body.radius + core).powi(2)
                 {
-                    damage(body, dps * dt, invulnerability);
+                    damage(body, dps * dt, invulnerability, &self.tune);
                 }
             }
         }
@@ -1368,7 +1371,7 @@ impl Game {
                         let thrown = direction * speed;
                         victim.velocity = thrown;
                         if victim.kind == BodyKind::Asteroid {
-                            damage(victim, 40.0 * strength, 0.0);
+                            damage(victim, 40.0 * strength, 0.0, &self.tune);
                         }
                         crazy.velocity = -direction * speed * 0.4;
                         crazy.contact_cooldown = 0.4;
@@ -1395,18 +1398,18 @@ impl Game {
                     let raw = if self.impact_gap.contains_key(&key) {
                         0.0
                     } else {
-                        impact::kinetic_damage(-closing_speed, inverse_a, inverse_b)
+                        impact::kinetic_damage(-closing_speed, inverse_a, inverse_b, &self.tune)
                     };
                     if raw > 0.0 {
                         self.impact_gap
-                            .insert(key, self.time + tuning::IMPACT_PAIR_COOLDOWN);
+                            .insert(key, self.time + self.tune.impact_pair_cooldown);
                         let factor = skills.plating_factor(caused);
-                        rammed += impact::strike(a, b, raw, invulnerability, factor);
+                        rammed += impact::strike(a, b, raw, invulnerability, factor, &self.tune);
                         struck.push((a.position.lerp(b.position, 0.5), raw));
                     }
                 }
                 if a.kind == BodyKind::Player && a.contact_cooldown <= 0.0 {
-                    let dealt = ram_contact(a, b, closing_speed, invulnerability);
+                    let dealt = ram_contact(a, b, closing_speed, invulnerability, &self.tune);
                     rammed += dealt;
                     ship_rammed |= dealt > 0.0;
                     if dealt > 0.0 && diplomacy::civil_target(b) {
@@ -1414,7 +1417,7 @@ impl Game {
                     }
                 }
                 if b.kind == BodyKind::Player && b.contact_cooldown <= 0.0 {
-                    let dealt = ram_contact(b, a, closing_speed, invulnerability);
+                    let dealt = ram_contact(b, a, closing_speed, invulnerability, &self.tune);
                     rammed += dealt;
                     ship_rammed |= dealt > 0.0;
                     if dealt > 0.0 && diplomacy::civil_target(a) {
@@ -1735,7 +1738,7 @@ impl Game {
                             let target = &self.bodies[index];
                             let family = profile.family();
                             (
-                                profile.reach().at(bullet.origin.distance(at))
+                                profile.reach().at(bullet.origin.distance(at), &self.tune)
                                     * self.adapt.get(&target.id).map_or(1.0, |r| r.scale(family)),
                                 Some(family),
                                 adapt::adaptive(target, &self.apexes),
@@ -1762,9 +1765,11 @@ impl Game {
                                         1.0
                                     },
                                 bullet.friendly,
+                                &self.tune,
                             ),
                             guard,
                             if bullet.friendly { 0.0 } else { bullet.pith },
+                            &self.tune,
                         )
                     };
                     if !bullet.friendly
@@ -1941,7 +1946,12 @@ impl Game {
                         .get(&body.id)
                         .map_or(1.0, |r| r.scale(arsenal::Family::Explosive));
                     let adaptive = adapt::adaptive(body, &self.apexes);
-                    let dealt = damage(body, armored(body, amount * boost * resist, true), 0.0);
+                    let dealt = damage(
+                        body,
+                        armored(body, amount * boost * resist, true, &self.tune),
+                        0.0,
+                        &self.tune,
+                    );
                     if adaptive {
                         blast_hits.push((body.id, dealt, body.max_health + body.max_shield));
                     }
@@ -1955,7 +1965,7 @@ impl Game {
                     && body.kind == BodyKind::Player
                     && civilization.is_none_or(|id| permitted_ship.contains(&id))
                 {
-                    damage(body, amount, invulnerability);
+                    damage(body, amount, invulnerability, &self.tune);
                 }
             }
             if friendly {
@@ -2369,24 +2379,30 @@ fn mass_sign(body: &Body) -> f32 {
 /// What the ship's own weapons do to a body: free rocks shrug most of it off (the mining
 /// beam, not the gun, is how rock becomes material). Everything else, nest stones included,
 /// takes it in full.
-fn armored(body: &Body, amount: f32, friendly: bool) -> f32 {
+fn armored(body: &Body, amount: f32, friendly: bool, tune: &Tunables) -> f32 {
     if friendly
         && body.kind == BodyKind::Asteroid
         && !body.pinned
         && !matches!(body.rock, RockKind::Planetoid | RockKind::Wall)
     {
-        amount / tuning::ROCK_HULL_FACTOR
+        amount / tune.rock_hull_factor
     } else {
         amount
     }
 }
 
-fn damage(body: &mut Body, amount: f32, player_invulnerability: f32) -> f32 {
-    damage_bypassing(body, amount, player_invulnerability, 0.0)
+fn damage(body: &mut Body, amount: f32, player_invulnerability: f32, tune: &Tunables) -> f32 {
+    damage_bypassing(body, amount, player_invulnerability, 0.0, tune)
 }
 
 /// `damage` where a share of it (`bypass`, 0 to 1) skips the shield and goes straight to hull.
-fn damage_bypassing(body: &mut Body, amount: f32, player_invulnerability: f32, bypass: f32) -> f32 {
+fn damage_bypassing(
+    body: &mut Body,
+    amount: f32,
+    player_invulnerability: f32,
+    bypass: f32,
+    tune: &Tunables,
+) -> f32 {
     if body.kind == BodyKind::BlackHole
         || body.rock == RockKind::Planetoid
         || (body.kind == BodyKind::Player && player_invulnerability > 0.0)
@@ -2399,7 +2415,7 @@ fn damage_bypassing(body: &mut Body, amount: f32, player_invulnerability: f32, b
     let amount = match body.kind {
         BodyKind::Player => amount * body.rig.guard,
         BodyKind::Creature => {
-            let through = (amount - foe.plating).max(amount * tuning::PLATING_FLOOR);
+            let through = (amount - foe.plating).max(amount * tune.plating_floor);
             through / body.genes.threat.max(1.0)
         }
         // Stations are meant to be taken down, so depth toughens them more gently.
@@ -2422,20 +2438,32 @@ fn damage_bypassing(body: &mut Body, amount: f32, player_invulnerability: f32, b
 
 /// Contact between the ship and `other`: the ship is hurt unless its lunatic field is on,
 /// and rams whatever it hits when fitted for it.
-fn ram_contact(ship: &mut Body, other: &mut Body, closing_speed: f32, invulnerability: f32) -> f32 {
+fn ram_contact(
+    ship: &mut Body,
+    other: &mut Body,
+    closing_speed: f32,
+    invulnerability: f32,
+    tune: &Tunables,
+) -> f32 {
     let harm = if ship.rig.aura > 0 {
         0.0
     } else {
         contact_damage(other)
     };
-    damage(ship, harm, invulnerability);
+    damage(ship, harm, invulnerability, tune);
     ship.contact_cooldown = 0.65;
     if ship.rig.ram > 0 && other.kind != BodyKind::Player {
         let force = (0.6 + closing_speed.abs() / 400.0).min(1.6);
         let dealt = damage(
             other,
-            armored(other, RAM_DAMAGE * f32::from(ship.rig.ram) * force, true),
+            armored(
+                other,
+                RAM_DAMAGE * f32::from(ship.rig.ram) * force,
+                true,
+                tune,
+            ),
             0.0,
+            tune,
         );
         if matches!(other.kind, BodyKind::Creature | BodyKind::Base) {
             return dealt;
@@ -2445,15 +2473,15 @@ fn ram_contact(ship: &mut Body, other: &mut Body, closing_speed: f32, invulnerab
 }
 
 /// The speed share of a shot of `damage` (heavier shots are slower: see `tuning::HEAVY_SLOW`).
-pub(crate) fn heavy_shot(damage: f32) -> f32 {
+pub(crate) fn heavy_shot(damage: f32, tune: &Tunables) -> f32 {
     let over = (damage / Stats::BASE.damage - 1.0).max(0.0);
-    (1.0 / (1.0 + tuning::HEAVY_SLOW * over)).max(tuning::HEAVY_SLOW_FLOOR)
+    (1.0 / (1.0 + tune.heavy_slow * over)).max(tune.heavy_slow_floor)
 }
 
 /// The speed a trigger pull of `damage` per shot kicks the ship with, for the profile `active`.
-pub(crate) fn recoil_of(damage: f32, active: arsenal::Profile) -> f32 {
-    ((damage - Stats::BASE.damage).max(0.0) * tuning::RECOIL_PER_DAMAGE * active.recoil())
-        .min(tuning::RECOIL_CAP)
+pub(crate) fn recoil_of(damage: f32, active: arsenal::Profile, tune: &Tunables) -> f32 {
+    ((damage - Stats::BASE.damage).max(0.0) * tune.recoil_per_damage * active.recoil())
+        .min(tune.recoil_cap)
 }
 
 /// The shots one trigger pull sends out: (angle from the nose, share of full damage).
@@ -3142,7 +3170,7 @@ mod tests {
     #[test]
     fn shield_regeneration_requires_a_quiet_interval() {
         let mut game = empty_game();
-        damage(&mut game.bodies[0], 30.0, 0.0);
+        damage(&mut game.bodies[0], 30.0, 0.0, &DEFAULT_TUNING);
         for _ in 0..60 {
             game.step(DT, Input::default());
         }
@@ -3225,7 +3253,7 @@ mod tests {
         game.step(DT, Input::default());
         assert!(game.player().unwrap().velocity.x > 0.0);
         let hole = game.bodies.iter_mut().find(|b| b.id == hole).unwrap();
-        damage(hole, 1_000_000.0, 0.0);
+        damage(hole, 1_000_000.0, 0.0, &DEFAULT_TUNING);
         assert_eq!(hole.position, Vec2::new(200.0, 0.0));
         assert!(hole.health.is_infinite());
     }

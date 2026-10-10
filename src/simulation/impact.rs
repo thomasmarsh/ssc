@@ -8,23 +8,22 @@
 //! is capped. A fixed body has inverse mass zero, so a wall is struck as hard as the mover is
 //! heavy. Nothing here is random.
 
-use super::tuning as t;
 use super::*;
 
 /// Damage of a strike at `closing_speed` between bodies of inverse mass `inverse_a` and
 /// `inverse_b` (zero for a fixed body). Zero if both are fixed, the speed is below the
 /// threshold, or an input is not a finite number.
-pub fn kinetic_damage(closing_speed: f32, inverse_a: f32, inverse_b: f32) -> f32 {
+pub fn kinetic_damage(closing_speed: f32, inverse_a: f32, inverse_b: f32, tune: &Tunables) -> f32 {
     let inverse_sum = inverse_a + inverse_b;
     if !(closing_speed.is_finite() && inverse_sum.is_finite()) || inverse_sum <= 0.0 {
         return 0.0;
     }
-    let over = closing_speed.min(t::IMPACT_SPEED_CAP) - t::IMPACT_MIN_SPEED;
+    let over = closing_speed.min(tune.impact_speed_cap) - tune.impact_min_speed;
     if over <= 0.0 {
         return 0.0;
     }
     let reduced_mass = 1.0 / inverse_sum;
-    (t::IMPACT_SCALE * 0.5 * reduced_mass * over * over).min(t::IMPACT_CAP)
+    (tune.impact_scale * 0.5 * reduced_mass * over * over).min(tune.impact_cap)
 }
 
 /// Key of an unordered pair of bodies.
@@ -41,6 +40,7 @@ pub(super) fn strike(
     raw: f32,
     invulnerability: f32,
     player_factor: f32,
+    tune: &Tunables,
 ) -> f32 {
     let mut dealt = 0.0;
     let amounts = [(&*a, &*b), (&*b, &*a)].map(|(target, other)| {
@@ -51,10 +51,10 @@ pub(super) fn strike(
             if target.rig.aura > 0 {
                 0.0
             } else {
-                raw * t::IMPACT_PLAYER_SHARE * player_factor
+                raw * tune.impact_player_share * player_factor
             }
         } else {
-            armored(target, raw, other.kind == BodyKind::Player)
+            armored(target, raw, other.kind == BodyKind::Player, tune)
         };
         (
             amount,
@@ -72,7 +72,7 @@ pub(super) fn strike(
         } else {
             0.0
         };
-        let taken = damage(target, amount, invulnerable);
+        let taken = damage(target, amount, invulnerable, tune);
         if rune_push && taken > 0.0 && target.kind != BodyKind::Player {
             target.rune_pushed = target.rune_pushed.max(1.5);
         }
@@ -111,7 +111,12 @@ mod tests {
                 0.0
             }
         };
-        kinetic_damage(closing_speed, inverse(mass_a), inverse(mass_b))
+        kinetic_damage(
+            closing_speed,
+            inverse(mass_a),
+            inverse(mass_b),
+            &DEFAULT_TUNING,
+        )
     }
 
     #[test]
@@ -122,7 +127,7 @@ mod tests {
             assert_eq!(d, kinetic_damage_for_masses(v, a, b), "deterministic");
             assert!(d > 0.0);
         }
-        for v in [0.0, 1.0, 120.0, t::IMPACT_MIN_SPEED] {
+        for v in [0.0, 1.0, 120.0, DEFAULT_TUNING.impact_min_speed] {
             assert_eq!(kinetic_damage_for_masses(v, 50.0, 50.0), 0.0, "{v}");
         }
     }
@@ -131,7 +136,7 @@ mod tests {
     fn it_grows_with_speed_and_with_either_mass_until_the_cap() {
         let mut last = 0.0;
         for k in 0..60 {
-            let v = t::IMPACT_MIN_SPEED + k as f32 * 20.0;
+            let v = DEFAULT_TUNING.impact_min_speed + k as f32 * 20.0;
             let d = kinetic_damage_for_masses(v, 20.0, 60.0);
             assert!(d >= last, "{v}");
             last = d;
@@ -153,14 +158,18 @@ mod tests {
     #[test]
     fn it_is_capped_and_survives_absurd_inputs() {
         let huge = kinetic_damage_for_masses(1.0e9, 1.0e6, f32::INFINITY);
-        assert_eq!(huge, t::IMPACT_CAP);
+        assert_eq!(huge, DEFAULT_TUNING.impact_cap);
         assert_eq!(
-            kinetic_damage_for_masses(t::IMPACT_SPEED_CAP, 1.0e6, 1.0e6),
-            t::IMPACT_CAP
+            kinetic_damage_for_masses(DEFAULT_TUNING.impact_speed_cap, 1.0e6, 1.0e6),
+            DEFAULT_TUNING.impact_cap
         );
-        assert_eq!(kinetic_damage(f32::NAN, 1.0, 1.0), 0.0);
-        assert_eq!(kinetic_damage(900.0, f32::NAN, 1.0), 0.0);
-        assert_eq!(kinetic_damage(900.0, 0.0, 0.0), 0.0, "two fixed bodies");
+        assert_eq!(kinetic_damage(f32::NAN, 1.0, 1.0, &DEFAULT_TUNING), 0.0);
+        assert_eq!(kinetic_damage(900.0, f32::NAN, 1.0, &DEFAULT_TUNING), 0.0);
+        assert_eq!(
+            kinetic_damage(900.0, 0.0, 0.0, &DEFAULT_TUNING),
+            0.0,
+            "two fixed bodies"
+        );
         assert_eq!(kinetic_damage_for_masses(-900.0, 10.0, 10.0), 0.0);
     }
 
@@ -211,7 +220,7 @@ mod tests {
         assert!(hit(750.0, 105.0) > hit(750.0, 12.0));
         assert!(hit(750.0, 105.0) > hit(450.0, 105.0));
         assert_eq!(hit(250.0, 105.0), 0.0, "a drifting rock does nothing");
-        assert!(hit(1300.0, 400.0) <= t::IMPACT_CAP + 1e-3);
+        assert!(hit(1300.0, 400.0) <= DEFAULT_TUNING.impact_cap + 1e-3);
     }
 
     #[test]
@@ -277,9 +286,9 @@ mod tests {
         let (rock_loss, _) = against(false);
         assert!(wall_loss > 10.0, "{wall_loss}");
         assert!(
-            (wall_loss / rock_loss / t::ROCK_HULL_FACTOR - 1.0).abs() < 0.05,
+            (wall_loss / rock_loss / DEFAULT_TUNING.rock_hull_factor - 1.0).abs() < 0.05,
             "free rocks keep the {}x armour ({wall_loss} vs {rock_loss})",
-            t::ROCK_HULL_FACTOR
+            DEFAULT_TUNING.rock_hull_factor
         );
         assert!(ship_loss > 0.0, "the ship pays too");
     }
@@ -343,7 +352,7 @@ mod tests {
             let speed = b.velocity.length();
             assert!(speed >= crate::simulation::FLING_SPEED * 0.9, "{speed}");
             // Into a wall at that speed.
-            kinetic_damage(speed, 0.0, 1.0 / b.mass)
+            kinetic_damage(speed, 0.0, 1.0 / b.mass, &DEFAULT_TUNING)
         };
         let bogey = thrown(Species::bogey());
         let fatso = thrown(Species::fatso());

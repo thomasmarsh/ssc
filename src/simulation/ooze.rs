@@ -546,7 +546,7 @@ impl Game {
         ship.velocity += want.clamp_length_max(cap) * dt;
         // Digested: shield first (the usual damage rules), and the shield will not recharge.
         let eaten = power::ENGULF_DPS * (power::ENGULF_DPS_GAIN + s) * dt;
-        let dealt = damage(ship, eaten, invulnerability);
+        let dealt = damage(ship, eaten, invulnerability, &self.tune);
         let at = ship.position;
         if let Some(e) = self.engulf.as_mut() {
             e.age = age;

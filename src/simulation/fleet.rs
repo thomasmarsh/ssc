@@ -866,8 +866,12 @@ impl Game {
                     .lerp(relative_end, fraction)
                     .normalize_or_zero();
                 let closing = -motion.dot(normal);
-                let amount =
-                    impact::kinetic_damage(closing, inverse_mass(body), 1.0 / (DRONE_RADIUS * 0.6));
+                let amount = impact::kinetic_damage(
+                    closing,
+                    inverse_mass(body),
+                    1.0 / (DRONE_RADIUS * 0.6),
+                    &self.tune,
+                );
                 if amount > 0.0 {
                     hits.push((fraction, body.id, amount));
                 }

@@ -327,12 +327,13 @@ impl Game {
             };
             let taken = damage(
                 body,
-                armored(body, amount * resist, credited),
+                armored(body, amount * resist, credited, &self.tune),
                 if body.kind == BodyKind::Player {
                     invulnerability
                 } else {
                     0.0
                 },
+                &self.tune,
             );
             if !credited && taken > 0.0 && body.kind == BodyKind::Asteroid {
                 body.rune_pushed = body.rune_pushed.max(SLOW_LIFE);
@@ -610,7 +611,10 @@ mod tests {
         assert!(g.player().unwrap().velocity.x > 0.0);
         assert!(body(&g, foe).velocity.x < 0.0);
         assert!(g.player().unwrap().velocity.length() <= 300.0);
-        assert_eq!(impact::kinetic_damage(300.0, 0.1, 0.1), 0.0);
+        assert_eq!(
+            impact::kinetic_damage(300.0, 0.1, 0.1, &DEFAULT_TUNING),
+            0.0
+        );
     }
     #[test]
     fn jam_takes_one_owned_system_and_obeys_immunity() {
@@ -794,9 +798,14 @@ mod tests {
         g.bodies[bi].health = 1.0;
         g.bodies[bi].velocity = -Vec2::X * 600.0;
         let speed = (g.bodies[ai].velocity - g.bodies[bi].velocity).length();
-        let raw = impact::kinetic_damage(speed, 1.0 / g.bodies[ai].mass, 1.0 / g.bodies[bi].mass);
+        let raw = impact::kinetic_damage(
+            speed,
+            1.0 / g.bodies[ai].mass,
+            1.0 / g.bodies[bi].mass,
+            &DEFAULT_TUNING,
+        );
         let (left, right) = g.bodies.split_at_mut(bi);
-        impact::strike(&mut left[ai], &mut right[0], raw, 0.0, 1.0);
+        impact::strike(&mut left[ai], &mut right[0], raw, 0.0, 1.0, &DEFAULT_TUNING);
         assert!(body(&g, victim).health <= 0.0);
         assert!(g.civ_hits.is_empty());
         g.remove_destroyed();

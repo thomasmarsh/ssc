@@ -742,7 +742,7 @@ mod tests {
             game.step(DT, Input::default());
             game.player_invulnerability = 0.0;
             let ship = &mut game.bodies[0];
-            damage(ship, 40.0, 0.0);
+            damage(ship, 40.0, 0.0, &DEFAULT_TUNING);
         }
         let lost = |game: &Game| {
             let ship = game.player().unwrap();
@@ -760,7 +760,7 @@ mod tests {
             let creature = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
             creature.genes.threat = threat;
             let before = creature.health;
-            damage(creature, 30.0, 0.0);
+            damage(creature, 30.0, 0.0, &DEFAULT_TUNING);
             let lost = before - creature.health;
             let sharp = creature.genes.sharpness();
             (lost, sharp)

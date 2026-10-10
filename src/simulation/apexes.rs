@@ -1653,20 +1653,29 @@ mod tests {
         use crate::simulation::arsenal::Profile;
         use crate::simulation::{heavy_shot, recoil_of};
         // A stock gun neither kicks nor slows.
-        assert_eq!(recoil_of(Stats::BASE.damage, Profile::Stock), 0.0);
-        assert_eq!(heavy_shot(Stats::BASE.damage), 1.0);
+        assert_eq!(
+            recoil_of(Stats::BASE.damage, Profile::Stock, &DEFAULT_TUNING),
+            0.0
+        );
+        assert_eq!(heavy_shot(Stats::BASE.damage, &DEFAULT_TUNING), 1.0);
         // Heavier shots are slower and kick harder, both bounded.
         let (mut slow, mut kick) = (1.0, 0.0);
         for k in 1..=40 {
             let damage = Stats::BASE.damage * k as f32 / 4.0;
-            let (s, r) = (heavy_shot(damage), recoil_of(damage, Profile::Stock));
+            let (s, r) = (
+                heavy_shot(damage, &DEFAULT_TUNING),
+                recoil_of(damage, Profile::Stock, &DEFAULT_TUNING),
+            );
             assert!(s <= slow + 1e-6 && s >= t::HEAVY_SLOW_FLOOR - 1e-6);
             assert!(r + 1e-6 >= kick && r <= t::RECOIL_CAP + 1e-6);
             (slow, kick) = (s, r);
         }
         assert!(slow < 0.75 && kick == t::RECOIL_CAP);
-        assert!(recoil_of(200.0, Profile::Pierce) > recoil_of(200.0, Profile::Needles));
-        assert_eq!(recoil_of(200.0, Profile::Missiles), 0.0);
+        assert!(
+            recoil_of(200.0, Profile::Pierce, &DEFAULT_TUNING)
+                > recoil_of(200.0, Profile::Needles, &DEFAULT_TUNING)
+        );
+        assert_eq!(recoil_of(200.0, Profile::Missiles, &DEFAULT_TUNING), 0.0);
         // In play: one shot at a near tough target and one at a far one.
         let dealt = |gap: f32| -> f32 {
             let mut game = crate::simulation::tests::empty_game();

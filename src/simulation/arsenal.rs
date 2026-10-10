@@ -80,8 +80,8 @@ pub struct Reach {
 
 impl Reach {
     /// The damage multiplier at `distance` travelled.
-    pub fn at(self, distance: f32) -> f32 {
-        let past = ((distance - self.sweet) / super::tuning::FALLOFF_SPAN).clamp(0.0, 1.0);
+    pub fn at(self, distance: f32, tune: &super::Tunables) -> f32 {
+        let past = ((distance - self.sweet) / tune.falloff_span).clamp(0.0, 1.0);
         1.0 - (1.0 - self.floor) * past
     }
 }
@@ -500,6 +500,7 @@ impl Arsenal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::simulation::DEFAULT_TUNING;
 
     #[test]
     fn profiles_only_ever_gain_levels() {
@@ -568,18 +569,18 @@ mod tests {
                 "{profile:?}"
             );
             // Full damage inside the sweet spot, then a slide that never rises and has a floor.
-            assert_eq!(reach.at(0.0), 1.0);
-            assert_eq!(reach.at(reach.sweet), 1.0);
+            assert_eq!(reach.at(0.0, &DEFAULT_TUNING), 1.0);
+            assert_eq!(reach.at(reach.sweet, &DEFAULT_TUNING), 1.0);
             let mut last = 1.0;
             for step in 0..=200 {
-                let m = reach.at(reach.sweet + step as f32 * 30.0);
+                let m = reach.at(reach.sweet + step as f32 * 30.0, &DEFAULT_TUNING);
                 assert!(
                     m <= last + 1e-6 && m >= reach.floor - 1e-6 && m > 0.0,
                     "{profile:?}"
                 );
                 last = m;
             }
-            assert!((reach.at(1e6) - reach.floor).abs() < 1e-6);
+            assert!((reach.at(1e6, &DEFAULT_TUNING) - reach.floor).abs() < 1e-6);
             assert!(profile.recoil() >= 0.0);
         }
         assert_eq!(seen.len(), Family::ALL.len(), "every family has a profile");

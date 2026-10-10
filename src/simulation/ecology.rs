@@ -671,7 +671,7 @@ mod tests {
             let rock = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
             rock.rock = RockKind::Husk;
             rock.den = Some((Species::bogey(), 3));
-            damage(rock, damage_amount, 0.0);
+            damage(rock, damage_amount, 0.0, &DEFAULT_TUNING);
             game.step(DT, Input::default());
             assert_eq!(
                 game.bodies

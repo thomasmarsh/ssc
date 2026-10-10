@@ -7,7 +7,6 @@
 //! without it the timing calls compile to nothing.
 
 use super::fleet::DroneView;
-use super::tuning;
 use super::*;
 
 /// One named stretch of the tick, in execution order. Used to label profile timings.
@@ -247,7 +246,13 @@ impl Game {
 
     fn phase_body_timers(&mut self, tick: &Tick) {
         let beaming = self.beam.is_some() || tick.electrolyzing;
-        tick_body_timers(&mut self.bodies, tick.dt, self.stats.recharge, beaming);
+        tick_body_timers(
+            &mut self.bodies,
+            tick.dt,
+            self.stats.recharge,
+            beaming,
+            &self.tune,
+        );
     }
 
     /// Everything the player's ship does this tick: pads, control, mining, grip, arms.
@@ -358,7 +363,7 @@ impl Game {
             tick.impact_before = self.bodies.iter().map(|b| (b.id, b.position)).collect();
         }
         let shove_cap = self.loadout.skills.shove_speed_cap();
-        integrate_bodies(&mut self.bodies, dt, shove_cap);
+        integrate_bodies(&mut self.bodies, dt, shove_cap, &self.tune);
     }
 
     /// Contacts and the constraints that follow them.
@@ -471,7 +476,13 @@ impl Game {
 /// Counts down every active body's cooldowns, recharges shields after quiet and heals
 /// dust-grazers. `ship_recharge` is the ship's shield rate; `beaming` holds the ship's shield
 /// off while it works a beam.
-fn tick_body_timers(bodies: &mut [Body], dt: f32, ship_recharge: f32, beaming: bool) {
+fn tick_body_timers(
+    bodies: &mut [Body],
+    dt: f32,
+    ship_recharge: f32,
+    beaming: bool,
+    tune: &Tunables,
+) {
     for body in bodies.iter_mut().filter(|b| b.active) {
         body.fire_cooldown = (body.fire_cooldown - dt).max(0.0);
         body.contact_cooldown = (body.contact_cooldown - dt).max(0.0);
@@ -486,24 +497,24 @@ fn tick_body_timers(bodies: &mut [Body], dt: f32, ship_recharge: f32, beaming: b
         body.rune_pushed = (body.rune_pushed - dt).max(0.0);
         body.shove_clock = (body.shove_clock - dt).max(0.0);
         body.grip_free = (body.grip_free - dt).max(0.0);
-        if body.since_hit > tuning::SHIELD_RECHARGE_DELAY
+        if body.since_hit > tune.shield_recharge_delay
             && !(beaming && body.kind == BodyKind::Player)
         {
             let rate = if body.kind == BodyKind::Player {
                 ship_recharge
             } else {
-                tuning::NPC_SHIELD_RATE
+                tune.npc_shield_rate
             };
             body.shield = (body.shield + dt * rate).min(body.max_shield);
         }
         if body.kind == BodyKind::Creature && body.genome.diet == Diet::Dust {
-            body.health = (body.health + dt * tuning::DUST_HEAL).min(body.max_health);
+            body.health = (body.health + dt * tune.dust_heal).min(body.max_health);
         }
     }
 }
 
 /// Moves every free active body by its velocity and applies rock drag and spin.
-fn integrate_bodies(bodies: &mut [Body], dt: f32, shove_cap: f32) {
+fn integrate_bodies(bodies: &mut [Body], dt: f32, shove_cap: f32, tune: &Tunables) {
     for body in bodies.iter_mut().filter(|b| b.active) {
         if body.shoved > 0.0 && body.kind == BodyKind::Asteroid {
             body.velocity = body.velocity.clamp_length_max(shove_cap);
@@ -514,14 +525,14 @@ fn integrate_bodies(bodies: &mut [Body], dt: f32, shove_cap: f32) {
         if body.kind == BodyKind::Asteroid && !body.pinned {
             // Flung rocks slowly lose their excess speed rather than ricocheting forever.
             let speed = body.velocity.length();
-            if speed > tuning::ASTEROID_SPEED_FLOOR {
-                body.velocity *= (tuning::ASTEROID_SPEED_FLOOR
-                    + (speed - tuning::ASTEROID_SPEED_FLOOR) * (-tuning::ASTEROID_DRAG * dt).exp())
+            if speed > tune.asteroid_speed_floor {
+                body.velocity *= (tune.asteroid_speed_floor
+                    + (speed - tune.asteroid_speed_floor) * (-tune.asteroid_drag * dt).exp())
                     / speed;
             }
-            body.angle += dt * tuning::ASTEROID_SPIN;
+            body.angle += dt * tune.asteroid_spin;
         } else if body.rock == RockKind::Planetoid {
-            body.angle += dt * tuning::PLANETOID_SPIN;
+            body.angle += dt * tune.planetoid_spin;
         }
     }
 }
