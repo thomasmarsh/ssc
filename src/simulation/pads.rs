@@ -110,6 +110,9 @@ pub struct Pad {
     pub drones: Vec<super::fleet::MiningDrone>,
     #[serde(default)]
     pub drone_template: super::fleet::DroneModules,
+    /// Finish paid trips and unload, then hold new dispatches at this dock.
+    #[serde(default)]
+    pub drone_paused: bool,
     #[serde(default)]
     pub drone_deposit: Option<super::fleet::DroneDeposit>,
     /// Deployment order: the oldest is dismantled first.
@@ -388,6 +391,7 @@ impl Game {
                 power: false,
                 drones: Vec::new(),
                 drone_template: Default::default(),
+                drone_paused: false,
                 drone_deposit: None,
                 warehouse: false,
             },
@@ -784,6 +788,7 @@ impl Game {
                 power: false,
                 drones: Vec::new(),
                 drone_template: Default::default(),
+                drone_paused: false,
                 drone_deposit: None,
                 warehouse: false,
             },
@@ -1865,6 +1870,7 @@ mod tests {
                     power: false,
                     drones: Vec::new(),
                     drone_template: Default::default(),
+                    drone_paused: false,
                     drone_deposit: None,
                     warehouse: false,
                 },
@@ -2606,6 +2612,7 @@ mod tests {
                 power: false,
                 drones: Vec::new(),
                 drone_template: Default::default(),
+                drone_paused: false,
                 drone_deposit: None,
                 warehouse: false,
             },
@@ -3239,6 +3246,7 @@ mod tests {
                     power: false,
                     drones: Vec::new(),
                     drone_template: Default::default(),
+                    drone_paused: false,
                     drone_deposit: None,
                     warehouse: false,
                 },

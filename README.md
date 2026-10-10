@@ -97,6 +97,8 @@ Xbox controllers use the existing gilrs input path and its built-in mappings. Fo
 
 At a powered warehouse after Automation, SAVE FLEET BLUEPRINT copies the local template for reuse; MERGE FLEET BLUEPRINT pays only for missing modules at another pad. SELECT FLEET ROLE cycles independent saved slots A/B/C. NAME FLEET ROLE edits a 12-character label: arrows/D-pad choose position and character, Q/X clears, Enter/A saves, E/B cancels; blank restores the role letter. Saving overwrites only the selected slot; merges keep existing modules and wait for cargo unloading.
 
+PARTS offers free PAUSE FLEET / RESUME FLEET at the home dock: paid trips finish and unload under local power, then new launches stop. The order persists while away and through saves; full stores retain cargo.
+
 PARTS also offers free fleet MINE orders for chart-known planetoids and free lodes within 6000 units. Old cargo unloads before switching. Free rocks supply one material per trip, skipping full local stores; travel adds distance / 300 seconds each way.
 
 The ship’s shouldered hull turns toward the left stick’s movement direction and holds its heading while coasting. The weapon spine, cannons and aim chevron turn independently toward weapon aim. Orange rear flames show main propulsion; blue front and side RCS jets show reverse thrust, strafing, braking and hull turns. These are inferred visual effects: movement and firing rules are unchanged. Equipment retains its rarity colors, and hull, shield and weapon indicators keep their existing meanings.

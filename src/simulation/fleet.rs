@@ -252,6 +252,8 @@ impl MiningDrone {
             format!("RETURNING {:.1}s - {:.1} CARGO", self.remaining, self.cargo)
         } else if self.cargo > 0.0 {
             "CARGO WAITING - STASH FULL".into()
+        } else if pad.drone_paused {
+            "PAUSED - DOCKED".into()
         } else if self.exhausted {
             "DEPOSIT EMPTY - WAITING".into()
         } else if pad.stash.fuel < self.fitted.fuel() {
@@ -653,6 +655,29 @@ impl Game {
         views
     }
 
+    pub(super) fn drone_pause_block(&self) -> Option<&'static str> {
+        match self.landed_pad() {
+            None => Some("LAND AT A PAD"),
+            Some(pad) if pad.drones.is_empty() && !pad.drone_paused => Some("NO FLEET"),
+            Some(_) => None,
+        }
+    }
+
+    pub(super) fn pause_drone_fleet(&mut self) {
+        if let Some(why) = self.drone_pause_block() {
+            self.bench_failed(why.into());
+            return;
+        }
+        let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
+        pad.drone_paused = !pad.drone_paused;
+        let message = if pad.drone_paused {
+            "FLEET PAUSED - FINISH PAID TRIPS"
+        } else {
+            "FLEET RESUMED"
+        };
+        self.bench_done(message.into(), upgrades::Rarity::Common);
+    }
+
     pub(super) fn mining_drone_block(&self) -> Option<&'static str> {
         match self.landed_pad() {
             None => Some("LAND AT A PAD"),
@@ -1040,6 +1065,9 @@ impl Game {
                         drone.exhausted = false;
                     }
                     drone.deposit = pad.drone_deposit;
+                    if pad.drone_paused {
+                        continue;
+                    }
                     let target = drone.deposit.map_or(key, |d| d.key);
                     let material =
                         if let Some(deposit) = drone.deposit.filter(|d| d.asteroid.is_some()) {
@@ -1131,6 +1159,124 @@ mod tests {
         game.bench_select(BenchAction::MiningDrone);
         let material = mining::material_of(game.seed, RockKind::Planetoid, Some(key));
         (game, key, material)
+    }
+
+    #[test]
+    fn paused_fleet_finishes_paid_trips_remotely_and_survives_reload() {
+        let (mut whole, key, material) = setup();
+        build_fleet(&mut whole);
+        whole.pad.pads.get_mut(&key).unwrap().stash.fuel = 20.0;
+        whole.update_mining_drones(3.0);
+        let fuel = whole.pad.pads[&key].stash.fuel;
+        let mined = whole.mined[&key];
+        whole.bench_select(BenchAction::PauseDroneFleet);
+        whole.bench_confirm();
+        assert!(whole.pad.pads[&key].drone_paused);
+        let (state, generator) = SaveState::from_text(&whole.save_state().to_text()).unwrap();
+        let (mut split, _) = Game::from_save(state, generator);
+        split.bodies.retain(|b| b.origin != Some(key));
+        whole.update_mining_drones(100.0);
+        for _ in 0..100 {
+            split.update_mining_drones(1.0);
+        }
+        let pad = &whole.pad.pads[&key];
+        assert_eq!(pad.stash.amount(material), 40.0);
+        assert_eq!(pad.stash.fuel, fuel);
+        assert_eq!(whole.mined[&key], mined);
+        assert!(
+            pad.drones
+                .iter()
+                .all(|d| d.cargo == 0.0 && d.remaining == 0.0)
+        );
+        assert_eq!(pad.drones, split.pad.pads[&key].drones);
+        assert_eq!(pad.stash, split.pad.pads[&key].stash);
+        assert_eq!(pad.drones[0].status(pad, material), "PAUSED - DOCKED");
+        whole.bench_confirm();
+        assert!(!whole.pad.pads[&key].drone_paused);
+        whole.update_mining_drones(1.0);
+        assert_eq!(whole.pad.pads[&key].stash.fuel, fuel - 4.0);
+        assert_eq!(whole.mined[&key], mined + 40.0);
+        let (reset, _) = Game::from_save(split.save_state(), generator + 1);
+        assert!(reset.pads().all(|p| !p.drone_paused && p.drones.is_empty()));
+    }
+
+    #[test]
+    fn paused_full_dock_retains_cargo_and_fits_modules_only_after_unload() {
+        let (mut game, key, material) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(2.0);
+        retrofit(&mut game, 0, DroneUpgrade::Cargo);
+        game.bench_select(BenchAction::PauseDroneFleet);
+        game.bench_confirm();
+        let pad = game.pad.pads.get_mut(&key).unwrap();
+        pad.stash.add_capped(material, 300.0, 300.0);
+        pad.power = false;
+        game.update_mining_drones(100.0);
+        assert_eq!(game.pad.pads[&key].drones[0].remaining, 13.0);
+        game.pad.pads.get_mut(&key).unwrap().power = true;
+        game.update_mining_drones(100.0);
+        let pad = &game.pad.pads[&key];
+        assert_eq!(pad.drones[0].cargo, 10.0);
+        assert!(!pad.drones[0].fitted.cargo);
+        assert_eq!(
+            pad.drones[0].status(pad, material),
+            "CARGO WAITING - STASH FULL"
+        );
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .take(material, 10.0);
+        game.update_mining_drones(100.0);
+        let pad = &game.pad.pads[&key];
+        assert_eq!(pad.drones[0].cargo, 0.0);
+        assert!(pad.drones[0].fitted.cargo);
+        assert_eq!(pad.stash.fuel, 2.0);
+        assert_eq!(pad.drones[0].remaining, 0.0);
+        // New construction at a held dock also waits without spending dispatch fuel.
+        game.cargo.metal = 40.0;
+        game.cargo.crystal = 10.0;
+        game.bench_select(BenchAction::MiningDrone);
+        game.bench_confirm();
+        game.update_mining_drones(100.0);
+        assert_eq!(game.pad.pads[&key].drones.len(), 2);
+        assert!(
+            game.pad.pads[&key]
+                .drones
+                .iter()
+                .all(|d| d.remaining == 0.0)
+        );
+    }
+
+    #[test]
+    fn pause_is_a_free_local_safety_order_without_power_or_research_gates() {
+        let (mut game, key, _) = setup();
+        game.bench_select(BenchAction::PauseDroneFleet);
+        assert_eq!(game.drone_pause_block(), Some("NO FLEET"));
+        game.bench_confirm();
+        assert!(!game.pad.pads[&key].drone_paused);
+        game.bench_select(BenchAction::MiningDrone);
+        game.bench_confirm();
+        game.loadout.research.known.clear();
+        game.pad.pads.get_mut(&key).unwrap().power = false;
+        let cargo = game.cargo;
+        game.bench_select(BenchAction::PauseDroneFleet);
+        game.bench_confirm();
+        assert!(game.pad.pads[&key].drone_paused);
+        assert_eq!(game.cargo, cargo);
+        let panel = game.bench_panel().unwrap();
+        assert!(
+            panel
+                .rows
+                .iter()
+                .any(|r| r.action == BenchAction::PauseDroneFleet
+                    && r.text == "RESUME FLEET"
+                    && r.ok
+                    && r.costs.is_empty())
+        );
+        game.pad.landed = None;
+        assert_eq!(game.drone_pause_block(), Some("LAND AT A PAD"));
     }
 
     // Seed 0 supplies a real chart-visible mixed lode near HOME.

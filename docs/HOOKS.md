@@ -109,3 +109,5 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 - `SSC_BENCH_VIEW=mining-fleet-role`: powered four-unit warehouse with independent role A/B blueprints, selecting SELECT FLEET ROLE. `SSC_BENCH_RESULT=1` cycles B to empty C; the existing `mining-fleet-blueprint` gallery previews/merges selected B.
 
 - `SSC_BENCH_VIEW=mining-fleet-name`: open the real role-name editor on DEEP MINER-1 with the caret on the hyphen; no research or payment required.
+
+- `SSC_BENCH_VIEW=mining-fleet-pause`: powered four-unit warehouse selecting PAUSE FLEET. `SSC_BENCH_RESULT=1` pauses and shows the RESUME FLEET preview with the receipt.

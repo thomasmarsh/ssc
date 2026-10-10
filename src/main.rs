@@ -1779,6 +1779,9 @@ fn smoke_run(
                     session.game.bench_select(action);
                 }
             }
+            "mining-fleet-pause" => session
+                .game
+                .bench_select(ssc::simulation::BenchAction::PauseDroneFleet),
             "mining-fleet-role" => session
                 .game
                 .bench_select(ssc::simulation::BenchAction::CycleDroneRole),
@@ -2214,6 +2217,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
         }
         "mining-drone"
         | "mining-fleet"
+        | "mining-fleet-pause"
         | "mining-fleet-status"
         | "mining-fleet-retrofit"
         | "mining-fleet-template"
@@ -2245,7 +2249,8 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 game.cargo.crystal = 10.0;
                 if matches!(
                     mode,
-                    "mining-fleet-status"
+                    "mining-fleet-pause"
+                        | "mining-fleet-status"
                         | "mining-fleet-retrofit"
                         | "mining-fleet-template"
                         | "mining-fleet-role"
@@ -2271,6 +2276,9 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                         ));
                     }
                     game.bench_feedback = None;
+                    if mode == "mining-fleet-pause" {
+                        game.bench_select(BenchAction::PauseDroneFleet);
+                    }
                     if matches!(mode, "mining-fleet-deposit" | "mining-fleet-rock")
                         && let Some(action) = if mode == "mining-fleet-rock" {
                             game.stage_drone_rock_smoke()

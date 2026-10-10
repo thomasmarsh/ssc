@@ -57,6 +57,8 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 
 ## Recently done
 
+- Fleet dispatch hold: free saved local pause/resume finishes paid trips, unloads and fits queued modules, then blocks new fuel/ore reservations; remote reload and compact bench verified. Early recall/combat remain next.
+
 - Named fleet roles: saved 12-character A/B/C labels with keyboard/controller editor, cancel/reset and transient drafts; source/world-loss retention and compact bench verified. Further modules/combat remain next.
 
 - Fleet role library: three independent saved module blueprints, bench selection, per-slot overwrite and atomic cross-pad merge; selection survives source/world loss. Further modules/combat remain next.
@@ -70,5 +72,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Pad fleet templates: saved cargo/mining choices pay atomically only for missing modules, queue existing trips until unload, and price/fit future builds; custom roles/designation/combat remain next.
 
 - Visible mining flight: stable slot glyphs follow saved launch/work/return/dock progress, cargo/modules and power pauses; no duplicate bodies/cargo. Designation/templates/combat/losses remain next.
-
-- Drone dock retrofits: one paid 20M 5C cargo pod and mining head per unit, saved queued/fitted modules, install after old cargo unloads; mixed-fleet conservation and compact bench verified. Designation/flight/templates/combat remain next.
