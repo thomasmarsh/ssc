@@ -129,6 +129,8 @@ NAME FLEET ROLE edits the selected slot, including an empty slot, without paymen
 
 Name scenarios cover character/caret wrapping, commit/cancel/reset, empty slots, unchanged goods/hardware, mid-edit saves and world loss. The `mining-fleet-name` gallery stages a named slot with the caret near the end; compact layout is covered by a desktop regression. The 640x480 Metal capture was inspected with the full name, caret and instructions visible. Human controller comfort remains unverified.
 
+G2 adds PULSE GUN (30M 10C, +1F per trip) and HULL SHIELD (25M 10C) as retrofit and FLEET TEMPLATE rows after CARGO POD and MINING HEAD, through the same payment, queueing and blueprint paths, and a BUILD REPAIR STATION row in PAD PRODUCTION (40M 10C after Fabrication; mends docking units from stash metal while powered). Scenarios cover registry pricing, atomic payment, save/load, fuel, shield scaling, grid-aligned pulses, authorization, kill-credit exclusion, scavenging by diet and authority, and station mending.
+
 RECALL FLEET is a free local safety order beside PAUSE/RESUME FLEET. Living units turn home immediately with launch-reserved cargo, then remain paused; no fuel refund or new extraction occurs. Return/unload needs power, full storage retains cargo, and dock retrofits wait for unloading. Targets and paid modules stay. `mining-fleet-recall` stages a launched four-unit fleet; `SSC_BENCH_RESULT=1` confirms recall. The 640x480 Metal receipt and 1280x800 recalled flight were inspected; terms and receipt fit, and the flight capture holds the bench closed despite physical input. Human retreat timing and throughput remain unverified.
 
 ## Procedural society contact (E2p/E2b, TODO)

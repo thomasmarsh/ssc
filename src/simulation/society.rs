@@ -25,6 +25,25 @@ pub enum CivilTarget {
     Fleet,
 }
 
+/// Which fleets of the player a society may strike: every pad's workers under war, only the
+/// operation's named pad in a convoy skirmish. Fleet code asks with the pad key of the unit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FleetAuthority {
+    None,
+    Pad(pads::PadKey),
+    All,
+}
+
+impl FleetAuthority {
+    pub fn covers(self, home: pads::PadKey) -> bool {
+        match self {
+            Self::None => false,
+            Self::Pad(key) => key == home,
+            Self::All => true,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EngagementRule {
     Peace,
@@ -204,7 +223,34 @@ impl Game {
         )
     }
 
-    /// Authoritative target permission. Reach, sanctuary and capacity remain caller gates.
+    /// Which fleets this society may strike right now (war covers all, a skirmish only its
+    /// named pad). Reach, sanctuary and capacity remain caller gates.
+    pub fn civilization_fleet_authority(&self, actor: u64) -> FleetAuthority {
+        let (war, _, skirmish) = self.authority(actor);
+        if war {
+            return FleetAuthority::All;
+        }
+        let named = skirmish
+            .then(|| {
+                self.civs
+                    .societies
+                    .actors
+                    .get(&actor)
+                    .and_then(|r| r.policy.op.as_ref())
+                    .map(|op| op.home)
+            })
+            .flatten();
+        named.map_or(FleetAuthority::None, FleetAuthority::Pad)
+    }
+
+    /// Authoritative permission to strike the fleet of one pad.
+    pub fn civilization_may_attack_fleet(&self, actor: u64, home: pads::PadKey) -> bool {
+        self.civilization_fleet_authority(actor).covers(home)
+    }
+
+    /// Class-level target permission: `Fleet` is true when any pad's workers may be struck.
+    /// Reach, sanctuary and capacity remain caller gates; fleet code uses
+    /// `civilization_may_attack_fleet` with the unit's pad key.
     pub fn civilization_may_attack(&self, actor: u64, target: CivilTarget) -> bool {
         let (war, defense, skirmish) = self.authority(actor);
         war || match target {
@@ -240,6 +286,16 @@ impl Game {
             );
         }
         true
+    }
+
+    /// The player's fleet engaged this society's ships: whose they are becomes evidence.
+    pub(super) fn civil_reveal_operation(&mut self, actor: u64) {
+        let now = self.civs.societies.elapsed;
+        if let Some(record) = self.civs.societies.actors.get_mut(&actor)
+            && let Some(op) = record.policy.op.as_mut().filter(|op| now < op.ends)
+        {
+            op.revealed = true;
+        }
     }
 
     pub(super) fn civil_player_harm(&mut self, actor: u64, damage: f32) {

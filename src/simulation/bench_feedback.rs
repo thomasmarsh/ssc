@@ -147,6 +147,7 @@ impl Snapshot {
             | BenchAction::SaveDroneBlueprint
             | BenchAction::ApplyDroneBlueprint
             | BenchAction::WaterExtractor
+            | BenchAction::RepairStation
             | BenchAction::Warehouse
             | BenchAction::WaterTank
             | BenchAction::Power

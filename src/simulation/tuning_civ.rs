@@ -294,6 +294,34 @@ macro_rules! groups {
             fleet_drone_radius: f32 = 12.0, 0.6, 200.0, Distance;
             /// Most drone wrecks kept in the world.
             fleet_max_wrecks: usize = 64, 0, 1000, Count;
+            /// Metal a cargo pod or mining head costs.
+            fleet_module_metal: f32 = 20.0, 0.0, 1000.0, Amount;
+            /// Crystal a cargo pod or mining head costs.
+            fleet_module_crystal: f32 = 5.0, 0.0, 1000.0, Amount;
+            /// Metal a pulse gun costs.
+            fleet_weapon_metal: f32 = 30.0, 0.0, 1000.0, Amount;
+            /// Crystal a pulse gun costs.
+            fleet_weapon_crystal: f32 = 10.0, 0.0, 1000.0, Amount;
+            /// Metal a hull shield costs.
+            fleet_shield_metal: f32 = 25.0, 0.0, 1000.0, Amount;
+            /// Crystal a hull shield costs.
+            fleet_shield_crystal: f32 = 10.0, 0.0, 1000.0, Amount;
+            /// Extra local fuel an armed unit pays per trip.
+            fleet_weapon_fuel: f32 = 1.0, 0.0, 20.0, Amount;
+            /// Damage of one pulse.
+            fleet_weapon_damage: f32 = 8.0, 0.0, 500.0, Amount;
+            /// Seconds between pulses, on the global clock.
+            fleet_weapon_interval: f32 = 0.6, 0.05, 30.0, Seconds;
+            /// How far from a unit a pulse reaches (to the target's edge).
+            fleet_weapon_range: f32 = 260.0, 0.0, 5000.0, Distance;
+            /// Share of each hit a fitted shield lets through to the hull.
+            fleet_shield_factor: f32 = 0.5, 0.0, 1.0, Ratio;
+            /// Metal a pad's stash pays per point of hull mended (dock repairs and the repair station).
+            fleet_repair_metal_per_hull: f32 = 0.1, 0.0, 10.0, Amount;
+            /// How far from a wreck a creature must be to strip or seize it.
+            fleet_scavenge_range: f32 = 60.0, 0.0, 2000.0, Distance;
+            /// Goods one scavenger takes from a wreck per second.
+            fleet_scavenge_rate: f32 = 2.0, 0.0, 100.0, Rate;
         }
 
         group "production" {
@@ -305,6 +333,10 @@ macro_rules! groups {
             production_refinery_output: f32 = 25.0, 0.0, 500.0, Amount;
             /// Seconds a refinery batch takes.
             production_refinery_seconds: f32 = 10.0, 0.1, 100.0, Seconds;
+            /// Metal a repair station costs.
+            production_repair_station_metal: f32 = 40.0, 0.0, 1000.0, Amount;
+            /// Crystal a repair station costs.
+            production_repair_station_crystal: f32 = 10.0, 0.0, 1000.0, Amount;
         }
 
         group "agreements" {

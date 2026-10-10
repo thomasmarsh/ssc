@@ -920,6 +920,15 @@ pub(crate) fn smoke_bench_hooks(run: &mut SmokeRun, session: &mut Session, limit
                         ssc::simulation::fleet::DroneUpgrade::Cargo,
                     ))
             }
+            "mining-fleet-armed" => {
+                let last = session.game.tune.fleet_max_drones - 1;
+                session
+                    .game
+                    .bench_select(ssc::simulation::BenchAction::DroneUpgrade(
+                        last,
+                        ssc::simulation::fleet::DroneUpgrade::Weapon,
+                    ))
+            }
             "mining-fleet-status" => {
                 let last = session.game.tune.fleet_max_drones - 1;
                 session
@@ -1356,6 +1365,7 @@ pub(crate) fn smoke_bench(game: &mut Game, mode: &str) {
         | "mining-fleet-repair"
         | "mining-fleet-status"
         | "mining-fleet-retrofit"
+        | "mining-fleet-armed"
         | "mining-fleet-template"
         | "mining-fleet-role"
         | "mining-fleet-blueprint"
@@ -1390,6 +1400,7 @@ pub(crate) fn smoke_bench(game: &mut Game, mode: &str) {
                         | "mining-fleet-repair"
                         | "mining-fleet-status"
                         | "mining-fleet-retrofit"
+                        | "mining-fleet-armed"
                         | "mining-fleet-template"
                         | "mining-fleet-role"
                         | "mining-fleet-blueprint"
@@ -1400,17 +1411,38 @@ pub(crate) fn smoke_bench(game: &mut Game, mode: &str) {
                     game.bench_select(BenchAction::MiningDroneStatus(
                         game.tune.fleet_max_drones - 1,
                     ));
-                    if matches!(mode, "mining-fleet-retrofit" | "mining-fleet-template") {
+                    if matches!(
+                        mode,
+                        "mining-fleet-retrofit" | "mining-fleet-armed" | "mining-fleet-template"
+                    ) {
                         game.cargo.fuel = 4.0;
                         game.bench_select(BenchAction::Stash(Material::Fuel));
                         game.bench_confirm();
                         game.step(1.0 / 60.0, Input::default());
                         let template = mode == "mining-fleet-template";
-                        game.cargo.metal = if template { 80.0 } else { 20.0 };
-                        game.cargo.crystal = if template { 20.0 } else { 5.0 };
+                        let armed = mode == "mining-fleet-armed";
+                        game.cargo.metal = if template {
+                            80.0
+                        } else if armed {
+                            30.0
+                        } else {
+                            20.0
+                        };
+                        game.cargo.crystal = if template {
+                            20.0
+                        } else if armed {
+                            10.0
+                        } else {
+                            5.0
+                        };
+                        let upgrade = if armed {
+                            ssc::simulation::fleet::DroneUpgrade::Weapon
+                        } else {
+                            ssc::simulation::fleet::DroneUpgrade::Cargo
+                        };
                         game.bench_select(BenchAction::DroneUpgrade(
                             game.tune.fleet_max_drones - 1,
-                            ssc::simulation::fleet::DroneUpgrade::Cargo,
+                            upgrade,
                         ));
                     }
                     game.bench_feedback = None;

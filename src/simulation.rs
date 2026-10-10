@@ -128,7 +128,7 @@ pub use rift::{Rift, RiftTrace};
 pub use root::Root;
 pub use rune::{Payload, RuneField, Sigil};
 pub use sling::SlingTell;
-pub use society::{CivilTarget, EngagementRule};
+pub use society::{CivilTarget, EngagementRule, FleetAuthority};
 pub use society::{CultureReading, RelationshipReading};
 pub use song::SongRing;
 pub use tether::{Cord, Tether, TetherKind};
@@ -1446,12 +1446,12 @@ impl Game {
             .copied()
             .filter(|id| self.civilization_may_attack(*id, CivilTarget::Ship))
             .collect();
-        let permitted_fleet: HashSet<_> = self
+        let permitted_fleet: HashMap<u64, FleetAuthority> = self
             .civs
             .territories
             .keys()
-            .copied()
-            .filter(|id| self.civilization_may_attack(*id, CivilTarget::Fleet))
+            .map(|&id| (id, self.civilization_fleet_authority(id)))
+            .filter(|(_, authority)| *authority != FleetAuthority::None)
             .collect();
         let seed = self.seed;
         let mut rift_events = Vec::new();
@@ -1567,13 +1567,17 @@ impl Game {
                         hit = Some((index, fraction));
                     }
                 }
-                if !bullet.friendly
-                    && bullet
-                        .civilization
-                        .is_none_or(|id| permitted_fleet.contains(&id))
-                {
+                if !bullet.friendly {
+                    // A civilization's shot reaches only the fleets it is authorized against.
+                    let authority = bullet.civilization.map_or(FleetAuthority::All, |id| {
+                        permitted_fleet
+                            .get(&id)
+                            .copied()
+                            .unwrap_or(FleetAuthority::None)
+                    });
                     let drone_hit = drones
                         .iter()
+                        .filter(|d| authority.covers(d.home))
                         .filter(|d| {
                             self.pad
                                 .pads
@@ -1888,8 +1892,14 @@ impl Game {
         let invulnerability = self.guard_time();
         let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();
         for (at, radius, amount, direct, friendly, civilization) in blasts {
-            if !friendly && civilization.is_none_or(|id| permitted_fleet.contains(&id)) {
-                self.damage_drone_blast(at, radius, amount);
+            if !friendly {
+                let authority = civilization.map_or(FleetAuthority::All, |id| {
+                    permitted_fleet
+                        .get(&id)
+                        .copied()
+                        .unwrap_or(FleetAuthority::None)
+                });
+                self.damage_drone_blast(at, radius, amount, authority);
             }
             for body in self.bodies.iter_mut().filter(|b| {
                 b.active && b.id != direct && !(friendly && apexes::is_part(&self.apexes.info, b))

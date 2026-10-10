@@ -159,6 +159,42 @@ impl Game {
         self.bench_done("WATER TANK BUILT".into(), upgrades::Rarity::Common);
     }
 
+    pub(super) fn repair_station_price(&self) -> Vec<(Material, f32)> {
+        vec![
+            (Material::Metal, self.tune.production_repair_station_metal),
+            (
+                Material::Crystal,
+                self.tune.production_repair_station_crystal,
+            ),
+        ]
+    }
+
+    pub(super) fn repair_station_block(&self) -> Option<&'static str> {
+        match self.landed_pad() {
+            None => Some("LAND AT A PAD"),
+            Some(pad) if pad.repair_station => Some("ALREADY BUILT"),
+            Some(_) if !self.loadout.research.active(research::Tech::Fabrication) => {
+                Some("NEEDS FABRICATION RESEARCH")
+            }
+            Some(_) => None,
+        }
+    }
+
+    pub(super) fn buy_repair_station(&mut self) {
+        if let Some(why) = self.repair_station_block() {
+            self.bench_failed(why.into());
+            return;
+        }
+        let price = self.repair_station_price();
+        if !self.cargo.spend(&price) {
+            self.bench_failed(format!("NEEDS {:.0}M {:.0}C", price[0].1, price[1].1));
+            return;
+        }
+        let key = self.pad.landed.unwrap();
+        self.pad.pads.get_mut(&key).unwrap().repair_station = true;
+        self.bench_done("REPAIR STATION BUILT".into(), upgrades::Rarity::Common);
+    }
+
     pub(super) fn water_extractor_block(&self) -> Option<&'static str> {
         let Some(pad) = self.landed_pad() else {
             return Some("LAND AT A PAD");

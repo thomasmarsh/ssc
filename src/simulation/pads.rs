@@ -57,6 +57,9 @@ pub struct Pad {
     pub water_extractor: bool,
     #[serde(default)]
     pub power: bool,
+    /// Mends docking drones from this pad's metal stash while powered.
+    #[serde(default)]
+    pub repair_station: bool,
     #[serde(default)]
     pub drones: Vec<super::fleet::MiningDrone>,
     #[serde(default)]
@@ -347,6 +350,7 @@ impl Game {
                 home: true,
                 reloads: 0,
                 refinery: None,
+                repair_station: false,
                 water_tank: false,
                 water_extractor: false,
                 power: false,
@@ -749,6 +753,7 @@ impl Game {
                 home: false,
                 reloads: 0,
                 refinery: None,
+                repair_station: false,
                 water_tank: false,
                 water_extractor: false,
                 power: false,
@@ -1852,6 +1857,7 @@ mod tests {
                     home: false,
                     reloads: 0,
                     refinery: None,
+                    repair_station: false,
                     water_tank: false,
                     water_extractor: false,
                     power: false,
@@ -2599,6 +2605,7 @@ mod tests {
                 home: false,
                 reloads: 0,
                 refinery: None,
+                repair_station: false,
                 water_tank: false,
                 water_extractor: false,
                 power: false,
@@ -3239,6 +3246,7 @@ mod tests {
                     home: false,
                     reloads: 0,
                     refinery: None,
+                    repair_station: false,
                     water_tank: false,
                     water_extractor: false,
                     power: false,

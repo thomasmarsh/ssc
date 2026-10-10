@@ -108,6 +108,8 @@ impl Profile {
 /// Values carried between phases within one tick.
 struct Tick {
     dt: f32,
+    /// The simulation clock before this step advanced it (pulse grids read both ends).
+    time_before: f32,
     input: Input,
     /// Bullets alive at the start (new shots are cued against it).
     in_flight: usize,
@@ -198,6 +200,7 @@ impl Game {
         let in_flight = self.bullets.len();
         let ship_before = self.player().map(|p| (p.shield, p.health));
         let sources = self.incoming_sources();
+        let time_before = self.time;
         self.time += dt;
         self.civs.societies.advance(dt, &self.tune);
         self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
@@ -208,6 +211,7 @@ impl Game {
         }
         self.effects.retain(|effect| effect.remaining > 0.0);
         Some(Tick {
+            time_before,
             dt,
             input,
             in_flight,
@@ -382,6 +386,8 @@ impl Game {
         // After contacts, so an impact cannot leave a joint stretched past its limit.
         self.constrain_chains();
         self.damage_drone_contacts(dt);
+        self.fire_drone_weapons(tick.time_before, dt);
+        self.scavenge_drone_wrecks(dt);
     }
 
     /// Parry, dash and everything in flight or lying about.

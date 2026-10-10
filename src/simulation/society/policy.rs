@@ -90,8 +90,8 @@ impl Outcome {
 }
 
 /// One bounded skirmish: sponsor is the owning actor; the named target is the pad whose worker
-/// was exposed inside the claim. Enforcement is at the Fleet target class until fleet code passes
-/// the pad key; the budget is simulation time and one operation at a time.
+/// was exposed inside the claim. Fleet code enforces it per pad through
+/// `civilization_may_attack_fleet`; the budget is simulation time, one operation at a time.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct Operation {
     pub(super) home: pads::PadKey,
@@ -943,6 +943,13 @@ mod tests {
             EngagementRule::Skirmish
         );
         assert!(game.civilization_may_attack(t.id, CivilTarget::Fleet));
+        // Enforcement names the pad: another pad's workers are not covered.
+        assert!(game.civilization_may_attack_fleet(t.id, key));
+        assert!(!game.civilization_may_attack_fleet(t.id, (SectorId { x: 1, y: 2 }, 8)));
+        assert_eq!(
+            game.civilization_fleet_authority(t.id),
+            FleetAuthority::Pad(key)
+        );
         for target in [CivilTarget::Ship, CivilTarget::Pad] {
             assert!(!game.civilization_may_attack(t.id, target));
         }

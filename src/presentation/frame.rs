@@ -426,6 +426,14 @@ fn draw_works(gizmos: &mut Gizmos, f: &Frame) {
                 .circle_2d(p - forward * 3.0, 5.0, color)
                 .resolution(6);
         }
+        if drone.armed {
+            gizmos.line_2d(p + forward * 12.0, p + forward * 20.0, color);
+        }
+        if drone.shielded {
+            gizmos
+                .circle_2d(p, 11.0, color.with_alpha(0.45))
+                .resolution(10);
+        }
         if drone.cargo > 0.0 {
             gizmos.line_2d(p - side * 4.0, p + side * 4.0, Color::srgb(1.0, 0.72, 0.25));
         }

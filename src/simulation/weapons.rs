@@ -277,7 +277,7 @@ impl Game {
     /// and owned drones, and shake rocks apart.
     pub(super) fn explode(&mut self, at: Vec2, radius: f32, amount: f32, friendly: bool) {
         if !friendly {
-            self.damage_drone_blast(at, radius, amount);
+            self.damage_drone_blast(at, radius, amount, FleetAuthority::All);
         }
         let invulnerability = self.player_invulnerability;
         let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();

@@ -38,6 +38,7 @@ pub enum BenchAction {
     WaterTank,
     Warehouse,
     WaterExtractor,
+    RepairStation,
     MiningDrone,
     PauseDroneFleet,
     RecallDroneFleet,
@@ -233,11 +234,14 @@ impl Game {
                         BenchAction::WaterTank,
                         BenchAction::Warehouse,
                         BenchAction::WaterExtractor,
+                        BenchAction::RepairStation,
                         BenchAction::MiningDrone,
                         BenchAction::PauseDroneFleet,
                         BenchAction::RecallDroneFleet,
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Cargo),
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Mining),
+                        BenchAction::DroneTemplate(fleet::DroneUpgrade::Weapon),
+                        BenchAction::DroneTemplate(fleet::DroneUpgrade::Shield),
                         BenchAction::CycleDroneRole,
                         BenchAction::NameDroneRole,
                         BenchAction::SaveDroneBlueprint,
@@ -342,6 +346,7 @@ impl Game {
             Some(BenchAction::Warehouse) => self.buy_warehouse(),
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
+            Some(BenchAction::RepairStation) => self.buy_repair_station(),
             Some(BenchAction::RepairDrone(slot)) => self.repair_drone(slot),
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
             Some(BenchAction::PauseDroneFleet) => self.pause_drone_fleet(),
@@ -835,6 +840,36 @@ impl Game {
                     }
                 }
             }
+            BenchAction::RepairStation => {
+                row.group = "PAD PRODUCTION";
+                row.text = "BUILD REPAIR STATION".into();
+                row.detail = format!(
+                    "Needs local power. When a unit docks, mends it from this pad's stash metal ({:.1}M per hull) before relaunch. Works while away; Enter stores metal.",
+                    self.tune.fleet_repair_metal_per_hull
+                );
+                if let Some(pad) = self.landed_pad().filter(|p| p.repair_station) {
+                    row.text = "REPAIR STATION".into();
+                    row.ok = false;
+                    let hurt = pad
+                        .drones
+                        .iter()
+                        .any(|d| d.health > 0.0 && d.health < self.tune.fleet_drone_health);
+                    row.state = if !pad.power {
+                        "NEEDS LOCAL POWER"
+                    } else if hurt && pad.stash.metal <= 0.0 {
+                        "NEEDS METAL IN STASH"
+                    } else {
+                        "MENDING AT DOCK"
+                    }
+                    .into();
+                } else {
+                    row.costs = self.repair_station_price();
+                    if let Some(why) = self.repair_station_block() {
+                        row.ok = false;
+                        row.state = why.into();
+                    }
+                }
+            }
             BenchAction::MiningDrone => {
                 row.group = "PAD FLEET";
                 row.text = "BUILD MINING DRONE".into();
@@ -917,7 +952,11 @@ impl Game {
                 row.group = "PAD FLEET";
                 row.text = format!("FLEET TEMPLATE {}", upgrade.label());
                 row.costs = self.drone_template_price(upgrade);
-                row.detail = "This pad's existing and future drones. Pay 20M 5C per unit missing this module; future builds include its price. Active trips fit after cargo unloads. Permanent; no refund on pad loss.".into();
+                let each = upgrade.price(&self.tune);
+                row.detail = format!(
+                    "This pad's existing and future drones. Pay {:.0}M {:.0}C per unit missing this module; future builds include its price. Active trips fit after cargo unloads. Permanent; no refund on pad loss.",
+                    each[0].1, each[1].1
+                );
                 if let Some(why) = self.drone_template_block(upgrade) {
                     row.ok = false;
                     row.state = why.into();
@@ -940,7 +979,7 @@ impl Game {
                     self.pad.drone_role_label(),
                     self.pad
                         .selected_blueprint()
-                        .map_or("EMPTY", fleet::DroneModules::label)
+                        .map_or("EMPTY".into(), fleet::DroneModules::label)
                 );
                 row.detail = "Cycle roles A, B, C. Each holds an independent custom module blueprint. Selection changes knowledge only; save or merge separately.".into();
             }
@@ -958,7 +997,7 @@ impl Game {
                     self.pad.drone_role_label(),
                     self.pad
                         .selected_blueprint()
-                        .map_or("NO BLUEPRINT", fleet::DroneModules::label)
+                        .map_or("NO BLUEPRINT".into(), fleet::DroneModules::label)
                 );
                 row.detail = if saving {
                     "Copy this pad's template into the selected role, replacing only that copy. Free knowledge; retained if the source pad is lost."
@@ -984,16 +1023,26 @@ impl Game {
             BenchAction::DroneUpgrade(slot, upgrade) => {
                 row.group = "PAD FLEET";
                 row.text = format!("DRONE #{} {}", slot + 1, upgrade.label());
-                row.costs = upgrade.price().to_vec();
+                row.costs = upgrade.price(&self.tune).to_vec();
                 row.detail = match upgrade {
                     fleet::DroneUpgrade::Cargo => {
-                        "20 ore, 2 local F, 20s work (10s with head) + 5s return."
+                        "20 ore, 2 local F, 20s work (10s with head) + 5s return.".into()
                     }
                     fleet::DroneUpgrade::Mining => {
-                        "Work 5s (10s with pod) + 5s return; fuel unchanged."
+                        "Work 5s (10s with pod) + 5s return; fuel unchanged.".into()
                     }
-                }
-                .into();
+                    fleet::DroneUpgrade::Weapon => format!(
+                        "Fires {:.0} damage every {:.1}s within {:.0} units at hostile wildlife and at society ships authorized against this pad; never starts a fight. +{:.0} local F per trip; needs power.",
+                        self.tune.fleet_weapon_damage,
+                        self.tune.fleet_weapon_interval,
+                        self.tune.fleet_weapon_range,
+                        self.tune.fleet_weapon_fuel
+                    ),
+                    fleet::DroneUpgrade::Shield => format!(
+                        "Hull takes {:.0}% of every hit; no extra fuel.",
+                        self.tune.fleet_shield_factor * 100.0
+                    ),
+                };
                 row.detail += " Fits after cargo unloads; pad loss loses payment.";
                 if let Some(why) = self.drone_upgrade_block(slot, upgrade) {
                     row.ok = false;
