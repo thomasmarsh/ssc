@@ -1,8 +1,9 @@
 //! Procedural vector art and HUD. Nothing here changes gameplay state.
 //!
 //! Shared theme (colors, view size), the marker components every panel file uses, and the
-//! module list. Each panel owns its file (`bench`, `help`, `details`, `summary`, `banners`,
-//! `chart_sidebar`); `panels` is only the per-frame orchestration and scrolling.
+//! module list. Each panel owns its file (`bench`, `help`, `banners`, `chart_sidebar`); the
+//! details and run summary panels are `ui::screens`; `panels` is only the per-frame
+//! orchestration and scrolling.
 use bevy::prelude::*;
 use ssc::simulation::Material;
 use ssc::simulation::upgrades::Rarity;
@@ -17,8 +18,6 @@ pub(crate) const MUTED: Color = Color::srgb(0.36, 0.49, 0.62);
 pub(crate) const AMBER: Color = Color::srgb(1.0, 0.62, 0.28);
 
 #[derive(Component)]
-pub(crate) struct Hud;
-#[derive(Component)]
 pub(crate) struct Overlay;
 /// A panel that scrolls with the mouse wheel while it is showing.
 #[derive(Component)]
@@ -26,21 +25,21 @@ pub(crate) struct Scrollable;
 
 /// The details and help panels sit between the top row and the bottom cluster (UI pixels) and
 /// scroll with the mouse wheel when the window is too small to show them whole.
-const DETAILS_TOP: f32 = 100.0;
-const DETAILS_BOTTOM: f32 = 118.0;
+pub(crate) const DETAILS_TOP: f32 = 100.0;
+pub(crate) const DETAILS_BOTTOM: f32 = 118.0;
 
 /// SSC_OFFSCREEN=1: render into an image instead of the window (for screenshots when the
 /// display is asleep or locked, where a window renders black).
 #[derive(Resource)]
 pub(crate) struct Offscreen(pub Handle<Image>);
 
-fn rarity_color(rarity: Rarity) -> Color {
+pub(crate) fn rarity_color(rarity: Rarity) -> Color {
     let [r, g, b] = rarity.color();
     Color::srgb(r, g, b)
 }
 
 /// How the ship's power compares with what the sector's fauna asks of it.
-fn standing(power: f32, threat: f32) -> &'static str {
+pub(crate) fn standing(power: f32, threat: f32) -> &'static str {
     ssc::simulation::verdict(power, threat)
 }
 
@@ -49,7 +48,7 @@ pub(crate) const APEX_GOLD: Color = Color::srgb(1.0, 0.82, 0.22);
 /// The crown of an apex that has passed its phase change.
 pub(crate) const APEX_ENRAGED: Color = Color::srgb(1.0, 0.36, 0.25);
 pub(crate) const DRY_RED: Color = Color::srgb(1.0, 0.42, 0.34);
-const OWNED: Color = Color::srgb(0.62, 0.72, 0.82);
+pub(crate) const OWNED: Color = Color::srgb(0.62, 0.72, 0.82);
 
 pub(crate) fn material_color(kind: Material) -> Color {
     let [r, g, b] = kind.color();
@@ -71,7 +70,7 @@ pub(super) fn lifted(tint: Option<[f32; 3]>) -> Color {
 }
 
 /// A fixed-width text meter.
-pub(super) fn bar(fraction: f32, width: usize) -> String {
+pub(crate) fn bar(fraction: f32, width: usize) -> String {
     let filled = ((fraction * width as f32).round() as usize).min(width);
     format!("{}{}", "#".repeat(filled), ".".repeat(width - filled))
 }
@@ -79,7 +78,6 @@ pub(super) fn bar(fraction: f32, width: usize) -> String {
 mod banners;
 mod bench;
 mod chart_sidebar;
-mod details;
 mod draw_overlay;
 mod draw_ship;
 mod draw_world;
@@ -87,7 +85,6 @@ mod frame;
 mod help;
 mod panels;
 mod setup;
-mod summary;
 
 pub(crate) use self::banners::arsenal_banner;
 pub(crate) use self::chart_sidebar::{ChartSpan, update_chart};
@@ -95,4 +92,3 @@ pub(crate) use self::draw_overlay::draw_discovery_glyph;
 pub(crate) use self::frame::draw;
 pub(crate) use self::panels::{scroll_panels, update_hud};
 pub(crate) use self::setup::setup;
-pub(crate) use self::summary::update_summary;

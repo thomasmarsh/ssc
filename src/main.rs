@@ -356,8 +356,6 @@ fn main() {
             (
                 presentation::setup,
                 hud::setup,
-                settings::setup,
-                titlemenu::setup,
                 nebula::setup,
                 chartview::setup,
                 bestiaryview::setup,
@@ -385,9 +383,6 @@ fn main() {
                 presentation::update_hud.run_if(not(bestiaryview::gallery_active)),
                 presentation::scroll_panels,
                 hud::update_texts.run_if(not(bestiaryview::gallery_active)),
-                settings::update,
-                titlemenu::update,
-                presentation::update_summary,
                 (
                     chartview::update,
                     chartview::update_geometry,
@@ -441,8 +436,6 @@ fn controls(
     mut window: Single<&mut Window, With<PrimaryWindow>>,
     view: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
     mut session: ResMut<Session>,
-    mut audio: ResMut<audio::Audio>,
-    mut exit: MessageWriter<AppExit>,
     mut stick_latch: Local<bool>,
 ) {
     let Devices {
@@ -465,27 +458,13 @@ fn controls(
         session.input = Input::default();
         return;
     }
-    if session.menu.is_some() {
-        title_controls(&keys, &pad, &mut session);
+    // The title menu and the settings screen (`ui::screens::{title, settings}`) take the same.
+    if session.menu.is_some() || session.settings.is_some() {
         session.input = Input::default();
         return;
     }
     if session.help && (escape || keys.just_pressed(KeyCode::F1)) {
         session.help = false;
-    } else if session.settings.is_some() {
-        if settings_controls(
-            &keys,
-            &pad,
-            &mut session,
-            &mut audio,
-            &mut window,
-            escape || start,
-        ) == settings::Outcome::Quit
-        {
-            exit.write(AppExit::Success);
-        }
-        session.input = Input::default();
-        return;
     } else if escape || start {
         session.settings = Some(0);
         session.input = Input::default();
@@ -674,95 +653,6 @@ fn restart(session: &mut Session) {
     session.chart = None;
     session.console = None;
     session.save_feedback.clear();
-}
-
-/// The title menu's keys: up and down choose, enter (south on a pad) confirms. The saved run is
-/// already loaded behind the menu, so continue only closes it; the other rows touch the file.
-fn title_controls(
-    keys: &ButtonInput<KeyCode>,
-    pad: &impl Fn(GamepadButton) -> bool,
-    session: &mut Session,
-) {
-    let Some(mut menu) = session.menu.take() else {
-        return;
-    };
-    if keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown) {
-        menu.step(1);
-    }
-    if keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
-        menu.step(-1);
-    }
-    let confirm = keys.just_pressed(KeyCode::Enter)
-        || keys.just_pressed(KeyCode::Space)
-        || pad(GamepadButton::South);
-    let outcome = if confirm {
-        menu.confirm()
-    } else {
-        titlemenu::Outcome::Stay
-    };
-    session.menu = match outcome {
-        titlemenu::Outcome::Stay => Some(menu),
-        titlemenu::Outcome::Continue => None,
-        titlemenu::Outcome::NewRun => match autosave::erase() {
-            Ok(()) => {
-                restart(session);
-                autosave::settle(&session.game);
-                None
-            }
-            Err(error) => {
-                menu.error(error);
-                Some(menu)
-            }
-        },
-    };
-}
-
-/// The settings screen's keys: up and down choose a row, left, right and enter change it, Esc
-/// (Start) closes. Returns what a change asked for beyond itself.
-fn settings_controls(
-    keys: &ButtonInput<KeyCode>,
-    pad: &impl Fn(GamepadButton) -> bool,
-    session: &mut Session,
-    audio: &mut audio::Audio,
-    window: &mut Window,
-    close: bool,
-) -> settings::Outcome {
-    let Some(mut row) = session.settings else {
-        return settings::Outcome::Stay;
-    };
-    if close || pad(GamepadButton::East) {
-        session.settings = None;
-        return settings::Outcome::Close;
-    }
-    if keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown) {
-        row = settings::step_index(row, 1);
-    }
-    if keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
-        row = settings::step_index(row, -1);
-    }
-    let dir = i32::from(keys.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight))
-        - i32::from(keys.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft));
-    let confirm = keys.just_pressed(KeyCode::Enter)
-        || keys.just_pressed(KeyCode::Space)
-        || pad(GamepadButton::South);
-    session.settings = Some(row);
-    if dir == 0 && !confirm {
-        return settings::Outcome::Stay;
-    }
-    let outcome = settings::change(settings::Setting::ALL[row], dir, session, audio, window);
-    match outcome {
-        settings::Outcome::Close => session.settings = None,
-        settings::Outcome::Restart => {
-            session.menu = Some(titlemenu::TitleMenu::new(
-                true,
-                "Start over? Existing saves will be cleared.".into(),
-            ));
-            session.menu.as_mut().unwrap().step(1);
-            session.settings = None;
-        }
-        _ => {}
-    }
-    outcome
 }
 
 /// The bench's keys; see `controls`.

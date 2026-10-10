@@ -1,22 +1,32 @@
-//! The title menu: CONTINUE and NEW GAME. Shown at every normal launch. The
-//! choices are pure state here (`TitleMenu`, tested); the adapter in `main.rs` does the file
-//! and game work for the outcome, and `update` draws the panel in the settings screen's style.
-
-use crate::Session;
-use crate::presentation::{AMBER, CYAN, MUTED};
-use bevy::prelude::*;
+//! The title menu: CONTINUE, NEW GAME and DELETE SAVE. Shown at every normal launch. The
+//! choices are pure state here (`TitleMenu`, tested); `ui::screens::title` reads and drives it
+//! from pad or keyboard, draws it with the widget layer and does the file and game work for
+//! each outcome.
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Row {
     Continue,
     NewRun,
+    /// Erase every save and stay on the title.
+    DeleteSaves,
 }
 
 impl Row {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Continue => "CONTINUE",
             Self::NewRun => "NEW GAME",
+            Self::DeleteSaves => "DELETE SAVE",
+        }
+    }
+
+    /// What the row does, for the detail line under the rows.
+    pub fn hint(self, has_save: bool) -> &'static str {
+        match self {
+            Self::Continue => "resume the saved run where it stopped",
+            Self::NewRun if has_save => "start over: replaces every save (asks once more)",
+            Self::NewRun => "begin a new run",
+            Self::DeleteSaves => "erase all saved progress and stay here (asks once more)",
         }
     }
 }
@@ -27,6 +37,7 @@ pub enum Outcome {
     Stay,
     Continue,
     NewRun,
+    DeleteSaves,
 }
 
 #[derive(Clone, Debug)]
@@ -51,7 +62,7 @@ impl TitleMenu {
 
     pub fn rows(&self) -> &'static [Row] {
         if self.has_save {
-            &[Row::Continue, Row::NewRun]
+            &[Row::Continue, Row::NewRun, Row::DeleteSaves]
         } else {
             &[Row::NewRun]
         }
@@ -66,6 +77,34 @@ impl TitleMenu {
         self.has_save
     }
 
+    /// The selected row's index into `rows`.
+    pub fn row(&self) -> usize {
+        self.row
+    }
+
+    /// The row waiting for its second confirm, if any.
+    pub fn armed(&self) -> Option<Row> {
+        self.armed
+    }
+
+    /// One line about the saved run, or the last failure.
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+
+    /// Back on the title: a pending second confirm is withdrawn.
+    pub fn disarm(&mut self) {
+        self.armed = None;
+    }
+
+    /// The saves were erased: only NEW GAME is left.
+    pub fn saves_deleted(&mut self) {
+        self.has_save = false;
+        self.row = 0;
+        self.armed = None;
+        self.summary = "saves deleted".into();
+    }
+
     pub fn step(&mut self, delta: i32) {
         let n = self.rows().len() as i32;
         self.row = (self.row as i32 + delta.signum()).rem_euclid(n) as usize;
@@ -78,111 +117,10 @@ impl TitleMenu {
         match row {
             Row::Continue => Outcome::Continue,
             Row::NewRun if !self.has_save || self.armed == Some(row) => Outcome::NewRun,
+            Row::DeleteSaves if self.armed == Some(row) => Outcome::DeleteSaves,
             _ => {
                 self.armed = Some(row);
                 Outcome::Stay
-            }
-        }
-    }
-}
-
-#[derive(Component)]
-pub struct TitlePanel;
-#[derive(Component)]
-pub struct TitleLine(usize);
-
-pub fn setup(mut commands: Commands) {
-    commands
-        .spawn((
-            TitlePanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(110),
-                justify_content: JustifyContent::Center,
-                display: Display::None,
-                ..default()
-            },
-            GlobalZIndex(45),
-        ))
-        .with_children(|row| {
-            row.spawn((
-                Node {
-                    padding: UiRect::axes(px(34), px(20)),
-                    border: UiRect::all(px(1)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.012, 0.022, 0.045)),
-                BorderColor::all(Color::srgba(0.28, 0.94, 0.92, 0.45)),
-                Text::new(""),
-                TextFont::from_font_size(14.0),
-            ))
-            .with_children(|panel| {
-                for n in 0..6 {
-                    panel.spawn((
-                        TitleLine(n),
-                        TextSpan::new(""),
-                        TextFont::from_font_size(14.0),
-                        TextColor(MUTED),
-                    ));
-                }
-            });
-        });
-}
-
-pub fn update(
-    session: Res<Session>,
-    mut panel: Single<&mut Node, With<TitlePanel>>,
-    mut lines: Query<(&mut TextSpan, &mut TextColor, &TitleLine)>,
-) {
-    let want = if session.menu.is_some() {
-        Display::Flex
-    } else {
-        Display::None
-    };
-    if panel.display != want {
-        panel.display = want;
-    }
-    let Some(menu) = &session.menu else {
-        return;
-    };
-    let light = Color::srgb(0.82, 0.88, 0.95);
-    let mut out: Vec<(String, Color)> = vec![("SSC / DEEP SPACE\n\n".into(), CYAN)];
-    for (i, row) in menu.rows().iter().enumerate() {
-        let on = i == menu.row;
-        let armed = menu.armed == Some(*row);
-        let text = format!(
-            "{} {:<14}{}\n",
-            if on { ">" } else { " " },
-            row.label(),
-            if armed { "ENTER AGAIN TO ERASE" } else { "" },
-        );
-        let color = match (on, armed) {
-            (_, true) => AMBER,
-            (true, _) => CYAN,
-            _ => light,
-        };
-        out.push((text, color));
-    }
-    let note = if menu.has_save {
-        format!("\n{}\n\n", menu.summary)
-    } else {
-        "\n\n".to_string()
-    };
-    out.push((format!("{note}UP / DOWN choose    ENTER confirms"), MUTED));
-    for (mut span, mut color, line) in &mut lines {
-        match out.get(line.0) {
-            Some((text, tint)) => {
-                if span.0 != *text {
-                    span.0 = text.clone();
-                }
-                color.0 = *tint;
-            }
-            None => {
-                if !span.0.is_empty() {
-                    span.0.clear();
-                }
             }
         }
     }
@@ -216,6 +154,28 @@ mod tests {
         menu.confirm();
         menu.step(1);
         menu.step(-1);
+        assert_eq!(menu.confirm(), Outcome::Stay);
+    }
+
+    #[test]
+    fn deleting_saves_asks_twice_and_leaves_only_a_new_game() {
+        let mut menu = with_save();
+        menu.step(-1);
+        assert_eq!(menu.rows()[menu.row()], Row::DeleteSaves);
+        assert_eq!(menu.confirm(), Outcome::Stay);
+        assert_eq!(menu.armed(), Some(Row::DeleteSaves));
+        assert_eq!(menu.confirm(), Outcome::DeleteSaves);
+        menu.saves_deleted();
+        assert_eq!(menu.rows(), &[Row::NewRun]);
+        assert_eq!(menu.confirm(), Outcome::NewRun);
+    }
+
+    #[test]
+    fn back_withdraws_an_armed_row() {
+        let mut menu = with_save();
+        menu.step(1);
+        menu.confirm();
+        menu.disarm();
         assert_eq!(menu.confirm(), Outcome::Stay);
     }
 

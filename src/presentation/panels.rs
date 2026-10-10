@@ -1,32 +1,24 @@
 //! HUD panel systems: text updates, summary, chart and scrolling.
 use super::banners::{FeedLine, PadBanner};
 use super::bench::{BenchLine, BenchPanelNode};
-use super::details::{DetailsPanel, RigLine};
 use super::help::{HelpBody, HelpPanel};
-use super::{DETAILS_BOTTOM, DETAILS_TOP, Hud, Overlay, Scrollable};
-use super::{banners, bench, details, help};
+use super::{DETAILS_BOTTOM, DETAILS_TOP, Overlay, Scrollable};
+use super::{banners, bench, help};
 use crate::Session;
 use bevy::prelude::*;
 
-pub(super) type BenchNodeOnly = (
-    With<BenchPanelNode>,
-    Without<DetailsPanel>,
-    Without<HelpPanel>,
-    Without<HelpBody>,
-);
-pub(super) type HelpBodyOnly = (With<HelpBody>, Without<HelpPanel>, Without<DetailsPanel>);
+pub(super) type BenchNodeOnly = (With<BenchPanelNode>, Without<HelpPanel>, Without<HelpBody>);
+pub(super) type HelpBodyOnly = (With<HelpBody>, Without<HelpPanel>);
 pub(super) type BenchSpan = (
     &'static mut TextSpan,
     &'static mut TextColor,
     &'static BenchLine,
 );
-pub(super) type BenchOnly = (Without<RigLine>, Without<FeedLine>);
+pub(super) type BenchOnly = Without<FeedLine>;
 pub(super) type BannerOnly = (
     With<PadBanner>,
     Without<BenchLine>,
-    Without<RigLine>,
     Without<FeedLine>,
-    Without<Hud>,
     Without<Overlay>,
 );
 
@@ -58,15 +50,12 @@ pub(crate) fn scroll_panels(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn update_hud(
     session: Res<Session>,
-    mut feed: Query<(&mut TextSpan, &mut TextColor, &FeedLine), Without<RigLine>>,
-    mut rig: Query<(&mut TextSpan, &mut TextColor, &RigLine), Without<FeedLine>>,
+    mut feed: Query<(&mut TextSpan, &mut TextColor, &FeedLine)>,
     mut pad_text: Single<(&mut Text, &mut TextColor), BannerOnly>,
     mut bench: Query<BenchSpan, BenchOnly>,
     mut bench_node: Single<&mut Node, BenchNodeOnly>,
-    mut hud: Single<&mut Text, (With<Hud>, Without<Overlay>)>,
-    mut overlay: Single<&mut Text, (With<Overlay>, Without<Hud>)>,
-    mut details_node: Single<&mut Node, (With<DetailsPanel>, Without<HelpPanel>)>,
-    mut help_node: Single<&mut Node, (With<HelpPanel>, Without<DetailsPanel>)>,
+    mut overlay: Single<&mut Text, With<Overlay>>,
+    mut help_node: Single<&mut Node, With<HelpPanel>>,
     mut help_body: Single<&mut Node, HelpBodyOnly>,
     camera: Single<&Camera, With<Camera2d>>,
     ui_scale: Res<UiScale>,
@@ -86,14 +75,6 @@ pub(crate) fn update_hud(
             size.y / ui_scale.0 - DETAILS_TOP - DETAILS_BOTTOM
         })
         .max(120.0);
-    details::apply(
-        &session,
-        details,
-        room,
-        &mut details_node,
-        &mut hud,
-        &mut rig,
-    );
     help::apply(session.help, room, &mut help_node, &mut help_body);
     banners::apply_feed(&session, details, &mut feed);
     let message = if !session.game.game_over && session.paused {

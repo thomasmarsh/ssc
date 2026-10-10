@@ -1,6 +1,6 @@
 # Persistence: state inventory and save format
 
-Workstream 12 (see [WORKSTREAMS.md](WORKSTREAMS.md)). Code: `src/simulation/save.rs` (state, format, versioning, load), `src/savefile.rs` (directory, atomic writes, bounded history) and `src/autosave.rs` (the Bevy hook, on by default) and `src/titlemenu.rs` (CONTINUE / NEW GAME).
+Workstream 12 (see [WORKSTREAMS.md](WORKSTREAMS.md)). Code: `src/simulation/save.rs` (state, format, versioning, load), `src/savefile.rs` (directory, atomic writes, bounded history) and `src/autosave.rs` (the Bevy hook, on by default) and `src/titlemenu.rs` and `src/ui/screens/title.rs` (CONTINUE / NEW GAME / DELETE SAVE).
 
 ## Principle
 
@@ -65,8 +65,8 @@ Tested in `simulation/save.rs`: the text round trip is a fixed point (apart from
 ## The menu, saving and death
 
 - Saving is on by default; `SSC_NO_SAVE=1` turns it off, and a scripted run (`SSC_SMOKE_FRAMES`) never touches the player's saves unless it sets `SSC_SAVE=1` (with `SSC_SAVE_DIR` for a scratch directory). See [HOOKS.md](HOOKS.md).
-- Every normal launch opens the title menu. With a readable save it offers CONTINUE (the latest valid save, already loaded behind it) and NEW GAME. Without one it offers NEW GAME. Nothing advances or saves while the menu is open. Replacing saved progress requires a second Enter; if removing the old saves fails, the menu stays open and reports the failure. NEW GAME clears all saved progress, including legacy and wrecks, and immediately saves the fresh game.
-- Autosaves run every **30 real seconds**, on exit and immediately after a ship is lost. The settings screen (Esc) offers SAVE GAME: Enter writes the separate explicit save and shows SAVED or a failure message.
+- Every normal launch opens the title menu. With a readable save it offers CONTINUE (the latest valid save, already loaded behind it) and NEW GAME. Without one it offers NEW GAME. Nothing advances or saves while the menu is open. Replacing saved progress requires a second Enter; if removing the old saves fails, the menu stays open and reports the failure. NEW GAME clears all saved progress, including legacy and wrecks, and immediately saves the fresh game. DELETE SAVE (also a second Enter) clears the same files and stays on the title with only NEW GAME left. The menu is gamepad-complete (d-pad or left stick, A, B).
+- Autosaves run every **30 real seconds**, on exit and immediately after a ship is lost. The settings screen (Esc or Start) offers SAVE GAME: Enter or A writes the separate explicit save and shows SAVED or a failure message.
 - Lives act as local revivals. A lost ship sheds material, surges and the uninsured best part under the existing death rules, and revives a short distance away while lives remain. When the last life is spent, the same game continues just above the last pad actually landed on, with **exactly one life**. If that pad was destroyed or dismantled, or none was visited, return to HOME. The pad's sector is streamed before the ship appears; a raid destroying the pad during streaming also falls back to HOME. Score, chart, equipment and run counters continue, with the usual death losses. No game over, successor, bequest or new wreck is created by death.
 - `last_visited` is an additive saved field (`#[serde(default)]`, no save-version bump). Deployment alone does not mark a visit. A generator change drops the pad identity together with placed pads.
 - Part insurance retains its existing cost and eligibility: a player-built pad must exist, insurance must be on and the hold must pay **10 metal** before the usual material loss. HOME fallback does not grant insurance.

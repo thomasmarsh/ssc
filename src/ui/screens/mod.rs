@@ -2,3 +2,7 @@
 
 pub mod console;
 pub mod console_ui;
+pub mod details;
+pub mod settings;
+pub mod summary;
+pub mod title;

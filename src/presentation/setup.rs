@@ -1,6 +1,6 @@
 //! Camera, offscreen target and HUD node spawning.
 use super::{CYAN, Offscreen, Overlay, VIEW_HEIGHT};
-use super::{banners, bench, details, help, summary};
+use super::{banners, bench, help};
 use bevy::camera::{Hdr, ScalingMode};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -42,7 +42,6 @@ pub(crate) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         ));
         commands.insert_resource(Offscreen(handle));
     }
-    details::spawn(&mut commands);
     help::spawn(&mut commands);
     commands.spawn((
         Overlay,
@@ -60,5 +59,4 @@ pub(crate) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     banners::spawn_feed(&mut commands);
     banners::spawn_banner(&mut commands);
     bench::spawn(&mut commands);
-    summary::spawn(&mut commands);
 }

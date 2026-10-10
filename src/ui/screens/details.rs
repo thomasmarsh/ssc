@@ -1,140 +1,369 @@
-//! The details panel (hold Tab, or F3 to latch): situation, ship gear and rig.
-use super::{
-    AMBER, CYAN, DETAILS_TOP, DRY_RED, Hud, MUTED, OWNED, PAD_GREEN, Scrollable, bar,
+//! The details panel (hold Tab, or F3 to latch): situation, ship gear
+//! and rig, as cards in three columns over a dim backdrop. Nothing here is needed to fly; it is
+//! for looking up, so it takes no focus (the flight keys keep working) and scrolls with the
+//! wheel when the window is short. The text builders are the view-model; the layout reads it.
+use super::title::{line, wrapped};
+use crate::Session;
+use crate::presentation::{
+    AMBER, CYAN, DETAILS_BOTTOM, DETAILS_TOP, DRY_RED, MUTED, OWNED, PAD_GREEN, Scrollable, bar,
     material_color, rarity_color, standing,
 };
-use crate::Session;
-use bevy::ecs::query::QueryFilter;
+use crate::ui::theme::{self, Tone};
 use bevy::prelude::*;
 use ssc::simulation::arsenal::Profile;
 use ssc::simulation::skills::{Skill, SkillTab};
 use ssc::simulation::upgrades::Slot;
 use ssc::simulation::{BodyKind, Game, Material, price_text};
 
-/// The on-demand details panel (hold Tab, or F3 to latch it).
-#[derive(Component)]
-pub(crate) struct DetailsPanel;
-/// One line of the ship panel: the five slots, the arsenal, the boosts, then the cargo hold.
-#[derive(Component)]
-pub(crate) struct RigLine(pub(super) usize);
-
-/// Panel rows: five slots, a header and up to eleven profiles, a header and up to nine
-/// boosts, a header and three materials. Rows with nothing to say are empty (no height).
-/// Where the ship panel's lines divide into its two columns: gear and arsenal, then the rig.
-const RIG_SPLIT: usize = Slot::ALL.len() + 1 + Profile::ALL.len() + 1 + 9;
-const RIG_LINES: usize = Slot::ALL.len()
-    + 1
-    + Profile::ALL.len()
-    + 1
-    + 9
-    + 1
-    + Skill::ALL.len()
-    + 1
-    + Material::ALL.len()
-    + 3;
-
-pub(super) fn spawn(commands: &mut Commands) {
-    // The on-demand details (hold Tab or F3): the situation, the ship's gear and the rig, in
-    // three columns over a dim backdrop. Nothing here is needed to fly; it is for looking up.
-    commands
-        .spawn((
-            DetailsPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(16),
-                top: px(DETAILS_TOP),
-                max_width: percent(96),
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                align_items: AlignItems::FlexStart,
-                align_content: AlignContent::FlexStart,
-                column_gap: px(26),
-                padding: UiRect::axes(px(16), px(12)),
-                border: UiRect::all(px(1)),
-                overflow: Overflow::scroll_y(),
-                display: Display::None,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.012, 0.022, 0.045, 0.9)),
-            BorderColor::all(Color::srgba(0.28, 0.94, 0.92, 0.35)),
-            ScrollPosition::default(),
-            Scrollable,
-            GlobalZIndex(10),
-        ))
-        .with_children(|panel| {
-            panel.spawn((
-                Hud,
-                Text::new(""),
-                TextFont::from_font_size(13.0),
-                TextColor(Color::srgb(0.82, 0.88, 0.95)),
-                Node {
-                    width: px(300),
-                    ..default()
-                },
-            ));
-            for (first, last) in [(0, RIG_SPLIT), (RIG_SPLIT, RIG_LINES)] {
-                panel
-                    .spawn((
-                        Text::new(""),
-                        TextFont::from_font_size(13.0),
-                        Node {
-                            width: px(300),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|column| {
-                        for line in first..last {
-                            column.spawn((
-                                RigLine(line),
-                                TextSpan::new(""),
-                                TextFont::from_font_size(13.0),
-                                TextColor(MUTED),
-                            ));
-                        }
-                    });
-            }
-        });
+/// A titled card of lines, each with its own color.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Block {
+    pub title: String,
+    /// Said beside the title in the muted tone.
+    pub note: String,
+    pub lines: Vec<(String, Color)>,
 }
 
-/// Show or hide the panel, size it to the window, and refresh its text while it is open.
-pub(super) fn apply<F: QueryFilter>(
-    session: &Session,
-    open: bool,
-    room: f32,
-    node: &mut Node,
-    status: &mut Text,
-    rig: &mut Query<(&mut TextSpan, &mut TextColor, &RigLine), F>,
-) {
-    if node.max_height != px(room) {
-        node.max_height = px(room);
+/// The three columns of the panel.
+#[derive(Clone, PartialEq, Debug)]
+pub struct DetailsView {
+    pub columns: Vec<Vec<Block>>,
+}
+
+const TEXT: Color = theme::TEXT;
+
+fn block(title: &str, note: impl Into<String>, lines: Vec<(String, Color)>) -> Block {
+    Block {
+        title: title.into(),
+        note: note.into(),
+        lines,
     }
+}
+
+/// The situation column: place, realm, power against threat, the sector's latent parameters,
+/// the tether and slow motion, the surroundings and the species nearby. Everything the
+/// always-visible HUD leaves out, one short line at a time.
+pub fn situation_blocks(session: &Session) -> Vec<Block> {
+    let game = &session.game;
+    let sector = game.sector();
+    let params = game.params();
+    let (health, shield) = game
+        .player()
+        .map_or((0.0, 0.0), |ship| (ship.health, ship.shield));
+    let (power, threat) = (game.power(), game.threat());
+    let plain = |s: String| (s, TEXT);
+    let mut out = Vec::new();
+    let mut place = Vec::new();
+    if let Some(region) = game.region() {
+        place.push(plain(region.name.to_uppercase()));
+    }
+    place.push(plain(format!(
+        "{} HOSTILES NEARBY   SCORE {:06}",
+        game.active_enemies(),
+        game.score
+    )));
+    place.push(plain(format!(
+        "HULL {:.0}   SHIELD {:.0}   LIVES {}",
+        health, shield, game.lives
+    )));
+    place.push(plain(format!(
+        "VIEW {}   STYLE {}",
+        session.camera_view.label(),
+        session.style.label()
+    )));
+    out.push(block(
+        "SECTOR",
+        format!("({}, {})", sector.x, sector.y),
+        place,
+    ));
+    let realm = game.realm_lines();
+    if !realm.is_empty() {
+        // The first line names the realm; it reads beside the title.
+        let (note, rest) = match realm[0].strip_prefix("REALM") {
+            Some(name) => (name.trim().to_string(), &realm[1..]),
+            None => (String::new(), &realm[..]),
+        };
+        out.push(block(
+            "REALM",
+            note,
+            rest.iter().map(|l| plain(l.clone())).collect(),
+        ));
+    }
+    out.push(block(
+        "POWER",
+        format!("ship x{power:.1}   threat x{threat:.1}"),
+        vec![plain(standing(power, threat).to_string())],
+    ));
+    let meter = |label: &str, value: f32| {
+        plain(format!(
+            "{label:<11}{:3.0}%  {}",
+            100.0 * value,
+            bar(value, 10)
+        ))
+    };
+    out.push(block(
+        "CHARACTER",
+        "",
+        vec![
+            meter("DANGER", params.danger),
+            meter("AGGRESSION", params.aggression),
+            meter("DENSITY", params.density),
+            meter("DISTORTION", params.distortion),
+            meter("TECH", params.tech),
+            meter("SWARM", params.swarm),
+        ],
+    ));
+    if let Some(cord) = game.latched_cord() {
+        let meter = (cord.tension * 8.0).round() as usize;
+        let gauge = format!("[{}{}]", "#".repeat(meter), ".".repeat(8 - meter.min(8)));
+        out.push(
+            if cord.cord.strength >= game.tune.tether_strong_cord || cord.cord.slack > 450.0 {
+                block(
+                    "GRIPPED",
+                    gauge,
+                    vec![("shoot the cord, you cannot break away".into(), DRY_RED)],
+                )
+            } else {
+                block(
+                    "TETHERED",
+                    gauge,
+                    vec![("shoot the cord or break away".into(), AMBER)],
+                )
+            },
+        );
+    }
+    if session.slow {
+        out.push(block("SLOW MOTION", "", Vec::new()));
+    }
+    let around = hud_lines(game);
+    let around: Vec<_> = around
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| plain(l.to_string()))
+        .collect();
+    if !around.is_empty() {
+        out.push(block("SURROUNDINGS", "", around));
+    }
+    // Species have no fixed names: list the most common ones nearby, as their genes spell them.
+    let mut census: Vec<(u64, String, usize)> = Vec::new();
+    for body in game
+        .bodies
+        .iter()
+        .filter(|b| b.active && b.kind == BodyKind::Creature && !b.follower)
+    {
+        match census.iter_mut().find(|c| c.0 == body.species) {
+            Some(entry) => entry.2 += 1,
+            None => census.push((body.species, body.genome.name().to_uppercase(), 1)),
+        }
+    }
+    census.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+    if !census.is_empty() {
+        out.push(block(
+            "NEARBY",
+            "",
+            census
+                .iter()
+                .take(6)
+                .map(|(_, name, n)| plain(format!("{name} x{n}")))
+                .collect(),
+        ));
+    }
+    out
+}
+
+/// Groups the ship panel's lines into cards: a line that starts with a newline opens one (its
+/// first word is the title, the rest a note); the lines before the first are the gear.
+fn rig_blocks(game: &Game) -> Vec<Block> {
+    let mut out = vec![block("GEAR", "", Vec::new())];
+    for (text, color) in rig_lines(game) {
+        if text.is_empty() {
+            continue;
+        }
+        if let Some(header) = text.strip_prefix('\n') {
+            let header = header.trim();
+            let (title, note) = header
+                .split_once(char::is_whitespace)
+                .unwrap_or((header, ""));
+            out.push(block(title, note.trim(), Vec::new()));
+            continue;
+        }
+        out.last_mut()
+            .expect("the gear block opens the list")
+            .lines
+            .push((text.trim_end().to_string(), color));
+    }
+    out
+}
+
+/// The whole panel: situation, then gear, arsenal and boosts, then the rest of the rig.
+pub fn view(session: &Session) -> DetailsView {
+    let mut rig = rig_blocks(&session.game);
+    let split = rig
+        .iter()
+        .position(|b| b.title == "SKILLS")
+        .unwrap_or(rig.len());
+    let right = rig.split_off(split);
+    DetailsView {
+        columns: vec![situation_blocks(session), rig, right],
+    }
+}
+
+// ---- Bevy -----------------------------------------------------------------------------------
+
+#[derive(Component)]
+pub struct DetailsRoot;
+
+pub fn setup(mut commands: Commands) {
+    commands.spawn((
+        DetailsRoot,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(16),
+            top: px(DETAILS_TOP),
+            max_width: percent(96),
+            flex_direction: FlexDirection::Column,
+            row_gap: px(theme::GAP),
+            padding: UiRect::axes(px(16), px(12)),
+            border: UiRect::all(px(1)),
+            overflow: Overflow::scroll_y(),
+            display: Display::None,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.012, 0.022, 0.045, 0.9)),
+        BorderColor::all(Color::srgba(0.28, 0.94, 0.92, 0.35)),
+        ScrollPosition::default(),
+        Scrollable,
+        GlobalZIndex(10),
+    ));
+}
+
+/// Shows or hides the panel, sizes it to the window and rebuilds its cards when they change.
+pub fn render(
+    session: Res<Session>,
+    camera: Query<&Camera, With<Camera2d>>,
+    ui_scale: Res<UiScale>,
+    mut commands: Commands,
+    mut root: Query<(Entity, &mut Node), With<DetailsRoot>>,
+    mut last: Local<Option<DetailsView>>,
+) {
+    let Ok((entity, mut node)) = root.single_mut() else {
+        return;
+    };
+    let open = session.details_open();
     let want = if open { Display::Flex } else { Display::None };
     if node.display != want {
         node.display = want;
     }
-    if open {
-        let text = situation_text(session);
-        if status.0 != text {
-            status.0 = text;
-        }
+    if !open {
+        *last = None;
+        return;
     }
-    let now = if open {
-        rig_lines(&session.game)
-    } else {
-        Vec::new()
-    };
-    for (mut span, mut color, line) in rig {
-        if let Some((text, tint)) = now.get(line.0) {
-            if span.0 != *text {
-                span.0 = text.clone();
+    // Between the top row and the bottom cluster, whatever the window: the panel scrolls.
+    let room = camera
+        .iter()
+        .find_map(|c| c.logical_viewport_size())
+        .map_or(600.0, |size| {
+            size.y / ui_scale.0 - DETAILS_TOP - DETAILS_BOTTOM
+        })
+        .max(120.0);
+    if node.max_height != px(room) {
+        node.max_height = px(room);
+    }
+    let now = view(&session);
+    if last.as_ref() == Some(&now) {
+        return;
+    }
+    commands.entity(entity).despawn_children();
+    commands
+        .entity(entity)
+        .with_children(|root| build(root, &now));
+    *last = Some(now);
+}
+
+fn build(root: &mut ChildSpawnerCommands, view: &DetailsView) {
+    root.spawn(Node {
+        align_items: AlignItems::Baseline,
+        column_gap: px(14),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|bar| {
+        line(bar, "DETAILS", theme::FONT_TITLE, Tone::Accent.color());
+        line(
+            bar,
+            "hold TAB, F3 latches",
+            theme::FONT_SMALL,
+            Tone::Muted.color(),
+        );
+    });
+    root.spawn(Node {
+        flex_direction: FlexDirection::Row,
+        flex_wrap: FlexWrap::Wrap,
+        align_items: AlignItems::FlexStart,
+        align_content: AlignContent::FlexStart,
+        column_gap: px(18),
+        row_gap: px(10),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|columns| {
+        for column in &view.columns {
+            columns
+                .spawn(Node {
+                    width: px(280),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(8),
+                    ..default()
+                })
+                .with_children(|col| {
+                    for b in column {
+                        card(col, b);
+                    }
+                });
+        }
+    });
+}
+
+/// One card: a header with the title and its note, then the lines.
+fn card(parent: &mut ChildSpawnerCommands, block: &Block) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(1),
+                padding: UiRect::axes(px(8), px(5)),
+                border: UiRect::left(px(2)),
+                ..default()
+            },
+            BackgroundColor(theme::CELL),
+            BorderColor::all(if block.title == "GEAR" {
+                Tone::Muted.color()
+            } else {
+                CYAN
+            }),
+        ))
+        .with_children(|card| {
+            if block.title != "GEAR" {
+                card.spawn(Node {
+                    align_items: AlignItems::Baseline,
+                    column_gap: px(8),
+                    ..default()
+                })
+                .with_children(|head| {
+                    line(head, block.title.clone(), theme::FONT_BODY, CYAN);
+                    if !block.note.is_empty() {
+                        line(head, block.note.clone(), theme::FONT_SMALL, MUTED);
+                    }
+                });
             }
-            color.0 = *tint;
-        }
-    }
+            for (text, color) in &block.lines {
+                wrapped(card, text.clone(), 13.0, *color);
+            }
+        });
 }
 
 /// Extra HUD lines under the ship status: the territory, then the nearest apex elder.
-pub(super) fn hud_lines(game: &Game) -> String {
+fn hud_lines(game: &Game) -> String {
     let mut text = territory_line(game);
     // The base ping's answer: the nearest civilization, its bearing and how far in sectors.
     if let Some(near) = game.nearest_civilization() {
@@ -188,7 +417,7 @@ pub(super) fn hud_lines(game: &Game) -> String {
 
 /// The HUD line for the territory the ship is in: its name, what it asks of the ship and
 /// where its raid clock stands. Empty outside any territory.
-pub(super) fn territory_line(game: &Game) -> String {
+fn territory_line(game: &Game) -> String {
     let line = territory_status(game);
     if line.is_empty() {
         return line;
@@ -205,7 +434,7 @@ pub(super) fn territory_line(game: &Game) -> String {
     format!("{line}\nWILDLIFE  {}", tags.join("   "))
 }
 
-pub(super) fn territory_status(game: &Game) -> String {
+fn territory_status(game: &Game) -> String {
     use ssc::simulation::RaidStage;
     use ssc::world::Standing;
     let Some(report) = game.territory_report() else {
@@ -268,7 +497,7 @@ pub(super) fn territory_status(game: &Game) -> String {
 
 /// Text for the ship panel lines: slot contents, the arsenal with the active profile
 /// highlighted, the boosts, then the hold.
-pub(super) fn rig_lines(game: &Game) -> Vec<(String, Color)> {
+fn rig_lines(game: &Game) -> Vec<(String, Color)> {
     let mut lines = Vec::new();
     for slot in Slot::ALL {
         let parts: Vec<_> = game.loadout.in_slot(slot).collect();
@@ -511,7 +740,7 @@ pub(super) fn rig_lines(game: &Game) -> Vec<(String, Color)> {
 
 /// The pad rows of the ship panel: how many pads stand and kits wait, and the state of the
 /// landing or the repair.
-pub(super) fn pad_lines(game: &Game) -> [(String, Color); 2] {
+fn pad_lines(game: &Game) -> [(String, Color); 2] {
     let insured = if game.is_insured() {
         "INSURED"
     } else {
@@ -557,76 +786,4 @@ pub(super) fn pad_lines(game: &Game) -> [(String, Color); 2] {
         (String::new(), MUTED)
     };
     [first, second]
-}
-
-/// The situation column of the details panel: place, standing, power against threat, the
-/// sector's latent parameters and the species around. Everything the always-visible HUD
-/// leaves out, one short line at a time.
-pub(super) fn situation_text(session: &Session) -> String {
-    let game = &session.game;
-    let sector = game.sector();
-    let params = game.params();
-    let (health, shield) = game
-        .player()
-        .map_or((0.0, 0.0), |ship| (ship.health, ship.shield));
-    let (power, threat) = (game.power(), game.threat());
-    let mut text = format!(
-        "DETAILS   (hold TAB, F3 latches)\n\nSECTOR ({}, {})   {}\n{} HOSTILES NEARBY   SCORE {:06}\nHULL {:.0}   SHIELD {:.0}   LIVES {}\nVIEW {}   STYLE {}\n\n{}\n\nSHIP POWER x{:.1}   THREAT x{:.1}\n{}\n\nDANGER {:3.0}%   AGGRESSION {:3.0}%\nDENSITY {:3.0}%   DISTORTION {:3.0}%\nTECH {:3.0}%   SWARM {:3.0}%",
-        sector.x,
-        sector.y,
-        game.region()
-            .map_or(String::new(), |r| r.name.to_uppercase()),
-        game.active_enemies(),
-        game.score,
-        health,
-        shield,
-        game.lives,
-        session.camera_view.label(),
-        session.style.label(),
-        game.realm_lines().join("\n"),
-        power,
-        threat,
-        standing(power, threat),
-        100.0 * params.danger,
-        100.0 * params.aggression,
-        100.0 * params.density,
-        100.0 * params.distortion,
-        100.0 * params.tech,
-        100.0 * params.swarm,
-    );
-    if let Some(cord) = game.latched_cord() {
-        let meter = (cord.tension * 8.0).round() as usize;
-        let gauge = format!("[{}{}]", "#".repeat(meter), ".".repeat(8 - meter.min(8)));
-        text.push_str(&if cord.cord.strength >= game.tune.tether_strong_cord
-            || cord.cord.slack > 450.0
-        {
-            format!("\n\nGRIPPED {gauge}\nshoot the cord, you cannot break away")
-        } else {
-            format!("\n\nTETHERED {gauge}\nshoot the cord or break away")
-        });
-    }
-    if session.slow {
-        text.push_str("\n\nSLOW MOTION");
-    }
-    text.push_str(&hud_lines(game));
-    // Species have no fixed names: list the most common ones nearby, as their genes spell them.
-    let mut census: Vec<(u64, String, usize)> = Vec::new();
-    for body in game
-        .bodies
-        .iter()
-        .filter(|b| b.active && b.kind == BodyKind::Creature && !b.follower)
-    {
-        match census.iter_mut().find(|c| c.0 == body.species) {
-            Some(entry) => entry.2 += 1,
-            None => census.push((body.species, body.genome.name().to_uppercase(), 1)),
-        }
-    }
-    census.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
-    if !census.is_empty() {
-        text.push_str("\n\nNEARBY");
-        for (_, name, n) in census.iter().take(6) {
-            text.push_str(&format!("\n{name} x{n}"));
-        }
-    }
-    text
 }

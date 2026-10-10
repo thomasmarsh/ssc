@@ -1,10 +1,10 @@
-//! The settings screen (Esc): the options that are not part of flying. It pauses the game.
-//! Rendering, window and sound choices live here and nowhere in the rules; auto repair and
-//! the boosts are pushed into the game every frame by the adapter, so they survive a restart.
+//! The settings screen's rows and what they change (Esc): the options that are not part of
+//! flying. It pauses the game. Rendering, window and sound choices live here and nowhere in the
+//! rules; auto repair and the boosts are pushed into the game every frame by the adapter, so
+//! they survive a restart. `ui::screens::settings` reads and drives it from pad or keyboard.
 
 use crate::Session;
 use crate::audio::Audio;
-use crate::presentation::{AMBER, CYAN, MUTED};
 use bevy::{
     prelude::*,
     window::{MonitorSelection, WindowMode},
@@ -46,6 +46,12 @@ impl Setting {
         Setting::Quit,
     ];
 
+    /// Whether Left and Right change the row (options), as opposed to an action that only
+    /// Confirm runs (save, resume, new game, quit).
+    pub fn adjusts(self) -> bool {
+        !matches!(self, Self::Save | Self::Resume | Self::Restart | Self::Quit)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::AutoRepair => "AUTO REPAIR",
@@ -75,13 +81,13 @@ impl Setting {
             Self::Camera => "close, wide, far or the whole sector",
             Self::Style => "classic lines, glow or neon",
             Self::Reduce => "plain backdrop, no screen shake",
-            Self::Sound => "",
-            Self::Fullscreen => "",
-            Self::SlowMotion => "",
+            Self::Sound => "mute or restore every sound",
+            Self::Fullscreen => "borderless fullscreen (F11 does the same)",
+            Self::SlowMotion => "run the simulation at 35% speed",
             Self::Save => "keep an explicit save separate from autosaves",
-            Self::Resume => "",
+            Self::Resume => "back to the game",
             Self::Restart => "start over (asks before replacing saves)",
-            Self::Quit => "",
+            Self::Quit => "leave the game (autosave runs on exit)",
         }
     }
 }
@@ -93,11 +99,6 @@ pub enum Outcome {
     Close,
     Restart,
     Quit,
-}
-
-/// The selected row after moving by `delta` (wrapping).
-pub fn step_index(index: usize, delta: i32) -> usize {
-    (index as i32 + delta.signum()).rem_euclid(Setting::ALL.len() as i32) as usize
 }
 
 fn on_off(on: bool) -> String {
@@ -193,129 +194,9 @@ pub fn save_game(session: &mut Session) {
     };
 }
 
-// ---- the panel --------------------------------------------------------------------------
-
-#[derive(Component)]
-pub struct SettingsPanel;
-#[derive(Component)]
-pub struct SettingsLine(usize);
-
-pub fn setup(mut commands: Commands) {
-    commands
-        .spawn((
-            SettingsPanel,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                right: px(0),
-                top: px(110),
-                justify_content: JustifyContent::Center,
-                display: Display::None,
-                ..default()
-            },
-            GlobalZIndex(40),
-        ))
-        .with_children(|row| {
-            row.spawn((
-                Node {
-                    padding: UiRect::axes(px(30), px(18)),
-                    border: UiRect::all(px(1)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.012, 0.022, 0.045)),
-                BorderColor::all(Color::srgba(0.28, 0.94, 0.92, 0.45)),
-                Text::new(""),
-                TextFont::from_font_size(14.0),
-            ))
-            .with_children(|panel| {
-                for n in 0..Setting::ALL.len() + 3 {
-                    panel.spawn((
-                        SettingsLine(n),
-                        TextSpan::new(""),
-                        TextFont::from_font_size(14.0),
-                        TextColor(MUTED),
-                    ));
-                }
-            });
-        });
-}
-
-pub fn update(
-    session: Res<Session>,
-    audio: Res<Audio>,
-    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
-    mut panel: Single<&mut Node, With<SettingsPanel>>,
-    mut lines: Query<(&mut TextSpan, &mut TextColor, &SettingsLine)>,
-) {
-    let want = if session.settings.is_some() {
-        Display::Flex
-    } else {
-        Display::None
-    };
-    if panel.display != want {
-        panel.display = want;
-    }
-    let Some(selected) = session.settings else {
-        return;
-    };
-    let light = Color::srgb(0.82, 0.88, 0.95);
-    let mut out: Vec<(String, Color)> = vec![("SETTINGS\n\n".into(), CYAN)];
-    for (i, setting) in Setting::ALL.into_iter().enumerate() {
-        let on = i == selected;
-        let value = value(setting, &session, &audio, &window);
-        let spacer = if matches!(setting, Setting::SlowMotion) {
-            "\n"
-        } else {
-            ""
-        };
-        let text = format!(
-            "{} {:<20} {value}\n{spacer}",
-            if on { ">" } else { " " },
-            setting.label(),
-        );
-        let color = match (on, setting) {
-            (true, Setting::Quit) => AMBER,
-            (true, _) => CYAN,
-            (false, _) => light,
-        };
-        out.push((text, color));
-    }
-    // The chosen row explains itself on a line of its own, so the panel never changes width.
-    out.push((
-        format!(
-            "\n{}\nUP / DOWN choose    LEFT / RIGHT or ENTER change    ESC closes",
-            Setting::ALL[selected].hint()
-        ),
-        MUTED,
-    ));
-    for (mut span, mut color, line) in &mut lines {
-        match out.get(line.0) {
-            Some((text, tint)) => {
-                if span.0 != *text {
-                    span.0 = text.clone();
-                }
-                color.0 = *tint;
-            }
-            None => {
-                if !span.0.is_empty() {
-                    span.0.clear();
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_selection_wraps_both_ways() {
-        assert_eq!(step_index(0, -1), Setting::ALL.len() - 1);
-        assert_eq!(step_index(Setting::ALL.len() - 1, 1), 0);
-        assert_eq!(step_index(3, 1), 4);
-        assert_eq!(step_index(3, -5), 2);
-    }
 
     #[test]
     fn every_row_has_a_label_and_the_exits_come_last() {

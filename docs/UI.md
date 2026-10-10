@@ -1,6 +1,6 @@
 # Graphical menus: UI foundation and conversion plan
 
-Status: foundation and the developer console built (slice U1, 2026-10-10); U2 to U5 are TODO. Every other menu is still a column of text lines in a `bevy_ui` `Node` (title, settings, help, details, bench, run summary, chart sidebar) navigated by keys and the controller; the chart map itself and the flight HUD are already vector shapes. User direction (2026-10-10): menus should become graphical and intuitive, and must not assume a mouse cursor: gamepad first wherever possible. This doc is the design contract; [SEED.md](../SEED.md) slices U1 to U5 are the work.
+Status: foundation and the developer console built (slice U1, 2026-10-10); title, settings, details and run summary converted (U3, 2026-10-10); U2, U4 and U5 are in progress or TODO. The rest are still columns of text lines in a `bevy_ui` `Node` (help, bench, chart sidebar) navigated by keys and the controller; the chart map itself and the flight HUD are already vector shapes. User direction (2026-10-10): menus should become graphical and intuitive, and must not assume a mouse cursor: gamepad first wherever possible. This doc is the design contract; [SEED.md](../SEED.md) slices U1 to U5 are the work.
 
 ## Rules
 
@@ -28,13 +28,21 @@ Gamepad routes: d-pad or left stick move, A confirm, B or Start or Guide back, L
 
 First consumer: the **developer tuning console** (DEVTOOLS Phase C, built), `SSC_DEV=1` only, with a TUNING tab (groups, search, modified filter, sliders, reset, regenerate, overrides load and save, culture drift status) and a TOGGLES tab (the old `src/devpanel.rs` rows, now deleted).
 
+## Player screens (slice U3, built)
+
+- **Title** (`screens/title.rs`, state in `src/titlemenu.rs`): CONTINUE, NEW GAME and DELETE SAVE as a column of buttons; d-pad or left stick, A, B (withdraws an armed row). NEW GAME over a save and DELETE SAVE ask for a second confirm; delete erases every save and leaves only NEW GAME. The file work (`autosave::erase`, `restart`, `settle`) runs in `title::apply`, as it did in `main.rs`.
+- **Settings** (`screens/settings.rs`, rows and effects in `src/settings.rs`): one `Scope` column, options adjust with Left and Right (stick or d-pad, held keys repeat), actions (SAVE GAME, RESUME, NEW GAME, QUIT) only on confirm, so a drifting stick cannot quit; a scroll window follows focus when the window is short; the row's hint is the detail pane.
+- **Details** (`screens/details.rs`): not focusable (flight keys keep working while it shows); cards in 280 px columns over a dim backdrop, rebuilt only when the cards change, wheel scrolls. No pad button latches it yet (the flight map is full; U5 owns that).
+- **Run summary** (`screens/summary.rs`): `run_report` lines become figure chips; the LAUNCH AGAIN button is the existing Enter or A in `controls`. Under 620 logical pixels of height it runs inline and puts the button first.
+- The held-key reader, the press source that swallows the opening key and the cyan panel frame are shared helpers in `screens/title.rs`; the coordinator may promote them to `widgets.rs`. Screens set `Session::ui_consumed` while open so `controls` skips the frame.
+
 ## Conversion sequence
 
 | Slice | Screens | View-model source | Notes |
 | --- | --- | --- | --- |
 | U1 | Tuning console, dev toggles | `tune_list`, `Game::dev`, `culture_clock` | Done: foundation and Phase C |
 | U2 | Bench (PARTS/WEAPONS/SKILLS), pad services and modules, research and grade, CONTACT (equipment, tithe/trade, jobs, agreements, partnership), mining fleet orders/templates/blueprints, organs, stash; purchase receipts | `BenchPanel`/`BenchRow`, `bench_feedback` | Cards with cost pips and an always-visible detail pane; `BenchAction` stays the only transaction identity ([BENCH.md](BENCH.md)) |
-| U3 | Title menu, settings, details panel, run summary | `TitleMenu`, settings state, details/summary view-models | Pause behavior unchanged |
+| U3 | Title menu, settings, details panel, run summary | `TitleMenu`, settings state, details/summary view-models | Done: `screens/{title,settings,details,summary}.rs`; pause and save behavior unchanged; see "Player screens (U3)" |
 | U4 | Star map sidebar and map controls | chart data in `simulation/chart.rs`, discovery | Fixes the compact sidebar overflow TODO (MIGRATION caveats); pad-first sector selection (a focus cursor moved by stick/d-pad, A for details), pan and zoom on sticks/triggers, mouse click optional |
 | U5 | Controls: one action table, on-screen glyphs by active device, help/controls reference generated from the table, contextual prompts, banners and notices as toasts | an input action table (adapter), `simulation::hud`, `guide` | Absorbs [WORKSTREAMS](WORKSTREAMS.md) section 10 (gamepad consolidation); deletes the leftover text-line plumbing |
 

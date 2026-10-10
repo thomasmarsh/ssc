@@ -28,9 +28,39 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<screens::console_ui::ConsoleScene>()
-            .add_systems(Startup, screens::console_ui::setup)
+            .init_resource::<screens::title::TitleScene>()
+            .init_resource::<screens::settings::SettingsScene>()
+            .add_systems(
+                Startup,
+                (
+                    screens::console_ui::setup,
+                    screens::title::setup,
+                    screens::settings::setup,
+                    screens::details::setup,
+                    screens::summary::setup,
+                ),
+            )
             // Input runs before the frame's `controls`, which skips the frame it was consumed.
-            .add_systems(PreUpdate, screens::console_ui::drive.after(InputSystems))
-            .add_systems(Update, screens::console_ui::render);
+            // The console goes first: while it is open the menus beneath it hear nothing.
+            .add_systems(
+                PreUpdate,
+                (
+                    screens::console_ui::drive,
+                    screens::title::drive,
+                    screens::settings::drive,
+                )
+                    .chain()
+                    .after(InputSystems),
+            )
+            .add_systems(
+                Update,
+                (
+                    screens::console_ui::render,
+                    screens::title::render,
+                    screens::settings::render,
+                    screens::details::render,
+                    screens::summary::render,
+                ),
+            );
     }
 }
