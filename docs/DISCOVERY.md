@@ -60,3 +60,7 @@ Generator version remains **19**. Generated content, indices, genes, RNG draw co
 ## Human playtest questions
 
 Can A/B identities and FORMING/OPEN be read quickly in a fight? Is an anchor-only well map entry clear enough to prevent treating it as a current position? Does LODE ECHO feel like a natural source of sealed-organ pointers? Are two pairs, two wells, and two relics enough curiosity without competing with survival? Do fallback-only curiosity lures feel too quiet when a distant normal lure remains selected? Does the label omission policy work at smaller window sizes and in moving, crowded combat?
+
+## Political knowledge and culture (E2p/E2c, TODO)
+
+[GAME_LOOP.md](GAME_LOOP.md) sections 9.2/9.4 own observer-specific political reports and Perlin-generated cultural profiles. Discovery reveals bounded evidence of tendencies, capabilities and incidents with confidence/source age; charting a territory does not grant perfect access to its inner vector, stock or sponsors. Profiles derive from stable founding anchors and the saved shared cultural phase, independent of visit order. Drift temperature starts exactly 0, while reports and relationship learning remain active; later explicit warming advances culture smoothly without wall-clock or first-visit rerolls. Preserve community origin through conquest/rebellion and successor discovery. Current sonar/chart behavior remains built as documented above; this political knowledge layer is unbuilt.

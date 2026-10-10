@@ -77,7 +77,7 @@ Tested in `simulation/save.rs`: the text round trip is a fixed point (apart from
 - Legacy and wrecks ride in the run file (decided, see above); a separate file depends on what 'new game' erases.
 - Migration fixtures and tests: NOT until 1.0 (user decision, permanent until lifted).
 
-## Planned economy and fleet state (TODO)
+## Planned economy, fleet, and political state (TODO)
 
 [GAME_LOOP.md](GAME_LOOP.md) section 12 is the target. Six-good inventories and Loadout research/grade/capture ledgers are serialized; the remaining state below is TODO. Extend the existing save in each implementation slice, not after the economy exists.
 
@@ -88,11 +88,15 @@ Tested in `simulation/save.rs`: the text round trip is a fixed point (apart from
 | Expanded research and supplier contracts | Narrow saved research/capture/grade is built; future contracts must distinguish access from ownership |
 | Jobs, offers, agreements, boons, experience if added | Stable IDs and settlement state; no duplicated payment, reward, experience, or obligation |
 | Fleet templates/units, cargo, routes, wrecks, incidents | Same identity across body materialization; delivery/loss/salvage settles once; remote risk is saved, not rerolled on load |
+| Procedural culture, cultural origin, decision state (E2p, unbuilt) | Base vector derives from salted Perlin seed/anchor/profile-generator identity and saved phase; save meaningful offsets, stable epoch identity, and inherited community origin. Save effective drift temperature (default exactly 0), long-period timescale, and accumulated cultural phase; freeze/resume without retrospective catch-up or config-driven jumps (GAME_LOOP section 9.4) |
+| Political knowledge, territory/community continuity and resistance (E2c/H2, unbuilt) | Save observer reports/evidence/causes, claims/control/legitimacy, surviving/displaced membership, rebellion/sponsors and settlements. Discovery/unload/reload cannot reroll culture, blame, funded forces, or duplicated ownership/contracts; lineage prevents archive/stock resets (sections 9.2/9.3) |
 | Player megastructure districts and later colony ledger | Paid progress, surviving blocks, stocks, population, and bounded worker state |
 
 Paid pad warehouses persist through the defaulted `Pad::warehouse` field. Local M/V/C/B/F caps are 300 with a warehouse, 100 without; water tank and ship caps remain separate. Pad removal loses the module under existing stash salvage rules. Save format and generation are unchanged.
 
 Paid water extractors save their installation with the pad and continuously fill its capped water stash on simulation time, including while unloaded. Their renewable aquifer requires no depletion ledger. Paid water tanks save their installation and water stocks with the pad; removal loses the tank and existing stash salvage rules apply. Paid pad refineries save their installation and reserved batch countdown alongside pad stocks. A removed pad also removes its machine and reserved input; generation invalidation discards both with its pad. Closing the app grants no wall-clock production in the first model. Unloaded systems advance on saved simulation time through bounded events, respecting input, capacity, route, and incident limits. UI selection and body instances are not authoritative stock.
+
+The planned cultural clock is advanced by temperature times simulation dt divided by its positive long-period timescale, not by total age or wall clock. At temperature 0 the phase and culture remain fixed, including through attacks and reload; relationship/needs/technology state still changes normally. Save the effective controls with the run so external overrides cannot silently alter continued culture. A normal new run starts at temperature 0. Returning to zero retains the current phase, and explicit warming resumes from it; no hidden catch-up. There is no culture save field or drift control built yet.
 
 Before fleets and factories ship, define generator-change handling for invalid pad/deposit/supplier anchors: suspend routes/jobs, resolve or refund reservations under visible terms, and explicitly relocate/salvage stranded cargo/assets. Existing load behavior drops generated-anchor deltas; new systems must not silently orphan still-consuming machines. Keep knowledge and player inventory where valid. This is a compatibility policy to design, not permission to add old-version migrations: before 1.0 use defaults or a SAVE_VERSION bump with refusal, with no migration fixtures/code.
 

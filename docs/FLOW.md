@@ -10,6 +10,12 @@ Priorities: **P0** is what to do before anyone else plays the game, **P1** is th
 
 The 2026-10-09 target is [GAME_LOOP.md](GAME_LOOP.md): six primary resources, raw-only wildlife rewards, peaceful technology procurement, continued equipment grades, jobs/agreements, and a defended home supplied by drones and pad-built tankers. The sections below retain the arcade review and built-status record; historical observations are not a current inventory. This update supersedes the old three-material role proposal, wild Smarties, kill-only skill trophies, universal wildlife technology drops, and death-triggered legacy progression. New resource/site/trade panels must keep the same readable combat surface.
 
+### Procedural political readability (E2p/E2c/H2, TODO)
+
+[GAME_LOOP.md](GAME_LOOP.md) sections 9.2 to 9.4 own political reports, conquest/rebellion, and Perlin-generated cultural profiles. Contact/chart details should reveal learned tendencies and uncertainty, separate culture from current motives, and explain changes as an actual shortage, threat, grievance, evidence, or very slow cultural shift. Similar cultures are not guaranteed allies; trade usefulness and earned trust have their own causes. Keep raw vectors, tensor terms, score contributions, drift temperature and phase in developer details, not the combat HUD or purchase confirmation.
+
+Initially cultural drift temperature is exactly 0, so the inner profile is stable while opinion, commerce and military posture react to local events. Future explicit playtest warming must not make abrupt or unexplained reversals; show FROZEN/DRIFTING and effective temperature in dev controls. Slight imperfect decisions retain a recognizable pattern and cannot bypass disclosed terms or attack permissions. Claim/rebellion warnings and foreign-response reports expose an actionable cause rather than calling every unfamiliar society irrational. This is planned presentation, not current contact behavior.
+
 ## 1. Where the game is today
 
 ### What is already good (keep it)

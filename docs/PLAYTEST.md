@@ -227,3 +227,17 @@ Do not judge these until GAME_LOOP sections 9.2/9.3 land. Run the same scenarios
 - While exploring, are remote resistance losses warned and recoverable? Do reload, sector unload, and opening the chart preserve decisions and report delays? Does HOME remain safe and a useful solo homestead remain viable?
 
 Political thresholds, warning grace, garrison reach, transfer/tribute terms, and aid/force caps are proposed tuning surfaces, not implemented knobs. H2 aggregate community politics does not require J's voluntary citizens.
+
+## Procedural societies and drift (proposed E2p checks, unbuilt)
+
+[GAME_LOOP.md](GAME_LOOP.md) section 9.4 owns this model. Start all ordinary checks with drift temperature exactly 0. Per-faction values come from Perlin fields; do not hand-tune individual civilizations into preset buckets.
+
+- Do nearby generated profiles show coherent similarities without every coordinate matching or all neighbors becoming automatic allies? Does the same seed/anchor yield the same profile regardless of discovery order?
+- Can shared values, complementary useful supplies and honored dealings each explain a partnership? Can similar resource-starved societies compete, and different cultures establish dependable trust?
+- Do most societies act logically according to their values and knowledge? Are occasional slightly imperfect choices bounded and recognizable, without arbitrary betrayal, infinite gifts or permission bypasses?
+- With temperature 0, do long simulation runs, attacks, resource crises, conquest, rebellion, unload/reload and time-scale changes leave cultural coordinates fixed while needs, histories and policies still react?
+- Can a supplier recover from scarcity without erasing a grievance or swapping cultural identity? Do observers interpret the same destruction/rebellion report differently through their generated values?
+- Only when explicitly requested for a later playtest, raise the global temperature gradually: does culture move slowly and smoothly? Does lowering it back to 0 freeze the current profile, and resuming continue without jumps, hidden catch-up or wall-clock change?
+- Do effective temperature, positive timescale, phase and community origin survive reload? Do clamped finite inputs and rejected nonfinite settings show their effective result clearly? Does a normal new run start frozen again?
+
+No automatic temperature schedule. Drift is initially fixed at 0; response to real events remains active. Automated acceptance checks should cover reproducibility, exact freeze, bounded warm/resume behavior, time partitions, community continuity and shared commerce/ROE/capacity rather than requiring particular archetype counts.
