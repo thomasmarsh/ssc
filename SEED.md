@@ -54,11 +54,13 @@ The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow 
 
 Creature backlog remains open: Foamback; Oozer small prey/nucleus/pinch/spit/gap/path and continuous perimeter/reach tuning; remaining organs and realm-discovery follow-ups; swarms/rally dispatch and herd map/sonar; elder weak points if needed. Builders still need visible gathering and player interaction. See BESTIARY/WORKSTREAMS for their built status. These do not block the first economy milestone.
 
-Other backlog: density/feeling view-model and measurements, weaver rock care, hyperlanes, generated ruins/living megastructures, local stash overflow, skill merging, and specimen log. Do not follow the historical 19 -> 20 generation batch; use the actual current version. No save-migration fixtures or code before 1.0.
+Other backlog: large cross-sector planets with diggable/navigable interiors, machine sites, civilization anchors, expanded suitable farm surfaces and deep heat (geothermal use open; WORKSTREAMS section 15, P1-P4); density/feeling view-model and measurements, weaver rock care, hyperlanes, generated ruins/living megastructures, local stash overflow, skill merging, and specimen log. Do not follow the historical 19 -> 20 generation batch; use the actual current version. No save-migration fixtures or code before 1.0.
 
 Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; tankers for any material with compatible local storage; tanker construction at established planetoid pads; a useful solo homestead before citizens; player and civilization conquest share political rules; claims can face organized rebellion; local reports drive observer-specific fears/sympathies; destruction, control and community survival stay distinct; society profiles come from coherent Perlin fields, with compact meaningful coordinates and sparse interactions; cultures remain fixed at drift temperature 0 until explicitly warmed in later playtests, while pressures/history still change policy. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Large-planet target planned: potentially cross-sector worlds, PixelJunk Shooter-style tunnel exploration/excavation, interior machines, deep heat, mostly barren geology, civilization anchors and more suitable farm area. P1-P4 remain TODO in WORKSTREAMS section 15; current implementation priority unchanged.
 
 - E2p foundation: salted Perlin culture, shared bounded evaluator, saved zero-default drift/anchors/epochs, finite granary-versus-repair contact responses and contact/chart estimates. E2a authorization/history and broader commerce/report consumers remain next.
 

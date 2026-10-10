@@ -62,6 +62,7 @@ These are eventual ideas to explore, not implemented behavior or the next ordere
 
 ## Existing backlog alongside the loop
 
+- TODO: very large planets, potentially wider than a sector, with continuous diggable terrain, cave/tunnel ship navigation and exploration inspired by PixelJunk Shooter, reachable interior machines, and planetary civilization anchors. Most worlds remain barren rock; suitable worlds gain more surface farming area. Deep large-planet interiors become hotter/dangerous toward the core; geothermal energy remains a possible payoff. Proposed P1-P4 slices and gates live in [WORKSTREAMS section 15](WORKSTREAMS.md#15-large-planets-and-explorable-interiors-2026-10-10-todo); current E2a/F/G priority is unchanged.
 - TODO: human playtests of early progression, civilization contact, realm counters, and deep-space combat; [PLAYTEST.md](PLAYTEST.md).
 - TODO: docking assist, BEST BUY guidance, automatic local stash overflow, controller-first panels/map, optional skill merging, specimen log, and other FLOW polish. Automatic overflow is local to a connected pad, never a free galactic inventory.
 - TODO: remaining bestiary work, including organs and the Foamback/Oozer follow-ups; [BESTIARY.md](BESTIARY.md). New specimens follow the target reward provenance.
