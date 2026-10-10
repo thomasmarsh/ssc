@@ -18,7 +18,7 @@ use crate::world::SectorId;
 use serde::{Deserialize, Serialize};
 
 /// The layout version this build writes.
-pub const SAVE_VERSION: u32 = 3;
+pub const SAVE_VERSION: u32 = 4;
 
 /// Why a save could not be read.
 #[derive(Debug, PartialEq, Eq)]

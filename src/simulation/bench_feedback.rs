@@ -135,6 +135,7 @@ impl Snapshot {
             | BenchAction::CancelJob(_, _)
             | BenchAction::Research(_)
             | BenchAction::MiningDrone
+            | BenchAction::MiningDroneStatus(_)
             | BenchAction::WaterExtractor
             | BenchAction::Warehouse
             | BenchAction::WaterTank

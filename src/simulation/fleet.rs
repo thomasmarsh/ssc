@@ -2,12 +2,13 @@
 use super::*;
 
 pub const DRONE_PRICE: [(Material, f32); 2] = [(Material::Metal, 40.0), (Material::Crystal, 10.0)];
+pub const MAX_DRONES: usize = 4;
 const CARGO_CAP: f32 = 10.0;
 const WORK_SECONDS: f32 = 10.0;
 const RETURN_SECONDS: f32 = 5.0;
 
-/// One fixed home-planetoid order per pad. The pad key is its stable identity and endpoint.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+/// A fixed home-planetoid order. Stable identity is (pad key, append-only fleet slot).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MiningDrone {
     cargo: f32,
     remaining: f32,
@@ -44,9 +45,12 @@ impl Game {
     pub(super) fn mining_drone_block(&self) -> Option<&'static str> {
         match self.landed_pad() {
             None => Some("LAND AT A PAD"),
-            Some(p) if p.drone.is_some() => Some("ALREADY BUILT"),
+            Some(p) if p.drones.len() >= MAX_DRONES => Some("FLEET FULL"),
             Some(_) if !self.loadout.research.active(research::Tech::Fabrication) => {
                 Some("NEEDS FABRICATION RESEARCH")
+            }
+            Some(_) if !self.loadout.research.active(research::Tech::Automation) => {
+                Some("NEEDS AUTOMATION RESEARCH")
             }
             Some(p) if !p.power => Some("NEEDS LOCAL POWER"),
             Some(p) if !p.warehouse => Some("NEEDS WAREHOUSE"),
@@ -67,7 +71,8 @@ impl Game {
             .pads
             .get_mut(&self.pad.landed.unwrap())
             .unwrap()
-            .drone = Some(MiningDrone::default());
+            .drones
+            .push(MiningDrone::default());
         self.bench_done("MINING DRONE BUILT".into(), upgrades::Rarity::Common);
     }
 
@@ -107,50 +112,62 @@ impl Game {
             .pad
             .pads
             .iter()
-            .filter_map(|(&key, p)| (p.power && p.drone.is_some()).then_some(key))
+            .filter_map(|(&key, p)| (p.power && !p.drones.is_empty()).then_some(key))
             .collect();
         for key in keys {
-            let mut drone = self.pad.pads.get_mut(&key).unwrap().drone.take().unwrap();
+            let mut drones = std::mem::take(&mut self.pad.pads.get_mut(&key).unwrap().drones);
             let material = mining::material_of(self.seed, RockKind::Planetoid, Some(key));
             let mut budget = dt;
             loop {
-                if drone.remaining > 0.0 {
-                    let elapsed = budget.min(drone.remaining);
-                    drone.remaining -= elapsed;
-                    budget -= elapsed;
+                // Settle and dispatch every unit before advancing to the next shared event.
+                // Slot order breaks ties for scarce fuel, ore, or storage deterministically.
+                for drone in &mut drones {
                     if drone.remaining > 0.0 {
-                        break;
+                        continue;
                     }
-                }
-                let pad = self.pad.pads.get_mut(&key).unwrap();
-                let cap = pad.stash_cap(material);
-                if drone.cargo > 0.0 {
-                    let delivered = pad.stash.add_capped(material, drone.cargo, cap);
-                    drone.cargo -= delivered;
-                    if drone.cargo > 1e-3 {
-                        break;
+                    let pad = self.pad.pads.get_mut(&key).unwrap();
+                    let cap = pad.stash_cap(material);
+                    if drone.cargo > 0.0 {
+                        let delivered = pad.stash.add_capped(material, drone.cargo, cap);
+                        drone.cargo -= delivered;
+                        if drone.cargo > 1e-3 {
+                            continue;
+                        }
+                        drone.cargo = 0.0;
                     }
-                    drone.cargo = 0.0;
+                    if budget <= 0.0 || pad.stash.fuel < 1.0 || pad.stash.amount(material) >= cap {
+                        continue;
+                    }
+                    let room = cap - pad.stash.amount(material);
+                    let amount = self.reserve_drone_ore(key, CARGO_CAP.min(room));
+                    drone.exhausted = amount == 0.0;
+                    if drone.exhausted {
+                        continue;
+                    }
+                    self.pad
+                        .pads
+                        .get_mut(&key)
+                        .unwrap()
+                        .stash
+                        .take(Material::Fuel, 1.0);
+                    drone.cargo = amount;
+                    drone.remaining = WORK_SECONDS + RETURN_SECONDS;
                 }
-                if budget <= 0.0 || pad.stash.fuel < 1.0 || pad.stash.amount(material) >= cap {
+                let next = drones
+                    .iter()
+                    .filter(|d| d.remaining > 0.0)
+                    .map(|d| d.remaining)
+                    .min_by(f32::total_cmp);
+                let Some(next) = next.filter(|_| budget > 0.0) else {
                     break;
+                };
+                let elapsed = budget.min(next);
+                for drone in &mut drones {
+                    drone.remaining = (drone.remaining - elapsed).max(0.0);
                 }
-                let room = cap - pad.stash.amount(material);
-                let amount = self.reserve_drone_ore(key, CARGO_CAP.min(room));
-                drone.exhausted = amount == 0.0;
-                if drone.exhausted {
-                    break;
-                }
-                self.pad
-                    .pads
-                    .get_mut(&key)
-                    .unwrap()
-                    .stash
-                    .take(Material::Fuel, 1.0);
-                drone.cargo = amount;
-                drone.remaining = WORK_SECONDS + RETURN_SECONDS;
+                budget -= elapsed;
             }
-            self.pad.pads.get_mut(&key).unwrap().drone = Some(drone);
+            self.pad.pads.get_mut(&key).unwrap().drones = drones;
         }
     }
 }
@@ -168,7 +185,7 @@ mod tests {
         game.loadout
             .research
             .known
-            .insert(research::Tech::Fabrication);
+            .extend([research::Tech::Fabrication, research::Tech::Automation]);
         let pad = game.pad.pads.get_mut(&key).unwrap();
         pad.power = true;
         pad.warehouse = true;
@@ -186,19 +203,128 @@ mod tests {
         let (mut game, key, _) = setup();
         game.pad.pads.get_mut(&key).unwrap().warehouse = false;
         game.bench_confirm();
-        assert!(game.pad.pads[&key].drone.is_none());
+        assert!(game.pad.pads[&key].drones.is_empty());
         assert_eq!(game.cargo.metal, 40.0);
         game.pad.pads.get_mut(&key).unwrap().warehouse = true;
         game.cargo.crystal = 9.0;
         game.bench_confirm();
-        assert!(game.pad.pads[&key].drone.is_none());
+        assert!(game.pad.pads[&key].drones.is_empty());
         assert_eq!(game.cargo.metal, 40.0);
         game.cargo.crystal = 10.0;
         game.bench_confirm();
-        assert!(game.pad.pads[&key].drone.is_some());
+        assert!(game.pad.pads[&key].drones.len() == 1);
         assert_eq!((game.cargo.metal, game.cargo.crystal), (0.0, 0.0));
         game.bench_confirm();
         assert_eq!(game.cargo.metal, 0.0);
+    }
+
+    fn build_fleet(game: &mut Game) {
+        for _ in 0..MAX_DRONES {
+            game.cargo.metal = 40.0;
+            game.cargo.crystal = 10.0;
+            game.bench_confirm();
+        }
+    }
+
+    #[test]
+    fn automation_dependency_and_fleet_cap_gate_paid_construction() {
+        let (mut game, key, _) = setup();
+        game.loadout
+            .research
+            .known
+            .remove(&research::Tech::Automation);
+        game.bench_confirm();
+        assert!(game.pad.pads[&key].drones.is_empty());
+        assert_eq!(game.cargo.metal, 40.0);
+        game.loadout
+            .research
+            .known
+            .insert(research::Tech::Automation);
+        build_fleet(&mut game);
+        assert_eq!(game.pad.pads[&key].drones.len(), MAX_DRONES);
+        game.cargo.metal = 40.0;
+        game.cargo.crystal = 10.0;
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&key].drones.len(), MAX_DRONES);
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (40.0, 10.0));
+        assert_eq!(game.mining_drone_block(), Some("FLEET FULL"));
+        let before = game.cargo;
+        for slot in 0..MAX_DRONES {
+            game.bench_select(BenchAction::MiningDroneStatus(slot));
+            game.bench_confirm();
+        }
+        assert_eq!(game.cargo, before, "unit rows are read-only");
+        assert!(
+            game.pad.pads[&key]
+                .drones
+                .iter()
+                .all(|d| d.cargo == 0.0 && d.remaining == 0.0)
+        );
+    }
+
+    #[test]
+    fn fleet_handoffs_are_independent_of_time_step_partition() {
+        let (mut whole, key, material) = setup();
+        let (mut split, _, _) = setup();
+        for game in [&mut whole, &mut split] {
+            build_fleet(game);
+            game.pad.pads.get_mut(&key).unwrap().stash.fuel = 9.0;
+        }
+        whole.update_mining_drones(45.0);
+        for _ in 0..45 {
+            split.update_mining_drones(1.0);
+        }
+        assert_eq!(whole.pad.pads[&key].stash.amount(material), 90.0);
+        assert_eq!(whole.pad.pads[&key].stash.fuel, 0.0);
+        assert_eq!(whole.mined[&key], 90.0);
+        assert_eq!(whole.pad.pads[&key].stash, split.pad.pads[&key].stash);
+        assert_eq!(whole.pad.pads[&key].drones, split.pad.pads[&key].drones);
+        assert_eq!(whole.mined[&key], split.mined[&key]);
+    }
+
+    #[test]
+    fn saved_remote_fleet_retains_each_units_blocked_cargo() {
+        let (mut game, key, material) = setup();
+        build_fleet(&mut game);
+        game.pad.pads.get_mut(&key).unwrap().stash.fuel = 4.0;
+        game.update_mining_drones(7.0);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut game, _) = Game::from_save(state, generator);
+        assert!(game.loadout.research.active(research::Tech::Automation));
+        assert_eq!(game.pad.pads[&key].drones.len(), MAX_DRONES);
+        game.bodies.retain(|b| b.origin != Some(key));
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .add_capped(material, 300.0, 300.0);
+        game.update_mining_drones(8.0);
+        assert!(
+            game.pad.pads[&key]
+                .drones
+                .iter()
+                .all(|d| d.cargo == 10.0 && d.remaining == 0.0)
+        );
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .take(material, 15.0);
+        game.update_mining_drones(1.0);
+        let pad = &game.pad.pads[&key];
+        assert_eq!(pad.stash.amount(material), 300.0);
+        assert_eq!(pad.stash.fuel, 0.0);
+        assert_eq!(pad.drones.iter().map(|d| d.cargo).sum::<f32>(), 25.0);
+        assert_eq!(pad.drones[0].cargo, 0.0);
+        assert_eq!(pad.drones[1].cargo, 5.0);
+        assert_eq!(game.mined[&key], 40.0);
+        // Removing the owner pad removes all units and their retained cargo.
+        game.pad.pads.remove(&key);
+        game.update_mining_drones(100.0);
+        assert!(!game.pad.pads.contains_key(&key));
+        assert_eq!(game.mined[&key], 40.0);
     }
 
     #[test]
@@ -218,7 +344,7 @@ mod tests {
         assert_eq!(game.mined[&key], 10.0);
         game.update_mining_drones(10.0);
         assert_eq!(game.pad.pads[&key].stash.amount(material), 10.0);
-        assert_eq!(game.pad.pads[&key].drone.as_ref().unwrap().cargo, 0.0);
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 0.0);
     }
 
     #[test]
@@ -238,7 +364,7 @@ mod tests {
             .stash
             .add_capped(material, 300.0, 300.0);
         game.update_mining_drones(10.0);
-        assert_eq!(game.pad.pads[&key].drone.as_ref().unwrap().cargo, 10.0);
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 10.0);
         assert_eq!(game.pad.pads[&key].stash.fuel, 2.0);
         game.pad
             .pads
@@ -248,7 +374,7 @@ mod tests {
             .take(material, 10.0);
         game.update_mining_drones(1.0);
         assert_eq!(game.pad.pads[&key].stash.amount(material), 300.0);
-        assert_eq!(game.pad.pads[&key].drone.as_ref().unwrap().cargo, 0.0);
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 0.0);
         game.pad
             .pads
             .get_mut(&key)
@@ -278,11 +404,11 @@ mod tests {
             .unwrap();
         body.set_ore(0.0);
         game.update_mining_drones(1.0);
-        assert!(game.pad.pads[&key].drone.as_ref().unwrap().exhausted);
+        assert!(game.pad.pads[&key].drones[0].exhausted);
         assert_eq!(game.pad.pads[&key].stash.fuel, 3.0);
         let state = game.save_state();
         let (game, report) = Game::from_save(state, crate::sectormap::GENERATOR_VERSION + 1);
         assert!(!report.world_deltas_kept);
-        assert!(game.pad.pads.values().all(|p| p.drone.is_none()));
+        assert!(game.pad.pads.values().all(|p| p.drones.is_empty()));
     }
 }

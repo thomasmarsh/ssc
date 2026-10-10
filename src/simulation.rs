@@ -30,7 +30,7 @@ mod ecology;
 pub mod farm;
 pub mod feel;
 mod fields;
-mod fleet;
+pub mod fleet;
 pub mod flock;
 mod food;
 mod fortress;

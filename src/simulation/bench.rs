@@ -41,6 +41,7 @@ pub enum BenchAction {
     Warehouse,
     WaterExtractor,
     MiningDrone,
+    MiningDroneStatus(usize),
     Research(research::Tech),
     Grade,
     Partnership,
@@ -151,6 +152,10 @@ impl Game {
                         BenchAction::MiningDrone,
                     ]
                 }))
+                .chain(
+                    (0..self.landed_pad().map_or(0, |p| p.drones.len()))
+                        .map(BenchAction::MiningDroneStatus),
+                )
                 .chain(Material::ALL.map(BenchAction::Stash))
                 .collect(),
             BenchTab::Weapons => Profile::ALL.map(BenchAction::Weapon).to_vec(),
@@ -225,6 +230,7 @@ impl Game {
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
+            Some(BenchAction::MiningDroneStatus(_)) => self.bench_failed("STATUS ONLY".into()),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
             Some(BenchAction::Partnership) => self.buy_partnership(),
             Some(BenchAction::Agreement(id)) => self.act_agreement(id),
@@ -367,7 +373,7 @@ impl Game {
             BenchAction::Research(tech) => {
                 row.group = "RESEARCH";
                 row.text = format!("LEARN {}", tech.label());
-                row.detail = match tech { research::Tech::Fabrication => "Dependency for organ interfaces and frontier calibration.", research::Tech::Protection => "Alternative to Rare Plating prerequisite for PARRY.", research::Tech::Propulsion => "Alternative to Rare Engine prerequisite for DASH.", research::Tech::OrganSupport => "Alternative to Rare Core prerequisite for SYMBIOSIS; permanent organ hosting support.", research::Tech::Frontier => "Continuing offense and durability grades at a better live supplier. Captured archives grant one grade commissioning claim at HOME." }.into();
+                row.detail = match tech { research::Tech::Fabrication => "Dependency for automation, organ interfaces and frontier calibration.", research::Tech::Automation => "Build up to four mining drones per powered warehouse pad.", research::Tech::Protection => "Alternative to Rare Plating prerequisite for PARRY.", research::Tech::Propulsion => "Alternative to Rare Engine prerequisite for DASH.", research::Tech::OrganSupport => "Alternative to Rare Core prerequisite for SYMBIOSIS; permanent organ hosting support.", research::Tech::Frontier => "Continuing offense and durability grades at a better live supplier. Captured archives grant one grade commissioning claim at HOME." }.into();
                 row.costs = self.research_price(tech);
                 if let Some(why) = self.research_block(tech) {
                     row.ok = false;
@@ -690,22 +696,32 @@ impl Game {
                 row.group = "PAD FLEET";
                 row.text = "BUILD MINING DRONE".into();
                 row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. No flight/combat yet.".into();
-                if let Some(pad) = self.landed_pad().filter(|p| p.drone.is_some()) {
-                    row.text = "MINING DRONE".into();
+                row.costs = fleet::DRONE_PRICE.to_vec();
+                if let Some(pad) = self.landed_pad() {
+                    row.text = format!(
+                        "BUILD MINING DRONE   {}/{}",
+                        pad.drones.len(),
+                        fleet::MAX_DRONES
+                    );
+                }
+                if let Some(why) = self.mining_drone_block() {
                     row.ok = false;
+                    row.state = why.into();
+                }
+            }
+            BenchAction::MiningDroneStatus(slot) => {
+                row.group = "PAD FLEET";
+                row.text = format!("MINING DRONE #{}", slot + 1);
+                row.ok = false;
+                row.state = "UNIT LOST".into();
+                row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. No flight/combat yet.".into();
+                if let Some(pad) = self.landed_pad()
+                    && let Some(drone) = pad.drones.get(slot)
+                {
                     let material =
                         mining::material_of(self.seed, RockKind::Planetoid, Some(pad.key));
-                    row.state = format!(
-                        "{} - {}",
-                        material.label(),
-                        pad.drone.as_ref().unwrap().status(pad, material)
-                    );
-                } else {
-                    row.costs = fleet::DRONE_PRICE.to_vec();
-                    if let Some(why) = self.mining_drone_block() {
-                        row.ok = false;
-                        row.state = why.into();
-                    }
+                    row.state = drone.status(pad, material);
+                    row.detail += &format!(" Output: {}. Status only.", material.label());
                 }
             }
             BenchAction::Warehouse => {

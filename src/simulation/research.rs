@@ -8,14 +8,16 @@ use std::collections::{BTreeMap, BTreeSet};
 )]
 pub enum Tech {
     Fabrication,
+    Automation,
     Protection,
     Propulsion,
     OrganSupport,
     Frontier,
 }
 impl Tech {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Fabrication,
+        Self::Automation,
         Self::Protection,
         Self::Propulsion,
         Self::OrganSupport,
@@ -24,6 +26,7 @@ impl Tech {
     pub fn label(self) -> &'static str {
         match self {
             Self::Fabrication => "FABRICATION",
+            Self::Automation => "AUTOMATION",
             Self::Protection => "PROTECTION INTERFACE",
             Self::Propulsion => "DASH INTERFACE",
             Self::OrganSupport => "ORGAN INTERFACE",
@@ -32,6 +35,7 @@ impl Tech {
     }
     pub fn prerequisites(self) -> &'static [Self] {
         match self {
+            Self::Automation => &[Self::Fabrication],
             Self::OrganSupport => &[Self::Fabrication],
             Self::Frontier => &[Self::Fabrication, Self::Protection],
             _ => &[],
@@ -60,7 +64,7 @@ impl Game {
         world::threat(world::latent(self.seed, civ.capital).depth)
     }
     /// The narrow profile has a shared calibration node and independently salted support specialty.
-    pub(super) fn supplier_profile(&self, civ: &Territory) -> [Tech; 4] {
+    pub(super) fn supplier_profile(&self, civ: &Territory) -> [Tech; 5] {
         let specialty = if crate::world::hash2(
             self.seed ^ 0x7EC4_0000_0000_0011 ^ civ.id,
             civ.capital.x,
@@ -77,6 +81,7 @@ impl Game {
             Tech::Protection,
             Tech::Frontier,
             specialty,
+            Tech::Automation,
         ]
     }
     pub(super) fn research_price(&self, tech: Tech) -> Vec<(Material, f32)> {
@@ -281,6 +286,29 @@ mod tests {
         for m in Material::ALL {
             game.cargo.add(m, game.cargo.cap(m));
         }
+    }
+
+    #[test]
+    fn peaceful_automation_requires_fabrication_and_is_paid_once() {
+        let mut game = Game::new(crate::config::MASTER_SEED);
+        home(&mut game);
+        fund(&mut game);
+        let before = game.cargo;
+        game.bench_select(BenchAction::Research(Tech::Automation));
+        game.bench_confirm();
+        assert_eq!(game.cargo, before);
+        assert!(!game.loadout.research.active(Tech::Automation));
+        game.bench_select(BenchAction::Research(Tech::Fabrication));
+        game.bench_confirm();
+        let before = game.cargo;
+        game.bench_select(BenchAction::Research(Tech::Automation));
+        game.bench_confirm();
+        assert!(game.loadout.research.active(Tech::Automation));
+        assert_eq!(game.cargo.metal, before.metal - 20.0);
+        assert_eq!(game.cargo.crystal, before.crystal - 8.0);
+        let paid = game.cargo;
+        game.bench_confirm();
+        assert_eq!(game.cargo, paid);
     }
     fn foundation(game: &mut Game) {
         home(game);

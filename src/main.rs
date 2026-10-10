@@ -1696,6 +1696,22 @@ fn smoke_run(
         ));
     }
     // A bounded receipt gallery confirms real actions near capture time.
+    // Keep fleet galleries on their requested row despite physical input arriving during staging.
+    if let Ok(mode) = std::env::var("SSC_BENCH_VIEW") {
+        match mode.as_str() {
+            "mining-fleet" => session
+                .game
+                .bench_select(ssc::simulation::BenchAction::MiningDrone),
+            "mining-fleet-status" => {
+                session
+                    .game
+                    .bench_select(ssc::simulation::BenchAction::MiningDroneStatus(
+                        ssc::simulation::fleet::MAX_DRONES - 1,
+                    ))
+            }
+            _ => {}
+        }
+    }
     if run.frames + 20 == limit && std::env::var_os("SSC_BENCH_RESULT").is_some() {
         let mode = std::env::var("SSC_BENCH_VIEW").unwrap_or_default();
         if !matches!(mode.as_str(), "gate" | "parts" | "raw-input") {
@@ -2102,11 +2118,11 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 .insert(ssc::simulation::research::Tech::Fabrication);
             game.bench_select(BenchAction::Power);
         }
-        "mining-drone" => {
-            game.loadout
-                .research
-                .known
-                .insert(ssc::simulation::research::Tech::Fabrication);
+        "mining-drone" | "mining-fleet" | "mining-fleet-status" => {
+            game.loadout.research.known.extend([
+                ssc::simulation::research::Tech::Fabrication,
+                ssc::simulation::research::Tech::Automation,
+            ]);
             game.bench_select(BenchAction::Power);
             game.bench_confirm();
             game.cargo.metal = 100.0;
@@ -2114,6 +2130,22 @@ fn smoke_bench(game: &mut Game, mode: &str) {
             game.bench_select(BenchAction::Warehouse);
             game.bench_confirm();
             game.bench_select(BenchAction::MiningDrone);
+            if mode.starts_with("mining-fleet") {
+                for _ in 0..ssc::simulation::fleet::MAX_DRONES - 1 {
+                    game.cargo.metal = 40.0;
+                    game.cargo.crystal = 10.0;
+                    game.bench_confirm();
+                }
+                game.cargo.metal = 40.0;
+                game.cargo.crystal = 10.0;
+                if mode == "mining-fleet-status" {
+                    game.bench_confirm();
+                    game.bench_select(BenchAction::MiningDroneStatus(
+                        ssc::simulation::fleet::MAX_DRONES - 1,
+                    ));
+                    game.bench_feedback = None;
+                }
+            }
         }
         "water-extractor" => {
             game.loadout
@@ -2276,7 +2308,7 @@ mod bench_input_tests {
         bench_controls(&keys, &|_| false, &mut session);
         keys.clear();
         let mut groups = vec![];
-        for _ in 0..29 {
+        for _ in 0..session.game.bench_panel().unwrap().rows.len() {
             let panel = session.game.bench_panel().unwrap();
             let row = panel.rows.iter().find(|r| r.selected).unwrap();
             if groups.last() != Some(&row.group) {
@@ -2309,7 +2341,7 @@ mod bench_input_tests {
                 .iter()
                 .position(|r| r.selected)
                 .unwrap(),
-            28
+            session.game.bench_panel().unwrap().rows.len() - 1
         );
     }
     #[test]

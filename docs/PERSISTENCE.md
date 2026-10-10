@@ -36,7 +36,7 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 
 Recurring agreements are an additive defaulted map in `jobs`: supplier ID, capital, player PadKey, remaining finite lots, simulation cooldown, pause, and terminal outcome. Four open / 128 lifetime records; successful handoff pays/decrements once, pause and suspension stop cooldown, no wall-clock catch-up. Endpoint loss and generator mismatch close stock permanently without touching ship cargo. Generation/save versions stay unchanged; no migration code.
 
-Mining orders are additive defaulted `Pad.drone` records: finite cargo, work/return countdown, and empty-deposit status. Home/order identity is the enclosing PadKey; ore uses the shared `mined`/`regrow_stamp` ledger. Dispatch removes local fuel and reserves ore once; delivery removes only accepted cargo. Save/unload never recharges fuel or refreshes ore. Pad loss or generator mismatch drops drone/cargo; remote combat and salvage are pending. No save/generator bump or migration code.
+Mining orders are `Pad.drones` records, capped at four paid units per pad: finite cargo, work/return countdown, and empty-deposit status. Identity is (PadKey, append-only slot); ore uses the shared `mined`/`regrow_stamp` ledger. Dispatch removes local fuel and reserves ore once; delivery removes only accepted cargo. Save/unload never recharges fuel or refreshes ore. Pad loss or generator mismatch drops the fleet/cargo; remote combat and salvage are pending. Automation is retained in saved research. Save format 4 replaces the single-unit field; older layouts are refused without migration. Generation is unchanged.
 
 ## Format and versioning
 
@@ -88,7 +88,7 @@ Paid water extractors save their installation with the pad and continuously fill
 
 Before fleets and factories ship, define generator-change handling for invalid pad/deposit/supplier anchors: suspend routes/jobs, resolve or refund reservations under visible terms, and explicitly relocate/salvage stranded cargo/assets. Existing load behavior drops generated-anchor deltas; new systems must not silently orphan still-consuming machines. Keep knowledge and player inventory where valid. This is a compatibility policy to design, not permission to add old-version migrations: before 1.0 use defaults or a SAVE_VERSION bump with refusal, with no migration fixtures/code.
 
-Shared resources (save format 3): ship and pad Cargo store metal, volatiles, crystal, biomass, fuel and water. Farm owns seeds/plants and civilization granaries, with no second ship biomass balance. Incompatible older saves are refused without migration.
+Shared resources (save format 4): ship and pad Cargo store metal, volatiles, crystal, biomass, fuel and water. Farm owns seeds/plants and civilization granaries, with no second ship biomass balance. Incompatible older saves are refused without migration.
 
 Narrow frontier progress: `Loadout::research` saves known nodes, up-to-25% fragments, one-time captured civilization IDs and unused source-grade claims. `equipment_grade` is retained on death/reload/generator changes. Generator 33 adds privately salted supplier specialties without changing HOME geography or existing RNG draws. The claim is earned knowledge/commissioning credit, not a remote inventory.
 
@@ -96,4 +96,4 @@ Generator 35 asteroid compositions are re-derived from an independent spawn-key 
 
 HOME raw-input orders are an additive defaulted run field, bounded to ten purchases. Stock depletion survives save/load and generator changes independently of pad deltas; only NEW GAME restores the initial 200V. Save format remains 3.
 
-Paid local power persists through defaulted `Pad::power`. Unpowered machines retain stocks and reserved batch progress without advancing. Saves lacking power load unpowered and must build the module to resume. Power supplies only its own pad; removal loses it with the pad. Save format 3 and generation are unchanged.
+Paid local power persists through defaulted `Pad::power`. Unpowered machines retain stocks and reserved batch progress without advancing. Saves lacking power load unpowered and must build the module to resume. Power supplies only its own pad; removal loses it with the pad. Power remains an additive field; generation is unchanged.
