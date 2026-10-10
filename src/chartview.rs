@@ -557,6 +557,38 @@ fn map(area: &mut Kids, v: &ChartView) {
                 BackgroundColor(rgb(t.fill)),
                 BorderColor::all(edge),
             ));
+            // The area readout: a bar along the foot of a charted sector in its mood's color.
+            if let Some(c) = t.read.filter(|_| tile >= 10.0) {
+                let h = if tile >= 30.0 { 3.0 } else { 2.0 };
+                map.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(t.col as f32 * tile + 3.0),
+                        top: px((t.row + 1) as f32 * tile - h - 3.0),
+                        width: px(tile - 6.0),
+                        height: px(h),
+                        ..default()
+                    },
+                    BackgroundColor(rgb(c).with_alpha(0.9)),
+                    FocusPolicy::Pass,
+                ));
+            }
+            // The way around the selected sector.
+            if t.skirt {
+                map.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(t.col as f32 * tile + 2.0),
+                        top: px(t.row as f32 * tile + 2.0),
+                        width: px(tile - 4.0),
+                        height: px(tile - 4.0),
+                        border: UiRect::all(px(2)),
+                        ..default()
+                    },
+                    BorderColor::all(rgb(t.read.unwrap_or([0.62, 0.78, 0.92]))),
+                    FocusPolicy::Pass,
+                ));
+            }
         }
         for s in &v.sites {
             let color = rgb(s.rgb);

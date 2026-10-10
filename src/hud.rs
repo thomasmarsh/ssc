@@ -1223,6 +1223,10 @@ pub enum Tag {
     Region,
     Realm,
     Sector,
+    /// What the sector asks of this build: level, rating and verdict (slice K3).
+    Area,
+    /// The plain lines under it: what is missing, the volley warning, the way around.
+    AreaDetail,
     Score,
     Mult,
     Standing,
@@ -1248,7 +1252,7 @@ pub enum Tag {
 }
 
 impl Tag {
-    const ALL: [Tag; 39] = [
+    const ALL: [Tag; 41] = [
         Tag::Discovery(0),
         Tag::Discovery(1),
         Tag::Discovery(2),
@@ -1260,6 +1264,8 @@ impl Tag {
         Tag::Region,
         Tag::Realm,
         Tag::Sector,
+        Tag::Area,
+        Tag::AreaDetail,
         Tag::Score,
         Tag::Mult,
         Tag::Standing,
@@ -1294,7 +1300,7 @@ impl Tag {
         match self {
             Tag::Discovery(_) => 11.0,
             Tag::Region => 19.0,
-            Tag::Realm => 11.0,
+            Tag::Realm | Tag::AreaDetail => 11.0,
             Tag::Score => 26.0,
             Tag::Weapon => 17.0,
             Tag::Prompt => 14.0,
@@ -1307,6 +1313,7 @@ impl Tag {
             | Tag::Hints
             | Tag::Standing
             | Tag::Nearest
+            | Tag::Area
             | Tag::Apex => 12.0,
             Tag::Vitals | Tag::Key(_) => 11.0,
             Tag::Cargo(_) | Tag::Farm => 10.0,
@@ -1367,6 +1374,12 @@ fn discovery_labels(game: &Game, s: &Screen) -> Vec<(String, Vec2, f32, [f32; 3]
     out
 }
 
+/// The color an area readout of this mood is drawn in (the star map uses the same ones).
+fn mood_color(mood: ssc::readout::Mood) -> Color {
+    let [r, g, b] = crate::ui::screens::chart::mood_rgb(mood);
+    Color::srgb(r, g, b)
+}
+
 /// Text, color, anchor (x, y of the text's middle) and alignment for a tag; None hides it.
 fn describe(
     tag: Tag,
@@ -1413,6 +1426,40 @@ fn describe(
             Vec2::new(cx, 40.0),
             Align::Center,
         ),
+        Tag::Area => {
+            let area = &hud.area;
+            if area.head.is_empty() {
+                return None;
+            }
+            let calm = area.mood == ssc::readout::Mood::Calm;
+            (
+                area.head.clone(),
+                mood_color(area.mood).with_alpha(if calm {
+                    0.55
+                } else {
+                    0.7 + 0.3 * hud.region_alpha
+                }),
+                Vec2::new(cx, 56.0),
+                Align::Center,
+            )
+        }
+        Tag::AreaDetail => {
+            let area = &hud.area;
+            if area.detail.is_empty() || area.mood < ssc::readout::Mood::Warn {
+                return None;
+            }
+            (
+                area.detail
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                mood_color(area.mood).with_alpha(0.85),
+                Vec2::new(cx, 84.0),
+                Align::Center,
+            )
+        }
         Tag::Dev => {
             if !game.dev.active() && !game.culture_modified() && !game.tuning_modified() {
                 return None;

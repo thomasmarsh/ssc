@@ -23,6 +23,7 @@ use crate::ui::theme::Tone;
 use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::{KeyCode, Vec2};
 use ssc::backdrop;
+use ssc::readout::{AreaReadout, Mood};
 use ssc::simulation::{ChartEntry, ChartGeometry, ChartGeometryKind, Game, price_text};
 use ssc::world::{SECTOR_SIZE, SectorId};
 use std::collections::BTreeMap;
@@ -82,6 +83,16 @@ pub fn mark_rgb(icon: Icon) -> [f32; 3] {
     }
 }
 
+/// The color of an area readout's mood, on the map's bars, the HUD tag and the sidebar.
+pub fn mood_rgb(mood: Mood) -> [f32; 3] {
+    match mood {
+        Mood::Calm => [0.42, 0.72, 0.62],
+        Mood::Notice => [0.62, 0.78, 0.92],
+        Mood::Warn => [0.98, 0.72, 0.30],
+        Mood::Danger => [0.95, 0.36, 0.40],
+    }
+}
+
 const RENEWABLE: [f32; 3] = [0.29, 0.87, 0.50];
 const LODE: [f32; 3] = [0.95, 0.80, 0.50];
 const EMPTY_FILL: [f32; 3] = [0.027, 0.035, 0.051];
@@ -112,6 +123,10 @@ pub struct TileView {
     /// A civilization's tint on the edge of its sectors.
     pub edge: Option<[f32; 4]>,
     pub label: String,
+    /// The area readout's bar for a charted sector: the color of its mood.
+    pub read: Option<[f32; 3]>,
+    /// The way around the selected sector (the skirt), marked on its tile.
+    pub skirt: bool,
 }
 
 /// Literal geometry: a disc or a structural footprint, in map pixels (never given a minimum
@@ -254,7 +269,7 @@ fn legend_widths(note: bool) -> Vec<f32> {
     widths
 }
 
-pub const NOTE: &str = "Green rim: renewable   Tint: local nebula   Dark: uncharted   North is up";
+pub const NOTE: &str = "Green rim: renewable   Tint: local nebula   Bar: calm, amber taxed or risky, red blocked   North is up";
 
 fn hint_widths(hints: &[HintView]) -> Vec<f32> {
     hints
@@ -773,6 +788,67 @@ impl Side {
     }
 }
 
+/// What the sector asks of this build, in plain words (slice K3): the verdict, each missing
+/// answer with what answers it, where sources add up, the volley warning, the keeper and the
+/// way around.
+fn area_lines(read: &AreaReadout) -> Vec<Side> {
+    let rgb = mood_rgb(read.mood());
+    let warn = Some((Icon::Warn, rgb));
+    let mut out = vec![Side::Line {
+        icon: if read.mood() >= Mood::Warn {
+            warn
+        } else {
+            None
+        },
+        text: read.headline_short(),
+        tint: Tint::Rgb(rgb),
+        small: false,
+    }];
+    let mut line = |text: String, small: bool, tint: Tint| {
+        out.push(Side::Line {
+            icon: None,
+            text,
+            tint,
+            small,
+        });
+    };
+    for (i, need) in read.needs.iter().enumerate() {
+        let unmet = !need.met();
+        let tint = if unmet {
+            Tint::Rgb(rgb)
+        } else {
+            Tint::Tone(Tone::Good)
+        };
+        line(need.text.clone(), !unmet, tint);
+        if i == 0 && unmet {
+            line(
+                format!("{} {}", need.why, need.answer),
+                true,
+                Tint::Tone(Tone::Muted),
+            );
+        }
+        if let Some(s) = &need.synergy {
+            line(s.clone(), true, Tint::Tone(Tone::Accent));
+        }
+    }
+    if let Some(burst) = &read.burst {
+        line(burst.text(), false, Tint::Rgb(mood_rgb(Mood::Danger)));
+    }
+    if let Some(key) = &read.key {
+        line(key.clone(), true, Tint::Tone(Tone::Normal));
+    } else if read.missing().next().is_some() {
+        line(
+            "FIND A WARD: ping and chart nearby sectors for who carries it".into(),
+            true,
+            Tint::Tone(Tone::Muted),
+        );
+    }
+    if let Some(skirt) = read.skirt_text() {
+        line(skirt, false, Tint::Rgb(mood_rgb(Mood::Notice)));
+    }
+    out
+}
+
 fn entry_lines(game: &Game, cursor: &ChartCursor, entry: Option<&ChartEntry>) -> Vec<Side> {
     let mut side = Vec::new();
     let line = |side: &mut Vec<Side>, icon, text: String, tint, small| {
@@ -808,6 +884,9 @@ fn entry_lines(game: &Game, cursor: &ChartCursor, entry: Option<&ChartEntry>) ->
         Tint::Rgb(realm.tint()),
         true,
     );
+    if charted(e) || cursor.sector == game.sector() {
+        side.extend(area_lines(&game.area_readout(cursor.sector)));
+    }
 
     // What is here, as icon chips.
     let mut counts = Vec::new();
@@ -1153,6 +1232,10 @@ impl ChartView {
                 .entry(SectorId::containing(b.position))
                 .or_insert(b.position);
         }
+        let skirt = (selected_entry.is_some_and(charted) || cursor.sector == ship_sector)
+            .then(|| game.area_readout(cursor.sector).skirt)
+            .flatten()
+            .map(|s| s.sector);
         let mut tiles = Vec::with_capacity((cols * rows) as usize);
         let mut marks = Vec::new();
         for row in 0..rows {
@@ -1176,6 +1259,8 @@ impl ChartView {
                     let [r, g, b] = c.tint;
                     [r, g, b, 0.42]
                 });
+                let readout = known.then(|| game.area_readout_plain(id));
+                let read = readout.as_ref().map(|r| mood_rgb(r.mood()));
                 let label = if tile < 30.0 {
                     String::new()
                 } else if id == SectorId::ORIGIN {
@@ -1196,6 +1281,8 @@ impl ChartView {
                     fill,
                     edge,
                     label,
+                    read,
+                    skirt: skirt == Some(id),
                 });
                 let Some(e) = entry else {
                     if id == here {
@@ -1434,6 +1521,28 @@ mod tests {
             ..Default::default()
         };
         game
+    }
+
+    #[test]
+    fn a_charted_sector_reads_its_area_and_a_dark_one_does_not() {
+        let mut game = Game::new(42);
+        game.step(0.05, ssc::simulation::Input::default());
+        let view = ChartView::build(&game, &cursor(3), SIZES[0], Device::Keys, 0, None);
+        let home = view
+            .tiles
+            .iter()
+            .find(|t| t.sector == SectorId::ORIGIN)
+            .expect("home tile");
+        assert!(home.read.is_some(), "the ship's own sector is charted");
+        assert!(
+            view.tiles
+                .iter()
+                .filter(|t| t.sector != SectorId::ORIGIN)
+                .all(|t| t.read.is_none()),
+            "an uncharted sector shows nothing of what it holds"
+        );
+        let text = view.text_lines().join("\n");
+        assert!(text.contains("LEVEL"), "{text}");
     }
 
     #[test]

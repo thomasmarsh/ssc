@@ -775,6 +775,24 @@ tuning_life::groups! {
         balance_dash_mitigation: f32 = 0.15, 0.0, 0.95, Multiplier;
     }
 
+    // ---- readout: what the area readout says before entering (docs/CAPABILITIES.md 3) -----------
+    group "readout" {
+        /// A channel's share of the area's danger weight below this is no need at all.
+        readout_need_floor: f32 = 0.05, 0.0, 1.0, Ratio;
+        /// The share at which a channel's need reaches the top degree (the need is `ceil(3 * share / this)`).
+        readout_need_ref: f32 = 0.25, 0.01, 1.0, Ratio;
+        /// Most danger one channel's missing answer adds, however dominant (a tax of `min(lift, this) * missing / need`).
+        readout_tax_k: f32 = 0.5, 0.0, 0.5, Ratio;
+        /// All taxes of an area together are at most this.
+        readout_tax_cap: f32 = 1.2, 0.0, 10.0, Ratio;
+        /// A channel whose full cover would cut the area's danger by less than this is no need, and a summed tax below it reads as Open.
+        readout_tax_min: f32 = 0.1, 0.0, 1.0, Ratio;
+        /// The rating over the area's level at and above which the area is TRIVIAL.
+        readout_trivial: f32 = 3.0, 1.3, 100.0, Multiplier;
+        /// One volley of the area's worst shooter, as a share of the ship's pool, from which the readout warns.
+        readout_volley_warn: f32 = 0.5, 0.0, 10.0, Ratio;
+    }
+
     // ---- drops -----------------------------------------------------------------------------------
     group "drops" {
         /// A creature's drop chance is multiplied by this plus hardness slope times (hull + shield) / reference.

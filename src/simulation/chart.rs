@@ -495,6 +495,11 @@ impl Game {
         })
     }
 
+    /// Whether the chart holds anything about `id` (visited or pinged).
+    pub(super) fn chart_knows(&self, id: SectorId) -> bool {
+        self.chart.known.contains_key(&id)
+    }
+
     /// What the chart knows of one sector, if anything.
     pub fn chart_entry(&self, id: SectorId) -> Option<ChartEntry> {
         self.chart_entries().into_iter().find(|e| e.sector == id)

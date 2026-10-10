@@ -10,7 +10,7 @@ use super::*;
 use crate::region::{Region, RegionKind, region};
 
 /// Where the region tracking stands.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct RegionState {
     /// The sector the region was last computed for, and the region there.
     here: Option<(SectorId, Region)>,
@@ -22,6 +22,22 @@ pub struct RegionState {
     since_banner: f32,
     /// Game time the current region was committed to (the HUD fades its tag from here).
     entered: f32,
+    /// The sector whose area readout was last announced (slice K3).
+    area_sector: Option<SectorId>,
+}
+
+/// The state digest hashes this, and the announcement memo is presentation only (it only
+/// decides when a banner posts), so it stays out of the text.
+impl std::fmt::Debug for RegionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegionState")
+            .field("here", &self.here)
+            .field("current", &self.current)
+            .field("candidate", &self.candidate)
+            .field("since_banner", &self.since_banner)
+            .field("entered", &self.entered)
+            .finish()
+    }
 }
 
 impl Game {
@@ -33,6 +49,7 @@ impl Game {
             self.region.here = Some((sector, r));
         }
         self.region.since_banner += dt;
+        self.announce_area(sector);
         if let Some(current) = self.region.current.as_ref() {
             self.run
                 .region_time
@@ -58,6 +75,36 @@ impl Game {
         self.region.candidate = Some((here.key, held));
         if held >= self.tune.region_hold && self.region.since_banner >= self.tune.region_cooldown {
             self.enter_region(here, true);
+        }
+    }
+
+    /// On entering a sector, posts what it asks of this build when that is worth saying: the
+    /// level and verdict, the first missing answer in plain words, and a burst warning
+    /// (`docs/CAPABILITIES.md` 3.4). An unremarkable area is not announced.
+    fn announce_area(&mut self, sector: SectorId) {
+        if self.region.area_sector == Some(sector) {
+            return;
+        }
+        self.region.area_sector = Some(sector);
+        let read = self.area_readout(sector);
+        if !read.notable() {
+            return;
+        }
+        let rarity = if read.mood() >= crate::readout::Mood::Danger {
+            upgrades::Rarity::Epic
+        } else {
+            upgrades::Rarity::Rare
+        };
+        self.notify(format!("AREA  {}", read.headline_short()), rarity);
+        // One more line, the most useful one; the rest lives on the HUD tag and the map.
+        let more = read
+            .missing()
+            .next()
+            .map(|n| n.text.clone())
+            .or_else(|| read.burst.as_ref().map(|b| b.text()))
+            .or_else(|| read.skirt_text());
+        if let Some(text) = more {
+            self.notify(text, rarity);
         }
     }
 

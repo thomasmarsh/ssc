@@ -4,6 +4,8 @@
 
 use super::skills::Skill;
 use super::{BodyKind, Game, Material, Tier, arsenal::Profile};
+use crate::readout::{AreaProfile, AreaReadout, Band, Bearing, Skirt, Verdict};
+use crate::world::SectorId;
 use crate::world::Standing;
 
 /// The hull ring is cut into this many segments so damage is countable at a glance.
@@ -342,6 +344,16 @@ pub struct HudModel {
     pub worms: (usize, f32),
     /// The realm the ship is announced to be in (none before the first tick).
     pub realm: Option<RealmTag>,
+    /// What the sector asks of this build, said plainly (slice K3).
+    pub area: AreaTag,
+}
+
+/// The HUD's area tag: the verdict in one line, the detail lines under it, and how loud it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AreaTag {
+    pub head: String,
+    pub detail: Vec<String>,
+    pub mood: crate::readout::Mood,
 }
 
 /// The realm tag of the HUD: the name, the kind, its colour and the axes it tests.
@@ -520,6 +532,7 @@ impl Game {
             jam,
             organs: self.organ_icons(),
             realm: self.realm_tag(),
+            area: self.area_tag(),
             worms: (
                 self.latches().len(),
                 self.latches()
@@ -527,6 +540,77 @@ impl Game {
                     .map(|l| (l.fed / 120.0).clamp(0.0, 1.0))
                     .fold(0.0, f32::max),
             ),
+        }
+    }
+
+    /// What `sector` asks of this ship as it flies, with the skirt among the charted
+    /// neighbors (slice K3). The profile is the threat model's, remembered per sector.
+    pub fn area_readout(&self, sector: SectorId) -> AreaReadout {
+        let mut read = self.area_readout_plain(sector);
+        if read.verdict == Verdict::Open && read.band >= Band::Even {
+            return read;
+        }
+        let here = read.cost();
+        let mut best: Option<(f32, Skirt)> = None;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let Some(bearing) = Bearing::of_step(dx, dy) else {
+                    continue;
+                };
+                let id = SectorId {
+                    x: sector.x + dx,
+                    y: sector.y + dy,
+                };
+                if !self.chart_knows(id) {
+                    continue;
+                }
+                let next = self.area_readout_plain(id);
+                let cost = next.cost();
+                if cost.is_finite()
+                    && cost < here * 0.95
+                    && best.as_ref().is_none_or(|(c, _)| cost < *c)
+                {
+                    best = Some((
+                        cost,
+                        Skirt {
+                            bearing,
+                            sector: id,
+                            verdict: next.verdict,
+                        },
+                    ));
+                }
+            }
+        }
+        read.skirt = best.map(|(_, s)| s);
+        read
+    }
+
+    /// The readout of one sector without a skirt (what the star map colors tiles by).
+    pub fn area_readout_plain(&self, sector: SectorId) -> AreaReadout {
+        let profile = AreaProfile::of(self.seed, sector);
+        let known = sector == self.sector() || self.chart_knows(sector);
+        AreaReadout::read(&profile, &self.loadout, self.power(), &self.tune, known)
+    }
+
+    /// The HUD tag of the sector the ship is in.
+    pub fn area_tag(&self) -> AreaTag {
+        let read = self.area_readout(self.sector());
+        let mut detail = Vec::new();
+        for need in read.needs.iter().filter(|n| !n.met()).take(2) {
+            detail.push(need.text.clone());
+        }
+        for need in read.needs.iter().filter(|n| n.synergy.is_some()).take(1) {
+            detail.extend(need.synergy.clone());
+        }
+        if let Some(burst) = &read.burst {
+            detail.push(burst.text());
+        }
+        detail.extend(read.key.clone());
+        detail.extend(read.skirt_text());
+        AreaTag {
+            head: read.headline_short(),
+            detail,
+            mood: read.mood(),
         }
     }
 
@@ -651,6 +735,74 @@ mod tests {
         assert_eq!(hud.cargo.len(), 6);
         assert_eq!(hud.threat, 0);
         assert_eq!(hud.lives, 3);
+    }
+
+    /// A sector at least `ring` out that reads taxed or worse to the bare ship, and a calmer
+    /// charted neighbor to skirt through, if the seed has one near.
+    fn notable_sector(game: &Game) -> SectorId {
+        (6..40)
+            .flat_map(|x| (-12..12).map(move |y| SectorId { x, y }))
+            .find(|&id| game.area_readout_plain(id).notable())
+            .expect("a notable sector")
+    }
+
+    #[test]
+    fn an_area_that_asks_something_is_announced_once_and_tagged_plainly() {
+        let mut game = empty_game();
+        game.set_auto_ping(false);
+        game.player_invulnerability = 1e9;
+        game.step(DT, Input::default());
+        let home = game.hud().area;
+        assert!(home.head.starts_with("LEVEL"), "{}", home.head);
+        assert!(home.mood < crate::readout::Mood::Warn);
+        assert!(!game.notices.iter().any(|n| n.text.starts_with("AREA")));
+
+        let target = notable_sector(&game);
+        game.teleport(target.center());
+        game.step(DT, Input::default());
+        let areas = |g: &Game| {
+            g.notices
+                .iter()
+                .filter(|n| n.text.starts_with("AREA"))
+                .count()
+        };
+        assert_eq!(areas(&game), 1, "announced on entering");
+        game.step(DT, Input::default());
+        assert_eq!(areas(&game), 1, "and only once");
+        let tag = game.hud().area;
+        assert!(tag.mood >= crate::readout::Mood::Warn);
+        assert!(tag.head.contains("LEVEL"), "{}", tag.head);
+        assert!(!tag.detail.is_empty());
+    }
+
+    #[test]
+    fn the_skirt_points_at_a_charted_calmer_neighbor_and_never_at_an_unknown_one() {
+        let mut game = empty_game();
+        let target = notable_sector(&game);
+        let before = game.area_readout(target);
+        assert!(
+            before.skirt.is_none(),
+            "nothing charted, nothing to skirt through"
+        );
+        let mut best = None;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let id = SectorId {
+                    x: target.x + dx,
+                    y: target.y + dy,
+                };
+                if id != target && game.area_readout_plain(id).cost() < before.cost() * 0.95 {
+                    best = Some(id);
+                }
+            }
+        }
+        let Some(calm) = best else {
+            return;
+        };
+        game.chart_reveal(calm, true);
+        let skirt = game.area_readout(target).skirt.expect("a skirt");
+        assert_eq!(skirt.sector, calm);
+        assert!(!matches!(skirt.verdict, Verdict::Blocked(_)));
     }
 
     #[test]

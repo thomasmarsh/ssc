@@ -19,6 +19,7 @@ pub mod hosted;
 pub mod mixer;
 pub mod power;
 pub mod range;
+pub mod readout;
 pub mod realm;
 pub mod region;
 pub mod savefile;
