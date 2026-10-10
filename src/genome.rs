@@ -1580,8 +1580,8 @@ mod tests {
     use super::*;
     use crate::world::SectorId;
 
-    // Expanded size and mass bounds allow larger outliers and heavier sampled bodies.
-    const GOLDEN_NO_GRAMMAR: u64 = 0x9c9d79833c8f214b;
+    // Platform-dependent math channels are rounded in fingerprint().
+    const GOLDEN_NO_GRAMMAR: u64 = 0x62efeac263c87d1a;
 
     #[test]
     fn home_species_are_named_and_colored_from_their_genes() {
@@ -1718,9 +1718,22 @@ mod tests {
         }
     }
 
-    /// A fingerprint of every gene (as bits) of a genome.
+    /// A fingerprint of every gene of a genome.
     fn fingerprint(g: &Genome, h: &mut u64) {
         let mut copy = *g;
+        // exp/powf are not bit-identical across platform math libraries. Their
+        // results also flow into mass, hull and movement; pin these channels to
+        // 0.1% of their gene ranges while keeping all other genes and RNG draws exact.
+        for (v, lo, hi) in [
+            (&mut copy.stiffness, 30.0, 900.0),
+            (&mut copy.radius, 6.0, 180.0),
+            (&mut copy.mass, -60.0, 2400.0),
+            (&mut copy.hull, 10.0, 400.0),
+            (&mut copy.speed, 30.0, 450.0),
+            (&mut copy.cruise, 10.0, 200.0),
+        ] {
+            *v = ((*v - lo) / (hi - lo) * 1000.0).round();
+        }
         // Pin the original scalar draw channels independently of the table's storage
         // layout: ordinary single carriers still express the same three parameters.
         let n = copy.genes().len() - POWER_GENES;

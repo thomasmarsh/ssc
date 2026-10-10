@@ -1139,16 +1139,26 @@ mod tests {
         assert!(report.next_in.is_none() && report.fort.is_none());
         assert!(report.threat < game.threat());
         // Hurting one makes it (and only the hurt one at first) fight back.
-        let victim = members(&game, o.id)[0];
-        let (victim_id, at) = (victim.id, victim.position);
-        let mut shot = Bullet::friendly(at + Vec2::X * 60.0, -Vec2::X * 2000.0, 1.0);
+        let victim = members(&game, o.id)
+            .into_iter()
+            .find(|b| b.active && !b.phased)
+            .expect("an active settler");
+        let (victim_id, at, durability) =
+            (victim.id, victim.position, victim.health + victim.shield);
+        // Resolve the graze before further movement, with no intervening rock or
+        // settler. Five minutes of physics need not leave a clear firing lane.
+        game.bodies
+            .retain(|b| b.kind == BodyKind::Player || b.id == victim_id);
+        let mut shot = Bullet::friendly(at, Vec2::ZERO, 1.0);
         shot.damage = 3.0;
         game.bullets.push(shot);
+        game.move_bullets(DT);
+        let hurt = game.body(victim_id).expect("a graze does not kill");
+        assert!(hurt.health + hurt.shield < durability);
         for _ in 0..4 {
             game.step(DT, Input::default());
         }
         let hurt = game.body(victim_id).expect("a graze does not kill");
-        assert!(hurt.health < hurt.max_health);
         assert!(hurt.alert, "a hurt settler fights back");
     }
 }
