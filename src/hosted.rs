@@ -20,6 +20,11 @@ use std::f32::consts::TAU;
 
 /// Separates the resident streams from every other one.
 pub const HOSTED_SALT: u64 = 0x4057_ED00_0000_0007;
+// Both numbers below stay consts, not registry entries: the cap is a hard invariant beside the
+// sector body budget, and the radius is also how a saved body is recognised as a resident
+// (`is_brood` and `is_rider` read the genes), so a tuned value would orphan residents of a loaded game.
+// `attach::SPACING` likewise stays a const (live attachment layout reads it).
+
 /// The most residents any one host may carry, whatever its genome says. A hard cap beside the
 /// sector's body budget (`world::SECTOR_BODY_BUDGET`), which residents also count against.
 pub const MAX_RESIDENTS: u8 = 6;

@@ -7,6 +7,7 @@
 //! compatible modules. Awakening retains its existing no-carrier policy.
 
 use crate::genome::{Gene, Genome, Weapon};
+use crate::simulation::tuning_gen;
 use crate::world::SectorParams;
 
 /// Weaver webs: short harmless lead-in, one minute solid, and spaced spokes.
@@ -35,18 +36,17 @@ pub const GATE: f32 = 0.3;
 /// Four bounded scalars per catalog power, including signed intensity/mode.
 pub const POWER_GENES: usize = Power::ALL.len() * 4;
 pub const INHERIT_SALT: u64 = 0x504F_5745_525F_4352;
-/// Individuals awaken from this ring on (a quarter of the 1 percent outlier band: 1 in 400).
-pub const AWAKEN_RING: u32 = 3;
-/// Ring steps over which a power's weight ramps from zero to full past its first ring.
-pub const RAMP_RINGS: f32 = 3.0;
-/// Intensity of a sampled species' carriers and of an awakened individual.
-pub const SPECIES_INTENSITY: (f32, f32) = (0.55, 1.0);
-pub const AWAKENED_INTENSITY: (f32, f32) = (0.35, 0.6);
-/// A mutation never drops an intensity below this (so one step cannot erase a power).
-pub const MUTATION_FLOOR: f32 = GATE + 0.02;
-/// How sector character tilts a power's weight: `BIAS_BASE + BIAS_SLOPE * above(param)`.
-pub const BIAS_BASE: f32 = 0.75;
-pub const BIAS_SLOPE: f32 = 1.0;
+// Generation numbers of the power lottery are registry entries (`simulation/tuning_gen.rs`,
+// read through `tuning_gen::active()`; a former const `NAME` is `gen_power_<name in lower case>`):
+// `AWAKEN_RING` (individuals awaken from this ring on: a quarter of the 1 percent outlier band,
+// 1 in 400), `RAMP_RINGS` (ring steps over which a power's weight ramps from zero to full past
+// its first ring), `SPECIES_INTENSITY` and `AWAKENED_INTENSITY` (intensity range of a sampled
+// species' carriers and of an awakened individual, as `_lo` and `_hi`), `MUTATION_FLOOR` (a
+// mutation never drops an intensity below it, so one step cannot erase a power; the default is
+// `GATE + 0.02`) and `BIAS_BASE` and `BIAS_SLOPE` (how sector character tilts a power's weight:
+// `BIAS_BASE + BIAS_SLOPE * above(param)`). `GATE` stays a const because `strength`, `active`
+// and the development fork read it directly, and the per-power numbers below because the
+// simulation reads them as consts.
 
 // ---- tuning: the powers that are built --------------------------------------------------
 
@@ -819,7 +819,7 @@ fn above(p: f32) -> f32 {
     (p - 0.5).max(0.0) * 2.0
 }
 
-fn bias(power: Power, params: &SectorParams) -> f32 {
+fn bias(power: Power, params: &SectorParams, base: f32, slope: f32) -> f32 {
     let lean = match power.spec().bias {
         Bias::Tech => above(params.tech),
         Bias::Distortion => above(params.distortion),
@@ -828,7 +828,7 @@ fn bias(power: Power, params: &SectorParams) -> f32 {
         Bias::Aggression => above(params.aggression),
         Bias::Calm => above(1.0 - params.aggression),
     };
-    BIAS_BASE + BIAS_SLOPE * lean
+    base + slope * lean
 }
 
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
@@ -839,19 +839,46 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 /// The species-level weight of each power at `params`: rate, times the ramp past its first
 /// ring, times the sector's lean.
 pub fn weights(params: &SectorParams) -> [f32; 22] {
+    let tg = tuning_gen::active();
     let mut out = [0.0; 22];
     for (slot, power) in out.iter_mut().zip(Power::ALL) {
         let first = power.first_ring() as f32;
-        let ramp = smoothstep(first, first + RAMP_RINGS, params.depth);
+        let ramp = smoothstep(first, first + tg.gen_power_ramp_rings, params.depth);
         // A power the simulation does not act on is never sampled (it would be a dud).
         let live = if power.built() { 1.0 } else { 0.0 };
-        *slot = power.rate() * ramp * bias(power, params) * live;
+        *slot = power.rate()
+            * ramp
+            * bias(
+                power,
+                params,
+                tg.gen_power_bias_base,
+                tg.gen_power_bias_slope,
+            )
+            * live;
     }
     out
 }
 
 fn lerp(lo: f32, hi: f32, t: f32) -> f32 {
     lo + (hi - lo) * t
+}
+
+/// Intensity range of a sampled species' carriers (`gen_power_species_intensity_lo` and `_hi`).
+pub(crate) fn species_intensity() -> (f32, f32) {
+    let tg = tuning_gen::active();
+    (
+        tg.gen_power_species_intensity_lo,
+        tg.gen_power_species_intensity_hi,
+    )
+}
+
+/// Intensity range of an awakened individual (`gen_power_awakened_intensity_lo` and `_hi`).
+fn awakened_intensity() -> (f32, f32) {
+    let tg = tuning_gen::active();
+    (
+        tg.gen_power_awakened_intensity_lo,
+        tg.gen_power_awakened_intensity_hi,
+    )
 }
 
 /// Writes `power` into `g` from a position `inner` in [0, 1) inside its band: intensity in
@@ -892,7 +919,7 @@ pub fn sample(g: &mut Genome, roll: f32, params: &SectorParams) {
             // A body plan that cannot carry it (a chain cannot blink) stays plain; a bypasser
             // is given a gun (see `style`).
             if power == Power::Bypass || power.fits(g) {
-                express(g, power, (roll - start) / weight, SPECIES_INTENSITY);
+                express(g, power, (roll - start) / weight, species_intensity());
                 style(g, power);
             }
             return;
@@ -1426,7 +1453,11 @@ impl Genome {
 /// `AWAKEN_RING`, never for a creature that already carries a power or that learns (a
 /// civilization's people).
 pub fn awaken(mut g: Genome, roll: f32, ring: u32) -> Genome {
-    if ring < AWAKEN_RING || roll < 1.0 - crate::genome::OUTLIER_CHANCE || g.learner > 0.0 {
+    let tg = tuning_gen::active();
+    if ring < tg.gen_power_awaken_ring
+        || roll < 1.0 - tg.gen_genome_outlier_chance
+        || g.learner > 0.0
+    {
         return g;
     }
     let slot = (roll * 997.0).fract();
@@ -1448,7 +1479,7 @@ pub fn awaken(mut g: Genome, roll: f32, ring: u32) -> Genome {
     let mut at = inner * total;
     for (power, rate) in eligible {
         if at < rate {
-            express(&mut g, power, (at / rate).min(0.999), AWAKENED_INTENSITY);
+            express(&mut g, power, (at / rate).min(0.999), awakened_intensity());
             break;
         }
         at -= rate;
@@ -1460,11 +1491,12 @@ pub fn awaken(mut g: Genome, roll: f32, ring: u32) -> Genome {
 /// Only intensities above the gate move, never below `MUTATION_FLOOR`, so a mutation cannot
 /// invent a power or erase one.
 pub fn mutate(g: &mut Genome, mut step: impl FnMut() -> f32) {
+    let floor = tuning_gen::active().gen_power_mutation_floor;
     let active: Vec<_> = g.powers().map(|c| c.power).collect();
     // Intensities retain their original order; one-carrier mutation uses identical draws.
     for &power in &active {
         let v = power.value(g);
-        power.set(g, (v.abs() + step()).clamp(MUTATION_FLOOR, 1.0).copysign(v));
+        power.set(g, (v.abs() + step()).clamp(floor, 1.0).copysign(v));
     }
     for power in active {
         let params = g.power_params_mut(power);
@@ -1517,7 +1549,7 @@ mod tests {
         assert_eq!((g.segments, g.limbs, g.radius, g.weapon), body);
         let before = g;
         assert_eq!(awaken(g, 0.9999, 30), before);
-        express(&mut g, Power::Song, 0.35, SPECIES_INTENSITY);
+        express(&mut g, Power::Song, 0.35, species_intensity());
         assert_eq!(g.power_module(Power::Blink), blink);
         assert!(g.song.abs() >= GATE);
     }
@@ -1793,8 +1825,9 @@ mod tests {
         let mut m = g;
         for _ in 0..2000 {
             m = m.mutate(&mut rng);
-            assert!(m.blink >= MUTATION_FLOOR && m.blink <= 1.0, "{}", m.blink);
-            assert!(m.warp <= -MUTATION_FLOOR && m.warp >= -1.0, "{}", m.warp);
+            let floor = tuning_gen::active().gen_power_mutation_floor;
+            assert!(m.blink >= floor && m.blink <= 1.0, "{}", m.blink);
+            assert!(m.warp <= -floor && m.warp >= -1.0, "{}", m.warp);
         }
         let drifted = g.drifted(7, 0.72, |_| -1.0);
         assert_eq!(drifted.blink, g.blink);

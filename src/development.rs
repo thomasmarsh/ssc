@@ -148,7 +148,7 @@ pub(crate) fn diversify(g: &mut Genome, source: &Rng, params: &crate::world::Sec
         for (power, weight) in eligible {
             if pick < weight {
                 // Express only the module: styling here would erase the original carrier.
-                crate::power::express(g, power, modules.f32(), crate::power::SPECIES_INTENSITY);
+                crate::power::express(g, power, modules.f32(), crate::power::species_intensity());
                 break;
             }
             pick -= weight;

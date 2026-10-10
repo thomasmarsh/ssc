@@ -7,7 +7,9 @@
 
 use super::*;
 
-/// Clear arc kept between neighbors on a host, in world units.
+/// Clear arc kept between neighbors on a host, in world units. A const, not a registry entry:
+/// live attachment (`free_angle`, `capacity`) reads it beside generation (`hosted::fitting`), and
+/// the two must never disagree about a loaded game's hosts.
 pub const SPACING: f32 = 4.0;
 
 /// A host as the attach mechanic sees it: where it is, which way it faces and how big.

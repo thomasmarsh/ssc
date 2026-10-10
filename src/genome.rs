@@ -18,21 +18,19 @@ use crate::builder::Builder;
 use crate::development::Appearance;
 use crate::hosted::Hosted;
 use crate::power::{self, POWER_GENES, Power, PowerParams};
+use crate::simulation::tuning_gen::active;
 use crate::world::{Rng, SectorParams, hash2};
 
 /// No creature has more bodies than this, however its genes combine.
 pub const MAX_PARTS: u32 = 28;
-/// Largest fractional jitter of an ordinary individual, and of the wider 4% tail.
-pub const JITTER_SMALL: f32 = 0.05;
-pub const JITTER_WIDE: f32 = 0.25;
-/// Chance an individual also carries one outlier gene.
-pub const OUTLIER_CHANCE: f32 = 0.01;
-/// Offspring mutation: ordinary jitter, the rare wider jitter and its chance per birth, and
-/// the chance per birth that a social, trigger or fear category flips.
-pub const MUTATION_SMALL: f32 = 0.01;
-pub const MUTATION_RARE: f32 = 0.08;
-pub const MUTATION_RARE_CHANCE: f32 = 0.03;
-pub const MUTATION_FLIP_CHANCE: f32 = 0.002;
+// Individual variation and offspring mutation are registry entries (`simulation/tuning_gen.rs`,
+// read through `tuning_gen::active()`; a former const `NAME` is `gen_genome_<name in lower
+// case>`): `JITTER_SMALL` and `JITTER_WIDE` (largest fractional jitter of an ordinary individual
+// and of the wider 4 percent tail), `OUTLIER_CHANCE` (chance an individual also carries one
+// outlier gene), `MUTATION_SMALL`, `MUTATION_RARE` and `MUTATION_RARE_CHANCE` (offspring
+// mutation: ordinary jitter, the rare wider jitter and its chance per birth) and
+// `MUTATION_FLIP_CHANCE` (chance per birth that a social, trigger or fear category flips). The
+// anatomy and grammar sections of a body plan read the same mutation entries.
 /// Separates individual variation from every other stream.
 pub const INDIVIDUAL_SALT: u64 = 0x1D1F_A11E_0000_0011;
 /// Extra fling strength a negative-mass body has on top of its fling gene.
@@ -563,11 +561,12 @@ impl Genome {
     /// `individual` for a roll already made: below 0.95 a tiny jitter, up to 0.99 a wide one,
     /// above that one outlier gene. Apex elders force the wide end.
     pub fn individual_from(self, rng: &mut Rng, roll: f32) -> Self {
-        let outlier = roll >= 1.0 - OUTLIER_CHANCE;
-        let spread = if (0.95..1.0 - OUTLIER_CHANCE).contains(&roll) {
-            JITTER_WIDE
+        let tg = active();
+        let outlier = roll >= 1.0 - tg.gen_genome_outlier_chance;
+        let spread = if (0.95..1.0 - tg.gen_genome_outlier_chance).contains(&roll) {
+            tg.gen_genome_jitter_wide
         } else {
-            JITTER_SMALL
+            tg.gen_genome_jitter_small
         };
         let mut g = self;
         let triangle = |rng: &mut Rng| (rng.f32() + rng.f32() - 1.0) * spread;
@@ -646,8 +645,13 @@ impl Genome {
     /// up to `MUTATION_RARE`, and the social, trigger and fear categories almost never flip.
     /// Body plan, weapon and diet are untouched. Always passes through `limited()`.
     pub fn mutate(self, rng: &mut Rng) -> Self {
-        let rare = rng.chance(MUTATION_RARE_CHANCE);
-        let spread = if rare { MUTATION_RARE } else { MUTATION_SMALL };
+        let tg = active();
+        let rare = rng.chance(tg.gen_genome_mutation_rare_chance);
+        let spread = if rare {
+            tg.gen_genome_mutation_rare
+        } else {
+            tg.gen_genome_mutation_small
+        };
         let mut g = self;
         let triangle = |rng: &mut Rng| (rng.f32() + rng.f32() - 1.0) * spread;
         for v in [
@@ -674,7 +678,7 @@ impl Genome {
         g.hue = (g.hue + triangle(rng) * 0.5).rem_euclid(1.0);
         g.pale += triangle(rng) * 0.5;
         g.bright += triangle(rng) * 0.5;
-        if rng.chance(MUTATION_FLIP_CHANCE) {
+        if rng.chance(tg.gen_genome_mutation_flip_chance) {
             match rng.int(0, 2) {
                 0 => g.social.set(rng.int(0, 3) as u8),
                 1 => g.trigger.set(rng.int(0, 2) as u8),

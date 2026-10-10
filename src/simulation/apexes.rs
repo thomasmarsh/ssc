@@ -807,18 +807,23 @@ mod tests {
                     let ring = crate::range::ring(id);
                     match crate::apex::rank(seed, id) {
                         Some(Rank::Major) => {
-                            assert!(ring >= crate::apex::APEX_RING, "{id:?}");
+                            assert!(
+                                ring >= crate::simulation::tuning_gen::active().gen_apex_apex_ring,
+                                "{id:?}"
+                            );
                             major += 1;
                         }
                         Some(Rank::Lesser) => {
                             assert!(
-                                (crate::apex::LESSER_RING..crate::apex::APEX_RING).contains(&ring)
+                                (crate::simulation::tuning_gen::active().gen_apex_lesser_ring
+                                    ..crate::simulation::tuning_gen::active().gen_apex_apex_ring)
+                                    .contains(&ring)
                             );
                             lesser += 1;
                         }
                         None => {}
                     }
-                    if ring >= crate::apex::APEX_RING {
+                    if ring >= crate::simulation::tuning_gen::active().gen_apex_apex_ring {
                         sectors += 1;
                     }
                 }
@@ -827,7 +832,7 @@ mod tests {
         let rate = major as f32 / sectors as f32;
         assert!((0.008..0.04).contains(&rate), "major rate {rate}");
         assert!(lesser < major / 3 + 1, "{lesser} lesser against {major}");
-        for ring in 0..crate::apex::LESSER_RING as i32 {
+        for ring in 0..crate::simulation::tuning_gen::active().gen_apex_lesser_ring as i32 {
             for x in -ring..=ring {
                 for y in -ring..=ring {
                     assert!(crate::apex::rank(SEED, SectorId { x, y }).is_none());
@@ -911,7 +916,10 @@ mod tests {
             let (_, depth) = crate::anatomy::grow(&spec);
             assert!(depth <= crate::anatomy::MAX_DEPTH);
             shallow += usize::from(depth <= 1);
-            assert!(crate::apex::reach(&spec) <= crate::apex::MAX_REACH + 0.01);
+            assert!(
+                crate::apex::reach(&spec)
+                    <= crate::simulation::tuning_gen::active().gen_apex_max_reach + 0.01
+            );
             assert_eq!(spec.genome.mounts, 0);
         }
         assert!(animals * 10 >= all.len() * 7, "{animals} of {}", all.len());
@@ -1365,7 +1373,7 @@ mod tests {
             let far = hull(a, Rank::Major, 25);
             assert!(near >= 2000.0, "{a:?} has only {near} hull at ring 5");
             assert!(far > 1.3 * near, "{a:?}: {near} -> {far}");
-            assert!(far <= near * crate::apex::GROWTH_CAP);
+            assert!(far <= near * crate::simulation::tuning_gen::active().gen_apex_growth_cap);
             assert!(hull(a, Rank::Lesser, 5) < 0.6 * near);
         }
         assert!(shield(Rank::Major, 25) > shield(Rank::Major, 5));
@@ -2073,7 +2081,8 @@ mod tests {
                     let g = spawn.species.unwrap().genome;
                     assert!(
                         !crate::realm::carries_jam(&g)
-                            || crate::range::ring(id) >= crate::apex::JAM_STAMP_RING
+                            || crate::range::ring(id)
+                                >= crate::simulation::tuning_gen::active().gen_apex_jam_stamp_ring
                     );
                     assert!(!Power::Lens.active(&g) && !Power::Split.active(&g));
                 }

@@ -21,6 +21,7 @@ use crate::genome::{
 use crate::hosted::{HOSTED_SALT, Hosted, partner, resident_of};
 use crate::power::Power;
 use crate::region::{harsh_name, soft_name};
+use crate::simulation::tuning_gen::active;
 use crate::world::{
     Phenotype, Rng, Rooting, SECTOR_BODY_BUDGET, SECTOR_SIZE, SectorId, Spawn, hash2,
 };
@@ -28,28 +29,25 @@ use bevy::prelude::Vec2;
 
 /// Separates the apex stream from every other one.
 pub const APEX_SALT: u64 = 0xA9E8_0000_0000_0057;
-/// Rings at which a full apex (and, one ring earlier, a lesser one) may appear.
-pub const APEX_RING: u32 = 5;
-pub const LESSER_RING: u32 = 3;
-/// Chance per sector of holding one, by rank.
-pub const APEX_CHANCE: f32 = 0.02;
-pub const LESSER_CHANCE: f32 = 0.004;
 
-// ---- tuning: strength ------------------------------------------------------------------
+// ---- tuning --------------------------------------------------------------------------
+//
+// The generation numbers of the elders are the `gen_apex_*` entries of the tunables registry
+// (`simulation/tuning_gen.rs`), read through `tuning_gen::active()`; a former const `NAME` is the
+// entry `gen_apex_<name in lower case>` (`HOSTED_SHARE` is `_lo` for a lesser and `_hi` for a
+// major elder). `APEX_RING` and `LESSER_RING` are the rings at which a full apex (and, earlier,
+// a lesser one) may appear, `APEX_CHANCE` and `LESSER_CHANCE` the chance per sector by rank,
+// `LESSER_SHARE` a lesser apex's share of a major one's hull and shield, `RING_GROWTH` and
+// `GROWTH_CAP` the growth of hull and shield per ring beyond `APEX_RING` (on top of the depth
+// threat that already divides the damage it takes) and its ceiling, `BASE_SHIELD` the shield of
+// a major apex at `APEX_RING`, `MAX_REACH` how far an elder's body may reach from its head in
+// head radii (so a species keeps one silhouette whatever archetype its elder is stamped with),
+// `JAM_STAMP_RING` the ring from which a major elder carries a jam stamp, and
+// `REALM_STAMP_STRENGTH` and `REALM_STAMP_SHARE` the strength of a power a realm stamps on its
+// elders and the share of major elders in a stamping realm that carry one.
 
-/// A lesser apex has this share of a major one's hull and shield.
-pub const LESSER_SHARE: f32 = 0.5;
-/// Hull and shield grow by this share per ring beyond `APEX_RING` (on top of the depth
-/// threat that already divides the damage it takes and sharpens what it deals), up to
-/// `GROWTH_CAP` times the base.
-pub const RING_GROWTH: f32 = 0.02;
-pub const GROWTH_CAP: f32 = 3.0;
-/// Shield of a major apex at `APEX_RING`.
-pub const BASE_SHIELD: f32 = 160.0;
-/// No elder's body reaches further than this many head radii from its head (so a species keeps
-/// one silhouette whatever archetype its elder is stamped with).
-pub const MAX_REACH: f32 = 14.0;
-/// A phase change (enrage, shed armour) comes below this share of the hull.
+/// A phase change (enrage, shed armour) comes below this share of the hull. It stays a const
+/// because the simulation reads it directly.
 pub const ENRAGE_AT: f32 = 0.35;
 
 /// How grand an apex is.
@@ -66,7 +64,7 @@ impl Rank {
     pub fn share(self) -> f32 {
         match self {
             Self::Major => 1.0,
-            Self::Lesser => LESSER_SHARE,
+            Self::Lesser => active().gen_apex_lesser_share,
         }
     }
 }
@@ -316,10 +314,11 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 /// Whether a sector holds an apex, and of what rank. Pure.
 pub fn rank(seed: u64, id: SectorId) -> Option<Rank> {
     let ring = crate::range::ring(id);
-    let (rank, chance) = if ring >= APEX_RING {
-        (Rank::Major, APEX_CHANCE)
-    } else if ring >= LESSER_RING {
-        (Rank::Lesser, LESSER_CHANCE)
+    let tg = active();
+    let (rank, chance) = if ring >= tg.gen_apex_apex_ring {
+        (Rank::Major, tg.gen_apex_apex_chance)
+    } else if ring >= tg.gen_apex_lesser_ring {
+        (Rank::Lesser, tg.gen_apex_lesser_chance)
     } else {
         return None;
     };
@@ -364,7 +363,9 @@ pub fn name(seed: u64, id: SectorId) -> String {
 
 /// The growth factor of hull and shield at ring `ring`.
 fn growth(ring: u32) -> f32 {
-    (1.0 + RING_GROWTH * ring.saturating_sub(APEX_RING) as f32).min(GROWTH_CAP)
+    let tg = active();
+    (1.0 + tg.gen_apex_ring_growth * ring.saturating_sub(tg.gen_apex_apex_ring) as f32)
+        .min(tg.gen_apex_growth_cap)
 }
 
 /// The hull points an apex of this kind has at `ring` (not a gene: genes are bounded).
@@ -374,7 +375,7 @@ pub fn hull(archetype: Archetype, rank: Rank, ring: u32) -> f32 {
 
 /// The shield points an apex has at `ring`.
 pub fn shield(rank: Rank, ring: u32) -> f32 {
-    BASE_SHIELD * rank.share() * growth(ring)
+    active().gen_apex_base_shield * rank.share() * growth(ring)
 }
 
 /// Turns an ordinary genome into an elder: the individual's wide jitter and an outlier gene,
@@ -451,14 +452,12 @@ pub fn escort(queen: &Genome) -> Genome {
     .limited()
 }
 
-/// The jam stamps of the elders (the bestiary's special attacks): from `JAM_RING` out, a major
-/// Maelstrom carries an emp, a Warden a glare and a Phantom a confusion beside its blink. They
-/// are genes like any carrier's, so they obey the same jam fairness rules.
-pub const JAM_STAMP_RING: u32 = 7;
-
+/// The jam stamps of the elders (the bestiary's special attacks): from `JAM_STAMP_RING` out, a
+/// major Maelstrom carries an emp, a Warden a glare and a Phantom a confusion beside its blink.
+/// They are genes like any carrier's, so they obey the same jam fairness rules.
 fn stamp_special(g: &mut Genome, rank: Rank, archetype: Archetype, ring: u32) {
     use crate::power::Power;
-    if rank != Rank::Major || ring < JAM_STAMP_RING {
+    if rank != Rank::Major || ring < active().gen_apex_jam_stamp_ring {
         return;
     }
     match archetype {
@@ -487,11 +486,6 @@ pub fn has_bubble(seed: u64, id: SectorId, archetype: Archetype) -> bool {
         || (realm.spec().bubbled && realm.intensity >= crate::realm::STAMP_FROM)
 }
 
-/// The strength of a power a realm stamps on its elders, and the share of major elders in a
-/// stamping realm that carry one.
-pub const REALM_STAMP_STRENGTH: f32 = 0.75;
-pub const REALM_STAMP_SHARE: f32 = 0.7;
-
 /// A realm's signature power (see `realm::Spec::stamps`) on a major elder that carries none yet:
 /// blinks in the veil, jams in the dead reach, drawing-in in the crush. Pure, on its own hash.
 fn stamp_realm(g: &mut Genome, seed: u64, id: SectorId, rank: Rank, archetype: Archetype) {
@@ -502,13 +496,14 @@ fn stamp_realm(g: &mut Genome, seed: u64, id: SectorId, rank: Rank, archetype: A
     let realm = crate::realm::weighting(seed, id);
     let h = hash2(seed ^ APEX_SALT ^ 0x57, id.x, id.y);
     let unit = |shift: u32| ((h >> shift) & 0xFFFF) as f32 / 65_536.0;
-    if unit(0) >= REALM_STAMP_SHARE {
+    let tg = active();
+    if unit(0) >= tg.gen_apex_realm_stamp_share {
         return;
     }
     if let Some(power) = realm.stamp(unit(16)) {
         let before = *g;
         g.clear_powers();
-        if !crate::power::stamp(g, power, REALM_STAMP_STRENGTH) {
+        if !crate::power::stamp(g, power, tg.gen_apex_realm_stamp_strength) {
             *g = before;
         }
     }
@@ -518,7 +513,7 @@ fn stamp_realm(g: &mut Genome, seed: u64, id: SectorId, rank: Rank, archetype: A
 /// the species lineage, so every elder grown from one species wears the same shape), made
 /// misshapen, with the genome's `radius` and `hull` scaled by `ELDER_SCALE`. The specimen's own
 /// weapon mounts are dropped (the archetype's weapon fires from the head, as before), and the
-/// body is cut back until it reaches no further than `MAX_REACH` from the head. Weak points per
+/// body is cut back until it reaches no further than `MAX_REACH` (`gen_apex_max_reach`) from the head. Weak points per
 /// node kind are open: today every part is plain armour and only the head is the fight (see
 /// `Game::register_apex`). Pure function of `seed` and `lineage`.
 pub fn body(seed: u64, lineage: u64) -> AnimalSpecimen {
@@ -529,7 +524,8 @@ pub fn body(seed: u64, lineage: u64) -> AnimalSpecimen {
     );
     let mut spec = AnimalSpecimen::for_entity(seed, key).misshapen();
     spec.genome.mounts = 0;
-    while reach(&spec) > MAX_REACH {
+    let max_reach = active().gen_apex_max_reach;
+    while reach(&spec) > max_reach {
         let g = &mut spec.genome;
         if g.depth > 0 {
             g.depth -= 1;
@@ -626,16 +622,14 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
     }
 }
 
-/// The share of elders that carry residents, by rank.
-pub const HOSTED_SHARE: (f32, f32) = (0.25, 0.5);
-
 /// The elder's host slots, if it has any: a pure function of the seed and sector.
 fn hosting(seed: u64, id: SectorId, rank: Rank) -> Option<Hosted> {
     let h = hash2(seed ^ HOSTED_SALT ^ 0x68, id.x, id.y);
+    let tg = active();
     let share = if rank == Rank::Major {
-        HOSTED_SHARE.1
+        tg.gen_apex_hosted_share_hi
     } else {
-        HOSTED_SHARE.0
+        tg.gen_apex_hosted_share_lo
     };
     ((h & 0xFFFF) as f32 / 65_536.0 < share)
         .then(|| Hosted::from_hash(h >> 16, biome(seed, id).kind))

@@ -13,8 +13,14 @@
 
 use bevy::prelude::Vec2;
 
-use crate::genome::{Categorical, Gene, MUTATION_RARE, MUTATION_RARE_CHANCE, MUTATION_SMALL};
+use crate::genome::{Categorical, Gene};
+use crate::simulation::tuning_gen::active;
 use crate::world::{Rng, SectorId, hash2};
+
+// The caps, step limits and rule tables below stay consts, not registry entries: plan expression
+// (`grow`) runs wherever a plant is drawn or collided with (flora, the viewers), so they are
+// structure of the format, not generation draws. The per birth chances and mutation spreads are
+// registry entries (`gen_grammar_*`, `gen_genome_mutation_*`).
 
 /// Hard caps. A plan never has more parts than this, whatever the genome or seed.
 pub const MAX_PARTS: usize = 1024;
@@ -944,10 +950,11 @@ impl GrammarGenome {
     /// Small heritable drift; the template flips only rarely and depth rarely moves.
     /// Always valid.
     pub fn mutate(self, rng: &mut Rng) -> Self {
-        let spread = if rng.chance(MUTATION_RARE_CHANCE) {
-            MUTATION_RARE
+        let tg = active();
+        let spread = if rng.chance(tg.gen_genome_mutation_rare_chance) {
+            tg.gen_genome_mutation_rare
         } else {
-            MUTATION_SMALL
+            tg.gen_genome_mutation_small
         };
         let mut g = self;
         let triangle = |rng: &mut Rng| (rng.f32() + rng.f32() - 1.0) * spread;
@@ -964,11 +971,11 @@ impl GrammarGenome {
         ] {
             *v *= 1.0 + triangle(rng);
         }
-        if rng.chance(GRAMMAR_FLIP_CHANCE) {
+        if rng.chance(tg.gen_grammar_grammar_flip_chance) {
             g.template
                 .set(rng.int(0, Template::ALL.len() as u32 - 1) as u8);
         }
-        if rng.chance(GRAMMAR_DEPTH_CHANCE) {
+        if rng.chance(tg.gen_grammar_grammar_depth_chance) {
             g.depth = if rng.chance(0.5) {
                 g.depth.saturating_add(1)
             } else {
@@ -1016,9 +1023,10 @@ impl GrammarGenome {
     }
 }
 
-/// Per birth chance that the template flips, and that depth moves by one.
-pub const GRAMMAR_FLIP_CHANCE: f32 = 0.01;
-pub const GRAMMAR_DEPTH_CHANCE: f32 = 0.04;
+// The per birth chances that the template flips and that depth moves by one are the registry
+// entries `gen_grammar_grammar_flip_chance` and `gen_grammar_grammar_depth_chance` (the former
+// consts `GRAMMAR_FLIP_CHANCE` and `GRAMMAR_DEPTH_CHANCE`); the mutation spreads are the
+// `gen_genome_mutation_*` entries.
 
 /// A genome and its plan seed: everything needed to regenerate a plan. This is what a save
 /// stores (plus the growth time).
@@ -1841,10 +1849,5 @@ mod tests {
         assert_eq!(a.distance(&a), 0.0);
         assert!((a.distance(&b) - b.distance(&a)).abs() < 1e-5);
         assert_eq!(Plan::default().distance(&Plan::default()), 0.0);
-    }
-
-    #[test]
-    fn mutation_constants_match_the_creature_genome() {
-        assert_eq!(MUTATION_SMALL, crate::genome::MUTATION_SMALL);
     }
 }

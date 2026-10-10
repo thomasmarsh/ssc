@@ -535,6 +535,94 @@ macro_rules! groups {
             gen_well_share_binary: f32 = 0.08, 0.0, 1.0, Ratio, Regen;
         }
 
+        // ---- the power lottery (`power.rs`) ------------------------------------------------------------
+        group "gen_power" {
+            /// Ring from which an individual may awaken a power of its own (a quarter of the 1 percent outlier band, 1 in 400).
+            gen_power_awaken_ring: u32 = 3, 0, 100, Count, Regen;
+            /// Ring steps over which a power weight ramps from zero to full past its first ring.
+            gen_power_ramp_rings: f32 = 3.0, 0.1, 50.0, Distance, Regen;
+            /// Intensity range of a sampled species carriers (low and high; the gate is 0.3).
+            gen_power_species_intensity_lo: f32 = 0.55, 0.3, 1.0, Ratio, Regen;
+            /// Intensity range of a sampled species carriers (low and high; the gate is 0.3).
+            gen_power_species_intensity_hi: f32 = 1.0, 0.3, 1.0, Ratio, Regen;
+            /// Intensity range of an awakened individual (low and high; the gate is 0.3).
+            gen_power_awakened_intensity_lo: f32 = 0.35, 0.3, 1.0, Ratio, Regen;
+            /// Intensity range of an awakened individual (low and high; the gate is 0.3).
+            gen_power_awakened_intensity_hi: f32 = 0.6, 0.3, 1.0, Ratio, Regen;
+            /// A mutation never drops an intensity below this, so one step cannot erase a power (the gate is 0.3; the default is the gate plus 0.02 as an f32).
+            gen_power_mutation_floor: f32 = 0.32000002, 0.3, 1.0, Ratio, Regen;
+            /// Weight of a power in a sector of average character: base plus slope times how far the sector leans toward it.
+            gen_power_bias_base: f32 = 0.75, 0.0, 5.0, Multiplier, Regen;
+            /// How strongly sector character tilts a power weight: base plus this times the lean.
+            gen_power_bias_slope: f32 = 1.0, 0.0, 5.0, Multiplier, Regen;
+        }
+
+        // ---- individual variation and heritable mutation (`genome.rs`, `anatomy.rs`, `grammar.rs`) ---
+        group "gen_genome" {
+            /// Largest fractional jitter of an ordinary individual.
+            gen_genome_jitter_small: f32 = 0.05, 0.0, 0.5, Ratio, Regen;
+            /// Largest fractional jitter of the wider 4 percent tail of individuals.
+            gen_genome_jitter_wide: f32 = 0.25, 0.0, 0.5, Ratio, Regen;
+            /// Chance an individual also carries one outlier gene (the band is the top of its variation roll).
+            gen_genome_outlier_chance: f32 = 0.01, 0.0, 0.05, Ratio, Regen;
+            /// Offspring mutation: the ordinary jitter of a gene as a fraction of its value.
+            gen_genome_mutation_small: f32 = 0.01, 0.0, 0.5, Ratio, Regen;
+            /// Offspring mutation: the rare wider jitter of a gene as a fraction of its value.
+            gen_genome_mutation_rare: f32 = 0.08, 0.0, 0.5, Ratio, Regen;
+            /// Chance per birth of the rare wider mutation.
+            gen_genome_mutation_rare_chance: f32 = 0.03, 0.0, 1.0, Ratio, Regen;
+            /// Chance per birth that a social, trigger or fear category flips.
+            gen_genome_mutation_flip_chance: f32 = 0.002, 0.0, 1.0, Ratio, Regen;
+        }
+
+        // ---- animal body plans (`anatomy.rs`) --------------------------------------------------------------
+        group "gen_anatomy" {
+            /// Chance per birth that an animal body plan flips its archetype.
+            gen_anatomy_animal_flip_chance: f32 = 0.01, 0.0, 1.0, Ratio, Regen;
+            /// Chance per birth that an animal body plan moves its iteration depth by one.
+            gen_anatomy_animal_depth_chance: f32 = 0.04, 0.0, 1.0, Ratio, Regen;
+        }
+
+        // ---- plant grammars (`grammar.rs`) ---------------------------------------------------------------
+        group "gen_grammar" {
+            /// Chance per birth that a plant grammar flips its template.
+            gen_grammar_grammar_flip_chance: f32 = 0.01, 0.0, 1.0, Ratio, Regen;
+            /// Chance per birth that a plant grammar moves its derivation depth by one.
+            gen_grammar_grammar_depth_chance: f32 = 0.04, 0.0, 1.0, Ratio, Regen;
+        }
+
+        // ---- apex elders (`apex.rs`) ----------------------------------------------------------------------
+        group "gen_apex" {
+            /// Ring from which a sector may hold a full (major) apex elder.
+            gen_apex_apex_ring: u32 = 5, 0, 100, Count, Regen;
+            /// Ring from which a sector may hold a lesser apex elder.
+            gen_apex_lesser_ring: u32 = 3, 0, 100, Count, Regen;
+            /// Chance per sector of holding a major apex, before the realm weighting.
+            gen_apex_apex_chance: f32 = 0.02, 0.0, 1.0, Ratio, Regen;
+            /// Chance per sector of holding a lesser apex, before the realm weighting.
+            gen_apex_lesser_chance: f32 = 0.004, 0.0, 1.0, Ratio, Regen;
+            /// A lesser apex has this share of a major one hull and shield.
+            gen_apex_lesser_share: f32 = 0.5, 0.0, 1.0, Ratio, Regen;
+            /// Hull and shield growth per ring beyond the major apex ring, as a share of the base.
+            gen_apex_ring_growth: f32 = 0.02, 0.0, 1.0, Ratio, Regen;
+            /// Hull and shield never grow past this multiple of the base.
+            gen_apex_growth_cap: f32 = 3.0, 1.0, 50.0, Multiplier, Regen;
+            /// Shield of a major apex at the major apex ring.
+            gen_apex_base_shield: f32 = 160.0, 0.0, 5000.0, Amount, Regen;
+            /// No elder body reaches further than this many head radii from its head, so a species keeps one silhouette.
+            gen_apex_max_reach: f32 = 14.0, 2.0, 100.0, Multiplier, Regen;
+            /// Ring from which a major Maelstrom carries an emp, a Warden a glare and a Phantom a confusion.
+            gen_apex_jam_stamp_ring: u32 = 7, 0, 100, Count, Regen;
+            /// Strength of the power a realm stamps on its major elders.
+            gen_apex_realm_stamp_strength: f32 = 0.75, 0.0, 1.0, Ratio, Regen;
+            /// Share of major elders in a stamping realm that carry its power.
+            gen_apex_realm_stamp_share: f32 = 0.7, 0.0, 1.0, Ratio, Regen;
+            /// Share of lesser elders that carry residents.
+            gen_apex_hosted_share_lo: f32 = 0.25, 0.0, 1.0, Ratio, Regen;
+            /// Share of major elders that carry residents.
+            gen_apex_hosted_share_hi: f32 = 0.5, 0.0, 1.0, Ratio, Regen;
+        }
+
         }
     };
 }
@@ -834,6 +922,42 @@ pub(super) fn validate(t: &Tunables) -> Result<(), String> {
         t.gen_range_belt_edge
     );
     rule!(
+        t.gen_power_species_intensity_lo <= t.gen_power_species_intensity_hi,
+        "gen_power_species_intensity_lo {} must stay not above gen_power_species_intensity_hi {}",
+        t.gen_power_species_intensity_lo,
+        t.gen_power_species_intensity_hi
+    );
+    rule!(
+        t.gen_power_awakened_intensity_lo <= t.gen_power_awakened_intensity_hi,
+        "gen_power_awakened_intensity_lo {} must stay not above gen_power_awakened_intensity_hi {}",
+        t.gen_power_awakened_intensity_lo,
+        t.gen_power_awakened_intensity_hi
+    );
+    rule!(
+        t.gen_genome_jitter_small <= t.gen_genome_jitter_wide,
+        "gen_genome_jitter_small {} must stay not above gen_genome_jitter_wide {}",
+        t.gen_genome_jitter_small,
+        t.gen_genome_jitter_wide
+    );
+    rule!(
+        t.gen_genome_mutation_small <= t.gen_genome_mutation_rare,
+        "gen_genome_mutation_small {} must stay not above gen_genome_mutation_rare {}",
+        t.gen_genome_mutation_small,
+        t.gen_genome_mutation_rare
+    );
+    rule!(
+        t.gen_apex_lesser_ring <= t.gen_apex_apex_ring,
+        "gen_apex_lesser_ring {} must stay not above gen_apex_apex_ring {}",
+        t.gen_apex_lesser_ring,
+        t.gen_apex_apex_ring
+    );
+    rule!(
+        t.gen_apex_hosted_share_lo <= t.gen_apex_hosted_share_hi,
+        "gen_apex_hosted_share_lo {} must stay not above gen_apex_hosted_share_hi {}",
+        t.gen_apex_hosted_share_lo,
+        t.gen_apex_hosted_share_hi
+    );
+    rule!(
         t.gen_realm_min_mult <= t.gen_realm_max_mult,
         "gen_realm_min_mult {} must stay at or below gen_realm_max_mult {}",
         t.gen_realm_min_mult,
@@ -992,6 +1116,26 @@ mod tests {
             PRE_REGISTRY_WINDOW,
             "memos do not leak across tunings"
         );
+    }
+
+    #[test]
+    fn genome_and_apex_entries_move_the_world_and_default_back_exactly() {
+        let _restore = Restore;
+        assert_eq!(
+            Tunables::DEFAULT.gen_power_mutation_floor,
+            crate::power::GATE + 0.02
+        );
+        let mut tuned = Tunables::DEFAULT;
+        tuned.gen_apex_apex_chance = 0.5;
+        tuned.gen_apex_lesser_ring = 1;
+        tuned.gen_genome_jitter_wide = 0.4;
+        tuned.gen_power_awaken_ring = 0;
+        install(&tuned);
+        let first = window_digest();
+        assert_ne!(first, PRE_REGISTRY_WINDOW);
+        assert_eq!(window_digest(), first, "deterministic under one tuning");
+        install(&Tunables::DEFAULT);
+        assert_eq!(window_digest(), PRE_REGISTRY_WINDOW);
     }
 
     fn body_positions(game: &Game) -> Vec<(u32, u32)> {

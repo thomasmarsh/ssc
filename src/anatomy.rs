@@ -25,14 +25,17 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 
 use bevy::prelude::Vec2;
 
-use crate::genome::{
-    Categorical, Gene, Genome, MUTATION_RARE, MUTATION_RARE_CHANCE, MUTATION_SMALL,
-};
+use crate::genome::{Categorical, Gene, Genome};
 use crate::grammar::{Domain, Part, PartKind, Plan, stream};
+use crate::simulation::tuning_gen::active;
 use crate::world::Rng;
 
 /// Separates the anatomy sections' mutation and crossover streams from every other stream.
 pub const ANATOMY_SALT: u64 = 0x4E41_B0D1_5EED_0006;
+
+// The caps below stay consts, not registry entries: they bound body plans wherever one is
+// expressed (the fortress budget, `bodyplan`, the viewers and the chain physics read them), not
+// only when one is generated.
 
 /// No animal body has more beads than this (the legacy genome's own cap, so every legacy
 /// body is representable).
@@ -360,9 +363,10 @@ impl Default for AnimalGenome {
     }
 }
 
-/// Per birth chance that the archetype flips, and that depth moves by one.
-pub const ANIMAL_FLIP_CHANCE: f32 = 0.01;
-pub const ANIMAL_DEPTH_CHANCE: f32 = 0.04;
+// The per birth chances that the archetype flips and that depth moves by one are the registry
+// entries `gen_anatomy_animal_flip_chance` and `gen_anatomy_animal_depth_chance` (the former
+// consts `ANIMAL_FLIP_CHANCE` and `ANIMAL_DEPTH_CHANCE`); the mutation spreads are the
+// `gen_genome_mutation_*` entries.
 
 impl AnimalGenome {
     /// Every gene with its bounds, in a fixed order, in the same `Gene` form `Genome::genes`
@@ -639,10 +643,11 @@ impl AnimalGenome {
     /// Small heritable drift; the archetype flips only rarely and depth rarely moves.
     /// Always valid.
     pub fn mutate(self, rng: &mut Rng) -> Self {
-        let spread = if rng.chance(MUTATION_RARE_CHANCE) {
-            MUTATION_RARE
+        let tg = active();
+        let spread = if rng.chance(tg.gen_genome_mutation_rare_chance) {
+            tg.gen_genome_mutation_rare
         } else {
-            MUTATION_SMALL
+            tg.gen_genome_mutation_small
         };
         let mut g = self;
         let triangle = |rng: &mut Rng| (rng.f32() + rng.f32() - 1.0) * spread;
@@ -675,11 +680,11 @@ impl AnimalGenome {
                 };
             }
         }
-        if rng.chance(ANIMAL_FLIP_CHANCE) {
+        if rng.chance(tg.gen_anatomy_animal_flip_chance) {
             g.archetype
                 .set(rng.int(0, Archetype::ALL.len() as u32 - 1) as u8);
         }
-        if rng.chance(ANIMAL_DEPTH_CHANCE) {
+        if rng.chance(tg.gen_anatomy_animal_depth_chance) {
             g.depth = if rng.chance(0.5) {
                 g.depth.saturating_add(1)
             } else {
