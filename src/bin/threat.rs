@@ -9,8 +9,9 @@
 //!   --per-ring N    sectors sampled per ring per seed (default 24)
 //!   --top N         rows in the outlier tables (default 15)
 //!   --realm-rings   ring span sampled for the per-realm table (default 40..130, about 25 rings)
-//!   --only SECTION  one of rings, outliers, weapons, speed, tiers, realms (repeatable)
+//!   --only SECTION  one of rings, outliers, weapons, speed, tiers, realms, channels (repeatable)
 
+use ssc::capability::{CHANNELS, Channel};
 use ssc::config::MASTER_SEED;
 use ssc::threat::{
     Class, Dist, Organism, SectorReport, Tier, assess_sector, ring_sectors, tier_at, tier_bare,
@@ -543,6 +544,135 @@ fn print_realms(o: &Options) {
     println!();
 }
 
+/// Mean channel share (percent) over `list`, then the share of sectors whose `gate_burst` of
+/// each gateable channel is at least one (lethal in a window without the answer).
+fn channel_row(list: &[&SectorReport]) -> String {
+    let n = list.len().max(1) as f32;
+    let mut mean = [0.0f32; CHANNELS];
+    for s in list {
+        for (m, v) in mean.iter_mut().zip(s.share) {
+            *m += v / n;
+        }
+    }
+    let mut cells: Vec<String> = mean.iter().map(|m| format!("{:.0}", m * 100.0)).collect();
+    for c in Channel::ALL.into_iter().filter(|c| c.can_gate()) {
+        let hot = list
+            .iter()
+            .filter(|s| s.gate_burst[c.index()] >= 1.0)
+            .count();
+        let present = list
+            .iter()
+            .filter(|s| s.gate_burst[c.index()] > 0.0)
+            .count();
+        cells.push(format!(
+            "{:.0}/{:.0}",
+            100.0 * present as f32 / n,
+            100.0 * hot as f32 / n
+        ));
+    }
+    cells.join(" | ")
+}
+
+fn channel_header(first: &str) -> String {
+    let mut head = vec![first.to_string(), "sectors".to_string()];
+    head.extend(Channel::ALL.iter().map(|c| c.label().to_string()));
+    head.extend(
+        Channel::ALL
+            .iter()
+            .filter(|c| c.can_gate())
+            .map(|c| format!("{} present/lethal %", c.label())),
+    );
+    format!("| {} |\n|{}", head.join(" | "), "---|".repeat(head.len()))
+}
+
+fn print_channels(o: &Options, by_ring: &BTreeMap<i32, Vec<(u64, SectorReport)>>) {
+    println!("## Channels\n");
+    println!(
+        "Share of the danger weight (`hostility * copies * power^2`) by channel at cover 0, mean over sectors, in percent; the unattributed rest is unarmed bodies and bonds. The last four columns are, per gateable channel, the percent of sectors where a power of that channel is present and, after the slash, where the worst hostile window burst over the unmitigated reference pool is at least 1 (lethal without the answer). Attribution: the gun keeps `1 / flair^2` of an organism, its powers split the rest by `ln(1 + term)`.\n"
+    );
+    println!("{}", channel_header("ring"));
+    for (ring, list) in by_ring {
+        let rows: Vec<&SectorReport> = list.iter().map(|(_, s)| s).collect();
+        println!("| {ring} | {} | {} |", rows.len(), channel_row(&rows));
+    }
+    println!();
+    println!("### What cover and skills do to the danger\n");
+    println!(
+        "Median sector danger and the worst window burst ratio (`burst_ratio_for`, parry and dash counted and switched off by disabling powers for their duty) at the kit of the ring's depth. `+wards` fits degree 2 on JAM, FIELD, ARMOR and INFO; `+skills` trains parry and dash.\n"
+    );
+    println!("| ring | tier | danger p50 | danger p90 | worst burst ratio p90 | cover |");
+    println!("|---|---|---|---|---|---|");
+    for (ring, list) in by_ring {
+        let typical = tier_at(o.seed, *ring as f32, false, false);
+        let maxed = tier_at(o.seed, *ring as f32, true, false);
+        let tiers = [
+            tier_bare(),
+            typical.clone(),
+            typical.warded(),
+            typical.skilled(),
+            typical.warded().skilled(),
+            maxed.warded(),
+        ];
+        for t in tiers {
+            let danger = Dist::of(list.iter().map(|(_, s)| s.danger_for(&t)).collect());
+            let burst = Dist::of(
+                list.iter()
+                    .map(|(_, s)| {
+                        s.organisms
+                            .iter()
+                            .filter(|org| hostile(org))
+                            .map(|org| org.burst_ratio_for(&t))
+                            .fold(0.0, f32::max)
+                    })
+                    .collect(),
+            );
+            let cover: Vec<String> = Channel::ALL
+                .iter()
+                .filter(|c| t.cover[c.index()] > 0)
+                .map(|c| format!("{}{}", c.label(), t.cover[c.index()]))
+                .collect();
+            println!(
+                "| {ring} | {} | {} | {} | {} | {} |",
+                t.label,
+                f(danger.p50),
+                f(danger.p90),
+                f(burst.p90),
+                if cover.is_empty() {
+                    "none".to_string()
+                } else {
+                    cover.join(" ")
+                }
+            );
+        }
+    }
+    println!();
+}
+
+fn print_channel_realms(o: &Options) {
+    println!("### Channels by realm\n");
+    println!(
+        "Rings {}..{}, as in the realm table; same columns as above.\n",
+        o.realm_rings.0, o.realm_rings.1
+    );
+    println!("{}", channel_header("realm"));
+    let mut by: BTreeMap<&'static str, Vec<SectorReport>> = BTreeMap::new();
+    for k in 0..o.seeds {
+        let seed = derived(o.seed, k);
+        let step = ((o.realm_rings.1 - o.realm_rings.0) / 24).max(1) as usize;
+        for r in (o.realm_rings.0..=o.realm_rings.1).step_by(step) {
+            for id in ring_sectors(r, o.per_ring) {
+                let s = assess_sector(seed, id);
+                by.entry(s.realm).or_default().push(s);
+            }
+        }
+    }
+    for (realm, list) in by {
+        let rows: Vec<&SectorReport> = list.iter().collect();
+        println!("| {realm} | {} | {} |", rows.len(), channel_row(&rows));
+    }
+    println!();
+}
+
 fn print_dominant(o: &Options, by_ring: &BTreeMap<i32, Vec<(u64, SectorReport)>>) {
     println!("## Most dangerous sampled sectors\n");
     println!("| danger | ring | sector | realm | share | dominant contributors |");
@@ -626,6 +756,10 @@ fn main() -> ExitCode {
     }
     if wants(&o, "realms") {
         print_realms(&o);
+    }
+    if wants(&o, "channels") {
+        print_channels(&o, &by_ring);
+        print_channel_realms(&o);
     }
     let _ = SectorId::ORIGIN;
     ExitCode::SUCCESS

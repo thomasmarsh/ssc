@@ -10,12 +10,14 @@
 //! even match is one. A sector's **danger** is `sqrt(sum(hostility * power^2))` over its
 //! organisms (Lanchester's square law for a simultaneous engagement).
 
+use crate::capability::{self, CHANNELS, Channel};
 use crate::genome::{Genome, Species, Trigger, Weapon};
 use crate::power::Power;
 use crate::range::ring;
 use crate::realm;
 use crate::simulation::BodyKind;
 use crate::simulation::burst::{hit_fraction, weapon_numbers};
+use crate::simulation::skills::Skill;
 use crate::simulation::tuning::{DEFAULT, Tunables};
 use crate::simulation::upgrades::{Loadout, Rarity, Source, Stats, roll_part};
 use crate::world::{self, Rng, SectorId, SectorParams, Spawn};
@@ -132,12 +134,129 @@ pub struct Organism {
     /// The organism's power index (see the module note).
     pub power: f32,
     pub hostility: f32,
+    /// The power index before the powers' flair (`power = core * product(1 + term)`).
+    pub core: f32,
+    /// Each live power's flair term (`role weight * strength`) and the channel it feeds
+    /// (`capability::power::channel`; None for a bond or a door, which no cover touches).
+    pub flair: Vec<(Option<Channel>, f32)>,
+    /// The channel the organism's gun feeds.
+    pub weapon_channel: Option<Channel>,
+    /// What its powers take from the ship for a moment (EMP removes parry and dash).
+    pub disables: Vec<Disable>,
+}
+
+/// A power that does not hurt but takes a capability away (docs/CAPABILITIES.md 2.1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Disable {
+    pub power: Power,
+    pub parry: bool,
+    pub dash: bool,
+    /// Share of the time the capability is off: hold over period, at most one.
+    pub duty: f32,
+}
+
+/// What a power takes from the ship, if anything. Exhaustive on purpose.
+pub fn disables(power: Power) -> (bool, bool) {
+    match power {
+        // Stormcap: parry and dash are dead for the hold (BESTIARY fairness caps).
+        Power::Emp => (true, true),
+        // Scrambled controls break the dash line, not the parry arc.
+        Power::Confuse => (false, true),
+        Power::Phase
+        | Power::Repel
+        | Power::Warp
+        | Power::Lens
+        | Power::Blink
+        | Power::Bypass
+        | Power::Glare
+        | Power::Mimic
+        | Power::Latch
+        | Power::Symbiote
+        | Power::Cloud
+        | Power::Devour
+        | Power::Weave
+        | Power::Song
+        | Power::Dim
+        | Power::Rift
+        | Power::Sling
+        | Power::Rune
+        | Power::Split
+        | Power::Engulf => (false, false),
+    }
 }
 
 impl Organism {
     /// Burst against a tier's pool: above one it can end the ship inside one window.
     pub fn burst_ratio(&self, tier: &Tier) -> f32 {
         self.burst_expected / tier.pool(self.pith)
+    }
+
+    /// The power index against `tier`: each power's flair is cut by the tier's cover of its
+    /// channel (`1 - cover / 3`, so degree 3 is immunity). At cover 0 it is `power` exactly.
+    pub fn power_for(&self, tier: &Tier) -> f32 {
+        let mut flair = 1.0;
+        for &(channel, term) in &self.flair {
+            let k = channel.map_or(1.0, |c| 1.0 - f32::from(tier.cover[c.index()]) / 3.0);
+            flair *= 1.0 + term * k;
+        }
+        self.core * flair
+    }
+
+    /// The burst ratio against `tier` with its parry and dash counted: mitigation scales the
+    /// pool by `1 / (1 - m)`, and a disabling power of this organism switches its capability off
+    /// for the duty. Equal to `burst_ratio` for a tier without those skills.
+    pub fn burst_ratio_for(&self, tier: &Tier) -> f32 {
+        let (mut off_parry, mut off_dash) = (0.0f32, 0.0f32);
+        for d in &self.disables {
+            if d.parry {
+                off_parry = off_parry.max(d.duty);
+            }
+            if d.dash {
+                off_dash = off_dash.max(d.duty);
+            }
+        }
+        let m = tier.mitigation(off_parry, off_dash);
+        self.burst_expected / (tier.pool(self.pith) / (1.0 - m))
+    }
+
+    /// Where the organism's weight in the danger goes, by channel, at its power against `tier`
+    /// (not normalized: `hostility * copies * power_for^2`, split by channel). The gun keeps
+    /// the share the flair does not explain (`1 / flair^2`); the rest is split over the powers'
+    /// channels by `ln(1 + term)`. A bond, an unarmed body or a bare door has an unattributed
+    /// part (the second value).
+    pub fn channel_weight(&self, tier: &Tier) -> ([f32; CHANNELS], f32) {
+        let power = self.power_for(tier);
+        let total = self.hostility * self.copies as f32 * power * power;
+        let mut out = [0.0f32; CHANNELS];
+        let ratio = if self.core > 0.0 {
+            power / self.core
+        } else {
+            1.0
+        };
+        let gun = 1.0 / (ratio * ratio).max(1.0);
+        let mut loose = 0.0;
+        match self.weapon_channel {
+            Some(c) => out[c.index()] += total * gun,
+            None => loose += total * gun,
+        }
+        let rest = total * (1.0 - gun);
+        let sum: f32 = self
+            .flair
+            .iter()
+            .map(|&(c, t)| {
+                let k = c.map_or(1.0, |c| 1.0 - f32::from(tier.cover[c.index()]) / 3.0);
+                (1.0 + t * k).ln()
+            })
+            .sum();
+        for &(c, t) in &self.flair {
+            let k = c.map_or(1.0, |c| 1.0 - f32::from(tier.cover[c.index()]) / 3.0);
+            let part = rest * (1.0 + t * k).ln() / sum.max(1e-9);
+            match c {
+                Some(c) => out[c.index()] += part,
+                None => loose += part,
+            }
+        }
+        (out, loose)
     }
 
     pub fn potential_ratio(&self, tier: &Tier) -> f32 {
@@ -151,6 +270,11 @@ pub struct Tier {
     pub label: String,
     pub stats: Stats,
     pub power: f32,
+    /// Capability degree per channel (`capability::coverage`), 0 for the bare ship.
+    pub cover: [u8; CHANNELS],
+    /// Trained share of the parry and dash skills, 0 to 1.
+    pub parry: f32,
+    pub dash: f32,
 }
 
 impl Tier {
@@ -175,6 +299,36 @@ impl Tier {
     pub fn dps(&self) -> f32 {
         self.stats.damage / self.stats.fire_period.max(0.01)
     }
+
+    /// The share of damage parry and dash turn aside while the given fractions of the time
+    /// each is disabled: `1 - (1 - parry_m (1 - off)) (1 - dash_m (1 - off))`. Zero for a
+    /// tier without the skills.
+    pub fn mitigation(&self, parry_off: f32, dash_off: f32) -> f32 {
+        let p = DEFAULT.balance_parry_mitigation * self.parry * (1.0 - parry_off.clamp(0.0, 1.0));
+        let d = DEFAULT.balance_dash_mitigation * self.dash * (1.0 - dash_off.clamp(0.0, 1.0));
+        1.0 - (1.0 - p) * (1.0 - d)
+    }
+
+    /// The same kit with one ward per gateable channel fitted at degree 2 (a gate cleared),
+    /// on top of whatever it already covers.
+    pub fn warded(&self) -> Tier {
+        let mut t = self.clone();
+        for c in Channel::ALL.into_iter().filter(|c| c.can_gate()) {
+            let at = &mut t.cover[c.index()];
+            *at = (*at).max(2);
+        }
+        t.label = format!("{}+wards", self.label);
+        t
+    }
+
+    /// The same kit with parry and dash fully trained.
+    pub fn skilled(&self) -> Tier {
+        let mut t = self.clone();
+        t.parry = 1.0;
+        t.dash = 1.0;
+        t.label = format!("{}+skills", self.label);
+        t
+    }
 }
 
 /// The bare starting ship.
@@ -184,6 +338,9 @@ pub fn tier_bare() -> Tier {
         label: "bare".into(),
         stats,
         power: Loadout::default().power(),
+        cover: [0; CHANNELS],
+        parry: 0.0,
+        dash: 0.0,
     }
 }
 
@@ -216,7 +373,24 @@ pub fn tier_at(seed: u64, depth: f32, maxed: bool, graded: bool) -> Tier {
         label,
         stats: loadout.stats(),
         power: loadout.power(),
+        cover: cover_of(&loadout),
+        parry: skill_fraction(&loadout, Skill::Parry),
+        dash: skill_fraction(&loadout, Skill::Dash),
     }
+}
+
+/// A loadout's coverage as a channel-indexed array.
+fn cover_of(loadout: &Loadout) -> [u8; CHANNELS] {
+    let cov = capability::coverage(loadout);
+    let mut out = [0u8; CHANNELS];
+    for c in Channel::ALL {
+        out[c.index()] = cov.get(c).degree();
+    }
+    out
+}
+
+fn skill_fraction(loadout: &Loadout, skill: Skill) -> f32 {
+    f32::from(loadout.skills.level(skill)) / f32::from(skill.max_level().max(1))
 }
 
 /// How many of a genome's bodies carry its gun (the same rule as `Game::armed_part`).
@@ -309,6 +483,8 @@ fn assess_genome(
     let size = (SHIP_RADIUS / g.radius.max(4.0)).clamp(0.5, 2.0);
     let mut powers = Vec::new();
     let (mut blink, mut phase, mut flair) = (0.0, 0.0, 1.0);
+    let mut terms = Vec::new();
+    let mut edges = Vec::new();
     for c in g.live_powers() {
         powers.push(format!("{:?}", c.power).to_lowercase());
         match c.power {
@@ -316,7 +492,19 @@ fn assess_genome(
             Power::Phase => phase = c.strength,
             _ => {}
         }
-        flair *= 1.0 + role(c.power).weight() * c.strength;
+        let term = role(c.power).weight() * c.strength;
+        flair *= 1.0 + term;
+        terms.push((capability::power::channel(c.power), term));
+        let (parry, dash) = disables(c.power);
+        if parry || dash {
+            let params = g.power_params(c.power);
+            edges.push(Disable {
+                power: c.power,
+                parry,
+                dash,
+                duty: (params.hold / params.period.max(0.1)).clamp(0.0, 1.0),
+            });
+        }
     }
     let evasion = 1.0 + 0.5 * strafe + 0.5 * blink + 0.5 * phase + 0.25 * (size - 1.0).max(0.0);
     let shield_pool = g.shield * foe.shield.max(0.05);
@@ -330,7 +518,8 @@ fn assess_genome(
     let ship_dps = (dps + contact_hit / CONTACT_COOLDOWN * 0.25).max(0.01);
     let ttk_ship = bare_pool / ship_dps;
     let agility = (speed / 460.0).clamp(0.2, 3.0);
-    let power = (ttk / ttk_ship).sqrt() * agility.powf(0.3) * flair;
+    let core = (ttk / ttk_ship).sqrt() * agility.powf(0.3);
+    let power = core * flair;
     Organism {
         class,
         name: species.name(),
@@ -374,6 +563,10 @@ fn assess_genome(
         ttk_ship,
         power,
         hostility: class.hostility(g.trigger),
+        core,
+        flair: terms,
+        weapon_channel: capability::weapon::channel(g.weapon),
+        disables: edges,
     }
 }
 
@@ -516,6 +709,10 @@ fn assess_structure(spawn: &Spawn, tune: &Tunables) -> Option<Organism> {
         ttk_ship,
         power: (ttk / ttk_ship).sqrt(),
         hostility: Class::Structure.hostility(Trigger::Sight),
+        core: (ttk / ttk_ship).sqrt(),
+        flair: Vec::new(),
+        weapon_channel: capability::weapon::channel(weapon),
+        disables: Vec::new(),
     })
 }
 
@@ -558,6 +755,14 @@ pub struct SectorReport {
     pub organisms: Vec<Organism>,
     /// `sqrt(sum(hostility * copies * power^2))`.
     pub danger: f32,
+    /// Share of the danger weight (`hostility * copies * power^2`) by channel, at cover 0.
+    /// Sums to at most one; the rest is unattributed (unarmed bodies, bonds).
+    pub share: [f32; CHANNELS],
+    /// Per channel, the worst hostile window burst over the unmitigated reference pool at the
+    /// organism's own level (`pool_ref`), counted only where a power of that channel is
+    /// present: what the area asks of a build whose ward and parry and dash are gone. At or
+    /// above one it is lethal in a window without the answer. Zero where the channel is absent.
+    pub gate_burst: [f32; CHANNELS],
 }
 
 impl SectorReport {
@@ -573,6 +778,34 @@ impl SectorReport {
         list.sort_by(|a, b| b.1.total_cmp(&a.1));
         list.truncate(top);
         list
+    }
+
+    /// The channel shares against `tier` (its cover cuts the powers' weight), normalized by the
+    /// whole danger weight at that tier, so they sum to at most one.
+    pub fn share_for(&self, tier: &Tier) -> [f32; CHANNELS] {
+        let mut out = [0.0f32; CHANNELS];
+        let mut total = 0.0f32;
+        for o in &self.organisms {
+            let (w, loose) = o.channel_weight(tier);
+            for (a, b) in out.iter_mut().zip(w) {
+                *a += b;
+            }
+            total += w.iter().sum::<f32>() + loose;
+        }
+        let total = total.max(1e-6);
+        out.map(|v| v / total)
+    }
+
+    /// The danger index at `tier`: `danger` with every power cut by the tier's cover.
+    pub fn danger_for(&self, tier: &Tier) -> f32 {
+        self.organisms
+            .iter()
+            .map(|o| {
+                let p = o.power_for(tier);
+                o.hostility * o.copies as f32 * p * p
+            })
+            .sum::<f32>()
+            .sqrt()
     }
 
     /// The largest expected window burst of any organism that can fire at the ship.
@@ -613,7 +846,7 @@ pub fn assess_sector(seed: u64, id: SectorId) -> SectorReport {
         .sum::<f32>()
         .sqrt();
     let (_, kind, _) = realm::identity(seed, id);
-    SectorReport {
+    let mut report = SectorReport {
         id,
         ring: ring(id),
         depth: params.depth,
@@ -621,7 +854,38 @@ pub fn assess_sector(seed: u64, id: SectorId) -> SectorReport {
         realm: kind.spec().id,
         organisms,
         danger,
+        share: [0.0; CHANNELS],
+        gate_burst: [0.0; CHANNELS],
+    };
+    report.share = report.share_for(&tier_bare());
+    report.gate_burst = gate_bursts(&report.organisms);
+    report
+}
+
+/// `SectorReport::gate_burst`: for each channel some organism carries a power of, the worst
+/// hostile burst of the sector over its unmitigated reference pool. A disabling power makes
+/// the whole sector's guns the burst of its channel (the carrier fires with its group).
+fn gate_bursts(organisms: &[Organism]) -> [f32; CHANNELS] {
+    let mut out = [0.0f32; CHANNELS];
+    let mut present = [false; CHANNELS];
+    for o in organisms.iter().filter(|o| is_hostile(o)) {
+        for &(c, _) in &o.flair {
+            if let Some(c) = c {
+                present[c.index()] = true;
+            }
+        }
     }
+    let worst = organisms
+        .iter()
+        .filter(|o| is_hostile(o))
+        .map(|o| o.burst_expected / crate::simulation::burst::pool_ref(o.threat, o.pith, &DEFAULT))
+        .fold(0.0f32, f32::max);
+    for c in Channel::ALL {
+        if present[c.index()] {
+            out[c.index()] = worst;
+        }
+    }
+    out
 }
 
 /// The sectors of Moore ring `r`, at most `limit` of them spread evenly around it.
@@ -826,6 +1090,103 @@ mod tests {
         assert_eq!((d.n, d.min, d.p50, d.max), (5, 1.0, 3.0, 5.0));
         assert!(d.p90 <= d.p99 && d.p99 <= d.max);
         assert_eq!(Dist::of(Vec::new()), Dist::default());
+    }
+
+    // ---- capability cover (docs/CAPABILITIES.md 5.3) -------------------------------------
+
+    fn sampled() -> Vec<SectorReport> {
+        [0, 2, 5, 8, 14, 30]
+            .into_iter()
+            .flat_map(|r| ring_sectors(r, 6))
+            .map(|id| assess_sector(MASTER_SEED, id))
+            .collect()
+    }
+
+    #[test]
+    fn cover_zero_prices_exactly_as_before() {
+        let bare = tier_bare();
+        assert!(bare.cover.iter().all(|&c| c == 0));
+        for s in sampled() {
+            assert_eq!(s.danger_for(&bare), s.danger);
+            for o in &s.organisms {
+                assert_eq!(o.power_for(&bare), o.power, "{}", o.name);
+                if o.pith == 0.0 {
+                    assert_eq!(o.burst_ratio_for(&bare), o.burst_ratio(&bare));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cover_cuts_flair_and_shares_stay_bounded() {
+        let bare = tier_bare();
+        let warded = bare.warded();
+        let mut total_cut = 0;
+        for s in sampled() {
+            let sum: f32 = s.share.iter().sum();
+            assert!(sum <= 1.0 + 1e-3, "{:?} shares sum to {sum}", s.id);
+            assert!(s.danger_for(&warded) <= s.danger + 1e-4);
+            if s.danger_for(&warded) < s.danger - 1e-4 {
+                total_cut += 1;
+            }
+            for o in &s.organisms {
+                assert!(o.power_for(&warded) <= o.power + 1e-4);
+                assert!(o.power_for(&warded) >= o.core - 1e-4);
+            }
+            for c in Channel::ALL {
+                if s.gate_burst[c.index()] > 0.0 {
+                    assert!(
+                        s.organisms
+                            .iter()
+                            .any(|o| o.flair.iter().any(|&(k, _)| k == Some(c)))
+                    );
+                }
+            }
+        }
+        assert!(total_cut > 0, "wards should cheapen some sampled sector");
+        let mut full = bare.clone();
+        full.cover = [3; CHANNELS];
+        for s in sampled() {
+            for o in &s.organisms {
+                // Degree 3 on every channel removes every mapped flair term.
+                let mapped_only_core_and_loose: f32 = o
+                    .flair
+                    .iter()
+                    .filter(|(c, _)| c.is_none())
+                    .fold(1.0, |a, &(_, t)| a * (1.0 + t));
+                let want = o.core * mapped_only_core_and_loose;
+                assert!((o.power_for(&full) - want).abs() <= want * 1e-4 + 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn a_disabling_power_exposes_what_parry_and_dash_cover() {
+        let mut species = Species::bogey();
+        species.genome.weapon = Weapon::Projectile;
+        species.genome.volley = 3;
+        Power::Emp.set(&mut species.genome, 1.0);
+        let mut spawn = Spawn::creature(species, Vec2::ZERO);
+        spawn.index = 1;
+        let o = assess_spawn(&spawn, &DEFAULT).remove(0);
+        assert!(
+            o.disables
+                .iter()
+                .any(|d| d.power == Power::Emp && d.parry && d.dash && d.duty > 0.0),
+            "{:?}",
+            o.disables
+        );
+        let skilled = tier_bare().skilled();
+        let mut plain = o.clone();
+        plain.disables.clear();
+        let with_edge = o.burst_ratio_for(&skilled);
+        let without = plain.burst_ratio_for(&skilled);
+        assert!(with_edge > without, "{with_edge} vs {without}");
+        // The skills still help against the unjammed volley, and never beyond the full cut.
+        assert!(without < o.burst_ratio(&skilled));
+        let m = skilled.mitigation(0.0, 0.0);
+        assert!(m > 0.0 && m < 1.0);
+        assert!(with_edge <= o.burst_ratio(&skilled) + 1e-6);
     }
 
     // ---- coverage: adding a feature must update the model -------------------------------

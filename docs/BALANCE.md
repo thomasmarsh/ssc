@@ -177,6 +177,26 @@ Realms move the median danger by 0.9x to 2.5x and leave the burst tail untouched
 
 Elder lunge and charge ram (`lunge_speed`, `elder_charge_speed`, `elder_enrage_sting`), ramming and impact strikes (`world_ram_damage`, `strike_damage`), predator bites and flock stings (`food_bite_*`, `fauna_bite*`, `flock_sting_*`), tether cords and links (`tether_cord_bullet_damage`, `tether_link_damage`), gravity wells and maws (`gen_well_dps_*`, `gen_well_maw_dps_*`), and the damage side of powers (cloud, devour, rune mines, rift, latch). Each should become a `Modelled` row before the next balance slice relies on the number; wells and maws are environmental and should join sector danger as a separate term.
 
+### 3.8 Channels, cover and the disables edge (K1; `threat --only channels`)
+
+`--seeds 2 --per-ring 24`, master seed. Shares are the percent of the danger weight (`hostility * copies * power^2`) by channel at cover 0, mean over sectors; the rest is unattributed (unarmed bodies, bonds, the Gap damage channels of 3.7).
+
+| ring | VOLLEY | MINES | CORD | INFO present / lethal % | JAM present / lethal % |
+| --- | --- | --- | --- | --- | --- |
+| 3 | 20 | 0 | 0 | 0 / 0 | 0 / 0 |
+| 5 | 33 | 0 | 0 | 0 / 0 | 0 / 0 |
+| 8 | 68 | 0 | 5 | 2 / 0 | 0 / 0 |
+| 14 | 61 | 0 | 14 | 0 / 0 | 0 / 0 |
+| 30 | 57 | 5 | 14 | 10 / 0 | 2 / 0 |
+
+By realm (rings 40 to 130): VOLLEY is 48 to 71 percent everywhere (crush highest, iron_tide lowest), CORD 12 percent in cradle, iron_tide and quiet_gold, MINES 17 to 23 percent in crush, dead_reach and iron_tide, and a power of INFO is present in 17 to 27 percent of dead_reach and crush sectors, JAM in 12 percent of hungry_deep. Every other channel is under 2 percent: the powers are nearly decorative in the danger index (flair adds 5 to 20 percent), which is the finding of CAPABILITIES section 0, now measured.
+
+Facts:
+- `gate_burst` is below one in every sampled sector, so no area is lethal in a window even with the ward and the parry and dash answers removed. That is the burst budget (5.4) holding, and it means a gate has to come from the realm environment (CAPABILITIES 3.1, K3) or from sustained pressure, not from a single volley.
+- `+wards` (degree 2 on JAM, FIELD, ARMOR, INFO) moves median danger by under 0.01 at every sampled ring, because wards only cut flair. The wards matter once K2 closes the damage channels and K8 buys the underpowered powers back.
+- Parry and dash fully trained cut the worst window burst ratio p90 by 30 to 40 percent (ring 14 typical: 2.22 to 1.41); an Emp carrier gives part of it back for `hold / period`, about 23 percent of the time at the typical 1.4 s over 6 s.
+- `typical` cover comes from the sampled parts (CLOSE, FIELD, RAM, SWARM and CORD at degree 1 to 3); skills are not part of `roll_part`, so `typical+skills` is a separate row.
+
 ## 4. Diagnosis: why it swings between trivial and lethal
 
 1. **Player power saturates, enemy burst does not.** `Stats::compute` clamps every stat (hull x8, shield x8, damage x8, armor 5x, recharge x6), so a maxed kit stops growing near ring 20 (3.1, `maxed d20 = maxed d40`). Enemy burst is `volley * shot * sharpness` with sharpness linear and volley up to 160 and no ceiling anywhere (apex growth is capped at 3x, creature volleys are not).
@@ -359,4 +379,4 @@ Items 1 and 5 are the cheapest correction of the "suddenly lethal" feel and can 
 
 ## 9. How to read the tool
 
-`cargo run --release --no-default-features --bin threat` prints, in order: per-ring table, the sectors that end each tier (with the list of lethal sectors up to ring 14), the most dangerous sectors with dominant contributors, the worst bursts, hardest hits and tiny-but-deadly organisms, worst expected burst per ring, the weapon table, speed, player tiers and the per-realm table. Flags: `--seed`, `--seeds K`, `--rings`, `--per-ring`, `--top`, `--realm-rings A..B`, `--only rings|outliers|weapons|speed|tiers|realms`. The checked-in baseline (`src/threat_baseline.txt`) is the same quantities for the master seed at 14 rings, 8 sectors each, as one line per ring.
+`cargo run --release --no-default-features --bin threat` prints, in order: per-ring table, the sectors that end each tier (with the list of lethal sectors up to ring 14), the most dangerous sectors with dominant contributors, the worst bursts, hardest hits and tiny-but-deadly organisms, worst expected burst per ring, the weapon table, speed, player tiers and the per-realm table; `--only channels` adds channel shares and gate flags per ring and realm and the danger at `typical`, `+wards` and `+skills` kits (3.8). Flags: `--seed`, `--seeds K`, `--rings`, `--per-ring`, `--top`, `--realm-rings A..B`, `--only rings|outliers|weapons|speed|tiers|realms|channels`. The checked-in baseline (`src/threat_baseline.txt`) is the same quantities for the master seed at 14 rings, 8 sectors each, as one line per ring.

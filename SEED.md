@@ -84,7 +84,7 @@ U1 ships the full widget set. A widget U2 or U3 still needs lives in its own scr
 Sizes, owns and dependencies are in the doc; this is the order. `B` = blesses the threat baseline, `S` = bumps `SAVE_VERSION` (refuse old saves, no migration), `G` = bumps `GENERATOR_VERSION` and blesses goldens. Two slices that bump never run together.
 
 - **K0 [S] Channel taxonomy and coverage tables** DONE (`src/capability.rs`: `Channel`, `Cap`, exhaustive `power::channel`, `weapon::channel`, `organ_covers`, `trait_covers`, `skill_covers`, `coverage(&Loadout)`, per-source `reason`, per-channel `need` and `answer`; no behavior).
-- **K1 [M] Threat integration** (`Tier.cover`, cover in flair, disables edges, `--only channels`; baseline unchanged at cover 0; B) and **K4 [L] Acquisition** (data-driven organ table, apex pays ward and gland, `Trait::Hardening` supplier substitute; S): parallel, disjoint files.
+- **K1 [M] Threat integration** DONE (`Tier.cover`, `Organism::power_for`, `burst_ratio_for` with disables edges, `SectorReport::share` and `gate_burst`, `threat --only channels`, `Tier::warded` and `skilled`; baseline byte-identical, not blessed) and **K4 [L] Acquisition** (DONE: `ORGANS` table, apex pays the strains of its powers, relic fills gaps, `Trait::Hardening`; SAVE_VERSION 5): parallel, disjoint files.
 - **K3 [M] AreaReadout** (verdict, star-map coloring and skirt path, banner; subsumes BALANCE slice 5), **K2 [M] close the `Gap` damage channels** (`threat.rs`, B) and **K7 [M] Resonance** (tags and table in `Loadout::stats()`): parallel after K1 and K4.
 - **K6 [M] Organ catalog** (S) and **K8 [M] Underpowered buffs** (B, goldens): parallel, disjoint.
 - **K5 [L] Keepers and realm power affinity** (G, B; alone), then **K9 [S] gate certificate properties**.
