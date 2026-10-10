@@ -211,3 +211,19 @@ Do not judge these until GAME_LOOP section 9.1 lands. Verify hostile defensive t
 - Can sensors/evidence reveal a privateer sponsor, and do escorts, rerouting or negotiation offer useful responses? Are remote losses warned, bounded and stable after reload?
 
 Tuning proposals live in section 9.1; no diplomacy-axis knobs are implemented yet. HOME and peaceful suppliers must still support essential zero-kill progression.
+
+## Territorial politics (proposed E2c/H2 checks, unbuilt)
+
+Do not judge these until GAME_LOOP sections 9.2/9.3 land. Run the same scenarios with the player and a civilization as conqueror; a human playtest complements the headless conservation/attribution gates.
+
+- After a civilization falls, can you distinguish government destruction, surviving/unknown communities, a declared claim, effective control, and foreign recognition? Is it clear that a raid grants no automatic annexation?
+- Do an ally, rival, dependent supplier, and distant uninformed observer respond differently to the same destruction? Can fear coexist with distrust, sympathy with continued essential trade, and defensive victory with relief?
+- Do reports take understandable time and retain source/confidence? Can repeated or circular reports amplify a single incident, reveal a secret sponsor prematurely, or cause unsupported universal hostility?
+- Before claiming inhabited territory, are obligations, likely resistance causes, disputed rights, and foreign ties visible? Does an uninhabited claim avoid invented rebels while retaining real border disputes?
+- Can restored supplies, honored autonomy, and negotiation reduce resistance for understandable reasons? Does a garrison deter action without making coercion equivalent to legitimacy? Can repeated gifts erase conquest cheaply?
+- Does mobilization give time to negotiate, withdraw, reroute, or defend? Are rebel forces and foreign aid visibly limited by real goods and routes? Does defeating a force leave unresolved community grievances?
+- Can neighbors offer recognition, sanctions, refuge, or secret material support without automatically declaring total war? Does evidence of sponsorship give a concrete grievance and preserve separate commerce/ROE decisions?
+- Do a captured dock, an independence settlement, and a fallen supplier resolve paid cargo, machine work, contracts, archives, and future access exactly once? Can repeated annexation/liberation reset rewards or stock?
+- While exploring, are remote resistance losses warned and recoverable? Do reload, sector unload, and opening the chart preserve decisions and report delays? Does HOME remain safe and a useful solo homestead remain viable?
+
+Political thresholds, warning grace, garrison reach, transfer/tribute terms, and aid/force caps are proposed tuning surfaces, not implemented knobs. H2 aggregate community politics does not require J's voluntary citizens.

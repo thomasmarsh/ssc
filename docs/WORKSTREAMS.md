@@ -151,21 +151,22 @@ Goal: automate repeated gathering and transport without making remote inventory 
 
 Working proposal: supplied, safe housing attracts voluntary specialists through relations and visiting ships; population consumes water/food/power and adds services or worker capacity. Upgrades share job/module concepts with drones. Start with a small ledger and named specialists if a clear gameplay need emerges. Arrival, upkeep, autonomy, and control need a separate design; the first homestead must work without citizens.
 
-## Order of operations (revised 2026-10-09)
+## Order of operations (revised 2026-10-10)
 
 The authoritative dependency/acceptance table is [GAME_LOOP.md](GAME_LOOP.md) section 13. [SEED.md](../SEED.md) holds the active queue. The earlier fixed generation batch, 19 -> 20 version instruction, and completed foundation phases are superseded; use the actual generator version and independent salted streams for each intentional generation change.
 
 1. **First frontier:** A shared resources/HUD; B peaceful basic procurement plus honest loot; narrow C technology, bounded capture, and grade scaling. Land B's substitute sources with removal of wildlife gear. Confirm both peaceful and warlike paths to a harder frontier.
 2. **Working home:** D local refinery/water/crops/production; narrow E delivery and research partnership. Require persistent transactions and useful recipes, not a complete market.
 3. **Remote industry:** F mining drones and upgrades/losses; G pad-built tanker/two-pad bulk material route. Hard caps, finite ore, and cargo conservation precede multi-hop routing.
-4. **Living trade and defense:** E2 independent diplomacy and commercial terms precede H visible merchant arrivals, real supply dependency, attributed privateering, sensors/turrets/escorts and bounded saved remote incidents.
-5. **Network and districts:** I distribution hubs and player-grown megastructure. J citizens only after a separate design establishes their purpose.
+4. **Living trade and defense:** E2a independent diplomacy/ROE, E2b commercial terms, and E2c attributed political events/local reports precede H1 merchant arrivals, real supply dependency, privateering, sensors/turrets/escorts and bounded saved remote incidents. Fear and sympathy from civilization destruction inform policy without conflating trust, commerce, and engagement permission (GAME_LOOP sections 9.1/9.2).
+5. **Territorial politics:** H2a aggregate surviving communities, claims/site control, legitimacy/recognition, autonomy and asset/contract succession; H2b organized funded rebellion against player or AI claims, independence and foreign aid/sponsorship/sanctions (GAME_LOOP section 9.3). Depends on E2c/H1/G, not J citizens. Government collapse does not erase inhabitants or grant annexation.
+6. **Network and districts:** I distribution hubs and player-grown megastructure. J citizens only after a separate design establishes their purpose.
 
 Cross-cutting dependencies:
 - Use one goods/price/transfer API for bench, farms, machines, markets, contracts, and fleets. Physical stock stays local or in transit; a UI preview cannot spend it twice.
 - Keep knowledge, held equipment, grades, and experience separate. Tech-graph alternatives cover essential peaceful progression and realm counters.
 - Extend SaveState in each slice. Define missing generated-anchor behavior before persistent factories/fleets depend on it; no save migrations before 1.0.
-- Budget bodies, fleet records, jobs, routes, retained outcomes, and catch-up events. Unloaded operations are explicit bounded state transitions; closing the game grants no wall-clock production by default.
+- Budget bodies, fleet records, jobs, routes, retained outcomes, political actors/communities/claims, report links/evidence, resistance operations, and catch-up events. Preserve irreversible control/collapse and one-shot settlement continuity when compacting history. Unloaded operations are explicit bounded state transitions; closing the game grants no wall-clock production by default.
 - Use a shared cross-sector plan query for generated layouts and lanes; player construction additionally needs mutable ownership and paid-progress deltas.
 - Audit context/controller navigation as each panel lands. Trade, planting, bench, and site actions use existing context conventions.
 - Register constants in DEVTOOLS B when available; tooling never blocks a feature. Human playtest after each milestone.
