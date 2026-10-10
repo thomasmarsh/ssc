@@ -186,9 +186,12 @@ mod tests {
             .research
             .known
             .insert(research::Tech::Fabrication);
-        game.cargo.crystal = 10.0;
+        game.cargo.crystal = 20.0;
         game.cargo.fuel = 0.0;
         game.bench_confirm();
+        game.bench_select(BenchAction::Power);
+        game.bench_confirm();
+        assert!(game.pad.pads[&key].power);
         game.bench_select(BenchAction::Refinery);
         game.bench_confirm();
         game.bench_select(BenchAction::Stash(Material::Volatiles));

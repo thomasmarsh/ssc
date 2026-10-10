@@ -3,6 +3,7 @@ use super::*;
 
 pub const REFINERY_PRICE: [(Material, f32); 2] =
     [(Material::Metal, 40.0), (Material::Crystal, 10.0)];
+pub const POWER_PRICE: [(Material, f32); 2] = [(Material::Metal, 30.0), (Material::Crystal, 10.0)];
 pub const WAREHOUSE_PRICE: [(Material, f32); 1] = [(Material::Metal, 30.0)];
 pub const WATER_TANK_PRICE: [(Material, f32); 1] = [(Material::Metal, 20.0)];
 pub const WATER_EXTRACTOR_PRICE: [(Material, f32); 2] =
@@ -25,7 +26,7 @@ const INPUT: f32 = 10.0;
 const OUTPUT: f32 = 25.0;
 const SECONDS: f32 = 10.0;
 
-/// One machine per pad, with integral power and one reserved batch at most.
+/// One machine per pad, with one reserved batch at most.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Refinery {
     /// Input is removed from the stash when work starts. Zero means finished but blocked.
@@ -65,6 +66,31 @@ impl Refinery {
 }
 
 impl Game {
+    pub(super) fn power_block(&self) -> Option<&'static str> {
+        match self.landed_pad() {
+            None => Some("LAND AT A PAD"),
+            Some(pad) if pad.power => Some("ALREADY BUILT"),
+            Some(_) if !self.loadout.research.active(research::Tech::Fabrication) => {
+                Some("NEEDS FABRICATION RESEARCH")
+            }
+            Some(_) => None,
+        }
+    }
+
+    pub(super) fn buy_power(&mut self) {
+        if let Some(why) = self.power_block() {
+            self.bench_failed(why.into());
+            return;
+        }
+        if !self.cargo.spend(&POWER_PRICE) {
+            self.bench_failed("NEEDS 30M 10C".into());
+            return;
+        }
+        let key = self.pad.landed.unwrap();
+        self.pad.pads.get_mut(&key).unwrap().power = true;
+        self.bench_done("LOCAL POWER BUILT".into(), upgrades::Rarity::Common);
+    }
+
     pub(super) fn refinery_block(&self) -> Option<&'static str> {
         let Some(pad) = self.landed_pad() else {
             return Some("LAND AT A PAD");
@@ -173,6 +199,9 @@ impl Game {
 
     pub(super) fn update_production(&mut self, dt: f32) {
         for pad in self.pad.pads.values_mut() {
+            if !pad.power {
+                continue;
+            }
             if pad.water_extractor {
                 let cap = pad.stash_cap(Material::Water);
                 pad.stash
@@ -194,6 +223,11 @@ mod tests {
     fn setup() -> Game {
         let mut game = Game::new(crate::config::MASTER_SEED);
         game.pad.landed = game.pad.pads.keys().next().copied();
+        game.pad
+            .pads
+            .get_mut(&game.pad.landed.unwrap())
+            .unwrap()
+            .power = true;
         game.bench_toggle();
         game.loadout
             .research
@@ -205,6 +239,116 @@ mod tests {
         game.cargo.fuel = 0.0;
         game.bench_select(BenchAction::Refinery);
         game
+    }
+
+    #[test]
+    fn power_purchase_requires_local_pad_research_and_atomic_payment() {
+        let mut game = setup();
+        let key = game.pad.landed.unwrap();
+        game.pad.pads.get_mut(&key).unwrap().power = false;
+        game.bench_select(BenchAction::Power);
+        game.loadout.research.known.clear();
+        game.bench_confirm();
+        assert_eq!(game.power_block(), Some("NEEDS FABRICATION RESEARCH"));
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (40.0, 10.0));
+        game.loadout
+            .research
+            .known
+            .insert(research::Tech::Fabrication);
+        game.cargo.crystal = 9.0;
+        game.bench_confirm();
+        assert!(!game.pad.pads[&key].power);
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (40.0, 9.0));
+        game.cargo.crystal = 10.0;
+        game.bench_confirm();
+        assert!(game.pad.pads[&key].power);
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (10.0, 0.0));
+        game.cargo.metal = 40.0;
+        game.cargo.crystal = 10.0;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (40.0, 10.0));
+        assert!(
+            game.bench_panel()
+                .unwrap()
+                .rows
+                .iter()
+                .any(|r| r.action == BenchAction::Power
+                    && r.state == "SUPPLYING PAD MACHINES"
+                    && !r.ok)
+        );
+        game.pad.landed = None;
+        game.buy_power();
+        assert_eq!(game.power_block(), Some("LAND AT A PAD"));
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (40.0, 10.0));
+    }
+
+    #[test]
+    fn local_power_pauses_reserved_work_and_resumes_after_unloaded_save() {
+        let mut game = setup();
+        let key = game.pad.landed.unwrap();
+        game.bench_confirm();
+        let pad = game.pad.pads.get_mut(&key).unwrap();
+        pad.water_tank = true;
+        pad.water_extractor = true;
+        pad.stash.volatiles = 20.0;
+        pad.power = false;
+        game.update_production(20.0);
+        assert_eq!(game.pad.pads[&key].stash.volatiles, 20.0);
+        assert_eq!(game.pad.pads[&key].stash.water, 0.0);
+        for action in [BenchAction::Refinery, BenchAction::WaterExtractor] {
+            let row = game
+                .bench_panel()
+                .unwrap()
+                .rows
+                .into_iter()
+                .find(|r| r.action == action)
+                .unwrap();
+            assert_eq!(row.state, "NEEDS LOCAL POWER");
+        }
+        game.cargo.metal = 30.0;
+        game.cargo.crystal = 10.0;
+        game.bench_select(BenchAction::Power);
+        game.bench_confirm();
+        game.update_production(3.0);
+        let pad = game.pad.pads.get_mut(&key).unwrap();
+        assert_eq!(pad.stash.volatiles, 10.0);
+        assert_eq!(pad.stash.water, 3.0);
+        assert_eq!(pad.refinery.as_ref().unwrap().remaining, Some(7.0));
+        pad.power = false;
+        game.update_production(20.0);
+        let pad = &game.pad.pads[&key];
+        assert_eq!(pad.refinery.as_ref().unwrap().remaining, Some(7.0));
+        assert_eq!((pad.stash.fuel, pad.stash.water), (0.0, 3.0));
+        game.pad.pads.get_mut(&key).unwrap().power = true;
+        game.teleport(Vec2::new(60000.0, 0.0));
+        game.player_invulnerability = 1e9;
+        game.step(0.05, Input::default());
+        assert!(!game.bodies.iter().any(|b| b.origin == Some(key)));
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        assert!(loaded.pad.pads[&key].power);
+        assert_eq!(
+            loaded.pad.pads[&key].stash.water,
+            game.pad.pads[&key].stash.water
+        );
+        loaded.update_production(7.0);
+        assert_eq!(loaded.pad.pads[&key].stash.fuel, 25.0);
+        assert_eq!(loaded.pad.pads[&key].stash.volatiles, 10.0);
+        assert!(loaded.pad.pads[&key].stash.water > 10.0);
+        // A powered site cannot supply a second site's machines.
+        let remote = (SectorId { x: 20, y: 0 }, key.1);
+        let mut pad = loaded.pad.pads[&key].clone();
+        pad.key = remote;
+        pad.power = false;
+        pad.stash = Cargo {
+            volatiles: 20.0,
+            ..Default::default()
+        };
+        loaded.pad.pads.insert(remote, pad);
+        loaded.update_production(20.0);
+        assert_eq!(loaded.pad.pads[&remote].stash.volatiles, 20.0);
+        assert_eq!(loaded.pad.pads[&remote].stash.fuel, 0.0);
+        assert_eq!(loaded.pad.pads[&remote].stash.water, 0.0);
     }
 
     #[test]

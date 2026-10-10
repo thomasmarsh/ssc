@@ -36,6 +36,7 @@ pub enum BenchAction {
     Repair,
     RawInput,
     Refinery,
+    Power,
     WaterTank,
     Warehouse,
     WaterExtractor,
@@ -122,6 +123,7 @@ impl Game {
                 .chain(self.pad.contact.map(|_| BenchAction::Tithe))
                 .chain(self.pad.landed.into_iter().flat_map(|_| {
                     [
+                        BenchAction::Power,
                         BenchAction::Refinery,
                         BenchAction::WaterTank,
                         BenchAction::Warehouse,
@@ -194,6 +196,7 @@ impl Game {
         match self.bench_selected() {
             Some(BenchAction::Repair) => self.bench_repair(),
             Some(BenchAction::RawInput) => self.buy_raw_input(),
+            Some(BenchAction::Power) => self.buy_power(),
             Some(BenchAction::Refinery) => self.buy_refinery(),
             Some(BenchAction::Warehouse) => self.buy_warehouse(),
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
@@ -566,17 +569,37 @@ impl Game {
                     row.detail += ". Bond, harvest, or find a sealed relic.";
                 }
             }
+            BenchAction::Power => {
+                row.group = "PAD PRODUCTION";
+                row.text = "BUILD LOCAL POWER".into();
+                row.detail = "Renewable power runs this pad's refinery and water extractor, including while away. No fuel or upkeep; storage and crops work independently.".into();
+                if self.landed_pad().is_some_and(|p| p.power) {
+                    row.text = "LOCAL POWER".into();
+                    row.ok = false;
+                    row.state = "SUPPLYING PAD MACHINES".into();
+                } else {
+                    row.costs = production::POWER_PRICE.to_vec();
+                    if let Some(why) = self.power_block() {
+                        row.ok = false;
+                        row.state = why.into();
+                    }
+                }
+            }
             BenchAction::Refinery => {
                 row.group = "PAD PRODUCTION";
                 row.text = "BUILD FUEL REFINERY".into();
-                row.detail = "Integral power; stash pays 10V per 25F batch, 10 seconds. Works while away; Q / X takes fuel from stash.".into();
+                row.detail = "Needs local power; stash pays 10V per 25F batch, 10 seconds. Works while away; Q / X takes fuel from stash.".into();
                 if let Some(refinery) = self.landed_pad().and_then(|p| p.refinery.as_ref()) {
                     row.text = "FUEL REFINERY".into();
                     row.ok = false;
-                    row.state = refinery.status(
-                        &self.landed_pad().unwrap().stash,
-                        self.landed_pad().unwrap().stash_cap(Material::Fuel),
-                    );
+                    row.state = if !self.landed_pad().unwrap().power {
+                        "NEEDS LOCAL POWER".into()
+                    } else {
+                        refinery.status(
+                            &self.landed_pad().unwrap().stash,
+                            self.landed_pad().unwrap().stash_cap(Material::Fuel),
+                        )
+                    };
                 } else {
                     row.costs = production::REFINERY_PRICE.to_vec();
                     if let Some(why) = self.refinery_block() {
@@ -588,11 +611,13 @@ impl Game {
             BenchAction::WaterExtractor => {
                 row.group = "PAD PRODUCTION";
                 row.text = "BUILD WATER EXTRACTOR".into();
-                row.detail = "Surveyed renewable aquifer; integral power, 1W per simulation second into this pad's tank. Works while away; Q / X takes water from stash.".into();
+                row.detail = "Surveyed renewable aquifer; needs local power, 1W per simulation second into this pad's tank. Works while away; Q / X takes water from stash.".into();
                 if let Some(pad) = self.landed_pad().filter(|p| p.water_extractor) {
                     row.text = "WATER EXTRACTOR".into();
                     row.ok = false;
-                    row.state = if pad.stash.water >= pad.stash_cap(Material::Water) {
+                    row.state = if !pad.power {
+                        "NEEDS LOCAL POWER"
+                    } else if pad.stash.water >= pad.stash_cap(Material::Water) {
                         "WATER TANK FULL"
                     } else {
                         "EXTRACTING 1W/s"

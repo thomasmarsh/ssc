@@ -35,7 +35,7 @@ Goal: a local economy that supplies expeditions, and civilizations that teach or
 
 - Built A/B/narrow C: six shared goods and fixed HUD counters, atomic prices/transfers, fuel/water services, shared biomass, peaceful support/profile procurement, raw biological/geological provenance, five saved research nodes, bounded capture and supplier-bound grades. See GAME_LOOP's built first-frontier notes for prices and scope.
 - TODO: extend the research graph, negotiated partnerships, full local inventory/reservations and richer commissioned manufacturing. Existing basic services are fixed barter sinks, not a stock-backed galactic market.
-- TODO: **local production (D):** refinery -> fuel, water extraction -> tank for industry, and biomass processing, with connected site stocks/power and bounded unloaded progress. No new-resource requirement without a starter source or supplier.
+- Built narrow **local production (D):** refinery -> fuel, aquifer extraction -> tank, local warehouse, renewable power, and bounded saved unloaded progress. TODO: further machine jobs and biomass processing. No new-resource requirement without a starter source or supplier.
 - TODO: **relations and work (E):** stock-backed offers, delivery/survey/pest jobs, earned boons, chart leads, deeper research cooperation, and one simple recurring agreement. Barter is the working default; currency and dynamic prices remain open.
 - TODO: **visiting trade (H):** supplier-owned ships delivering to established player docks, visible arrivals, saved one-time payment/handoff, suspension on stock/access/dock failure. Dynamic galactic markets and escort missions can follow real supply routes.
 - Dependencies: A before B/C and D; C plus a usable local dock before E; fleet lifecycle/routes before visiting ships. Farming does not need to be rebuilt. Controls use contextual panels, not a new key for every verb.
@@ -141,7 +141,7 @@ Goal: automate repeated gathering and transport without making remote inventory 
 
 - Today: no player fleets, freight routes, shipyards, or bulk tanks. Local pads and saved depletion/structures are the foundation.
 - F: fabricate a mining drone at a pad facility, assign a surveyed deposit, mine and return; finite fuel/cargo, persisted ore depletion, paid replacements, shields/weapons, fleet templates, and dock retrofits. Wrecks share one finite salvage ledger among owner, wildlife, and civilizations.
-- G: construct a tanker at a planetoid pad shipyard, connect two established compatible endpoints, deliver water in bounded batches, return/refuel. Source reserves, destination targets, in-transit stock, loss, and blocked delivery are explicit.
+- G: construct a tanker at a planetoid pad shipyard, connect two established compatible endpoints, deliver any selected material in bounded batches (water to a dry pad is one example), return/refuel. Source reserves, destination targets, in-transit stock, loss, and blocked delivery are explicit.
 - H: merchant fleets, escorts, sensors/turrets, and saved bounded remote incidents. Materialize fleet records locally under the same identity; unloading cannot duplicate or heal away a loss.
 - I: hubs, shared fleets, thresholds/priorities, fuel/general freight, and interplanetary distribution. Local production works first; bulk ship water capacity is not the logistics solution.
 - Dependencies: shared resources, C's grade/module model, D's fabrication/storage/power. F's lifecycle and conservation precede G. Remote incidents precede exposing all sites to raids while absent.
@@ -156,7 +156,7 @@ The authoritative dependency/acceptance table is [GAME_LOOP.md](GAME_LOOP.md) se
 
 1. **First frontier:** A shared resources/HUD; B peaceful basic procurement plus honest loot; narrow C technology, bounded capture, and grade scaling. Land B's substitute sources with removal of wildlife gear. Confirm both peaceful and warlike paths to a harder frontier.
 2. **Working home:** D local refinery/water/crops/production; narrow E delivery and research partnership. Require persistent transactions and useful recipes, not a complete market.
-3. **Remote industry:** F mining drones and upgrades/losses; G pad-built tanker/two-pad water route. Hard caps, finite ore, and cargo conservation precede multi-hop routing.
+3. **Remote industry:** F mining drones and upgrades/losses; G pad-built tanker/two-pad bulk material route. Hard caps, finite ore, and cargo conservation precede multi-hop routing.
 4. **Living trade and defense:** H visible merchant arrivals, sensors/turrets/escorts, bounded saved remote incidents.
 5. **Network and districts:** I distribution hubs and player-grown megastructure. J citizens only after a separate design establishes their purpose.
 

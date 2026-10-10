@@ -42,11 +42,11 @@ Decide per slice, and say which in one line.
 
 ## Queue (revised 2026-10-09: expand the game loop)
 
-The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D refinery, water and bought-input routes are built; remaining local production and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
+The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; further machine jobs and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, working home: remaining D local power module (paid saved refinery, warehouse, water tank, aquifer extractor and finite HOME bought-input route built); then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
-2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk water delivery, fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
+1. [L] NEXT, working home: narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Paid saved local power, refinery, warehouse, water tank, aquifer extractor and finite HOME bought-input route are built; further D machine jobs remain open. Stock-backed barter first; no complete galactic market required.
+2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 3. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 4. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
@@ -54,11 +54,13 @@ Creature backlog remains open: Foamback; Oozer small prey/nucleus/pinch/spit/gap
 
 Other backlog: density/feeling view-model and measurements, weaver rock care, hyperlanes, generated ruins/living megastructures, local stash overflow, skill merging, and specimen log. Do not follow the historical 19 -> 20 generation batch; use the actual current version. No save-migration fixtures or code before 1.0.
 
-Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; bulk water via local tanks/tankers; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
+Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; tankers for any material with compatible local storage; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
 
-- Narrow local warehouse: 30M builds saved 300-unit M/V/C/B/F site storage; stash previews/transfers and refinery output share caps. Water remains tank-backed; local power is next.
+- Local power: 30M 10C after Fabrication builds saved renewable supply for both pad machines; unpowered stocks/work pause, unloaded/save resume stays local. Narrow E is next.
+
+- Narrow local warehouse: 30M builds saved 300-unit M/V/C/B/F site storage; stash previews/transfers and refinery output share caps. Water remains tank-backed.
 
 - Narrow bought-input route: HOME barters ten saved lots of 20V for 10M each; atomic hold/payment gates, visible remaining stock, stash-to-refinery fuel loop, no restock.
 
@@ -68,8 +70,6 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 
 - Narrow water storage: paid saved pad tank, 20M for 300 local water capacity; stash previews/transfers respect the tank and fixed 30 ship reserve. Aquifer extraction is now built.
 
-- Narrow local production: paid pad fuel refinery with integral power, Fabrication gate, local stash inputs/output, bounded unloaded simulation, and saved reserved batches. Bought-input trade remains queued.
+- Narrow local production: paid pad fuel refinery, Fabrication gate, local stash inputs/output, bounded unloaded simulation, and saved reserved batches. Bought-input trade is now built.
 
 - Narrow frontier progression (generator 33): five saved research dependencies, independently salted supplier specialties, capped one-time captures and one-use archive grade claims, continuing source-bound offense/durability grades with preserved handling/pattern bounds and normalized repair costs. Peaceful and conquest paths share the tested frontier ceiling.
-
-- Frontier procurement: HOME/friendly-seat peaceful basic equipment, support prerequisites and profile purchases; wild bodies/apex biological/raw rewards only, finite geological lodes without technological charges. CONTACT reuses bench/controller navigation.

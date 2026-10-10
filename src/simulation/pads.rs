@@ -104,6 +104,8 @@ pub struct Pad {
     pub warehouse: bool,
     #[serde(default)]
     pub water_extractor: bool,
+    #[serde(default)]
+    pub power: bool,
     /// Deployment order: the oldest is dismantled first.
     pub order: u64,
     /// The home-base pad on HOME's planetoid, there from the start: never dismantled for a
@@ -360,6 +362,7 @@ impl Game {
                 refinery: None,
                 water_tank: false,
                 water_extractor: false,
+                power: false,
                 warehouse: false,
             },
         );
@@ -752,6 +755,7 @@ impl Game {
                 refinery: None,
                 water_tank: false,
                 water_extractor: false,
+                power: false,
                 warehouse: false,
             },
         );
@@ -1824,6 +1828,7 @@ mod tests {
                     refinery: None,
                     water_tank: false,
                     water_extractor: false,
+                    power: false,
                     warehouse: false,
                 },
             );
@@ -2561,6 +2566,7 @@ mod tests {
                 refinery: None,
                 water_tank: false,
                 water_extractor: false,
+                power: false,
                 warehouse: false,
             },
         );
@@ -3190,6 +3196,7 @@ mod tests {
                     refinery: None,
                     water_tank: false,
                     water_extractor: false,
+                    power: false,
                     warehouse: false,
                 },
             );

@@ -281,7 +281,7 @@ This is a P1 item because it is a new verb: the HUD, bench and starting-ramp wor
 
 The original P0 HUD/input/feel pass is largely built; the status sections below record remaining polish. The next gameplay priority is the first frontier milestone in [ROADMAP.md](ROADMAP.md): shared resources and six counters, peaceful procurement plus honest loot, then a narrow technology/grade loop. Docking assist and layout/controller polish can accompany the panels they affect.
 
-Later: local production and jobs, mining drones, two-pad water tankers, visiting trade ships and defenses, then multi-pad distribution and player-grown districts. Specimen log, skill merging, single manual pin, and optional presets remain polish proposals. The Tow Rig remains superseded by built shoving; no legacy ceremony is queued.
+Built narrow local production includes renewable pad power, storage, refinery and water extraction. Later: further machines and jobs, mining drones, two-pad tankers carrying any material (water delivery is one example), visiting trade ships and defenses, then multi-pad distribution and player-grown districts. Specimen log, skill merging, single manual pin, and optional presets remain polish proposals. The Tow Rig remains superseded by built shoving; no legacy ceremony is queued.
 
 ## 10. Recommended implementation order
 

@@ -90,3 +90,5 @@ Narrow frontier progress: `Loadout::research` saves known nodes, up-to-25% fragm
 Generator 35 asteroid compositions are re-derived from an independent spawn-key salt. Selectively mined lodes also save their exact per-material remainders in a defaulted delta field; full holds leave those resources untouched. Shards inherit remaining goods, with the existing explicit shooting loss. Water mined by the ship has a defaulted run counter. Save format remains 3; generator invalidation clears composition deltas alongside other spawn deltas.
 
 HOME raw-input orders are an additive defaulted run field, bounded to ten purchases. Stock depletion survives save/load and generator changes independently of pad deltas; only NEW GAME restores the initial 200V. Save format remains 3.
+
+Paid local power persists through defaulted `Pad::power`. Unpowered machines retain stocks and reserved batch progress without advancing. Saves lacking power load unpowered and must build the module to resume. Power supplies only its own pad; removal loses it with the pad. Save format 3 and generation are unchanged.

@@ -132,6 +132,7 @@ impl Snapshot {
             | BenchAction::WaterExtractor
             | BenchAction::Warehouse
             | BenchAction::WaterTank
+            | BenchAction::Power
             | BenchAction::Refinery
             | BenchAction::Grade => receipt.text.clone(),
         };
