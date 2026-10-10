@@ -2,7 +2,6 @@ mod audio;
 mod autosave;
 mod bestiaryview;
 mod chartview;
-mod devpanel;
 mod flockview;
 mod glitchview;
 mod grammarview;
@@ -15,6 +14,7 @@ mod settings;
 mod shipview;
 mod smoke;
 mod titlemenu;
+mod ui;
 mod wellview;
 
 use bevy::{
@@ -185,8 +185,11 @@ pub struct Session {
     /// game itself keeps: auto repair and the boosts.
     pub settings: Option<usize>,
     pub save_feedback: String,
-    /// The developer panel (SSC_DEV=1) and its selected row; the game waits while it is open.
-    pub dev_panel: Option<usize>,
+    /// The developer console (SSC_DEV=1); the game waits while it is open. See `ui`.
+    pub console: Option<ui::screens::console::Console>,
+    /// The console took this frame's input (it was open, or opened or closed this frame), so
+    /// `controls` skips it.
+    pub ui_consumed: bool,
     /// Screen shake, floating scores and rings; see `juice`.
     pub juice: juice::Juice,
     pub auto_repair: bool,
@@ -290,7 +293,8 @@ impl Default for Session {
             reduce_effects: std::env::var_os("SSC_REDUCE_EFFECTS").is_some(),
             settings: None,
             save_feedback: String::new(),
-            dev_panel: None,
+            console: None,
+            ui_consumed: false,
             juice: juice::Juice::default(),
             auto_repair: true,
             boosts: true,
@@ -330,6 +334,7 @@ fn main() {
         .insert_resource(grammarview::Gallery::from_env())
         .insert_resource(bestiaryview::Bestiary::from_env())
         .init_resource::<audio::Audio>()
+        .add_plugins(ui::UiPlugin)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -353,7 +358,6 @@ fn main() {
                 hud::setup,
                 settings::setup,
                 titlemenu::setup,
-                devpanel::setup,
                 nebula::setup,
                 chartview::setup,
                 bestiaryview::setup,
@@ -383,7 +387,6 @@ fn main() {
                 hud::update_texts.run_if(not(bestiaryview::gallery_active)),
                 settings::update,
                 titlemenu::update,
-                devpanel::update,
                 presentation::update_summary,
                 (
                     chartview::update,
@@ -403,7 +406,7 @@ fn simulate(time: Res<Time<Fixed>>, mut session: ResMut<Session>, smoke: Res<Smo
         || session.paused
         || session.chart.is_some()
         || session.settings.is_some()
-        || session.dev_panel.is_some()
+        || session.console.is_some()
         || session.menu.is_some()
     {
         return;
@@ -456,19 +459,11 @@ fn controls(
     // first if that is what is showing.
     let escape = keys.just_pressed(KeyCode::Escape);
     let start = pad(GamepadButton::Start);
-    // The developer panel (SSC_DEV=1 only): backquote or the guide button toggles it, and while
-    // it is open it takes every key.
-    if ssc::simulation::dev::enabled() {
-        let toggle = keys.just_pressed(KeyCode::Backquote) || pad(GamepadButton::Mode);
-        if session.dev_panel.is_some() {
-            dev_controls(&keys, &pad, &mut session, toggle || escape || start);
-            session.input = Input::default();
-            return;
-        } else if toggle && session.settings.is_none() {
-            session.dev_panel = Some(0);
-            session.input = Input::default();
-            return;
-        }
+    // The developer console (SSC_DEV=1, `ui`) takes every key while it is open, and the frame
+    // it opens or closes on.
+    if std::mem::take(&mut session.ui_consumed) {
+        session.input = Input::default();
+        return;
     }
     if session.menu.is_some() {
         title_controls(&keys, &pad, &mut session);
@@ -677,7 +672,7 @@ fn restart(session: &mut Session) {
     session.paused = false;
     session.slow = false;
     session.chart = None;
-    session.dev_panel = None;
+    session.console = None;
     session.save_feedback.clear();
 }
 
@@ -768,41 +763,6 @@ fn settings_controls(
         _ => {}
     }
     outcome
-}
-
-/// The developer panel's keys: up and down choose a row, left and right change it, enter does it,
-/// backquote, Esc or Start close.
-fn dev_controls(
-    keys: &ButtonInput<KeyCode>,
-    pad: &impl Fn(GamepadButton) -> bool,
-    session: &mut Session,
-    close: bool,
-) {
-    use ssc::simulation::dev::DevRow;
-    let Some(mut row) = session.dev_panel else {
-        return;
-    };
-    if close || pad(GamepadButton::East) {
-        session.dev_panel = None;
-        return;
-    }
-    if keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown) {
-        row = devpanel::step_index(row, 1);
-    }
-    if keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
-        row = devpanel::step_index(row, -1);
-    }
-    session.dev_panel = Some(row);
-    let dir = i32::from(keys.just_pressed(KeyCode::ArrowRight) || pad(GamepadButton::DPadRight))
-        - i32::from(keys.just_pressed(KeyCode::ArrowLeft) || pad(GamepadButton::DPadLeft));
-    let confirm = keys.just_pressed(KeyCode::Enter)
-        || keys.just_pressed(KeyCode::Space)
-        || pad(GamepadButton::South);
-    if dir != 0 {
-        session.game.dev_change(DevRow::ALL[row], dir);
-    } else if confirm {
-        session.game.dev_change(DevRow::ALL[row], 0);
-    }
 }
 
 /// The bench's keys; see `controls`.

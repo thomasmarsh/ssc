@@ -1,6 +1,6 @@
 # Graphical menus: UI foundation and conversion plan
 
-Status: TODO (planned 2026-10-10). Today every menu is a column of text lines in a `bevy_ui` `Node` (title, settings, dev panel, help, details, bench, run summary, chart sidebar) navigated by keys and the controller; the chart map itself and the flight HUD are already vector shapes. User direction (2026-10-10): menus should become graphical and intuitive, and must not assume a mouse cursor: gamepad first wherever possible. This doc is the design contract; [SEED.md](../SEED.md) slices U1 to U5 are the work.
+Status: foundation and the developer console built (slice U1, 2026-10-10); U2 to U5 are TODO. Every other menu is still a column of text lines in a `bevy_ui` `Node` (title, settings, help, details, bench, run summary, chart sidebar) navigated by keys and the controller; the chart map itself and the flight HUD are already vector shapes. User direction (2026-10-10): menus should become graphical and intuitive, and must not assume a mouse cursor: gamepad first wherever possible. This doc is the design contract; [SEED.md](../SEED.md) slices U1 to U5 are the work.
 
 ## Rules
 
@@ -11,22 +11,28 @@ Status: TODO (planned 2026-10-10). Today every menu is a column of text lines in
 - **Cheap when idle.** A screen rebuilds its widget tree only when its view-model changes (compare by equality), not every frame. Closed screens cost nothing; a normal run with every menu closed renders as today.
 - **Smoke hooks keep working.** Each converted screen keeps its `SSC_*` hooks ([HOOKS.md](HOOKS.md)) with the same staging, and is captured at both sizes before and after.
 
-## Foundation (slice U1)
+## Foundation (slice U1, built)
 
-`src/ui/` in the desktop binary, one plugin registered from `main.rs`:
-- `theme.rs`: tokens (colors, type scale, spacing, borders, focus ring), UI scale.
-- `focus.rs`: a pure focus model (a list/grid of focusable ids per screen, directional neighbors, wrap rules, tab order, modal stack, back behavior, held-input repeat) fed by one input mapping for pad and keys (mouse optional); unit tested without rendering. This is the primary interaction model, not an accessibility add-on.
-- `widgets.rs`: spawn helpers and components: panel/window frame with title and a B-to-close hint, tab bar with LB/RB glyphs, list row (icon, label, state badge, cost pips by material, disabled reason), button, toggle, slider and stepper (step by d-pad, accelerate on hold, respect min/max/whole-number), search or filter field usable from a pad (an on-screen character grid or preset filters; typing is a keyboard shortcut, not a requirement), scroll container that follows focus, detail pane for the focused row, confirm dialog, toast, and button glyphs that follow the active device.
-- `intent.rs`: the `UiIntent` message and its single dispatch system onto `Session`/`Game`.
-- `screens/`: one file per screen, each owning its layout and its view-model to widget mapping.
+`src/ui/` in the desktop binary, one `UiPlugin` registered from `main.rs` (the only other touch points are `Session::console`/`ui_consumed`, a short skip in `controls`, and the smoke hook):
+- `theme.rs`: palette tokens (shared with the flight HUD), `Tone` (normal, muted, accent, warn, bad, good), the type scale (18, 14, 12), spacing, the two-pixel focus ring. Window-following scale stays `hud::apply_ui_scale`.
+- `focus.rs`: the pure focus model, unit tested without rendering. `UiKey` is the one input vocabulary (directions, confirm, back, tab prev/next, page up/down, two alternates); `Repeater` turns held keys into a press then repeats (0.38 s delay, 85 ms interval, a repeat count for acceleration, `prime` so the key that opened a screen does not also act); `Scope` is a grid of rows of cells with wrap or clamp, column memory, id-stable `replace` and tab order; an item can `adjust` (Left and Right become value changes); `FocusStack` adds modals; `Window` is a scroll window that follows a cursor.
+- `input.rs`: the device mapping to `UiKey` as a pure function of "is it down" closures (keys, pad buttons, left stick as a d-pad), tested to reach every key from a pad alone and from a keyboard alone.
+- `value.rs`: pure slider stepping (`Span`): 1-2-5 grid of a fiftieth of the range, whole numbers, ratio steps for wide ranges, acceleration, landing on the default, track fraction, short number formatting.
+- `icons.rs`: procedural vector icons (bars, discs, rings in a unit box: chevrons, check, cross, dot, regenerate, reset, search, save, load, warning), pure data drawn as rotated `bevy_ui` nodes; no atlas.
+- `glyphs.rs`: button prompts that follow the device last used (A or ENTER, LB RB or `[ ]`).
+- `widgets.rs`: pure view structs (compared by value) and spawn helpers: panel frame with title chips, tab bar, list row (caret, label, badges, and a toggle, slider, stepper, text field or action value), buttons, list with scroll bar, detail pane, toast, hint bar, confirm and picker dialog, glyph chip. A screen rebuilds its tree only when its view differs from the last one.
+- `intent.rs`: `UiIntent` and the dispatch onto `Game` (and `restart` for regenerate); replies are `Game::tune_command`'s text verbatim.
+- `screens/`: `console.rs` (state, focus layout, view-model, intents; pure and tested) and `console_ui.rs` (root node, input and render systems).
 
-First consumer: the **developer tuning console** (DEVTOOLS Phase C), `SSC_DEV=1` only, fully driveable from a pad (the guide button already opens the dev panel): group tabs from `Game::tune_groups`, search or filter, a "modified" filter, a slider or stepper per entry from `tune_list` (value, default, range, unit, doc), reset one or all, a `Regen` badge and a regenerate action (restart under the tuning) when `tuning_needs_regen`, load and save of the `SSC_TUNING` overrides file, and the culture drift temperature/timescale rows with FROZEN/DRIFTING status. Refusals show the reply of `tune_set`/`tune_command` verbatim. The existing toggles of `src/devpanel.rs` move onto the same widgets as a second tab, so the old dev text panel is deleted.
+Gamepad routes: d-pad or left stick move, A confirm, B or Start or Guide back, LB and RB tabs, LT and RT page, X and Y alternates. Keyboard: arrows, Enter or Space, Esc or backquote, `[` and `]`, Page Up and Page Down, Delete and Insert; letters type into a search field. A mouse click focuses (and activates unless the row adjusts) and the wheel scrolls; nothing depends on them.
+
+First consumer: the **developer tuning console** (DEVTOOLS Phase C, built), `SSC_DEV=1` only, with a TUNING tab (groups, search, modified filter, sliders, reset, regenerate, overrides load and save, culture drift status) and a TOGGLES tab (the old `src/devpanel.rs` rows, now deleted).
 
 ## Conversion sequence
 
 | Slice | Screens | View-model source | Notes |
 | --- | --- | --- | --- |
-| U1 | Tuning console, dev toggles | `tune_list`, `Game::dev`, `culture_clock` | Foundation; Phase C done when it lands |
+| U1 | Tuning console, dev toggles | `tune_list`, `Game::dev`, `culture_clock` | Done: foundation and Phase C |
 | U2 | Bench (PARTS/WEAPONS/SKILLS), pad services and modules, research and grade, CONTACT (equipment, tithe/trade, jobs, agreements, partnership), mining fleet orders/templates/blueprints, organs, stash; purchase receipts | `BenchPanel`/`BenchRow`, `bench_feedback` | Cards with cost pips and an always-visible detail pane; `BenchAction` stays the only transaction identity ([BENCH.md](BENCH.md)) |
 | U3 | Title menu, settings, details panel, run summary | `TitleMenu`, settings state, details/summary view-models | Pause behavior unchanged |
 | U4 | Star map sidebar and map controls | chart data in `simulation/chart.rs`, discovery | Fixes the compact sidebar overflow TODO (MIGRATION caveats); pad-first sector selection (a focus cursor moved by stick/d-pad, A for details), pan and zoom on sticks/triggers, mouse click optional |
@@ -34,8 +40,9 @@ First consumer: the **developer tuning console** (DEVTOOLS Phase C), `SSC_DEV=1`
 
 The geometric flight HUD (`src/hud.rs`) stays gizmo-drawn; only its prompts and notices move in U5.
 
-## Open choices
+## Choices made
 
-- Bevy in-tree widgets (`bevy_ui_widgets`, `bevy_input_focus` directional navigation) versus a thin own layer over `bevy_ui`: U1 evaluates and records the choice here; no third-party crate either way without approval.
-- Icon source: procedural vector icons (consistent with the game's look) versus a small committed icon atlas. Default: procedural.
-- Mouse support depth: default is the minimal optional route above (click and wheel); no pointer-only features. The cursor stays hidden in flight.
+- **Own thin layer over `bevy_ui`, not `bevy_ui_widgets` or `bevy_input_focus`** (U1 evaluated both in Bevy 0.19.1): the in-tree widgets are pointer-picking driven (sliders and buttons react to `Pointer` events, with focus a keyboard add-on) and marked experimental, external state and observers per widget; the focus model here must be pure, desktop-testable without an app, with held-key repeat, id-stable replacement, a modal stack and scroll windows. No Bevy feature was added and no crate. A later slice may adopt `bevy_ui_widgets` for something it covers better; the views and focus model do not depend on the choice.
+- **Procedural vector icons**, no atlas (default kept): `icons.rs`.
+- **Mouse depth**: click focuses and activates (not on adjusting rows), wheel scrolls; no hover, drag or pointer-only feature. The cursor is not hidden by the console.
+- **Rebuild on change**: screens diff a pure view and respawn the tree; fixed-slot retained updates were not needed at console scale. Revisit if a screen with hundreds of rows per change appears.

@@ -118,22 +118,43 @@ fn smoke_view_hooks(run: &mut SmokeRun, session: &mut Session) {
 
 /// Where the ship starts: developer panel, teleport, farm, civ greenhouse and the clock.
 fn smoke_placement_hooks(run: &mut SmokeRun, session: &mut Session) {
-    // SSC_DEV=1 SSC_DEV_PANEL=<row>: open the developer panel on that row; SSC_DEV_ON=1 first
-    // turns on the six switches and doubles the time scale (to check the panel and the DEV tag).
-    if run.frames == 0
-        && ssc::simulation::dev::enabled()
-        && let Some(row) = std::env::var("SSC_DEV_PANEL")
-            .ok()
-            .and_then(|v| v.trim().parse::<usize>().ok())
-    {
+    // SSC_DEV=1 SSC_DEV_CONSOLE=tuning|toggles opens the developer console on a tab, with
+    // SSC_DEV_GROUP=<group>, SSC_DEV_SEARCH=<text> and SSC_DEV_MODIFIED=1 staging the filters and
+    // SSC_DEV_DIALOG=reset|regen|search opening a dialog over it;
+    // SSC_DEV_PANEL=<row> opens the toggles tab on that row (the older hook). SSC_DEV_ON=1 first
+    // turns on the six switches and doubles the time scale (to check the console and DEV tag).
+    if run.frames == 0 && ssc::simulation::dev::enabled() {
+        use crate::ui::screens::console::{Console, Tab};
         use ssc::simulation::dev::DevRow;
-        if std::env::var_os("SSC_DEV_ON").is_some() {
-            for row in DevRow::ALL.into_iter().take(6) {
-                session.game.dev_change(row, 0);
+        let staged_row = std::env::var("SSC_DEV_PANEL")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok());
+        let tab = std::env::var("SSC_DEV_CONSOLE").ok();
+        if staged_row.is_some() || tab.is_some() {
+            if std::env::var_os("SSC_DEV_ON").is_some() {
+                for row in DevRow::ALL.into_iter().take(6) {
+                    session.game.dev_change(row, 0);
+                }
+                session.game.dev_change(DevRow::TimeScale, 1);
             }
-            session.game.dev_change(DevRow::TimeScale, 1);
+            session.console = Some(match (tab.as_deref(), staged_row) {
+                (Some("toggles"), row) | (None, row @ Some(_)) => {
+                    Console::on_toggle_row(row.unwrap_or(0).min(DevRow::ALL.len() - 1))
+                }
+                _ => {
+                    let console = Console::staged(
+                        Tab::Tuning,
+                        std::env::var("SSC_DEV_GROUP").ok().as_deref(),
+                        &std::env::var("SSC_DEV_SEARCH").unwrap_or_default(),
+                        std::env::var_os("SSC_DEV_MODIFIED").is_some(),
+                    );
+                    match std::env::var("SSC_DEV_DIALOG") {
+                        Ok(name) => console.with_dialog(&name),
+                        Err(_) => console,
+                    }
+                }
+            });
         }
-        session.dev_panel = Some(row.min(DevRow::ALL.len() - 1));
     }
     // Smoke runs can start somewhere interesting: SSC_TELEPORT="x,y" (invulnerable).
     if run.frames == 0
