@@ -146,9 +146,9 @@ fn draw_bodies(
                     session.reduce_effects,
                 );
                 if !session.reduce_effects {
-                    crate::glitchview::ship_fringe(gizmos, &jam, body, ship_view.angle);
+                    crate::glitchview::ship_fringe(gizmos, jam, body, ship_view.angle);
                 }
-                crate::glitchview::confusion(gizmos, &jam, body, game.time);
+                crate::glitchview::confusion(gizmos, jam, body, game.time);
             }
             BodyKind::Creature if game.disguise(body).is_some() => {
                 // A mimic: a plain rock, or a bright pickup hanging on a thin stalk. A crack
@@ -192,7 +192,7 @@ fn draw_bodies(
                 let faint = if dim.is_empty() {
                     0.0
                 } else {
-                    Game::dim_from(&dim, p) / (1.0 - ssc::power::DIM_FLOOR)
+                    Game::dim_from(dim, p) / (1.0 - ssc::power::DIM_FLOOR)
                 };
                 let shown = crate::powerview::outline(game, body, color);
                 // A piece broken off a body fades as it drifts away.
@@ -899,7 +899,7 @@ fn draw_ship_effects(gizmos: &mut Gizmos, f: &Frame) {
         camera,
         half,
         session.arrows,
-        &jam,
+        jam,
         session.reduce_effects,
     );
 }
@@ -937,17 +937,17 @@ fn draw_screen_layer(gizmos: &mut Gizmos, f: &Frame) {
             );
         } else {
             if let Some(ship) = game.player() {
-                crate::hud::draw_ship_rings(gizmos, &hud, ship, &screen, game.time);
+                crate::hud::draw_ship_rings(gizmos, &hud, ship, screen, game.time);
             }
-            crate::hud::draw_hud(gizmos, game, &hud, &screen, game.time);
+            crate::hud::draw_hud(gizmos, game, &hud, screen, game.time);
         }
         if !session.reduce_effects {
-            crate::hud::draw_juice(gizmos, &session.juice, &screen);
-            crate::hud::draw_vignette(gizmos, &hud, &screen, game.time);
+            crate::hud::draw_juice(gizmos, &session.juice, screen);
+            crate::hud::draw_vignette(gizmos, &hud, screen, game.time);
         }
     }
     if !session.reduce_effects {
-        crate::glitchview::screen(gizmos, &jam, camera, half, game.time);
+        crate::glitchview::screen(gizmos, jam, camera, half, game.time);
     }
     // The radar: always on if the setting says so, else while the details are open and there
     // is room beside them. Mid-right, clear of the corners and the bottom cluster.
@@ -957,7 +957,7 @@ fn draw_screen_layer(gizmos: &mut Gizmos, f: &Frame) {
             game,
             screen.at(window.x - 24.0 - RADAR_RADIUS, window.y / 2.0),
             screen.scale,
-            &jam,
+            jam,
             session.reduce_effects,
         );
     }
