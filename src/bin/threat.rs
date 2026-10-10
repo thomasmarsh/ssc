@@ -588,7 +588,7 @@ fn channel_header(first: &str) -> String {
 fn print_channels(o: &Options, by_ring: &BTreeMap<i32, Vec<(u64, SectorReport)>>) {
     println!("## Channels\n");
     println!(
-        "Share of the danger weight (`hostility * copies * power^2`) by channel at cover 0, mean over sectors, in percent; the unattributed rest is unarmed bodies and bonds. The last four columns are, per gateable channel, the percent of sectors where a power of that channel is present and, after the slash, where the worst hostile window burst over the unmitigated reference pool is at least 1 (lethal without the answer). Attribution: the gun keeps `1 / flair^2` of an organism, its powers split the rest by `ln(1 + term)`.\n"
+        "Share of the danger weight (`hostility * copies * power^2`) by channel at cover 0, mean over sectors, in percent; the unattributed rest is unarmed bodies, bonds and diets that drain cargo, not the ship. The last four columns are, per gateable channel, the percent of sectors where a power of that channel is present and, after the slash, where the worst hostile window burst over the unmitigated reference pool is at least 1 (lethal without the answer). Attribution: an organism's core (`1 / flair^2`) splits over its damage sources by expected damage per second (gun, bite, lunge, charge, cord, siphon, latch, digest), its powers split the rest by `ln(1 + term)`; wells, maws and a herd's sting are hazards with their own channel.\n"
     );
     println!("{}", channel_header("ring"));
     for (ring, list) in by_ring {

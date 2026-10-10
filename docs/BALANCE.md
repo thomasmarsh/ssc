@@ -1,6 +1,6 @@
 # Balance: how hard is an enemy, a sector and an island
 
-Status: MEASURED and PROPOSED; slice 1 (the burst budget, section 8) is BUILT, the rest is not. The tables of sections 2 to 3 below are the pre-slice-1 snapshot unless marked; section 3.3 carries the after numbers. The tool (`src/threat.rs`, `src/bin/threat.rs`, `src/threat_baseline.txt`) is built and kept current by tests. Every number below was produced by `cargo run --release --no-default-features --bin threat -- --seeds 3 --per-ring 40 --rings 0,1,2,3,4,5,6,8,10,14,20,30,50,80` (master seed and two derived seeds, `Tunables::DEFAULT`, generation as of GENERATOR_VERSION 36). Re-run it after any generation or tuning change; the figures are a snapshot, the method is the deliverable.
+Status: MEASURED and PROPOSED; slice 1 (the burst budget, section 8) is BUILT, the rest is not (CAPABILITIES K2 priced the non-gun damage channels, section 3.7). The tables of sections 2 to 3 below are the pre-slice-1 snapshot unless marked; section 3.3 carries the after numbers. The tool (`src/threat.rs`, `src/bin/threat.rs`, `src/threat_baseline.txt`) is built and kept current by tests. Every number below was produced by `cargo run --release --no-default-features --bin threat -- --seeds 3 --per-ring 40 --rings 0,1,2,3,4,5,6,8,10,14,20,30,50,80` (master seed and two derived seeds, `Tunables::DEFAULT`, generation as of GENERATOR_VERSION 36). Re-run it after any generation or tuning change; the figures are a snapshot, the method is the deliverable.
 
 Design feedback this answers: the game feels either trivially easy or suddenly lethal from a confluence of events; tiny creatures one-shot a maxed ship by blasting nails; all enemies move at roughly the same slow speed; apex elders have obvious strategies; mining for small upgrades is a grind. Sections 1 to 4 say what is true, section 5 onward is the proposed model.
 
@@ -173,27 +173,43 @@ Alert top speed over the ship's 460 (all organisms, 21474 samples): min 0.06, p1
 
 Realms move the median danger by 0.9x to 2.5x and leave the burst tail untouched: every realm's p99 burst is 8000 to 26000, which is why realms add variety (a different mix of axes) but not a different failure mode. The worst sampled sectors are at ring 80, dominated by Missile and Mine genomes (Darzuox Missile x9, Mogliine Missile x11, Fatmowyrm Mine x18) at danger 60 to 100 against a `threat^0.8` of 12 to 15.
 
-### 3.7 Not modelled yet (the `Gap` entries of `DAMAGE_CHANNELS`)
+### 3.7 The damage channels that are not guns (K2: closed)
 
-Elder lunge and charge ram (`lunge_speed`, `elder_charge_speed`, `elder_enrage_sting`), ramming and impact strikes (`world_ram_damage`, `strike_damage`), predator bites and flock stings (`food_bite_*`, `fauna_bite*`, `flock_sting_*`), tether cords and links (`tether_cord_bullet_damage`, `tether_link_damage`), gravity wells and maws (`gen_well_dps_*`, `gen_well_maw_dps_*`), and the damage side of powers (cloud, devour, rune mines, rift, latch). Each should become a `Modelled` row before the next balance slice relies on the number; wells and maws are environmental and should join sector danger as a separate term.
+Every entry of `DAMAGE_CHANNELS` is now `Modelled` or `NotEnemyOfTheShip`. Each source is priced from the live tunables and the genome, as expected damage per second to the ship, and joins `ship_dps` of the organism's core (`Organism::sources`, with the channel it feeds):
+
+| Source | Tunables and genes read | Channel | Price |
+| --- | --- | --- | --- |
+| Bite and sting (every creature) | `contact_damage`, sharpness | RAM | `contact_hit / 0.65 s * CONTACT_DUTY` (0.25, the old literal, now named) |
+| Elder lunge (queen, bulwark, hunter, warden: `Archetype::lunges`) | `lunge_speed`, `lunge_time`, `lunge_windup`, `snipe_after`, `snipe_range` | CLOSE | one contact hit per `snipe_after + windup + time + 1.5 s`, landing the share `lunge_speed * lunge_time / snipe_range` |
+| Elder charge (juggernaut) | `elder_charge_speed`, `_time`, `_windup`, `_every_calm`, `_range_min`, `_range_max` | CLOSE | one contact hit per `every + windup + time`, landing the share of the start band the charge covers |
+| Enraged sting | `elder_enrage_sting` | RAM | raises an apex's `max_hit` (calm dps and burst stay calm) |
+| Cord link (bonded bodies) | `tether_link_damage`, `bond` | CORD | `link / 0.65 s * duty * bond` |
+| Siphon (Tether weapon, Siphon diet) | `tether_siphon_rate` | DRAIN | rate times duty |
+| Latch (Hunt or Siphon diet) | `LATCH_DRAIN`, `LATCH_HULL_DRAIN` | DRAIN | drain a second times duty; replaces the Latch flair term |
+| Engulf digest | `ENGULF_DPS`, `ENGULF_DPS_GAIN` | DRAIN | digest a second times duty; replaces the Engulf flair term |
+| Gravity well, maw | `gen_well_dps_*`, `gen_well_maw_dps_*` through `well::of_sector` | FIELD | a `Hazard`: `power^2 = WINDOW * dps * duty / bare pool`, cut by the tier's FIELD cover (a ballast is immune) |
+| Herd sting | `flock_sting_rate`, `flock_sting_cap`, `contact_damage`, trigger | RAM | a `Hazard` at the cap, weighted by the trigger's hostility |
+
+Hazards join `danger` (`sqrt(organisms + hazards)`) and `share`; they are not organisms, so burst, alpha and speed tables are untouched. Reclassified as `NotEnemyOfTheShip` because they never reach the ship: `world_ram_damage` (the ship's own ram), `strike_damage`, `fauna_bite*` and `food_bite_*` (creature against creature or civilization), `tether_cord_bullet_damage` (player bullets cutting a cord). Still unpriced, by design: Cloud, Devour, Rune sigils, Rift and Weave webs keep the abstract flair term of section 2; fling and Maelstrom drag are control, not damage.
 
 ### 3.8 Channels, cover and the disables edge (K1; `threat --only channels`)
 
-`--seeds 2 --per-ring 24`, master seed. Shares are the percent of the danger weight (`hostility * copies * power^2`) by channel at cover 0, mean over sectors; the rest is unattributed (unarmed bodies, bonds, the Gap damage channels of 3.7).
+`--seeds 2 --per-ring 24`, master seed. Shares are the percent of the danger weight (`hostility * copies * power^2`, plus the hazards of 3.7) by channel at cover 0, mean over sectors; the rest is unattributed (bonds, diets that drain cargo). Re-measured after K2 closed the damage channels.
 
-| ring | VOLLEY | MINES | CORD | INFO present / lethal % | JAM present / lethal % |
-| --- | --- | --- | --- | --- | --- |
-| 3 | 20 | 0 | 0 | 0 / 0 | 0 / 0 |
-| 5 | 33 | 0 | 0 | 0 / 0 | 0 / 0 |
-| 8 | 68 | 0 | 5 | 2 / 0 | 0 / 0 |
-| 14 | 61 | 0 | 14 | 0 / 0 | 0 / 0 |
-| 30 | 57 | 5 | 14 | 10 / 0 | 2 / 0 |
+| ring | VOLLEY | RAM | FIELD | CORD | DRAIN | INFO present / lethal % | JAM present / lethal % |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0 | 100 | 0 | 0 | 0 | 0 / 0 | 0 / 0 |
+| 3 | 13 | 79 | 8 | 0 | 0 | 0 / 0 | 0 / 0 |
+| 5 | 20 | 75 | 5 | 0 | 0 | 0 / 0 | 0 / 0 |
+| 8 | 39 | 48 | 8 | 2 | 1 | 2 / 0 | 0 / 0 |
+| 14 | 23 | 54 | 18 | 4 | 0 | 0 / 0 | 0 / 0 |
+| 30 | 19 | 72 | 3 | 2 | 0 | 10 / 0 | 2 / 0 |
 
-By realm (rings 40 to 130): VOLLEY is 48 to 71 percent everywhere (crush highest, iron_tide lowest), CORD 12 percent in cradle, iron_tide and quiet_gold, MINES 17 to 23 percent in crush, dead_reach and iron_tide, and a power of INFO is present in 17 to 27 percent of dead_reach and crush sectors, JAM in 12 percent of hungry_deep. Every other channel is under 2 percent: the powers are nearly decorative in the danger index (flair adds 5 to 20 percent), which is the finding of CAPABILITIES section 0, now measured.
+(The pre-K2 table read VOLLEY 20 to 68 percent with the rest unattributed: the bite and the sting were counted in the power index but attributed to the gun.) By realm (rings 40 to 130): RAM is 39 to 65 percent everywhere (hive lowest, hungry_deep highest), VOLLEY 21 to 36, FIELD 19 to 25 in bright_silence, glass_seas and hive (wells and Song rings; 7 or less elsewhere), MINES up to 11 in iron_tide, CLOSE (lunge, charge) at most 2, and a power of INFO is present in 17 to 27 percent of dead_reach and crush sectors, JAM in 12 percent of hungry_deep. The other channels are under 2 percent: the powers are still nearly decorative in the danger index (flair adds 5 to 20 percent), which is the finding of CAPABILITIES section 0, now measured honestly. Baseline shift from blessing K2: median danger rose 0.01 to 0.12 at rings 4 to 80 (latch and engulf are priced as drains, lunge, charge, link and siphon add damage), rings 0 to 3 are unchanged.
 
 Facts:
 - `gate_burst` is below one in every sampled sector, so no area is lethal in a window even with the ward and the parry and dash answers removed. That is the burst budget (5.4) holding, and it means a gate has to come from the realm environment (CAPABILITIES 3.1, K3) or from sustained pressure, not from a single volley.
-- `+wards` (degree 2 on JAM, FIELD, ARMOR, INFO) moves median danger by under 0.01 at every sampled ring, because wards only cut flair. The wards matter once K2 closes the damage channels and K8 buys the underpowered powers back.
+- `+wards` (degree 2 on JAM, FIELD, ARMOR, INFO) moves median danger by under 0.01 at every sampled ring, because wards only cut flair. The wards matter once K8 buys the underpowered powers back (K2 closed the damage channels and left the powers' share at 1 to 5 percent).
 - Parry and dash fully trained cut the worst window burst ratio p90 by 30 to 40 percent (ring 14 typical: 2.22 to 1.41); an Emp carrier gives part of it back for `hold / period`, about 23 percent of the time at the typical 1.4 s over 6 s.
 - `typical` cover comes from the sampled parts (CLOSE, FIELD, RAM, SWARM and CORD at degree 1 to 3); skills are not part of `roll_part`, so `typical+skills` is a separate row.
 

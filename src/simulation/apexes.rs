@@ -88,10 +88,7 @@ pub struct ApexState {
 
 /// Whether an archetype lacks a closer of its own and so lunges when sniped.
 fn lunges(archetype: Archetype) -> bool {
-    matches!(
-        archetype,
-        Archetype::Queen | Archetype::Bulwark | Archetype::Hunter | Archetype::Warden
-    )
+    archetype.lunges()
 }
 
 fn pick<T: Copy>(pair: (T, T), enraged: bool) -> T {

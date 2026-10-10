@@ -102,6 +102,15 @@ impl Archetype {
         Self::Warden,
     ];
 
+    /// Whether the archetype has no closer of its own and so lunges at a ship that snipes it
+    /// (a juggernaut charges, a phantom blinks, a lasher reels and a maelstrom pulls already).
+    pub fn lunges(self) -> bool {
+        matches!(
+            self,
+            Self::Queen | Self::Bulwark | Self::Hunter | Self::Warden
+        )
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Juggernaut => "juggernaut",

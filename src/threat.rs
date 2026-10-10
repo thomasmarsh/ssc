@@ -10,8 +10,9 @@
 //! even match is one. A sector's **danger** is `sqrt(sum(hostility * power^2))` over its
 //! organisms (Lanchester's square law for a simultaneous engagement).
 
+use crate::apex::Archetype;
 use crate::capability::{self, CHANNELS, Channel};
-use crate::genome::{Genome, Species, Trigger, Weapon};
+use crate::genome::{Diet, Genome, Species, Trigger, Weapon};
 use crate::power::Power;
 use crate::range::ring;
 use crate::realm;
@@ -28,6 +29,11 @@ pub const SHIP_RADIUS: f32 = 14.0;
 pub const WINDOW: f32 = 1.0;
 /// The contact cooldown after a ram (`ram_contact`).
 const CONTACT_COOLDOWN: f32 = 0.65;
+/// The share of the time a melee attacker (a bite, a link, a latch, a digest) is landing on
+/// the ship while it is in play: the duty that prices contact damage per second.
+const CONTACT_DUTY: f32 = 0.25;
+/// Seconds an elder rests after a lunge (`apexes::closers` holds `state.clock` at 1.5).
+const LUNGE_RECOVER: f32 = 1.5;
 /// Mean of the per-body fire stagger `(id % 7) * 0.13`.
 pub(crate) const STAGGER: f32 = 0.39;
 
@@ -143,6 +149,10 @@ pub struct Organism {
     pub weapon_channel: Option<Channel>,
     /// What its powers take from the ship for a moment (EMP removes parry and dash).
     pub disables: Vec<Disable>,
+    /// Where the organism's sustained damage to the ship comes from: expected damage per
+    /// second and the channel it feeds (the gun, the bite, a lunge, a charge, a cord, a
+    /// drain). `core` is priced from their sum, so the channel shares are honest.
+    pub sources: Vec<(Option<Channel>, f32)>,
 }
 
 /// A power that does not hurt but takes a capability away (docs/CAPABILITIES.md 2.1).
@@ -235,9 +245,21 @@ impl Organism {
         };
         let gun = 1.0 / (ratio * ratio).max(1.0);
         let mut loose = 0.0;
-        match self.weapon_channel {
-            Some(c) => out[c.index()] += total * gun,
-            None => loose += total * gun,
+        // The part the flair does not explain is split over the damage sources by their
+        // expected damage per second (the gun alone when nothing else bites).
+        let harm: f32 = self.sources.iter().map(|&(_, d)| d).sum();
+        if harm > 1e-9 {
+            for &(c, d) in &self.sources {
+                match c {
+                    Some(c) => out[c.index()] += total * gun * d / harm,
+                    None => loose += total * gun * d / harm,
+                }
+            }
+        } else {
+            match self.weapon_channel {
+                Some(c) => out[c.index()] += total * gun,
+                None => loose += total * gun,
+            }
         }
         let rest = total * (1.0 - gun);
         let sum: f32 = self
@@ -434,6 +456,7 @@ fn assess_genome(
     species: &Species,
     phenotype: world::Phenotype,
     copies: u32,
+    closer: Option<Archetype>,
     tune: &Tunables,
 ) -> Organism {
     let g = &species.genome;
@@ -474,7 +497,13 @@ fn assess_genome(
     }
     let dps = armed as f32 * volley_damage * hits / period;
     let contact_hit = g.contact_damage * sharp;
-    let max_hit = shot_damage.max(contact_hit);
+    // An enraged elder stings harder (`apexes::enrage`).
+    let sting = if class == Class::Apex {
+        tune.elder_enrage_sting.max(1.0)
+    } else {
+        1.0
+    };
+    let max_hit = shot_damage.max(contact_hit * sting);
     let speed = g.speed * (1.0 + (phenotype.aggression - 1.0) * 0.4) * foe.speed;
     let cruise = g.cruise * foe.speed * 1.4;
     let tow = (g.parts() as f32 * 0.6).max(1.0);
@@ -485,11 +514,66 @@ fn assess_genome(
     let (mut blink, mut phase, mut flair) = (0.0, 0.0, 1.0);
     let mut terms = Vec::new();
     let mut edges = Vec::new();
+    // The sources of sustained damage to the ship, expected, calm.
+    let mut sources: Vec<(Option<Channel>, f32)> = vec![
+        (capability::weapon::channel(g.weapon), dps),
+        (
+            Some(Channel::Ram),
+            contact_hit / CONTACT_COOLDOWN * CONTACT_DUTY,
+        ),
+    ];
+    if class == Class::Apex
+        && let Some(archetype) = closer
+    {
+        // The range closers (`apexes::closers`, `juggernaut`): one contact hit a cycle, the
+        // cycle being the wait, the telegraph and the move. A lunge fires at a ship that
+        // snipes from `snipe_range`; a charge starts anywhere in its band and reaches the
+        // share of it that `speed * time` covers.
+        if archetype.lunges() {
+            let cycle = tune.snipe_after + tune.lunge_windup + tune.lunge_time + LUNGE_RECOVER;
+            let lands = (tune.lunge_speed * tune.lunge_time / tune.snipe_range.max(1.0)).min(1.0);
+            sources.push((Some(Channel::Close), contact_hit * lands / cycle));
+        }
+        if archetype == Archetype::Juggernaut {
+            let cycle =
+                tune.elder_charge_every_calm + tune.elder_charge_windup + tune.elder_charge_time;
+            let band = (tune.elder_charge_range_max - tune.elder_charge_range_min).max(1.0);
+            let reach = tune.elder_charge_speed * tune.elder_charge_time;
+            let lands = ((reach - tune.elder_charge_range_min) / band).clamp(0.0, 1.0);
+            sources.push((Some(Channel::Close), contact_hit * lands / cycle));
+        }
+    }
+    if g.weapon == Weapon::Tether && g.diet == Diet::Siphon {
+        // The cord feeds on the shield while it holds (`tether::siphon`).
+        sources.push((Some(Channel::Drain), tune.tether_siphon_rate * CONTACT_DUTY));
+    }
+    if g.bond > 0.0 {
+        // A bonded body trails a cord to its neighbour; a ship crossing it takes a link hit.
+        sources.push((
+            Some(Channel::Cord),
+            tune.tether_link_damage / CONTACT_COOLDOWN * CONTACT_DUTY * g.bond.min(1.0),
+        ));
+    }
     for c in g.live_powers() {
         powers.push(format!("{:?}", c.power).to_lowercase());
         match c.power {
             Power::Blink => blink = c.strength,
             Power::Phase => phase = c.strength,
+            Power::Latch => {
+                // Priced as the drain it is (`parasite`): the carrier's diet says what it eats.
+                let rate = match g.diet {
+                    Diet::Rocks | Diet::Graze => 0.0,
+                    Diet::Hunt => crate::power::LATCH_HULL_DRAIN,
+                    _ => crate::power::LATCH_DRAIN.0 + crate::power::LATCH_DRAIN.1 * c.strength,
+                };
+                sources.push((capability::power::channel(c.power), rate * CONTACT_DUTY));
+                continue;
+            }
+            Power::Engulf => {
+                let rate = crate::power::ENGULF_DPS * (crate::power::ENGULF_DPS_GAIN + c.strength);
+                sources.push((capability::power::channel(c.power), rate * CONTACT_DUTY));
+                continue;
+            }
             _ => {}
         }
         let term = role(c.power).weight() * c.strength;
@@ -515,7 +599,7 @@ fn assess_genome(
     let through = (shot - foe.plating).max(shot * tune.plating_floor) / threat;
     let ttk = pool / (through / Stats::BASE.fire_period) * evasion;
     let bare_pool = Stats::BASE.max_hull + Stats::BASE.max_shield;
-    let ship_dps = (dps + contact_hit / CONTACT_COOLDOWN * 0.25).max(0.01);
+    let ship_dps = sources.iter().map(|&(_, d)| d).sum::<f32>().max(0.01);
     let ttk_ship = bare_pool / ship_dps;
     let agility = (speed / 460.0).clamp(0.2, 3.0);
     let core = (ttk / ttk_ship).sqrt() * agility.powf(0.3);
@@ -567,6 +651,7 @@ fn assess_genome(
         flair: terms,
         weapon_channel: capability::weapon::channel(g.weapon),
         disables: edges,
+        sources,
     }
 }
 
@@ -713,11 +798,23 @@ fn assess_structure(spawn: &Spawn, tune: &Tunables) -> Option<Organism> {
         flair: Vec::new(),
         weapon_channel: capability::weapon::channel(weapon),
         disables: Vec::new(),
+        sources: vec![(capability::weapon::channel(weapon), dps)],
     })
 }
 
 /// The organisms of one spawn (none for rocks and wells). A husk contributes its tenants.
+/// An apex elder's range closers need its sector's archetype: see `assess_spawn_in`.
 pub fn assess_spawn(spawn: &Spawn, tune: &Tunables) -> Vec<Organism> {
+    assess_spawn_in(spawn, None, tune)
+}
+
+/// `assess_spawn` for a spawn of a sector whose elder (if any) is of `archetype`: a lunge or
+/// a charge is a source of the elder's damage.
+pub fn assess_spawn_in(
+    spawn: &Spawn,
+    archetype: Option<Archetype>,
+    tune: &Tunables,
+) -> Vec<Organism> {
     let mut out = Vec::new();
     if let (Some((species, count)), true) = (spawn.den, spawn.kind != BodyKind::Creature) {
         out.push(assess_genome(
@@ -725,6 +822,7 @@ pub fn assess_spawn(spawn: &Spawn, tune: &Tunables) -> Vec<Organism> {
             &species,
             spawn.phenotype,
             u32::from(count),
+            None,
             tune,
         ));
     }
@@ -737,9 +835,69 @@ pub fn assess_spawn(spawn: &Spawn, tune: &Tunables) -> Vec<Organism> {
             } else {
                 Class::Wild
             };
-            out.push(assess_genome(class, &species, spawn.phenotype, 1, tune));
+            let closer = archetype.filter(|_| class == Class::Apex);
+            out.push(assess_genome(
+                class,
+                &species,
+                spawn.phenotype,
+                1,
+                closer,
+                tune,
+            ));
         }
         _ => out.extend(assess_structure(spawn, tune)),
+    }
+    out
+}
+
+/// Damage that is in a sector but is no organism's: a gravity well or maw (the ship in its
+/// core takes `dps`) and a herd's sting. Priced like an organism whose ttk is the player's
+/// `WINDOW` to answer it, so `power^2 = WINDOW / ttk_ship` with `ttk_ship` the bare ship's
+/// pool over the hazard's damage per second while it is landing (`CONTACT_DUTY`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hazard {
+    pub name: &'static str,
+    pub channel: Channel,
+    /// Damage per second to the ship when it is in the hazard, times the duty.
+    pub dps: f32,
+    /// How readily it goes for the ship (a well always; a herd as its trigger says).
+    pub hostility: f32,
+}
+
+impl Hazard {
+    /// `power^2` against a ship of `tier`, the tier's cover of the channel cutting the damage
+    /// (a ballast is immune to a well's core: degree three).
+    pub fn weight_for(&self, tier: &Tier) -> f32 {
+        let k = 1.0 - f32::from(tier.cover[self.channel.index()]) / 3.0;
+        let bare = Stats::BASE.max_hull + Stats::BASE.max_shield;
+        self.hostility * WINDOW * self.dps * k / bare
+    }
+}
+
+/// The hazards of sector `id`: its wells and maws (`well::of_sector`, genome damage rate and
+/// all) and the sting of its herd (`herd::plan`, `flock::sting_rate` at the cap).
+fn hazards_of(seed: u64, id: SectorId, spawns: &[Spawn], tune: &Tunables) -> Vec<Hazard> {
+    let mut out = Vec::new();
+    for well in crate::well::of_sector(seed, id, spawns) {
+        out.push(Hazard {
+            name: if well.genome.mode == crate::well::Mode::Maw {
+                "maw"
+            } else {
+                "well"
+            },
+            channel: Channel::Field,
+            dps: well.genome.dps * CONTACT_DUTY,
+            hostility: 1.0,
+        });
+    }
+    if let Some(plan) = crate::herd::plan(seed, id) {
+        let g = &plan.species.genome;
+        out.push(Hazard {
+            name: "herd",
+            channel: Channel::Ram,
+            dps: g.contact_damage * tune.flock_sting_rate * tune.flock_sting_cap as f32,
+            hostility: Class::Wild.hostility(g.trigger),
+        });
     }
     out
 }
@@ -753,7 +911,9 @@ pub struct SectorReport {
     pub threat: f32,
     pub realm: &'static str,
     pub organisms: Vec<Organism>,
-    /// `sqrt(sum(hostility * copies * power^2))`.
+    /// Wells, maws and the herd's sting: environmental damage that joins the danger.
+    pub hazards: Vec<Hazard>,
+    /// `sqrt(sum(hostility * copies * power^2))` over organisms and hazards.
     pub danger: f32,
     /// Share of the danger weight (`hostility * copies * power^2`) by channel, at cover 0.
     /// Sums to at most one; the rest is unattributed (unarmed bodies, bonds).
@@ -792,20 +952,27 @@ impl SectorReport {
             }
             total += w.iter().sum::<f32>() + loose;
         }
+        for h in &self.hazards {
+            let w = h.weight_for(tier);
+            out[h.channel.index()] += w;
+            total += w;
+        }
         let total = total.max(1e-6);
         out.map(|v| v / total)
     }
 
     /// The danger index at `tier`: `danger` with every power cut by the tier's cover.
     pub fn danger_for(&self, tier: &Tier) -> f32 {
-        self.organisms
+        let organisms: f32 = self
+            .organisms
             .iter()
             .map(|o| {
                 let p = o.power_for(tier);
                 o.hostility * o.copies as f32 * p * p
             })
-            .sum::<f32>()
-            .sqrt()
+            .sum();
+        let hazards: f32 = self.hazards.iter().map(|h| h.weight_for(tier)).sum();
+        (organisms + hazards).sqrt()
     }
 
     /// The largest expected window burst of any organism that can fire at the ship.
@@ -837,14 +1004,19 @@ impl SectorReport {
 pub fn assess_sector(seed: u64, id: SectorId) -> SectorReport {
     let params = world::latent(seed, id);
     let mut organisms = Vec::new();
-    for spawn in world::generate(seed, id) {
-        organisms.extend(assess_spawn(&spawn, &DEFAULT));
+    let spawns = world::generate(seed, id);
+    let archetype = Some(crate::apex::archetype(seed, id));
+    for spawn in &spawns {
+        organisms.extend(assess_spawn_in(spawn, archetype, &DEFAULT));
     }
-    let danger = organisms
+    let hazards = hazards_of(seed, id, &spawns, &DEFAULT);
+    let tier = tier_bare();
+    let danger = (organisms
         .iter()
         .map(|o| o.hostility * o.copies as f32 * o.power * o.power)
         .sum::<f32>()
-        .sqrt();
+        + hazards.iter().map(|h| h.weight_for(&tier)).sum::<f32>())
+    .sqrt();
     let (_, kind, _) = realm::identity(seed, id);
     let mut report = SectorReport {
         id,
@@ -853,11 +1025,12 @@ pub fn assess_sector(seed: u64, id: SectorId) -> SectorReport {
         threat: world::threat(params.depth),
         realm: kind.spec().id,
         organisms,
+        hazards,
         danger,
         share: [0.0; CHANNELS],
         gate_burst: [0.0; CHANNELS],
     };
-    report.share = report.share_for(&tier_bare());
+    report.share = report.share_for(&tier);
     report.gate_burst = gate_bursts(&report.organisms);
     report
 }
@@ -1214,25 +1387,25 @@ mod tests {
         ("barrage_shots_calm", Coverage::Modelled),
         ("barrage_shots_enraged", Coverage::Modelled),
         ("barrage_share", Coverage::Modelled),
-        ("lunge_speed", Coverage::Gap),
-        ("elder_charge_speed", Coverage::Gap),
-        ("elder_enrage_sting", Coverage::Gap),
-        ("world_ram_damage", Coverage::Gap),
-        ("strike_damage", Coverage::Gap),
-        ("food_bite_damage", Coverage::Gap),
-        ("food_bite_period", Coverage::Gap),
-        ("fauna_bite", Coverage::Gap),
-        ("fauna_bite_per_contact", Coverage::Gap),
-        ("fauna_bite_period", Coverage::Gap),
-        ("fauna_bite_reach", Coverage::Gap),
-        ("flock_sting_cap", Coverage::Gap),
-        ("flock_sting_rate", Coverage::Gap),
-        ("tether_cord_bullet_damage", Coverage::Gap),
-        ("tether_link_damage", Coverage::Gap),
-        ("gen_well_dps_lo", Coverage::Gap),
-        ("gen_well_dps_hi", Coverage::Gap),
-        ("gen_well_maw_dps_lo", Coverage::Gap),
-        ("gen_well_maw_dps_hi", Coverage::Gap),
+        ("lunge_speed", Coverage::Modelled),
+        ("elder_charge_speed", Coverage::Modelled),
+        ("elder_enrage_sting", Coverage::Modelled),
+        ("world_ram_damage", Coverage::NotEnemyOfTheShip),
+        ("strike_damage", Coverage::NotEnemyOfTheShip),
+        ("food_bite_damage", Coverage::NotEnemyOfTheShip),
+        ("food_bite_period", Coverage::NotEnemyOfTheShip),
+        ("fauna_bite", Coverage::NotEnemyOfTheShip),
+        ("fauna_bite_per_contact", Coverage::NotEnemyOfTheShip),
+        ("fauna_bite_period", Coverage::NotEnemyOfTheShip),
+        ("fauna_bite_reach", Coverage::NotEnemyOfTheShip),
+        ("flock_sting_cap", Coverage::Modelled),
+        ("flock_sting_rate", Coverage::Modelled),
+        ("tether_cord_bullet_damage", Coverage::NotEnemyOfTheShip),
+        ("tether_link_damage", Coverage::Modelled),
+        ("gen_well_dps_lo", Coverage::Modelled),
+        ("gen_well_dps_hi", Coverage::Modelled),
+        ("gen_well_maw_dps_lo", Coverage::Modelled),
+        ("gen_well_maw_dps_hi", Coverage::Modelled),
         ("pad_siege_dps", Coverage::NotEnemyOfTheShip),
         ("pad_reload_raid_damage_min", Coverage::NotEnemyOfTheShip),
         ("pad_reload_raid_damage_max", Coverage::NotEnemyOfTheShip),
@@ -1253,6 +1426,8 @@ mod tests {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Coverage {
         Modelled,
+        /// Kept for the next unmodelled channel (docs/BALANCE.md 3.7 lists the ones open).
+        #[allow(dead_code)]
         Gap,
         NotEnemyOfTheShip,
     }
