@@ -3,16 +3,6 @@ use super::powers::PowerState;
 use super::*;
 use crate::power::Power;
 
-pub const ARM: f32 = 1.2;
-pub const LIFE: f32 = 20.0;
-pub const RADIUS: f32 = 90.0;
-pub const OWNER_CAP: usize = 4;
-pub const SECTOR_CAP: usize = 8;
-pub const GLOBAL_CAP: usize = 32;
-pub const SLOW_LIFE: f32 = 1.5;
-pub const SLOW_FLOOR: f32 = 0.6;
-pub const PUSH: f32 = 240.0;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Payload {
     Blast,
@@ -130,16 +120,16 @@ impl Game {
             return;
         }
         self.cleanup_runes();
-        if self.mines.len() >= weapons::MAX_MINES
+        if self.mines.len() >= self.tune.weapon_max_mines
             || self.mines.iter().filter(|m| m.sigil.is_some()).count() + self.rune_fields.len()
-                >= GLOBAL_CAP
+                >= self.tune.rune_global_cap
             || self
                 .mines
                 .iter()
                 .filter(|m| m.sigil.is_some_and(|s| s.owner == owner))
                 .count()
                 + self.rune_fields.iter().filter(|f| f.owner == owner).count()
-                >= OWNER_CAP
+                >= self.tune.rune_owner_cap
         {
             return;
         }
@@ -156,7 +146,7 @@ impl Game {
             };
             let target = ship + offset;
             if target.distance(at) > g.power_params(Power::Rune).reach
-                || target.distance(at) < RADIUS + self.bodies[index].radius + 30.0
+                || target.distance(at) < self.tune.rune_radius + self.bodies[index].radius + 30.0
                 || !self.active.contains(&SectorId::containing(target))
             {
                 continue;
@@ -165,11 +155,11 @@ impl Game {
                 b.active
                     && is_fixed(b)
                     && b.id != owner
-                    && b.position.distance(target) < b.radius + RADIUS + 24.0
+                    && b.position.distance(target) < b.radius + self.tune.rune_radius + 24.0
             }) || self
                 .mines
                 .iter()
-                .any(|m| m.position.distance(target) < 2.0 * RADIUS + 50.0)
+                .any(|m| m.position.distance(target) < 2.0 * self.tune.rune_radius + 50.0)
                 || self
                     .mines
                     .iter()
@@ -185,7 +175,7 @@ impl Game {
                             SectorId::containing(f.position) == SectorId::containing(target)
                         })
                         .count()
-                    >= SECTOR_CAP
+                    >= self.tune.rune_sector_cap
             {
                 continue;
             }
@@ -200,9 +190,9 @@ impl Game {
                 velocity: Vec2::ZERO,
                 friendly: false,
                 age: 0.0,
-                fuse: Some(ARM),
+                fuse: Some(self.tune.rune_arm),
                 damage: 30.0 * self.bodies[index].genes.sharpness(),
-                blast: RADIUS,
+                blast: self.tune.rune_radius,
             });
             state.rune_casts = state.rune_casts.wrapping_add(1);
             self.cue(Cue::RuneTell { at: target });
@@ -218,11 +208,12 @@ impl Game {
                 continue;
             }
             mine.age += dt;
-            mine.fuse = (mine.age < ARM).then_some((ARM - mine.age).max(0.0));
-            if mine.age >= LIFE {
+            mine.fuse =
+                (mine.age < self.tune.rune_arm).then_some((self.tune.rune_arm - mine.age).max(0.0));
+            if mine.age >= self.tune.rune_life {
                 continue;
             }
-            if mine.age >= ARM
+            if mine.age >= self.tune.rune_arm
                 && (mine.sigil.unwrap().shot
                     || self.bodies.iter().any(|b| {
                         b.active
@@ -234,24 +225,25 @@ impl Game {
                     }))
             {
                 bursts.push(mine.clone());
-                mine.age = LIFE;
+                mine.age = self.tune.rune_life;
             }
         }
-        self.mines.retain(|m| m.sigil.is_none() || m.age < LIFE);
+        self.mines
+            .retain(|m| m.sigil.is_none() || m.age < self.tune.rune_life);
         for mine in bursts {
             let sigil = mine.sigil.unwrap();
             if !self.body(sigil.owner).is_some_and(Self::rune_owner_live) {
                 continue;
             }
             self.cue(Cue::RuneFire { at: mine.position });
-            if self.rune_fields.len() < GLOBAL_CAP {
+            if self.rune_fields.len() < self.tune.rune_global_cap {
                 self.rune_fields.push(RuneField {
                     owner: sigil.owner,
                     position: mine.position,
                     payload: sigil.payload,
                     age: 0.0,
                     left: if sigil.payload == Payload::Slow {
-                        SLOW_LIFE
+                        self.tune.rune_slow_life
                     } else {
                         0.45
                     },
@@ -278,10 +270,10 @@ impl Game {
                             .try_normalize()
                             .unwrap_or(Vec2::X);
                         let ballast = if body.rig.ballast { 0.2 } else { 1.0 };
-                        body.velocity =
-                            (body.velocity + out * PUSH * ballast).clamp_length_max(300.0);
+                        body.velocity = (body.velocity + out * self.tune.rune_push * ballast)
+                            .clamp_length_max(300.0);
                         if body.kind != BodyKind::Player {
-                            body.rune_pushed = SLOW_LIFE;
+                            body.rune_pushed = self.tune.rune_slow_life;
                         }
                     }
                 }
@@ -337,7 +329,7 @@ impl Game {
                 &self.tune,
             );
             if !credited && taken > 0.0 && body.kind == BodyKind::Asteroid {
-                body.rune_pushed = body.rune_pushed.max(SLOW_LIFE);
+                body.rune_pushed = body.rune_pushed.max(self.tune.rune_slow_life);
             }
             if body.health <= 0.0 && body.kind != BodyKind::Player {
                 body.hostile_rock_kill = !credited;
@@ -367,7 +359,7 @@ impl Game {
         {
             if !self.rune_fields.iter().any(|f| {
                 f.payload == Payload::Slow
-                    && body.position.distance(f.position) < RADIUS + body.radius
+                    && body.position.distance(f.position) < self.tune.rune_radius + body.radius
             }) {
                 continue;
             }
@@ -378,7 +370,7 @@ impl Game {
                 BodyKind::Player => self.stats.top_speed,
                 BodyKind::Creature => body.genome.speed.max(body.genome.cruise),
                 _ => 120.0,
-            } * SLOW_FLOOR;
+            } * self.tune.rune_slow_floor;
             let speed = body.velocity.length();
             if speed > top {
                 body.velocity *= 1.0 + (top / speed - 1.0) * rate;
@@ -412,9 +404,9 @@ mod tests {
             velocity: Vec2::ZERO,
             friendly: false,
             age: 0.0,
-            fuse: Some(ARM),
+            fuse: Some(DEFAULT_TUNING.rune_arm),
             damage: 40.0,
-            blast: RADIUS,
+            blast: DEFAULT_TUNING.rune_radius,
             sigil: Some(Sigil {
                 owner: id,
                 payload,
@@ -434,7 +426,7 @@ mod tests {
     fn arming_warns_for_full_duration_then_fires_only_once() {
         let (mut g, _) = arena(Payload::Blast, Vec2::ZERO);
         let before = g.player().unwrap().shield;
-        tick(&mut g, ARM - 2.0 * DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm - 2.0 * DT);
         assert_eq!(g.player().unwrap().shield, before);
         assert!(g.mines[0].fuse.unwrap() > 0.0);
         tick(&mut g, 3.0 * DT);
@@ -456,7 +448,7 @@ mod tests {
         tick(&mut g, 2.0);
         assert_eq!(g.mines.len(), 1);
         assert_eq!(g.mines[0].fuse, None);
-        tick(&mut g, LIFE);
+        tick(&mut g, DEFAULT_TUNING.rune_life);
         assert!(g.mines.is_empty());
         assert!(
             !g.drain_cues()
@@ -496,7 +488,10 @@ mod tests {
                     },
                 );
             }
-            assert!(g.player().unwrap().position.length() > RADIUS + g.player().unwrap().radius);
+            assert!(
+                g.player().unwrap().position.length()
+                    > DEFAULT_TUNING.rune_radius + g.player().unwrap().radius
+            );
             assert_eq!(g.player().unwrap().shield, before);
             assert!(!g.jam_view().any());
         }
@@ -511,7 +506,7 @@ mod tests {
         ));
         g.move_bullets(DT);
         assert!(g.mines[0].sigil.unwrap().shot);
-        tick(&mut g, ARM - 2.0 * DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm - 2.0 * DT);
         assert_eq!(g.mines.len(), 1);
         tick(&mut g, 3.0 * DT);
         assert!(g.mines.is_empty());
@@ -543,7 +538,7 @@ mod tests {
         let phased = spawn(&mut g, &Species::fatso(), Vec2::new(-40.0, 0.0));
         g.bodies.iter_mut().find(|b| b.id == phased).unwrap().phased = true;
         let hull = body(&g, phased).health;
-        tick(&mut g, ARM + DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
         assert!(body(&g, owner).health < body(&g, owner).max_health);
         assert_eq!(body(&g, phased).health, hull);
     }
@@ -554,7 +549,7 @@ mod tests {
             let foe = spawn(&mut g, &Species::bogey(), Vec2::new(30.0, 0.0));
             g.bodies.iter_mut().find(|b| b.id == foe).unwrap().health = 1.0;
             g.mines[0].sigil.as_mut().unwrap().shot = shot;
-            tick(&mut g, ARM + DT);
+            tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
             assert!(body(&g, foe).health <= 0.0);
             g.remove_destroyed();
             assert_eq!(g.run.kills > 0, shot);
@@ -573,7 +568,7 @@ mod tests {
         crystal.health = 1.0;
         let foe = spawn(&mut g, &Species::bogey(), Vec2::new(140.0, 0.0));
         g.bodies.iter_mut().find(|b| b.id == foe).unwrap().health = 1.0;
-        tick(&mut g, ARM + DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
         g.remove_destroyed();
         assert!(body(&g, foe).health > 0.0);
         g.remove_destroyed();
@@ -584,7 +579,7 @@ mod tests {
     #[test]
     fn slow_patch_is_short_nonstacking_and_never_brakes_below_the_floor() {
         let (mut g, owner) = arena(Payload::Slow, Vec2::ZERO);
-        tick(&mut g, ARM + DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
         g.bodies
             .iter_mut()
             .find(|b| b.kind == BodyKind::Player)
@@ -596,7 +591,10 @@ mod tests {
         }
         for _ in 0..60 {
             g.update_rune_fields(DT);
-            assert!(g.player().unwrap().velocity.length() >= g.stats.top_speed * SLOW_FLOOR);
+            assert!(
+                g.player().unwrap().velocity.length()
+                    >= g.stats.top_speed * DEFAULT_TUNING.rune_slow_floor
+            );
         }
         assert!(g.player().unwrap().velocity.length() < g.stats.top_speed * 0.7);
         tick(&mut g, 1.0);
@@ -608,7 +606,7 @@ mod tests {
         let (mut g, _) = arena(Payload::Push, Vec2::ZERO);
         set_player(&mut g, Vec2::new(20.0, 0.0), Vec2::X * 600.0);
         let foe = spawn(&mut g, &Species::fatso(), Vec2::new(-30.0, 0.0));
-        tick(&mut g, ARM + DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
         assert!(g.player().unwrap().velocity.x > 0.0);
         assert!(body(&g, foe).velocity.x < 0.0);
         assert!(g.player().unwrap().velocity.length() <= 300.0);
@@ -620,7 +618,7 @@ mod tests {
     #[test]
     fn jam_takes_one_owned_system_and_obeys_immunity() {
         let (mut g, _) = arena(Payload::Jam, Vec2::ZERO);
-        tick(&mut g, ARM + DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
         assert!(g.jammed(JamSystem::Weapons));
         assert_eq!(g.jam_view().weapons, 0.8);
         assert_eq!(g.jam_view().dash, 0.0);
@@ -660,7 +658,7 @@ mod tests {
                     g.cargo.volatiles = 100.0;
                 }
             }
-            tick(&mut g, ARM + DT);
+            tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
             assert!(!g.jam_view().any(), "protection {protection}");
         }
     }
@@ -668,7 +666,7 @@ mod tests {
     fn cleanup_covers_dead_consumed_frozen_unloaded_and_powerless_owners() {
         for reason in 0..5 {
             let (mut g, owner) = arena(Payload::Slow, Vec2::ZERO);
-            tick(&mut g, ARM + DT);
+            tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
             g.mines.push(Mine {
                 sigil: Some(Sigil {
                     owner,
@@ -680,9 +678,9 @@ mod tests {
                 velocity: Vec2::ZERO,
                 friendly: false,
                 age: 0.0,
-                fuse: Some(ARM),
+                fuse: Some(DEFAULT_TUNING.rune_arm),
                 damage: 40.0,
-                blast: RADIUS,
+                blast: DEFAULT_TUNING.rune_radius,
             });
             let b = g.bodies.iter_mut().find(|b| b.id == owner).unwrap();
             match reason {
@@ -745,9 +743,14 @@ mod tests {
     }
     #[test]
     fn owner_sector_global_and_shared_mine_budgets_refuse_new_casts() {
-        for (reason, count) in [OWNER_CAP, SECTOR_CAP, GLOBAL_CAP, weapons::MAX_MINES]
-            .into_iter()
-            .enumerate()
+        for (reason, count) in [
+            DEFAULT_TUNING.rune_owner_cap,
+            DEFAULT_TUNING.rune_sector_cap,
+            DEFAULT_TUNING.rune_global_cap,
+            DEFAULT_TUNING.weapon_max_mines,
+        ]
+        .into_iter()
+        .enumerate()
         {
             let (mut g, owner) = arena(Payload::Blast, Vec2::ZERO);
             g.mines.clear();
@@ -780,7 +783,7 @@ mod tests {
                     age: 0.0,
                     fuse: None,
                     damage: 40.0,
-                    blast: RADIUS,
+                    blast: DEFAULT_TUNING.rune_radius,
                 });
             }
             let index = g.bodies.iter().position(|b| b.id == owner).unwrap();
@@ -792,7 +795,7 @@ mod tests {
     fn a_pushed_body_hitting_a_fast_pursuer_does_not_pay_kill_credit() {
         let (mut g, _) = arena(Payload::Push, Vec2::ZERO);
         let pushed = spawn(&mut g, &Species::fatso(), Vec2::new(40.0, 0.0));
-        tick(&mut g, ARM + DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm + DT);
         let victim = spawn(&mut g, &Species::bogey(), Vec2::new(250.0, 0.0));
         let ai = g.bodies.iter().position(|b| b.id == pushed).unwrap();
         let bi = g.bodies.iter().position(|b| b.id == victim).unwrap();
@@ -818,12 +821,12 @@ mod tests {
     fn active_fields_share_the_owner_budget_and_two_builders_per_sector() {
         let (mut g, owner) = arena(Payload::Slow, Vec2::ZERO);
         g.mines.clear();
-        for _ in 0..OWNER_CAP {
+        for _ in 0..DEFAULT_TUNING.rune_owner_cap {
             g.rune_fields.push(RuneField {
                 owner,
                 position: Vec2::ZERO,
                 payload: Payload::Slow,
-                left: SLOW_LIFE,
+                left: DEFAULT_TUNING.rune_slow_life,
                 age: 0.0,
             });
         }
@@ -851,7 +854,7 @@ mod tests {
         let (mut g, _) = arena(Payload::Jam, Vec2::ZERO);
         g.loadout.skills.raise(super::super::skills::Skill::Dash);
         set_player(&mut g, -Vec2::X * 240.0, Vec2::ZERO);
-        g.mines[0].age = ARM;
+        g.mines[0].age = DEFAULT_TUNING.rune_arm;
         g.mines[0].fuse = None;
         assert!(g.dash(Some(Vec2::X)));
         assert!(g.player().unwrap().position.length() < 1.0);
@@ -879,14 +882,18 @@ mod tests {
             for (i, mine) in g.mines.iter().enumerate().skip(1) {
                 assert!(mine.position.length() > 0.0, "k0 was occupied");
                 assert!(
-                    mine.position.distance(body(&g, obstacle).position) >= 40.0 + RADIUS + 24.0
+                    mine.position.distance(body(&g, obstacle).position)
+                        >= 40.0 + DEFAULT_TUNING.rune_radius + 24.0
                 );
                 assert!(
                     mine.position.distance(body(&g, owner).position)
                         <= body(&g, owner).genome.power_params(Power::Rune).reach
                 );
                 for prior in &g.mines[..i] {
-                    assert!(mine.position.distance(prior.position) >= 2.0 * RADIUS + 50.0);
+                    assert!(
+                        mine.position.distance(prior.position)
+                            >= 2.0 * DEFAULT_TUNING.rune_radius + 50.0
+                    );
                 }
             }
             g.mines
@@ -951,7 +958,7 @@ mod tests {
         g.step_rune(index, &mut PowerState::default(), DT);
         g.update_mines(DT);
         assert_eq!(g.mines[0].age, 0.0);
-        tick(&mut g, ARM - DT);
+        tick(&mut g, DEFAULT_TUNING.rune_arm - DT);
         assert_eq!(g.mines.len(), 1);
         tick(&mut g, 2.0 * DT);
         assert!(g.mines.is_empty());
@@ -965,7 +972,7 @@ mod tests {
             Vec2::new(35.0, 0.0),
         );
         g.bodies.iter_mut().find(|b| b.id == second).unwrap().health = 1.0;
-        g.mines[0].age = ARM;
+        g.mines[0].age = DEFAULT_TUNING.rune_arm;
         let mut mine = g.mines[0].clone();
         mine.sigil.as_mut().unwrap().owner = second;
         mine.sigil.as_mut().unwrap().shot = true;

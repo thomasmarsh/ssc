@@ -1083,7 +1083,7 @@ mod tests {
             .filter(|b| b.root.is_some_and(|r| r.host == host.id))
             .count();
         assert!(clingers >= 3, "{clingers} residents");
-        assert!(game.bodies.len() < MAX_BODIES);
+        assert!(game.bodies.len() < DEFAULT_TUNING.world_max_bodies);
         for b in game.bodies.iter().filter(|b| b.root.is_some()) {
             let h = game.body(b.root.unwrap().host).unwrap();
             let gap =
@@ -1217,7 +1217,7 @@ mod tests {
         };
         let ids = riders(&game);
         assert!(!ids.is_empty(), "residents ride the elder");
-        assert!(game.bodies.len() < MAX_BODIES);
+        assert!(game.bodies.len() < DEFAULT_TUNING.world_max_bodies);
         // Free creatures never take hold of an elder: nothing but residents is on it.
         for &r in &ids {
             if body(&game, r).root.is_some_and(|r| r.socket.is_some()) {

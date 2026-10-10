@@ -350,7 +350,7 @@ mod tests {
             let b = game.body(victim).unwrap();
             assert_eq!(b.health + b.shield, before, "the throw itself is free");
             let speed = b.velocity.length();
-            assert!(speed >= crate::simulation::FLING_SPEED * 0.9, "{speed}");
+            assert!(speed >= DEFAULT_TUNING.world_fling_speed * 0.9, "{speed}");
             // Into a wall at that speed.
             kinetic_damage(speed, 0.0, 1.0 / b.mass, &DEFAULT_TUNING)
         };

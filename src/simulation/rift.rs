@@ -3,13 +3,6 @@ use super::powers::PowerState;
 use super::*;
 use crate::power::Power;
 
-pub const RADIUS: f32 = 70.0;
-pub const WARNING: f32 = 1.2;
-pub const LIFE: f32 = 8.0;
-pub const GRACE: f32 = 0.6;
-pub const SECTOR_CAP: usize = 2;
-pub const GLOBAL_CAP: usize = 8;
-
 /// Shared genes retain their ranges; Rift expresses them in its own units.
 pub fn period(g: &Genome) -> f32 {
     12.0 + 18.0 * ((g.power_params(Power::Rift).period - 1.5) / 12.5).clamp(0.0, 1.0)
@@ -41,6 +34,7 @@ pub(super) fn crossing(
     start: Vec2,
     end: Vec2,
     radius: f32,
+    tune: &Tunables,
 ) -> Option<(f32, Vec2, Vec2)> {
     if !start.is_finite() || !end.is_finite() {
         return None;
@@ -49,15 +43,15 @@ pub(super) fn crossing(
     let mut best = None;
     for r in rifts.iter().filter(|r| r.warning <= 0.0 && r.left > 0.0) {
         for (from, to) in [(r.a, r.b), (r.b, r.a)] {
-            if start.distance_squared(from) <= RADIUS * RADIUS {
+            if start.distance_squared(from) <= tune.rift_radius * tune.rift_radius {
                 continue;
             }
-            if let Some(t) = segment_circle(start, end, from, RADIUS)
+            if let Some(t) = segment_circle(start, end, from, tune.rift_radius)
                 && best.is_none_or(|(prior, _, _)| t < prior)
             {
                 let entry = start.lerp(end, t);
                 let lateral = entry - from - dir * (entry - from).dot(dir);
-                let exit = to + lateral + dir * (RADIUS + radius + 8.0);
+                let exit = to + lateral + dir * (tune.rift_radius + radius + 8.0);
                 best = Some((t, entry, exit));
             }
         }
@@ -158,7 +152,8 @@ impl Game {
             return;
         }
         self.cleanup_rifts();
-        if self.rifts.len() >= GLOBAL_CAP || self.rifts.iter().any(|r| r.owner == id) {
+        if self.rifts.len() >= self.tune.rift_global_cap || self.rifts.iter().any(|r| r.owner == id)
+        {
             return;
         }
         let sector = SectorId::containing(at);
@@ -188,10 +183,11 @@ impl Game {
                     || self.bodies.iter().any(|body| {
                         body.active
                             && is_fixed(body)
-                            && body.position.distance(p) < body.radius + RADIUS + 100.0
+                            && body.position.distance(p)
+                                < body.radius + self.tune.rift_radius + 100.0
                     })
                     || self.player().is_some_and(|ship| {
-                        ship.position.distance(p) < RADIUS + ship.radius + 100.0
+                        ship.position.distance(p) < self.tune.rift_radius + ship.radius + 100.0
                     })
                     || self
                         .rifts
@@ -205,7 +201,7 @@ impl Game {
                                 || SectorId::containing(r.b) == SectorId::containing(p)
                         })
                         .count()
-                        >= SECTOR_CAP
+                        >= self.tune.rift_sector_cap
             }) {
                 continue;
             }
@@ -213,8 +209,8 @@ impl Game {
                 owner: id,
                 a,
                 b,
-                warning: WARNING,
-                left: LIFE,
+                warning: self.tune.rift_warning,
+                left: self.tune.rift_life,
             });
             self.cue(Cue::RiftTell { at: a });
             self.cue(Cue::RiftTell { at: b });
@@ -255,7 +251,8 @@ impl Game {
                 continue;
             }
             let end = body.position;
-            let Some((fraction, entry, exit)) = crossing(&self.rifts, start, end, body.radius)
+            let Some((fraction, entry, exit)) =
+                crossing(&self.rifts, start, end, body.radius, &self.tune)
             else {
                 continue;
             };
@@ -336,7 +333,7 @@ impl Game {
             }
             for b in self.bodies.iter_mut().filter(|b| group.contains(&b.id)) {
                 b.position += shift;
-                b.rift_grace = GRACE;
+                b.rift_grace = self.tune.rift_grace;
                 if b.kind == BodyKind::Asteroid
                     && b.shoved <= 0.0
                     && b.sling_thrown <= 0.0
@@ -392,7 +389,7 @@ mod tests {
             a: Vec2::ZERO,
             b: Vec2::X * 1200.0,
             warning,
-            left: LIFE,
+            left: DEFAULT_TUNING.rift_life,
         });
         g.drain_cues();
         (g, owner)
@@ -436,10 +433,12 @@ mod tests {
             let r = g.rifts[0];
             assert!((r.a.distance(r.b) - 1200.0).abs() < 0.01);
             assert!(
-                r.a.distance(body(&g, rock).position) >= body(&g, rock).radius + RADIUS + 100.0
+                r.a.distance(body(&g, rock).position)
+                    >= body(&g, rock).radius + DEFAULT_TUNING.rift_radius + 100.0
             );
             assert!(
-                r.b.distance(body(&g, rock).position) >= body(&g, rock).radius + RADIUS + 100.0
+                r.b.distance(body(&g, rock).position)
+                    >= body(&g, rock).radius + DEFAULT_TUNING.rift_radius + 100.0
             );
             assert_eq!(g.rng.f32(), rng);
             assert_eq!(g.variation.f32(), variation);
@@ -456,13 +455,22 @@ mod tests {
     }
     #[test]
     fn full_warning_then_activation_and_eight_seconds_of_use() {
-        let (mut g, _) = arena(WARNING);
+        let (mut g, _) = arena(DEFAULT_TUNING.rift_warning);
         for _ in 0..71 {
             g.update_rifts(DT);
         }
         assert!(g.rifts[0].warning > 0.0);
-        assert_eq!(g.rifts[0].left, LIFE);
-        assert!(crossing(&g.rifts, -Vec2::X * 100.0, Vec2::X * 100.0, 3.0).is_none());
+        assert_eq!(g.rifts[0].left, DEFAULT_TUNING.rift_life);
+        assert!(
+            crossing(
+                &g.rifts,
+                -Vec2::X * 100.0,
+                Vec2::X * 100.0,
+                3.0,
+                &DEFAULT_TUNING
+            )
+            .is_none()
+        );
         g.update_rifts(2.0 * DT);
         assert_eq!(g.rifts[0].warning, 0.0);
         assert_eq!(
@@ -485,7 +493,7 @@ mod tests {
         let mut s = PowerState::default();
         g.step_rift(i, &mut s, DT);
         assert_eq!(g.rifts, vec![old]);
-        g.update_rifts(LIFE);
+        g.update_rifts(DEFAULT_TUNING.rift_life);
         s.rift_clock = 0.0;
         g.step_rift(i, &mut s, DT);
         assert_eq!(g.rifts.len(), 1);
@@ -517,7 +525,7 @@ mod tests {
                 );
                 assert_eq!(body(&g, id).velocity, v);
                 assert_eq!(body(&g, id).angle, angle);
-                assert_eq!(body(&g, id).rift_grace, GRACE);
+                assert_eq!(body(&g, id).rift_grace, DEFAULT_TUNING.rift_grace);
                 assert!(if reverse {
                     body(&g, id).position.x < 500.0
                 } else {
@@ -551,7 +559,7 @@ mod tests {
                 assert_eq!(b.pierce, 2);
                 // Translation of origin excludes the seam distance from falloff and bubbles.
                 assert!((b.position.distance(b.origin) - 400.0).abs() < 0.01);
-                assert_eq!(b.rift_grace, GRACE);
+                assert_eq!(b.rift_grace, DEFAULT_TUNING.rift_grace);
                 assert_eq!(g.rift_traces.len(), 1);
             }
         }
@@ -701,7 +709,7 @@ mod tests {
         for &(part, at, v) in &before {
             assert!(body(&g, part).position.distance(at + shift) < 0.001);
             assert_eq!(body(&g, part).velocity, v);
-            assert_eq!(body(&g, part).rift_grace, GRACE);
+            assert_eq!(body(&g, part).rift_grace, DEFAULT_TUNING.rift_grace);
         }
         assert_eq!(g.rift_traces.len(), 1);
     }
@@ -772,12 +780,12 @@ mod tests {
             );
             assert!(body(&g, id).position.x > 1200.0);
             assert!(body(&g, passenger).position.x > 1200.0);
-            assert_eq!(body(&g, passenger).rift_grace, GRACE);
+            assert_eq!(body(&g, passenger).rift_grace, DEFAULT_TUNING.rift_grace);
             let shift = body(&g, passenger).position - passenger_before[0].1;
             for (part, at, velocity) in passenger_before {
                 assert!(body(&g, part).position.distance(at + shift) < 0.001);
                 assert_eq!(body(&g, part).velocity, velocity);
-                assert_eq!(body(&g, part).rift_grace, GRACE);
+                assert_eq!(body(&g, part).rift_grace, DEFAULT_TUNING.rift_grace);
             }
             assert!(g.tethers.is_empty());
             assert!(if ship {
@@ -863,7 +871,7 @@ mod tests {
     #[test]
     fn owner_and_mouth_cleanup_is_silent_and_grace_has_no_entity_map() {
         for reason in 0..9 {
-            let (mut g, owner) = arena(WARNING);
+            let (mut g, owner) = arena(DEFAULT_TUNING.rift_warning);
             let b = g.bodies.iter_mut().find(|b| b.id == owner).unwrap();
             match reason {
                 0 => b.health = 0.0,
@@ -884,9 +892,13 @@ mod tests {
     #[test]
     fn owner_sector_and_global_budgets_are_independent_and_include_warnings() {
         for global in [false, true] {
-            let (mut g, owner) = arena(WARNING);
+            let (mut g, owner) = arena(DEFAULT_TUNING.rift_warning);
             g.rifts.clear();
-            let count = if global { GLOBAL_CAP } else { SECTOR_CAP };
+            let count = if global {
+                DEFAULT_TUNING.rift_global_cap
+            } else {
+                DEFAULT_TUNING.rift_sector_cap
+            };
             for k in 0..count {
                 let at = Vec2::new(if global { (k + 1) as f32 * 6000.0 } else { 0.0 }, 1500.0);
                 let keeper = spawn(&mut g, &Species::of(Genome::seamer()), at);
@@ -895,8 +907,8 @@ mod tests {
                     owner: keeper,
                     a: at,
                     b: at + Vec2::X * 1000.0,
-                    warning: WARNING,
-                    left: LIFE,
+                    warning: DEFAULT_TUNING.rift_warning,
+                    left: DEFAULT_TUNING.rift_life,
                 });
             }
             let i = g.bodies.iter().position(|b| b.id == owner).unwrap();
@@ -926,7 +938,7 @@ mod tests {
     }
     #[test]
     fn bare_ship_can_leave_a_warning_without_dash_parry_or_damage() {
-        let (mut g, owner) = arena(WARNING);
+        let (mut g, owner) = arena(DEFAULT_TUNING.rift_warning);
         set_player(&mut g, Vec2::ZERO, Vec2::ZERO);
         let id = g.player().unwrap().id;
         let hull = body(&g, id).health;
@@ -940,14 +952,14 @@ mod tests {
                 },
             );
         }
-        assert!(body(&g, id).position.y > RADIUS + body(&g, id).radius);
+        assert!(body(&g, id).position.y > DEFAULT_TUNING.rift_radius + body(&g, id).radius);
         assert_eq!(body(&g, id).health, hull);
         assert_eq!(body(&g, id).rift_grace, 0.0);
     }
     #[test]
     fn full_step_trace_is_repeatable_and_contains_cast_open_transit_and_expiry() {
         let trace = || {
-            let (mut g, owner) = arena(WARNING);
+            let (mut g, owner) = arena(DEFAULT_TUNING.rift_warning);
             let mut out = Vec::new();
             let mut opened = false;
             let mut cast = false;
@@ -1045,7 +1057,7 @@ mod tests {
     }
     #[test]
     fn unloading_cleans_pairs_and_reload_never_restores_old_mouths() {
-        let (mut g, _) = arena(WARNING);
+        let (mut g, _) = arena(DEFAULT_TUNING.rift_warning);
         g.teleport(Vec2::X * 60000.0);
         g.step(DT, Input::default());
         assert!(g.rifts.is_empty());

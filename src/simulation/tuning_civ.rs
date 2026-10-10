@@ -320,6 +320,27 @@ macro_rules! groups {
             /// Lots the HOME workshop sells in total.
             procurement_raw_input_orders: u8 = 10, 0, 100, Count;
         }
+
+        group "civilization" {
+            /// Seconds of attributed ship defense after the ship harms a civilization: the window in which its members may answer.
+            society_defense_seconds: f32 = 30.0, 0.0, 500.0, Seconds;
+            /// Earned trust per finite fulfilled job, after actual settlement.
+            society_job_trust: f32 = 5.0, 0.0, 100.0, Regard;
+            /// Maximum earned trust within one credit window per counterpart.
+            society_trust_gain_cap: f32 = 10.0, 0.0, 100.0, Regard;
+            /// Simulation seconds before another window of earned trust can begin.
+            society_trust_window: f32 = 300.0, 1.0, 86_400.0, Seconds;
+            /// Trust lost per point of attributed player damage.
+            society_harm_trust: f32 = 0.1, 0.0, 10.0, Multiplier;
+            /// Attack grievance per point of attributed player damage.
+            society_harm_friction: f32 = 0.5, 0.0, 10.0, Multiplier;
+            /// Claim grievance per unit of ore actually mined.
+            society_mine_friction: f32 = 0.2, 0.0, 10.0, Multiplier;
+            /// Claim grievance points forgotten per simulation second.
+            society_claim_decay: f32 = 0.1, 0.0, 10.0, Rate;
+            /// Attack grievance points forgotten per simulation second.
+            society_attack_decay: f32 = 0.01, 0.0, 10.0, Rate;
+        }
         }
     };
 }

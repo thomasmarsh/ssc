@@ -1274,7 +1274,10 @@ mod tests {
             game.set_civilization_war(t.id, regard < 0.0);
             for _ in 0..12 {
                 hold(&mut game, spot, 50.0);
-                assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
+                assert!(
+                    game.bodies.len() + game.food.len() + game.eggs.len()
+                        < DEFAULT_TUNING.world_max_bodies
+                );
                 assert!(game.bodies.iter().all(|b| b.position.is_finite()));
                 assert!(game.civ_strength(t.id) < 80, "{regard}");
             }

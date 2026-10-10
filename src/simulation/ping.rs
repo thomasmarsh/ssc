@@ -28,21 +28,6 @@ use crate::world::{self, RockKind, SECTOR_SIZE, SectorId, Spawn};
 use bevy::prelude::Vec2;
 use std::collections::HashMap;
 
-/// Seconds before the ship may ping again (base; upgrades shorten it).
-pub const PING_COOLDOWN: f32 = 5.0;
-/// How far the ring travels, in units, and how fast (base).
-pub const PING_RANGE: f32 = 20_000.0;
-pub const RING_SPEED: f32 = 7_000.0;
-/// Seconds an echo lasts once it has sounded.
-pub const ECHO_LIFE: f32 = 9.0;
-/// Most echoes of each base kind.
-const CAP_PLANETOID: usize = 3;
-const CAP_CIVILIZATION: usize = 2;
-const CAP_FORTRESS: usize = 2;
-const CAP_PAD: usize = 2;
-/// A nest's stones lie within this of its heart; dwellers are counted inside it.
-const NEST_REACH: f32 = 180.0;
-
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
@@ -80,11 +65,11 @@ impl EchoKind {
         match self {
             Self::Rift => 4,
             Self::Well | Self::Relic => 2,
-            Self::Planetoid => CAP_PLANETOID,
-            Self::Civilization => CAP_CIVILIZATION,
-            Self::Fortress => CAP_FORTRESS,
+            Self::Planetoid => tune.ping_cap_planetoid,
+            Self::Civilization => tune.ping_cap_civilization,
+            Self::Fortress => tune.ping_cap_fortress,
             Self::Nearest => 1,
-            Self::Pad => CAP_PAD,
+            Self::Pad => tune.ping_cap_pad,
             Self::PadAlert => tune.cap_pad_alert,
             Self::Lode => tune.cap_lode,
             Self::Nest => tune.cap_nest,
@@ -270,7 +255,9 @@ pub(super) fn sites_of(seed: u64, id: SectorId, tune: &Tunables) -> Vec<Site> {
         let heart = ring.iter().map(|s| s.position).sum::<Vec2>() / ring.len() as f32;
         let dwellers = spawns
             .iter()
-            .filter(|s| s.kind == BodyKind::Creature && s.position.distance(heart) < NEST_REACH)
+            .filter(|s| {
+                s.kind == BodyKind::Creature && s.position.distance(heart) < tune.ping_nest_reach
+            })
             .count();
         sites.push(Site {
             kind: EchoKind::Nest,
@@ -314,7 +301,9 @@ pub(super) fn sites_of(seed: u64, id: SectorId, tune: &Tunables) -> Vec<Site> {
 impl Game {
     /// Seconds a ping takes to recharge with the rig as it is.
     pub fn ping_recharge(&self) -> f32 {
-        self.loadout.skills.ping_cooldown(PING_COOLDOWN, &self.tune)
+        self.loadout
+            .skills
+            .ping_cooldown(self.tune.ping_cooldown, &self.tune)
     }
 
     /// Sends a ping from the ship. Refused (false) while recharging, dead or over.
@@ -331,11 +320,12 @@ impl Game {
             return false;
         };
         let skills = self.loadout.skills;
-        let range = skills.ping_range(PING_RANGE, &self.tune) * self.realm_effects().sensor;
-        let speed = skills.ping_speed(RING_SPEED, &self.tune);
+        let range =
+            skills.ping_range(self.tune.ping_range, &self.tune) * self.realm_effects().sensor;
+        let speed = skills.ping_speed(self.tune.ping_ring_speed, &self.tune);
         let owns = |kind: EchoKind| kind.unlocked_by().is_none_or(|s| skills.level(s) > 0);
         if !free {
-            self.ping.cooldown = skills.ping_cooldown(PING_COOLDOWN, &self.tune);
+            self.ping.cooldown = skills.ping_cooldown(self.tune.ping_cooldown, &self.tune);
         }
         self.ping.ring = Some(Ring {
             origin,
@@ -484,7 +474,9 @@ impl Game {
                 sounded.push(*echo);
             }
         }
-        self.ping.echoes.retain(|e| time < e.born + ECHO_LIFE);
+        self.ping
+            .echoes
+            .retain(|e| time < e.born + self.tune.ping_echo_life);
         let any = !sounded.is_empty();
         for echo in sounded {
             self.chart_learn_echo(&echo);
@@ -521,7 +513,7 @@ impl Game {
 
     /// How far the ring in flight travels, for fading it (the base range without one).
     pub fn ping_ring_range(&self) -> f32 {
-        self.ping.ring.map_or(PING_RANGE, |r| r.range)
+        self.ping.ring.map_or(self.tune.ping_range, |r| r.range)
     }
 
     /// What the sounded nearest-civilization echo says: who, how far in sectors and which
@@ -545,8 +537,17 @@ impl Game {
         self.ping
             .echoes
             .iter()
-            .filter(move |e| time >= e.born && time < e.born + ECHO_LIFE && self.discovery_valid(e))
-            .map(move |e| (e, (1.0 - (time - e.born) / ECHO_LIFE).clamp(0.0, 1.0)))
+            .filter(move |e| {
+                time >= e.born
+                    && time < e.born + self.tune.ping_echo_life
+                    && self.discovery_valid(e)
+            })
+            .map(move |e| {
+                (
+                    e,
+                    (1.0 - (time - e.born) / self.tune.ping_echo_life).clamp(0.0, 1.0),
+                )
+            })
     }
 }
 
@@ -574,7 +575,7 @@ mod tests {
         let mut game = empty_game();
         assert!(game.ping());
         assert!(!game.ping());
-        run(&mut game, PING_COOLDOWN + 0.2);
+        run(&mut game, DEFAULT_TUNING.ping_cooldown + 0.2);
         assert!(game.ping());
     }
 
@@ -592,7 +593,7 @@ mod tests {
         for echo in &all {
             let delay = echo.born - game.time;
             let distance = echo.position.length();
-            assert!((delay - distance / RING_SPEED).abs() < 1e-3);
+            assert!((delay - distance / DEFAULT_TUNING.ping_ring_speed).abs() < 1e-3);
         }
         run(&mut game, 1.0);
         let heard = game.echoes().count();
@@ -600,7 +601,7 @@ mod tests {
         assert_eq!(heard, due);
         run(&mut game, 3.0);
         assert_eq!(game.echoes().count(), all.len());
-        run(&mut game, ECHO_LIFE + 1.0);
+        run(&mut game, DEFAULT_TUNING.ping_echo_life + 1.0);
         assert_eq!(game.echoes().count(), 0, "echoes fade away");
         assert!(game.ping_ring().is_none());
     }
@@ -702,7 +703,7 @@ mod tests {
     #[test]
     fn the_base_ping_is_unchanged_and_new_kinds_are_hidden() {
         let mut game = empty_game();
-        assert_eq!(game.ping_recharge(), PING_COOLDOWN);
+        assert_eq!(game.ping_recharge(), DEFAULT_TUNING.ping_cooldown);
         for id in [
             sector_with(EchoKind::Nest),
             sector_with(EchoKind::Predators),
@@ -718,7 +719,7 @@ mod tests {
             assert!(
                 echoes
                     .iter()
-                    .all(|e| e.position.distance(id.center()) <= PING_RANGE)
+                    .all(|e| e.position.distance(id.center()) <= DEFAULT_TUNING.ping_range)
             );
         }
     }
@@ -730,7 +731,11 @@ mod tests {
         let mut far = skilled(&[(Skill::PingReach, 4), (Skill::PingTargets, 4)]);
         let near = kinds_after_ping(&mut base, start);
         let wide = kinds_after_ping(&mut far, start);
-        assert!(!near.iter().any(|e| e.position.distance(start) > PING_RANGE));
+        assert!(
+            !near
+                .iter()
+                .any(|e| e.position.distance(start) > DEFAULT_TUNING.ping_range)
+        );
         assert!(
             wide.iter()
                 .all(|e| e.position.distance(start) <= range_of(&far))
@@ -745,7 +750,7 @@ mod tests {
         assert!(farthest(&wide) > farthest(&near), "level 4 hears farther");
         assert_eq!(
             far.ping_ring_range(),
-            PING_RANGE + 4.0 * DEFAULT_TUNING.ping_reach_step
+            DEFAULT_TUNING.ping_range + 4.0 * DEFAULT_TUNING.ping_reach_step
         );
         let range = far.ping_ring_range();
         run(&mut far, 1.0);
@@ -777,7 +782,7 @@ mod tests {
 
     #[test]
     fn recharge_shortens_per_level_down_to_a_floor() {
-        let mut last = PING_COOLDOWN;
+        let mut last = DEFAULT_TUNING.ping_cooldown;
         for level in 1..=4u8 {
             let game = skilled(&[(Skill::PingCooldown, level)]);
             assert!(game.ping_recharge() < last);
@@ -834,7 +839,7 @@ mod tests {
                 .iter()
                 .find(|e| e.kind == kind)
                 .unwrap_or_else(|| panic!("{kind:?} answers once {skill:?} is owned"));
-            assert!(echo.position.distance(at) <= PING_RANGE);
+            assert!(echo.position.distance(at) <= DEFAULT_TUNING.ping_range);
             match kind {
                 EchoKind::Predators => assert!(echo.weight >= 1.0, "a density reading"),
                 EchoKind::Nest => assert!(echo.weight >= 0.0),
@@ -865,7 +870,7 @@ mod tests {
                 .iter()
                 .filter(|e| e.kind == EchoKind::Planetoid)
                 .count()
-                <= CAP_PLANETOID
+                <= DEFAULT_TUNING.ping_cap_planetoid
         );
         assert!(!before.is_empty());
     }
@@ -928,8 +933,14 @@ mod tests {
             assert!((echo.weight - echo.position.distance(at) / SECTOR_SIZE).abs() < 1e-3);
             assert!(echo.tint.is_some());
             // It sounds no later than the ring runs out, however far the thing is.
-            assert!(echo.born - game.time <= PING_RANGE / RING_SPEED + 1e-3);
-            run(&mut game, PING_RANGE / RING_SPEED + 0.5);
+            assert!(
+                echo.born - game.time
+                    <= DEFAULT_TUNING.ping_range / DEFAULT_TUNING.ping_ring_speed + 1e-3
+            );
+            run(
+                &mut game,
+                DEFAULT_TUNING.ping_range / DEFAULT_TUNING.ping_ring_speed + 0.5,
+            );
             let report = game
                 .nearest_civilization()
                 .expect("reported while it lingers");

@@ -119,7 +119,7 @@ pub use mimic::Disguise;
 pub use mining::{Beam, Cargo, Lode, Material, renewable};
 pub use ooze::{Engulf, INSIDE as OOZE_INSIDE, SKIN as OOZE_SKIN, skin_radius};
 pub use pads::{KIT_PRICE, Pad, PadHint, PadKey, PadState, price_text};
-pub use ping::{ECHO_LIFE, Echo, EchoKind, NearestReport, PING_COOLDOWN, PING_RANGE, RING_SPEED};
+pub use ping::{Echo, EchoKind, NearestReport};
 pub use powers::{BlinkTell, JamKind, JamTell, OozeView, PowerView};
 pub use realms::RealmState;
 pub use regions::RegionState;
@@ -149,41 +149,7 @@ use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 const MAX_BULLETS: usize = 512;
 const MAX_EFFECTS: usize = 128;
-/// Hard ceiling on loaded bodies; shattering and breeding stop short of it.
-const MAX_BODIES: usize = 1500;
-/// A destroyed rock splits into pieces this much smaller, unless they would be tiny.
-const SHARD_FACTOR: f32 = 0.62;
-const MIN_SHARD_RADIUS: f32 = 13.0;
-/// Creatures bred by a base wander no farther than this from it before turning back.
-const HOME_LEASH: f32 = 800.0;
-/// Enemies this close to a destroyed base lose their bearings for a while.
-const ECOSYSTEM_RADIUS: f32 = 2200.0;
 const PLAYER_SPEED: f32 = 460.0;
-/// Kills this close to the ship are felt (a floating score, a hit stop for a big one).
-const KILL_FEEL_RANGE: f32 = 1400.0;
-/// A wall segment's hull per unit of radius on top of a rock's 1.6, before depth.
-pub const WALL_HULL: f32 = 5.0;
-/// An inhabited rock hatches when the ship comes this close.
-const HUSK_TRIGGER: f32 = 320.0;
-/// Damage per ram level at a leisurely approach; faster impacts hurt more.
-const RAM_DAMAGE: f32 = 16.0;
-/// Fling strength per level of lunatic field (a Lunatic's own is 1).
-const AURA_FLING: f32 = 0.45;
-/// Spread shots fan this far apart and each carry a share of full damage; flank and
-/// stern guns likewise.
-const SPREAD_ANGLE: f32 = 0.14;
-const SPREAD_SHARE: f32 = 0.7;
-const SIDE_SHARE: f32 = 0.6;
-const NEEDLE_SHARE: f32 = 0.28;
-/// Seekers notice targets this close, and bend this fast per level.
-const SEEK_RANGE: f32 = 650.0;
-const SEEK_TURN: f32 = 2.4;
-/// A body touched by a flinging creature is thrown at least this fast (scaled by the
-/// fling gene), and never faster than the cap.
-const FLING_SPEED: f32 = 520.0;
-const FLING_MAX_SPEED: f32 = 1000.0;
-/// Whatever the genes say, nothing is thrown faster than this.
-const FLING_HARD_CAP: f32 = 1400.0;
 /// Half-extent of the region around the player whose sectors are simulated. It must
 /// exceed the close combat view so loading and freezing happen off screen there.
 /// Wider overview cameras do not expand this region or change simulation rules.
@@ -752,7 +718,7 @@ impl Game {
         }
         self.focus = position;
         // Arriving somewhere new earns its free ping at once.
-        self.lure.rearm();
+        self.lure.rearm(&self.tune);
     }
 
     /// Latent parameters of the sector the player is in.
@@ -906,7 +872,7 @@ impl Game {
             // wall, never closing it) once the world is nearly full.
             if spawn.fort.is_some()
                 && self.bodies.len() + self.food.len() + self.eggs.len() + self.tune.fort_reserve
-                    >= MAX_BODIES
+                    >= self.tune.world_max_bodies
             {
                 continue;
             }
@@ -947,7 +913,10 @@ impl Game {
                     // Heavy enough to read as fixed; it never takes damage anyway.
                     RockKind::Planetoid => (1.0, 6.0),
                     // Tough, and tougher deeper in; a breach takes real effort.
-                    RockKind::Wall => (WALL_HULL * spawn.phenotype.threat.max(1.0).sqrt(), 40.0),
+                    RockKind::Wall => (
+                        self.tune.world_wall_hull * spawn.phenotype.threat.max(1.0).sqrt(),
+                        40.0,
+                    ),
                 };
                 body.health *= toughness;
                 body.max_health = body.health;
@@ -1055,14 +1024,16 @@ impl Game {
 
     /// Breaks a destroyed rock into smaller free-flying pieces.
     fn shatter(&mut self, rock: &Body) {
-        let radius = rock.radius * SHARD_FACTOR;
-        if radius < MIN_SHARD_RADIUS || self.bodies.len() >= MAX_BODIES {
+        let radius = rock.radius * self.tune.world_shard_factor;
+        if radius < self.tune.world_min_shard_radius
+            || self.bodies.len() >= self.tune.world_max_bodies
+        {
             return;
         }
         let pieces = if rock.radius >= 45.0 { 3 } else { 2 };
         let start = self.rng.range(0.0, TAU);
         for piece in 0..pieces {
-            if self.bodies.len() >= MAX_BODIES {
+            if self.bodies.len() >= self.tune.world_max_bodies {
                 break;
             }
             let angle = start + piece as f32 * TAU / pieces as f32 + self.rng.range(-0.3, 0.3);
@@ -1145,7 +1116,7 @@ impl Game {
             }
             // A needler trades rate of fire for a dense burst.
             player.fire_cooldown = stats.fire_period * if stats.needles > 0 { 1.5 } else { 1.0 };
-            for (offset, share, shape) in volley(&stats, &mut self.rng) {
+            for (offset, share, shape) in volley(&stats, &mut self.rng, &self.tune) {
                 if self.bullets.len() >= MAX_BULLETS {
                     break;
                 }
@@ -1292,7 +1263,7 @@ impl Game {
                         _ => None,
                     };
                     if let Some(creature) = creature {
-                        let flinger = fling_strength(creature) > 0.0;
+                        let flinger = fling_strength(creature, &self.tune) > 0.0;
                         if dash::stagger(creature, &self.tune) && flinger {
                             grazes.push(creature.position);
                         }
@@ -1303,7 +1274,8 @@ impl Game {
                 b.position += separation * inverse_b;
                 // Contact fling is a continuous trait: whichever body flings harder throws the
                 // other (equals bounce), and negative mass adds to it.
-                let (fling_a, fling_b) = (fling_strength(a), fling_strength(b));
+                let (fling_a, fling_b) =
+                    (fling_strength(a, &self.tune), fling_strength(b, &self.tune));
                 let flinger = if fling_a > fling_b && !is_fixed(b) {
                     Some(true)
                 } else if fling_b > fling_a && !is_fixed(a) {
@@ -1321,13 +1293,14 @@ impl Game {
                         (&mut *b, &mut *a, -normal)
                     };
                     if crazy.contact_cooldown <= 0.0 {
-                        let strength = fling_strength(crazy);
+                        let strength = fling_strength(crazy, &self.tune);
                         let relative = (victim.velocity - crazy.velocity).length();
                         let angle = self.rng.range(-1.0, 1.0) * crazy.genome.fling_chaos;
                         let direction = Vec2::from_angle(angle).rotate(normal);
-                        let speed = ((FLING_SPEED + relative * 0.8).min(FLING_MAX_SPEED)
+                        let speed = ((self.tune.world_fling_speed + relative * 0.8)
+                            .min(self.tune.world_fling_max_speed)
                             * strength)
-                            .min(FLING_HARD_CAP);
+                            .min(self.tune.world_fling_hard_cap);
                         let thrown = direction * speed;
                         victim.velocity = thrown;
                         if victim.kind == BodyKind::Asteroid {
@@ -1510,7 +1483,7 @@ impl Game {
                 }
             }
             if bullet.friendly && bullet.homing > 0 {
-                steer_seeker(bullet, &targets, dt);
+                steer_seeker(bullet, &targets, dt, &self.tune);
             } else if !bullet.friendly
                 && bullet.seek > 0.0
                 && let Some(ship) = ship
@@ -1529,12 +1502,20 @@ impl Game {
             };
             let end = start + bullet.velocity * flight;
             let route = if bullet.rift_grace <= 0.0 {
-                rift::crossing(&self.rifts, start, end, bullet.radius).filter(|(_, entry, exit)| {
-                    rift::clear_path(&self.bodies, &self.active, *exit, *exit, bullet.radius, &[])
-                        && self
+                rift::crossing(&self.rifts, start, end, bullet.radius, &self.tune).filter(
+                    |(_, entry, exit)| {
+                        rift::clear_path(
+                            &self.bodies,
+                            &self.active,
+                            *exit,
+                            *exit,
+                            bullet.radius,
+                            &[],
+                        ) && self
                             .active
                             .contains(&SectorId::containing(*exit + end - *entry))
-                })
+                    },
+                )
             } else {
                 None
             };
@@ -1550,7 +1531,7 @@ impl Game {
                     }
                     let (_, entry, exit) = route.unwrap();
                     bullet.origin += exit - entry;
-                    bullet.rift_grace = rift::GRACE;
+                    bullet.rift_grace = self.tune.rift_grace;
                     rift_events.push((entry, exit));
                 }
                 bullet.position = next;
@@ -2029,7 +2010,7 @@ impl Game {
             };
             // Kills chain: another within the window multiplies the score (never the damage).
             let earned = if bounty > 0 && kind != BodyKind::Asteroid {
-                (bounty as f32 * self.streak.link()) as u64
+                (bounty as f32 * self.streak.link(&self.tune)) as u64
             } else {
                 bounty
             };
@@ -2037,7 +2018,7 @@ impl Game {
             // A big body going down stops the game for a breath, and the screen marks the kill.
             let near = self
                 .player()
-                .is_some_and(|p| p.position.distance(position) < KILL_FEEL_RANGE);
+                .is_some_and(|p| p.position.distance(position) < self.tune.world_kill_feel_range);
             let body_kind = matches!(kind, BodyKind::Creature | BodyKind::Base);
             let big = feel::big_kill(body.max_health, body_kind);
             if near && body_kind && !turret && !body.hostile_rock_kill {
@@ -2321,10 +2302,10 @@ fn contact_damage(body: &Body) -> f32 {
 }
 
 /// How hard a body throws what touches it: the fling gene plus a push for negative mass.
-fn fling_strength(body: &Body) -> f32 {
+fn fling_strength(body: &Body, tune: &Tunables) -> f32 {
     match body.kind {
         BodyKind::Creature => body.genome.fling_strength(),
-        BodyKind::Player => f32::from(body.rig.aura) * AURA_FLING,
+        BodyKind::Player => f32::from(body.rig.aura) * tune.world_aura_fling,
         _ => 0.0,
     }
 }
@@ -2434,7 +2415,7 @@ fn ram_contact(
             other,
             armored(
                 other,
-                RAM_DAMAGE * f32::from(ship.rig.ram) * force,
+                tune.world_ram_damage * f32::from(ship.rig.ram) * force,
                 true,
                 tune,
             ),
@@ -2461,27 +2442,33 @@ pub(crate) fn recoil_of(damage: f32, active: arsenal::Profile, tune: &Tunables) 
 }
 
 /// The shots one trigger pull sends out: (angle from the nose, share of full damage).
-fn volley(stats: &Stats, rng: &mut Rng) -> Vec<(f32, f32, Shape)> {
+fn volley(stats: &Stats, rng: &mut Rng, tune: &Tunables) -> Vec<(f32, f32, Shape)> {
     let mut shots = if stats.needles > 0 {
         // Many thin particles in a narrow cone: small each, heavy in mass.
         (0..5 + 4 * usize::from(stats.needles))
-            .map(|_| (rng.range(-0.07, 0.07), NEEDLE_SHARE, Shape::Needle))
+            .map(|_| {
+                (
+                    rng.range(-0.07, 0.07),
+                    tune.world_needle_share,
+                    Shape::Needle,
+                )
+            })
             .collect()
     } else {
         vec![(0.0, 1.0, Shape::Pellet)]
     };
     for n in 1..=stats.spread {
-        let fan = f32::from(n) * SPREAD_ANGLE;
-        shots.push((fan, SPREAD_SHARE, Shape::Pellet));
-        shots.push((-fan, SPREAD_SHARE, Shape::Pellet));
+        let fan = f32::from(n) * tune.world_spread_angle;
+        shots.push((fan, tune.world_spread_share, Shape::Pellet));
+        shots.push((-fan, tune.world_spread_share, Shape::Pellet));
     }
     for n in 0..stats.broadside {
         let angle = FRAC_PI_2 + f32::from(n) * FRAC_PI_4;
-        shots.push((angle, SIDE_SHARE, Shape::Pellet));
-        shots.push((-angle, SIDE_SHARE, Shape::Pellet));
+        shots.push((angle, tune.world_side_share, Shape::Pellet));
+        shots.push((-angle, tune.world_side_share, Shape::Pellet));
     }
     if stats.tailgun > 0 {
-        shots.push((PI, SIDE_SHARE, Shape::Pellet));
+        shots.push((PI, tune.world_side_share, Shape::Pellet));
     }
     shots
 }
@@ -2492,16 +2479,16 @@ fn blast_radius(level: u8) -> f32 {
 }
 
 /// Bends a seeker toward the nearest target in front of it, at a rate set by its level.
-fn steer_seeker(bullet: &mut Bullet, targets: &[Vec2], dt: f32) {
+fn steer_seeker(bullet: &mut Bullet, targets: &[Vec2], dt: f32, tune: &Tunables) {
     let heading = bullet.velocity.normalize_or_zero();
     let best = targets
         .iter()
         .map(|&t| t - bullet.position)
-        .filter(|d| d.length() < SEEK_RANGE && heading.dot(d.normalize_or_zero()) > 0.5)
+        .filter(|d| d.length() < tune.world_seek_range && heading.dot(d.normalize_or_zero()) > 0.5)
         .min_by(|a, b| a.length_squared().total_cmp(&b.length_squared()));
     if let Some(toward) = best {
         let turn = heading.angle_to(toward);
-        let limit = f32::from(bullet.homing) * SEEK_TURN * dt;
+        let limit = f32::from(bullet.homing) * tune.world_seek_turn * dt;
         bullet.velocity = Vec2::from_angle(turn.clamp(-limit, limit)).rotate(bullet.velocity);
     }
 }
@@ -2981,7 +2968,7 @@ mod tests {
             game.step(DT, Input::default());
             let player = game.player().unwrap();
             assert!(
-                player.velocity.length() >= FLING_SPEED * 0.95,
+                player.velocity.length() >= DEFAULT_TUNING.world_fling_speed * 0.95,
                 "not flung hard"
             );
             assert!(
@@ -3194,10 +3181,13 @@ mod tests {
         }
         game.step(DT, Input::default());
         // Two kills in one step chain: the second pays the first link's step on top.
-        assert!(game.score > 225 && game.score <= (225.0 * feel::streak_multiplier(2)) as u64);
+        assert!(
+            game.score > 225
+                && game.score <= (225.0 * feel::streak_multiplier(2, &DEFAULT_TUNING)) as u64
+        );
         assert_eq!(
             game.streak_view().map(|(m, _)| m),
-            Some(feel::streak_multiplier(2))
+            Some(feel::streak_multiplier(2, &DEFAULT_TUNING))
         );
     }
 
@@ -3606,7 +3596,7 @@ mod tests {
                 body.health = 0.0;
             }
             game.step(DT, Input::default());
-            assert!(game.bodies.len() < MAX_BODIES);
+            assert!(game.bodies.len() < DEFAULT_TUNING.world_max_bodies);
         }
         assert!(game.bodies.iter().all(|b| b.kind != BodyKind::Asteroid));
     }
@@ -3764,7 +3754,7 @@ mod tests {
                     ..Default::default()
                 },
             );
-            assert!(game.bodies.len() <= MAX_BODIES);
+            assert!(game.bodies.len() <= DEFAULT_TUNING.world_max_bodies);
             assert!(game.tethers.len() <= DEFAULT_TUNING.tether_max_tethers);
             assert!(game.bullets.len() <= MAX_BULLETS);
             assert!(
@@ -3830,11 +3820,17 @@ mod tests {
             mass: -20.0,
             ..calm
         };
-        assert!(thrown(calm) < FLING_SPEED * 0.5, "no fling gene, no fling");
+        assert!(
+            thrown(calm) < DEFAULT_TUNING.world_fling_speed * 0.5,
+            "no fling gene, no fling"
+        );
         assert!(thrown(weak) < thrown(Genome::lunatic()));
         assert!(thrown(Genome::lunatic()) < thrown(strong));
-        assert!(thrown(negative) > FLING_SPEED * 0.5, "negative mass flings");
-        assert!(thrown(strong) <= FLING_HARD_CAP + 1.0);
+        assert!(
+            thrown(negative) > DEFAULT_TUNING.world_fling_speed * 0.5,
+            "negative mass flings"
+        );
+        assert!(thrown(strong) <= DEFAULT_TUNING.world_fling_hard_cap + 1.0);
     }
 
     #[test]
@@ -4000,7 +3996,7 @@ mod tests {
                                     ..Default::default()
                                 },
                             );
-                            assert!(game.bodies.len() <= MAX_BODIES);
+                            assert!(game.bodies.len() <= DEFAULT_TUNING.world_max_bodies);
                             for b in &game.bodies {
                                 assert!(
                                     b.position.is_finite()
@@ -4051,7 +4047,7 @@ mod tests {
                         ..Default::default()
                     },
                 );
-                assert!(game.bodies.len() <= MAX_BODIES);
+                assert!(game.bodies.len() <= DEFAULT_TUNING.world_max_bodies);
                 assert!(
                     game.bodies
                         .iter()

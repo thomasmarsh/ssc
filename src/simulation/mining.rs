@@ -13,11 +13,8 @@ use super::*;
 use crate::world::hash2;
 
 pub use super::tuning::{CAP, PLANETOID_BUDGET};
-/// Fraction of each material lost when the ship is destroyed.
-pub const DEATH_LOSS: f32 = 0.25;
 const MINE_SALT: u64 = 0x31A3_0000_0000_00FE;
 const REGROW_SALT: u64 = 0x6E6B_0000_0000_0A11;
-const NOTE_EVERY: f32 = 3.0;
 /// Spent ore is remembered to this grain, rounded up so reloading never refreshes a rock.
 const GRAIN: f32 = 0.25;
 
@@ -705,7 +702,7 @@ impl Game {
             if let Some(kind) = blocked
                 && self.mine_note <= 0.0
             {
-                self.mine_note = NOTE_EVERY;
+                self.mine_note = self.tune.mining_note_every;
                 self.notify(
                     format!("{} HOLD FULL", kind.label()),
                     upgrades::Rarity::Common,
@@ -846,7 +843,7 @@ impl Game {
 
     /// A destroyed ship drops a quarter of its cargo where it died, to be recovered.
     pub(super) fn shed_cargo(&mut self, position: Vec2) {
-        let lost = self.cargo.take_fraction(DEATH_LOSS);
+        let lost = self.cargo.take_fraction(self.tune.mining_death_loss);
         for (k, kind) in Material::ALL.into_iter().enumerate() {
             let amount = lost.amount(kind);
             if amount >= 0.5 {
@@ -900,7 +897,7 @@ mod tests {
             0.0
         );
         let before = game.cargo;
-        let lost = game.cargo.take_fraction(DEATH_LOSS);
+        let lost = game.cargo.take_fraction(DEFAULT_TUNING.mining_death_loss);
         for kind in Material::ALL {
             assert_eq!(
                 before.amount(kind),

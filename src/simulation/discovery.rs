@@ -1,6 +1,6 @@
 //! Bounded sonar curiosity. Live handles never become persistent travel destinations.
 use super::lure::{Lure, LureKind};
-use super::ping::{ECHO_LIFE, Echo, EchoKind, Ring};
+use super::ping::{Echo, EchoKind, Ring};
 use super::*;
 use crate::well::Mode;
 
@@ -198,7 +198,7 @@ impl Game {
 
     fn discovery_radius(&self, target: Target) -> f32 {
         match target {
-            Target::Rift { .. } => rift::RADIUS + 14.0,
+            Target::Rift { .. } => self.tune.rift_radius + 14.0,
             Target::Well(id) => self.bodies.iter().find(|b| b.id == id).map_or(0.0, |b| {
                 b.radius + b.well.as_ref().map_or(0.0, |w| w.pose.core) + 12.0
             }),
@@ -228,7 +228,7 @@ impl Game {
             }
             echo.born = scan.started + distance / scan.speed;
         }
-        if self.time >= echo.born + ECHO_LIFE {
+        if self.time >= echo.born + self.tune.ping_echo_life {
             return None;
         }
         echo.position = position;
@@ -359,7 +359,7 @@ impl Game {
                     position: e.position,
                 })
             })
-            .filter(|l| l.position.distance(ship) > lure::ARRIVED)
+            .filter(|l| l.position.distance(ship) > self.tune.lure_arrived)
             .min_by(|a, b| {
                 lure::lure_score(a.kind, a.position.distance(ship))
                     .total_cmp(&lure::lure_score(b.kind, b.position.distance(ship)))
@@ -420,8 +420,8 @@ impl Game {
                 owner,
                 a: ship - Vec2::X * 475.0,
                 b: ship + Vec2::X * if mode == "crowded" { 1200.0 } else { 475.0 },
-                warning: rift::WARNING,
-                left: rift::LIFE,
+                warning: self.tune.rift_warning,
+                left: self.tune.rift_life,
             });
         }
         if matches!(mode, "well" | "crowded") {
@@ -493,8 +493,8 @@ mod tests {
             owner,
             a: Vec2::new(x, 0.0),
             b: Vec2::new(x + 1000.0, 0.0),
-            warning: rift::WARNING,
-            left: rift::LIFE,
+            warning: DEFAULT_TUNING.rift_warning,
+            left: DEFAULT_TUNING.rift_life,
         });
         owner
     }
@@ -914,7 +914,7 @@ mod tests {
         g.ping();
         tick(&mut g, 0.5);
         assert_eq!(discovered(&g, EchoKind::Well).len(), 1);
-        tick(&mut g, ECHO_LIFE);
+        tick(&mut g, DEFAULT_TUNING.ping_echo_life);
         assert!(discovered(&g, EchoKind::Well).is_empty());
     }
     #[test]

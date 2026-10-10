@@ -248,18 +248,15 @@ fn skill_value(s: Skill, skills: &Skills, tune: &Tunables) -> String {
         Skill::Cargo => format!("{:.0} hold each", mining::CAP + skills.cargo_bonus(tune)),
         Skill::Dash => format!("{:.0} jump", skills.dash_distance(tune)),
         Skill::Parry => format!("{:.0}% block", skills.parry_chance(tune) * 100.0),
-        Skill::PingReach => format!(
-            "{:.0} ping reach",
-            skills.ping_range(ping::PING_RANGE, tune)
-        ),
+        Skill::PingReach => format!("{:.0} ping reach", skills.ping_range(tune.ping_range, tune)),
         Skill::PingSpeed => format!(
             "{:.0} ring speed",
-            skills.ping_speed(ping::RING_SPEED, tune)
+            skills.ping_speed(tune.ping_ring_speed, tune)
         ),
         Skill::PingCooldown => {
             format!(
                 "{:.1}s recharge",
-                skills.ping_cooldown(ping::PING_COOLDOWN, tune)
+                skills.ping_cooldown(tune.ping_cooldown, tune)
             )
         }
         Skill::PingTargets => format!("{} extra echoes/kind", skills.ping_extra_targets(tune)),

@@ -479,7 +479,10 @@ impl Game {
                 })
                 .count()
                 >= world::SECTOR_BODY_BUDGET as usize;
-            if crowded || self.bodies.len() + self.food.len() + self.eggs.len() + 1 >= MAX_BODIES {
+            if crowded
+                || self.bodies.len() + self.food.len() + self.eggs.len() + 1
+                    >= self.tune.world_max_bodies
+            {
                 break;
             }
             let species = species.individual(&mut self.variation);
@@ -1092,7 +1095,10 @@ mod tests {
         let mut game = visit(SEED, spot);
         for _ in 0..12 {
             hold(&mut game, spot, 50.0);
-            assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
+            assert!(
+                game.bodies.len() + game.food.len() + game.eggs.len()
+                    < DEFAULT_TUNING.world_max_bodies
+            );
             assert!(game.bodies.iter().all(|b| b.position.is_finite()));
             for q in &game.active {
                 let creatures = game

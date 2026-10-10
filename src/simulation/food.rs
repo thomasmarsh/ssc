@@ -162,7 +162,8 @@ impl Game {
 
     /// Plankton still allowed: under its own budget and the shared body budget.
     fn food_room(&self) -> usize {
-        MAX_BODIES
+        self.tune
+            .world_max_bodies
             .saturating_sub(self.bodies.len() + self.food.len() + self.eggs.len())
             .min(self.tune.food_budget.saturating_sub(self.food.len()))
     }
@@ -1120,7 +1121,7 @@ mod tests {
                     },
                 );
                 assert!(game.food.len() <= DEFAULT_TUNING.food_budget);
-                assert!(game.bodies.len() + game.food.len() <= MAX_BODIES);
+                assert!(game.bodies.len() + game.food.len() <= DEFAULT_TUNING.world_max_bodies);
                 assert!(game.food.iter().all(|f| f.position.is_finite()));
             }
             let energies: Vec<(u64, f32)> = game

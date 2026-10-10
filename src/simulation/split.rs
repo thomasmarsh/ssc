@@ -87,7 +87,8 @@ impl Game {
                     b.kind == BodyKind::Creature && SectorId::containing(b.position) == sector
                 })
                 .count();
-            if self.bodies.len() + self.food.len() + self.eggs.len() + 2 >= MAX_BODIES
+            if self.bodies.len() + self.food.len() + self.eggs.len() + 2
+                >= self.tune.world_max_bodies
                 || here + 1 >= world::SECTOR_BODY_BUDGET as usize
                 || !self.active.contains(&sector)
             {

@@ -270,7 +270,7 @@ impl Game {
         // Before anything is generated, so `Regen` entries shape the world that loads. An entry
         // a newer build dropped or a value now out of range is skipped, never fatal.
         tunables::set_many(&mut game.tune, state.tuning);
-        game.civs.societies = state.societies.restore(keep);
+        game.civs.societies = state.societies.restore(keep, &game.tune);
         game.time = state.time;
         game.score = state.score;
         game.lives = state.lives.max(1);

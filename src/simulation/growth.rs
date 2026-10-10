@@ -199,7 +199,7 @@ impl Game {
     /// Room for `parts` more bodies under every cap: the global budget, the sector's
     /// creature budget and the lineage's local and world caps.
     pub(super) fn room_to_breed(&self, parent: &Body, parts: usize) -> bool {
-        if self.population() + parts >= MAX_BODIES {
+        if self.population() + parts >= self.tune.world_max_bodies {
             return false;
         }
         let sector = SectorId::containing(parent.position);
@@ -309,7 +309,9 @@ impl Game {
         let Some(adult) = self.bodies[index].adult else {
             return;
         };
-        if adult.is_jointed() && self.population() + adult.parts() as usize >= MAX_BODIES {
+        if adult.is_jointed()
+            && self.population() + adult.parts() as usize >= self.tune.world_max_bodies
+        {
             // No room for the full body yet; try again next tick.
             return;
         }
@@ -552,7 +554,7 @@ impl Game {
                     <= self.tune.growth_lineage_cap + self.tune.growth_hatch_slack
                 && self.lineage_world_load(egg.lineage)
                     <= self.tune.growth_lineage_world_cap + self.tune.growth_hatch_slack
-                && self.population() < MAX_BODIES - 1
+                && self.population() < self.tune.world_max_bodies - 1
                 && self.population_here(egg.position) < world::SECTOR_BODY_BUDGET as usize;
             if hatchable {
                 self.eggs.remove(index);
@@ -1061,7 +1063,7 @@ mod tests {
         let mut game = empty_game();
         let parent = spawn(&mut game, &species, ORIGIN);
         let p = body(&game, parent).clone();
-        while game.bodies.len() < MAX_BODIES - 1 {
+        while game.bodies.len() < DEFAULT_TUNING.world_max_bodies - 1 {
             add(&mut game, BodyKind::Asteroid, Vec2::new(3000.0, 3000.0));
         }
         assert!(!game.room_to_breed(&p, 1), "global budget is full");
@@ -1110,7 +1112,7 @@ mod tests {
                 <= DEFAULT_TUNING.growth_lineage_cap + DEFAULT_TUNING.growth_hatch_slack + 2
         );
         assert!(creatures(&game) < world::SECTOR_BODY_BUDGET as usize);
-        assert!(game.bodies.len() + game.eggs.len() < MAX_BODIES);
+        assert!(game.bodies.len() + game.eggs.len() < DEFAULT_TUNING.world_max_bodies);
     }
 
     fn ready_parent(game: &mut Game, id: u64) {
@@ -1245,7 +1247,7 @@ mod tests {
                 bloom(&mut game, ORIGIN, 8);
             }
             game.step(DT, Input::default());
-            assert!(game.bodies.len() + game.eggs.len() < MAX_BODIES);
+            assert!(game.bodies.len() + game.eggs.len() < DEFAULT_TUNING.world_max_bodies);
         }
         let load = game.lineage_load(a.lineage, ORIGIN);
         assert!(
@@ -1375,7 +1377,10 @@ mod tests {
                     if tick > 60 * 60 * 4 {
                         low = low.min(bogeys(&game));
                     }
-                    assert!(game.bodies.len() + game.food.len() + game.eggs.len() <= MAX_BODIES);
+                    assert!(
+                        game.bodies.len() + game.food.len() + game.eggs.len()
+                            <= DEFAULT_TUNING.world_max_bodies
+                    );
                     assert!(creatures(&game) < 2 * world::SECTOR_BODY_BUDGET as usize);
                 }
             }
@@ -1438,7 +1443,10 @@ mod tests {
                 start = fed(&game).0;
             }
             if tick % 60 == 0 {
-                assert!(game.bodies.len() + game.food.len() + game.eggs.len() <= MAX_BODIES);
+                assert!(
+                    game.bodies.len() + game.food.len() + game.eggs.len()
+                        <= DEFAULT_TUNING.world_max_bodies
+                );
                 assert!(game.food.len() <= DEFAULT_TUNING.food_budget);
                 assert!(creatures(&game) < 2 * world::SECTOR_BODY_BUDGET as usize);
                 if tick > 60 * 60 * 5 {

@@ -195,7 +195,7 @@ impl Game {
             if point_segment(body.position, from, to)
                 < body.radius + ship_radius + self.tune.dash_graze_margin
                 && stagger(body, &self.tune)
-                && fling_strength(body) > 0.0
+                && fling_strength(body, &self.tune) > 0.0
             {
                 grazes.push(body.position);
             }
@@ -221,7 +221,7 @@ impl Game {
             return;
         }
         self.dash.grazed = true;
-        self.streak.link();
+        self.streak.link(&self.tune);
         self.dash.stacks = (self.dash.stacks + 1).min(self.tune.dash_boost_stacks);
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.shield = (ship.shield + self.tune.dash_graze_refund).min(ship.max_shield);
@@ -627,7 +627,7 @@ mod tests {
         let before = game.bodies[0].velocity;
         game.step(DT, Input::default());
         assert!(
-            game.bodies[0].velocity.distance(before) < FLING_SPEED * 0.5,
+            game.bodies[0].velocity.distance(before) < DEFAULT_TUNING.world_fling_speed * 0.5,
             "not flung: {}",
             game.bodies[0].velocity
         );

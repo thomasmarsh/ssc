@@ -12,7 +12,7 @@
 //! - **Budget.** A fortress is generated inside a body budget (`crate::fortress`); on load,
 //!   pieces are skipped once the world is within `RESERVE` bodies of `MAX_BODIES`.
 
-use super::weapons::{MINE_BLAST, MINE_DAMAGE, Muzzle, pace};
+use super::weapons::{Muzzle, pace};
 use super::*;
 use crate::fortress::{FortPart, MUZZLE_GAP, PartKind};
 use crate::territory::Standing;
@@ -132,8 +132,8 @@ impl Game {
                         friendly: false,
                         age: 0.0,
                         fuse: None,
-                        damage: MINE_DAMAGE * genes.sharpness(),
-                        blast: MINE_BLAST,
+                        damage: self.tune.weapon_mine_damage * genes.sharpness(),
+                        blast: self.tune.weapon_mine_blast,
                     });
                 }
                 if let Some(state) = self.bodies[index].base.as_mut() {
@@ -594,7 +594,9 @@ mod tests {
         let mut game = Game::new(SEED);
         game.player_invulnerability = 1e9;
         // Fill the world to just under the reserve line with dummy rocks.
-        while game.bodies.len() + fortress::DEFAULT_TUNING.fort_reserve < MAX_BODIES {
+        while game.bodies.len() + fortress::DEFAULT_TUNING.fort_reserve
+            < DEFAULT_TUNING.world_max_bodies
+        {
             let id = crate::simulation::tests::add(
                 &mut game,
                 BodyKind::Asteroid,
@@ -621,7 +623,10 @@ mod tests {
                 set_player(&mut game, spot, Vec2::ZERO);
                 game.step(0.05, Input::default());
             }
-            assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
+            assert!(
+                game.bodies.len() + game.food.len() + game.eggs.len()
+                    < DEFAULT_TUNING.world_max_bodies
+            );
             assert!(game.fort_bodies() <= start + 140);
             assert!(game.bullets.len() <= MAX_BULLETS && game.mines.len() <= 90);
         }

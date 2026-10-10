@@ -11,9 +11,9 @@
 //! levels up) the matching `Profile` in the arsenal instead of occupying a slot, and finding
 //! gear can never lower the ship's firepower.
 
-use super::Material;
 pub use super::arsenal::Gain;
 use super::arsenal::{Arsenal, Boost, BoostGain, Need, Profile};
+use super::{Material, Tunables};
 use crate::genome::{Diet, Genome, Weapon};
 use crate::world::{Rng, SectorParams};
 
@@ -564,11 +564,6 @@ const PARTS: &[Blueprint] = &[
         &[T(Trait::Aura, 1), S(Stat::Handling, -0.15)],
     ),
 ];
-
-/// Seconds of running a boost pickup's fuel lasts, at common rarity.
-const BOOST_FUEL_SECONDS: f32 = 60.0;
-/// Fuel a weapon charge carries, at common rarity.
-const CHARGE_FUEL: f32 = 40.0;
 
 const SURGES: &[Blueprint] = &[
     // Weapon charges: each unlocks or levels up its profile and brings fuel for it.
@@ -1445,13 +1440,13 @@ impl Part {
     }
 }
 
-pub fn roll_surge(rng: &mut Rng, source: &Source) -> Surge {
+pub fn roll_surge(rng: &mut Rng, source: &Source, tune: &Tunables) -> Surge {
     let blueprint = choose(rng, SURGES, source);
     let rarity = roll_rarity(rng, source);
     let richer = 1.0 + 0.25 * rarity as usize as f32;
     let effects = scaled(blueprint.effects, rarity, 1.0 + (source.grade - 1.0) * 0.5);
     let (material, drain, need, fuel) = match blueprint.boost {
-        Some((material, drain, need)) => (material, drain, need, drain * BOOST_FUEL_SECONDS),
+        Some((material, drain, need)) => (material, drain, need, drain * tune.boost_fuel_seconds),
         None => {
             // A weapon charge is fuel for the profile it unlocks.
             let material = effects
@@ -1461,7 +1456,7 @@ pub fn roll_surge(rng: &mut Rng, source: &Source) -> Surge {
                     Effect::Stat(..) => None,
                 })
                 .unwrap_or(Material::Metal);
-            (material, 0.0, Need::Firing, CHARGE_FUEL)
+            (material, 0.0, Need::Firing, tune.boost_charge_fuel)
         }
     };
     Surge {
@@ -1477,7 +1472,7 @@ pub fn roll_surge(rng: &mut Rng, source: &Source) -> Surge {
 }
 
 /// An ordinary kill's drop: mostly restoratives and surges, now and then a permanent part.
-pub fn roll_item(rng: &mut Rng, source: &Source) -> Item {
+pub fn roll_item(rng: &mut Rng, source: &Source, tune: &Tunables) -> Item {
     let lucky = 1.0 + 2.0 * source.bias;
     let weights = [
         20.0,                // hull repair
@@ -1490,7 +1485,7 @@ pub fn roll_item(rng: &mut Rng, source: &Source) -> Item {
     match pick(rng, &weights) {
         0 => Item::Repair(15.0 + 25.0 * source.grade.sqrt() * rng.range(0.8, 1.2)),
         1 => Item::Recharge(20.0 + 20.0 * source.grade.sqrt() * rng.range(0.8, 1.2)),
-        2 => Item::Surge(roll_surge(rng, source)),
+        2 => Item::Surge(roll_surge(rng, source, tune)),
         3 => Item::Part(roll_part(rng, source)),
         4 => {
             // The same single draw picks the amount and, through its low digits, the kind of

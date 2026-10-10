@@ -1,13 +1,10 @@
 //! Game feel that the rules own: the score chain. Pure and tested; the adapter only draws it.
 //! Screen shake, hit stops and the events the adapter turns into feel come below.
 
+#[cfg(test)]
+use super::DEFAULT_TUNING;
+use super::Tunables;
 use bevy::prelude::Vec2;
-
-/// Seconds a chain survives without a new link.
-pub const STREAK_WINDOW: f32 = 3.0;
-/// Each link after the first adds this much to the score multiplier, up to `STREAK_MAX`.
-pub const STREAK_STEP: f32 = 0.25;
-pub const STREAK_MAX: f32 = 3.0;
 
 /// The arcade chain: kills, grazes and perfect parries within `STREAK_WINDOW` seconds of each
 /// other grow a score multiplier (never a damage one).
@@ -18,16 +15,16 @@ pub struct Streak {
 }
 
 /// The score multiplier of a chain with `links` links.
-pub fn streak_multiplier(links: u32) -> f32 {
-    (1.0 + STREAK_STEP * links.saturating_sub(1) as f32).min(STREAK_MAX)
+pub fn streak_multiplier(links: u32, tune: &Tunables) -> f32 {
+    (1.0 + tune.feel_streak_step * links.saturating_sub(1) as f32).min(tune.feel_streak_max)
 }
 
 impl Streak {
     /// Adds a link and returns the multiplier it earns.
-    pub fn link(&mut self) -> f32 {
+    pub fn link(&mut self, tune: &Tunables) -> f32 {
         self.links = self.links.saturating_add(1);
-        self.left = STREAK_WINDOW;
-        streak_multiplier(self.links)
+        self.left = tune.feel_streak_window;
+        streak_multiplier(self.links, tune)
     }
 
     pub fn tick(&mut self, dt: f32) {
@@ -44,8 +41,13 @@ impl Streak {
     }
 
     /// The multiplier and the share of the window left, while a chain of two or more runs.
-    pub fn view(&self) -> Option<(f32, f32)> {
-        (self.links >= 2).then(|| (streak_multiplier(self.links), self.left / STREAK_WINDOW))
+    pub fn view(&self, tune: &Tunables) -> Option<(f32, f32)> {
+        (self.links >= 2).then(|| {
+            (
+                streak_multiplier(self.links, tune),
+                self.left / tune.feel_streak_window,
+            )
+        })
     }
 }
 
@@ -55,25 +57,28 @@ mod tests {
 
     #[test]
     fn the_multiplier_grows_a_step_per_link_and_caps() {
-        assert_eq!(streak_multiplier(0), 1.0);
-        assert_eq!(streak_multiplier(1), 1.0);
-        assert!((streak_multiplier(2) - 1.25).abs() < 1e-6);
-        assert_eq!(streak_multiplier(100), STREAK_MAX);
+        assert_eq!(streak_multiplier(0, &DEFAULT_TUNING), 1.0);
+        assert_eq!(streak_multiplier(1, &DEFAULT_TUNING), 1.0);
+        assert!((streak_multiplier(2, &DEFAULT_TUNING) - 1.25).abs() < 1e-6);
+        assert_eq!(
+            streak_multiplier(100, &DEFAULT_TUNING),
+            DEFAULT_TUNING.feel_streak_max
+        );
     }
 
     #[test]
     fn a_chain_breaks_when_the_window_runs_out() {
         let mut streak = Streak::default();
-        assert_eq!(streak.link(), 1.0);
-        assert!(streak.view().is_none());
-        assert!((streak.link() - 1.25).abs() < 1e-6);
-        assert!(streak.view().is_some());
-        streak.tick(STREAK_WINDOW - 0.1);
+        assert_eq!(streak.link(&DEFAULT_TUNING), 1.0);
+        assert!(streak.view(&DEFAULT_TUNING).is_none());
+        assert!((streak.link(&DEFAULT_TUNING) - 1.25).abs() < 1e-6);
+        assert!(streak.view(&DEFAULT_TUNING).is_some());
+        streak.tick(DEFAULT_TUNING.feel_streak_window - 0.1);
         assert_eq!(streak.links(), 2);
         streak.tick(0.2);
         assert_eq!(streak.links(), 0);
-        assert!(streak.view().is_none());
-        assert_eq!(streak.link(), 1.0);
+        assert!(streak.view(&DEFAULT_TUNING).is_none());
+        assert_eq!(streak.link(&DEFAULT_TUNING), 1.0);
     }
 }
 

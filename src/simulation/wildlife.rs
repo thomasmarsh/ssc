@@ -865,7 +865,7 @@ mod tests {
         for _ in 0..(150.0 / 0.05) as usize {
             set_player(&mut game, ship, Vec2::ZERO);
             game.step(0.05, Input::default());
-            assert!(game.bodies.len() < MAX_BODIES);
+            assert!(game.bodies.len() < DEFAULT_TUNING.world_max_bodies);
         }
         assert!(game.civ_standing(outpost.id) == Standing::Thriving);
         assert!(
@@ -879,7 +879,7 @@ mod tests {
             set_player(&mut game, ship, Vec2::ZERO);
             game.step(0.05, Input::default());
         }
-        assert!(game.bodies.len() < MAX_BODIES);
+        assert!(game.bodies.len() < DEFAULT_TUNING.world_max_bodies);
         assert!(game.civ_strength(capital.id) <= 3 * DEFAULT_TUNING.civ_cap);
     }
 

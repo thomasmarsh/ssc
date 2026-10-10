@@ -315,7 +315,8 @@ impl Game {
             .filter(|b| b.active && b.den.is_some())
         {
             let provoked = body.health < body.max_health;
-            let near = ship.is_some_and(|p| p.distance(body.position) < HUSK_TRIGGER);
+            let near =
+                ship.is_some_and(|p| p.distance(body.position) < self.tune.world_husk_trigger);
             if (provoked || near)
                 && let Some((species, count)) = body.den.take()
             {
@@ -326,7 +327,8 @@ impl Game {
         for (position, radius, genes, species, count) in hatching {
             self.effect(position, radius * 2.5, 0.5, EffectKind::Explosion);
             for k in 0..count {
-                if self.bodies.len() + species.genome.parts() as usize >= MAX_BODIES {
+                if self.bodies.len() + species.genome.parts() as usize >= self.tune.world_max_bodies
+                {
                     break;
                 }
                 let direction = Vec2::from_angle(
@@ -511,7 +513,7 @@ impl Game {
 
     /// Births a creature at the rim of a base, drifting outward.
     fn spawn_creature(&mut self, species: &Species, center: Vec2, genes: Phenotype) {
-        if self.bodies.len() + species.genome.parts() as usize >= MAX_BODIES {
+        if self.bodies.len() + species.genome.parts() as usize >= self.tune.world_max_bodies {
             return;
         }
         let direction = self.rng.direction();
@@ -532,7 +534,7 @@ impl Game {
     pub(super) fn base_destroyed(&mut self, position: Vec2) {
         for body in self.bodies.iter_mut() {
             if body.kind == BodyKind::Creature
-                && body.position.distance(position) < ECOSYSTEM_RADIUS
+                && body.position.distance(position) < self.tune.world_ecosystem_radius
             {
                 body.panic = 10.0;
                 body.panic_from = position;
@@ -703,7 +705,7 @@ mod tests {
         for _ in 0..60 * 240 {
             game.step(DT, Input::default());
             assert!(near(&game, Species::bogey()) <= DEFAULT_TUNING.ecology_brood_cap);
-            assert!(game.bodies.len() < MAX_BODIES);
+            assert!(game.bodies.len() < DEFAULT_TUNING.world_max_bodies);
             assert!(game.bodies.iter().all(|b| b.position.is_finite()));
         }
         assert!(near(&game, Species::bogey()) >= 3, "the brood never grew");

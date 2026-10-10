@@ -14,19 +14,8 @@ use super::arsenal::{Billing, BoostGain, Gain, Need, Profile};
 use super::upgrades::{Charged, Rarity, Surge};
 use super::*;
 
-/// Shortest gap between two switches.
-const SWITCH_DEBOUNCE: f32 = 0.08;
 /// Seconds the HUD announces a switch.
 const FLASH: f32 = 1.6;
-/// Fuel that comes with unlocking a profile from a part, and with a repeat find.
-pub const UNLOCK_FUEL: f32 = 40.0;
-pub const UPGRADE_FUEL: f32 = 25.0;
-/// How close hostiles, loot and wells must be to wake the boosts that watch for them.
-const DANGER_RANGE: f32 = 800.0;
-const LOOT_RANGE: f32 = 900.0;
-const WELL_RANGE: f32 = 800.0;
-/// A hit this recent counts as danger.
-const RECENT_HIT: f32 = 3.0;
 
 impl Game {
     /// Whether a profile could fire right now (the stock gun always can).
@@ -103,7 +92,7 @@ impl Game {
     }
 
     fn switched(&mut self, profile: Profile) {
-        self.switch_clock = SWITCH_DEBOUNCE;
+        self.switch_clock = self.tune.arms_switch_debounce;
         self.arsenal_flash = FLASH;
         let dry = !self.usable(profile);
         self.cue(Cue::Switch { dry });
@@ -303,16 +292,18 @@ impl Game {
                 input.thrust > 0.1 || input.move_direction.is_some_and(|m| m.length() > 0.1)
             }
             Need::Danger => {
-                ship.since_hit < RECENT_HIT
-                    || near(DANGER_RANGE, &|b| {
+                ship.since_hit < self.tune.arms_recent_hit
+                    || near(self.tune.arms_danger_range, &|b| {
                         matches!(b.kind, BodyKind::Creature | BodyKind::Base)
                     })
             }
             Need::Loot => self
                 .pickups
                 .iter()
-                .any(|p| p.position.distance(ship.position) < LOOT_RANGE),
-            Need::Wells => near(WELL_RANGE, &|b| b.kind == BodyKind::BlackHole),
+                .any(|p| p.position.distance(ship.position) < self.tune.arms_loot_range),
+            Need::Wells => near(self.tune.arms_well_range, &|b| {
+                b.kind == BodyKind::BlackHole
+            }),
             Need::Cords => self.tethers.iter().any(|t| {
                 (t.kind == TetherKind::Latch && t.attached())
                     || (matches!(t.kind, TetherKind::Web | TetherKind::Sling)
@@ -376,10 +367,13 @@ mod tests {
             game.loadout.parts.is_empty(),
             "weapon-only parts take no slot"
         );
-        assert_eq!(game.cargo.fuel, UNLOCK_FUEL);
+        assert_eq!(game.cargo.fuel, DEFAULT_TUNING.arms_unlock_fuel);
         game.collect(Item::Part(part(vec![Effect::Trait(Trait::Missiles, 1)])));
         assert_eq!(game.loadout.arsenal.level(Profile::Missiles), 2);
-        assert_eq!(game.cargo.fuel, UNLOCK_FUEL + UPGRADE_FUEL);
+        assert_eq!(
+            game.cargo.fuel,
+            DEFAULT_TUNING.arms_unlock_fuel + DEFAULT_TUNING.arms_upgrade_fuel
+        );
         // A weaker find never lowers it, and a maxed one only brings fuel.
         for _ in 0..4 {
             game.collect(Item::Part(part(vec![Effect::Trait(Trait::Missiles, 1)])));
@@ -415,7 +409,7 @@ mod tests {
             for round in 0..240 {
                 let source = Source::plain(1.0 + rng.f32() * 6.0, SectorParams::HOME);
                 let item = match rng.int(0, 2) {
-                    0 => Item::Surge(upgrades::roll_surge(&mut rng, &source)),
+                    0 => Item::Surge(upgrades::roll_surge(&mut rng, &source, &DEFAULT_TUNING)),
                     _ => Item::Part(upgrades::roll_part(&mut rng, &source)),
                 };
                 game.collect(item);
@@ -628,7 +622,11 @@ mod tests {
             for step in 0..600 {
                 if step % 50 == 0 {
                     let source = Source::plain(2.0, SectorParams::HOME);
-                    game.collect(Item::Surge(upgrades::roll_surge(&mut rng, &source)));
+                    game.collect(Item::Surge(upgrades::roll_surge(
+                        &mut rng,
+                        &source,
+                        &DEFAULT_TUNING,
+                    )));
                     game.collect(Item::Material(Material::Fuel, 30.0));
                 }
                 if step % 70 == 0 {

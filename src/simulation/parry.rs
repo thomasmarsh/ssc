@@ -194,7 +194,7 @@ impl Game {
         if turned > 0 && !self.parry.perfected {
             self.parry.perfected = true;
             self.run.perfect_parries += 1;
-            self.streak.link();
+            self.streak.link(&self.tune);
             self.parry.cooldown =
                 (self.parry.cooldown - self.tune.parry_perfect_cooldown_refund).max(0.0);
             self.request_hit_stop(self.tune.parry_hitstop);

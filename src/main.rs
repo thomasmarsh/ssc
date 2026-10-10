@@ -2185,7 +2185,9 @@ fn arm_for_smoke(game: &mut Game, grade: f32) {
         game.collect(Item::Part(upgrades::roll_part(&mut rng, &source)));
     }
     for _ in 0..3 {
-        game.collect(Item::Surge(upgrades::roll_surge(&mut rng, &source)));
+        game.collect(Item::Surge(upgrades::roll_surge(
+            &mut rng, &source, &game.tune,
+        )));
     }
     let center = game.player().map_or(Vec2::ZERO, |ship| ship.position);
     let items = [
@@ -2197,8 +2199,8 @@ fn arm_for_smoke(game: &mut Game, grade: f32) {
         Item::Material(Material::Crystal, 20.0),
         Item::Part(upgrades::roll_part(&mut rng, &source)),
         Item::Part(upgrades::roll_part(&mut rng, &source)),
-        Item::Surge(upgrades::roll_surge(&mut rng, &source)),
-        Item::Surge(upgrades::roll_surge(&mut rng, &source)),
+        Item::Surge(upgrades::roll_surge(&mut rng, &source, &game.tune)),
+        Item::Surge(upgrades::roll_surge(&mut rng, &source, &game.tune)),
     ];
     for (i, item) in items.into_iter().enumerate() {
         let spot = center + Vec2::from_angle(i as f32 * 0.8) * 240.0;

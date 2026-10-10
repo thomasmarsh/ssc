@@ -3,8 +3,6 @@ use super::*;
 use crate::culture::{self, Clock, Origin, Profile};
 use serde::{Deserialize, Serialize};
 
-const DEFENSE_SECONDS: f64 = 30.0;
-
 /// Saved permission, independent of sentiment. Only attributed player harm opens defense.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct Engagement {
@@ -75,7 +73,7 @@ impl Societies {
             actor.engagement.defense = (actor.engagement.defense - f64::from(dt)).max(0.0);
         }
     }
-    pub(super) fn restore(mut self, keep: bool) -> Self {
+    pub(super) fn restore(mut self, keep: bool, tune: &Tunables) -> Self {
         if !self.clock.valid() {
             self.clock = Clock::default();
         }
@@ -86,7 +84,7 @@ impl Societies {
             if !actor.engagement.defense.is_finite() {
                 actor.engagement.defense = 0.0;
             }
-            actor.engagement.defense = actor.engagement.defense.clamp(0.0, DEFENSE_SECONDS);
+            actor.engagement.defense = actor.engagement.defense.clamp(0.0, f64::from(tune.society_defense_seconds));
         }
         self.actors.retain(|id, a| {
             a.origin.actor == *id
@@ -174,7 +172,7 @@ impl Game {
 
     pub(super) fn civil_player_harm(&mut self, actor: u64) {
         if let Some(record) = self.civs.societies.actors.get_mut(&actor) {
-            record.engagement.defense = DEFENSE_SECONDS;
+            record.engagement.defense = f64::from(self.tune.society_defense_seconds);
         }
     }
 

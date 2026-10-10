@@ -12,10 +12,6 @@ use crate::world::hash2;
 
 /// Separates loot from every other stream.
 pub(super) const LOOT_SALT: u64 = 0x100D_5A1D_0000_0007;
-const MAX_PICKUPS: usize = 96;
-/// A pickup is collected when the ship's edge is this close.
-const PICKUP_RADIUS: f32 = 12.0;
-const MAX_LIVES: u32 = 6;
 const MAX_NOTICES: usize = 5;
 
 #[derive(Clone, Debug)]
@@ -199,7 +195,7 @@ impl Game {
                 self.notify(format!("SHIELD +{amount:.0}"), rarity);
             }
             Item::Life => {
-                self.lives = (self.lives + 1).min(MAX_LIVES);
+                self.lives = (self.lives + 1).min(self.tune.loot_max_lives);
                 self.notify("EXTRA LIFE".into(), rarity);
             }
             Item::Material(kind, amount) => {
@@ -219,8 +215,8 @@ impl Game {
                 let acquired = self.loadout.acquire(part);
                 for (profile, gain) in acquired.profiles {
                     let fuel = match gain {
-                        upgrades::Gain::New(_) => super::arms::UNLOCK_FUEL,
-                        _ => super::arms::UPGRADE_FUEL,
+                        upgrades::Gain::New(_) => self.tune.arms_unlock_fuel,
+                        _ => self.tune.arms_upgrade_fuel,
                     };
                     self.grant_profile(profile, gain, fuel, rarity);
                 }
@@ -271,7 +267,7 @@ impl Game {
 
     fn creature_reward(&self, body: &Body, rng: &mut Rng, source: &Source) -> Item {
         if self.civ_membership(body).is_some() {
-            return upgrades::roll_item(rng, source);
+            return upgrades::roll_item(rng, source, &self.tune);
         }
         let material = match rng.next_u64() % 4 {
             0 => Material::Metal,
@@ -370,7 +366,7 @@ impl Game {
                 }
                 if kind == BaseKind::Turret {
                     if rng.chance(0.3) {
-                        drops.push(upgrades::roll_item(&mut rng, &source));
+                        drops.push(upgrades::roll_item(&mut rng, &source, &self.tune));
                     }
                 } else {
                     let capital = matches!(self.civ_membership(body), Some((_, CivRole::Capital)));
@@ -387,7 +383,7 @@ impl Game {
                     }
                     source.min_rarity = upgrades::Rarity::Common;
                     for _ in 0..rolls {
-                        drops.push(upgrades::roll_item(&mut rng, &source));
+                        drops.push(upgrades::roll_item(&mut rng, &source, &self.tune));
                     }
                 }
             }
@@ -401,7 +397,7 @@ impl Game {
 
     /// Leaves an item floating at `position`.
     pub fn drop_item(&mut self, position: Vec2, velocity: Vec2, item: Item) {
-        if self.pickups.len() >= MAX_PICKUPS {
+        if self.pickups.len() >= self.tune.loot_max_pickups {
             self.pickups.remove(0);
         }
         self.pickups.push(Pickup {
@@ -462,7 +458,7 @@ impl Game {
             if let Some((position, radius)) = ship {
                 let offset = position - pickup.position;
                 let distance = offset.length();
-                if distance < radius + PICKUP_RADIUS {
+                if distance < radius + self.tune.loot_pickup_radius {
                     taken.push(index);
                     continue;
                 }
@@ -886,7 +882,7 @@ mod tests {
         for _ in 0..10 {
             game.collect(Item::Life);
         }
-        assert_eq!(game.lives, MAX_LIVES);
+        assert_eq!(game.lives, DEFAULT_TUNING.loot_max_lives);
         game.collect(Item::Material(Material::Metal, 75.0));
         assert_eq!(game.score, 75);
         assert_eq!(game.cargo.metal, 75.0);

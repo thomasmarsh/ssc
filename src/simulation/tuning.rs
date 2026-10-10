@@ -965,6 +965,14 @@ fn validate(t: &Tunables) -> Result<(), String> {
         t.pad_reload_raid_damage_min,
         t.pad_reload_raid_damage_max
     );
+    rule!(
+        t.world_fling_speed <= t.world_fling_max_speed
+            && t.world_fling_max_speed <= t.world_fling_hard_cap,
+        "fling speeds must stay ordered: min {} <= max {} <= hard cap {}",
+        t.world_fling_speed,
+        t.world_fling_max_speed,
+        t.world_fling_hard_cap
+    );
     Ok(())
 }
 

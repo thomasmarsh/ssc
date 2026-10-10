@@ -72,9 +72,6 @@ pub struct Lure {
     pub position: Vec2,
 }
 
-/// Within this distance the ship has arrived and the lure is spent.
-pub const ARRIVED: f32 = 320.0;
-
 /// The score of a lure `distance` away (lower is better): sectors of distance plus the kind's
 /// handicap.
 pub fn lure_score(kind: LureKind, distance: f32) -> f32 {
@@ -82,19 +79,16 @@ pub fn lure_score(kind: LureKind, distance: f32) -> f32 {
 }
 
 /// The best of some candidates seen from `from`, by `lure_score` (ties go to the first).
-pub fn choose(from: Vec2, candidates: &[Lure]) -> Option<Lure> {
+pub fn choose(from: Vec2, candidates: &[Lure], tune: &Tunables) -> Option<Lure> {
     candidates
         .iter()
-        .filter(|c| c.position.distance(from) > ARRIVED)
+        .filter(|c| c.position.distance(from) > tune.lure_arrived)
         .min_by(|a, b| {
             lure_score(a.kind, a.position.distance(from))
                 .total_cmp(&lure_score(b.kind, b.position.distance(from)))
         })
         .copied()
 }
-
-/// Seconds between free pings on entering sectors.
-pub const AUTO_PING_GAP: f32 = 6.0;
 
 /// The lure state and the auto ping's memory.
 #[derive(Clone, Debug)]
@@ -108,8 +102,8 @@ pub struct LureState {
 
 impl LureState {
     /// Lets the next new sector be pinged at once (after a jump or a teleport).
-    pub(super) fn rearm(&mut self) {
-        self.since = AUTO_PING_GAP;
+    pub(super) fn rearm(&mut self, tune: &Tunables) {
+        self.since = tune.lure_auto_ping_gap;
     }
 }
 
@@ -118,7 +112,7 @@ impl Default for LureState {
         Self {
             lure: None,
             pinged: super::digest::DetSet::default(),
-            since: AUTO_PING_GAP,
+            since: super::DEFAULT_TUNING.lure_auto_ping_gap,
             auto_ping: true,
         }
     }
@@ -144,14 +138,14 @@ impl Game {
         if self
             .lure
             .lure
-            .is_some_and(|l| l.position.distance(ship) <= ARRIVED)
+            .is_some_and(|l| l.position.distance(ship) <= self.tune.lure_arrived)
         {
             self.lure.lure = None;
         }
         let here = self.sector();
         if self.lure.auto_ping
             && !self.game_over
-            && self.lure.since >= AUTO_PING_GAP
+            && self.lure.since >= self.tune.lure_auto_ping_gap
             && !self.lure.pinged.contains(&here)
             && self.ping_ring().is_none()
         {
@@ -175,7 +169,7 @@ impl Game {
                 mine < theirs
             }
         };
-        if better && candidate.position.distance(ship) > ARRIVED {
+        if better && candidate.position.distance(ship) > self.tune.lure_arrived {
             self.lure.lure = Some(candidate);
         }
     }
@@ -197,33 +191,45 @@ mod tests {
     fn a_lode_beats_a_slightly_nearer_civilization_and_a_planetoid_beats_nothing() {
         let near_civ = lure(LureKind::Civilization, 1.0 * SECTOR_SIZE);
         let lode = lure(LureKind::Lode, 1.5 * SECTOR_SIZE);
-        assert_eq!(choose(Vec2::ZERO, &[near_civ, lode]), Some(lode));
+        assert_eq!(
+            choose(Vec2::ZERO, &[near_civ, lode], &DEFAULT_TUNING),
+            Some(lode)
+        );
         let planet = lure(LureKind::Planetoid, 1.0 * SECTOR_SIZE);
-        assert_eq!(choose(Vec2::ZERO, &[planet]), Some(planet));
-        assert_eq!(choose(Vec2::ZERO, &[]), None);
+        assert_eq!(choose(Vec2::ZERO, &[planet], &DEFAULT_TUNING), Some(planet));
+        assert_eq!(choose(Vec2::ZERO, &[], &DEFAULT_TUNING), None);
     }
 
     #[test]
     fn distance_breaks_ties_within_a_kind_and_a_far_lode_loses_to_a_near_planetoid() {
         let near = lure(LureKind::Planetoid, 0.5 * SECTOR_SIZE);
         let far = lure(LureKind::Planetoid, 2.0 * SECTOR_SIZE);
-        assert_eq!(choose(Vec2::ZERO, &[far, near]), Some(near));
+        assert_eq!(
+            choose(Vec2::ZERO, &[far, near], &DEFAULT_TUNING),
+            Some(near)
+        );
         let far_lode = lure(LureKind::Lode, 3.0 * SECTOR_SIZE);
-        assert_eq!(choose(Vec2::ZERO, &[far_lode, near]), Some(near));
+        assert_eq!(
+            choose(Vec2::ZERO, &[far_lode, near], &DEFAULT_TUNING),
+            Some(near)
+        );
     }
 
     #[test]
     fn an_apex_wins_only_when_it_is_all_there_is() {
         let apex = lure(LureKind::Apex, 0.8 * SECTOR_SIZE);
         let planet = lure(LureKind::Planetoid, 3.0 * SECTOR_SIZE);
-        assert_eq!(choose(Vec2::ZERO, &[apex, planet]), Some(planet));
-        assert_eq!(choose(Vec2::ZERO, &[apex]), Some(apex));
+        assert_eq!(
+            choose(Vec2::ZERO, &[apex, planet], &DEFAULT_TUNING),
+            Some(planet)
+        );
+        assert_eq!(choose(Vec2::ZERO, &[apex], &DEFAULT_TUNING), Some(apex));
     }
 
     #[test]
     fn a_lure_the_ship_is_already_at_is_not_a_lure() {
-        let here = lure(LureKind::Lode, ARRIVED - 1.0);
-        assert_eq!(choose(Vec2::ZERO, &[here]), None);
+        let here = lure(LureKind::Lode, DEFAULT_TUNING.lure_arrived - 1.0);
+        assert_eq!(choose(Vec2::ZERO, &[here], &DEFAULT_TUNING), None);
     }
 
     #[test]
@@ -252,7 +258,7 @@ mod tests {
     fn entering_a_sector_sends_one_free_ping_without_touching_the_cooldown() {
         let mut game = empty_game();
         game.set_auto_ping(true);
-        game.lure.since = AUTO_PING_GAP;
+        game.lure.since = DEFAULT_TUNING.lure_auto_ping_gap;
         game.step(DT, Input::default());
         assert!(game.ping_ring().is_some(), "the free ping went out");
         assert_eq!(game.ping_cooldown(), 0.0, "and cost nothing");
@@ -263,7 +269,7 @@ mod tests {
     fn the_free_ping_does_not_repeat_in_the_same_sector_or_spam_across_fast_ones() {
         let mut game = empty_game();
         game.set_auto_ping(true);
-        game.lure.since = AUTO_PING_GAP;
+        game.lure.since = DEFAULT_TUNING.lure_auto_ping_gap;
         let mut rings = 0;
         let mut was = false;
         for _ in 0..600 {

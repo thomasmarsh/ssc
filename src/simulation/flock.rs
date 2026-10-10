@@ -1125,7 +1125,7 @@ mod tests {
             .expect("the herd loaded with its sector");
         assert_eq!(flock.lineage, plan.species.lineage);
         assert!(flock.len() >= 100 && flock.len() <= plan.count as usize);
-        assert!(game.bodies.len() <= MAX_BODIES);
+        assert!(game.bodies.len() <= DEFAULT_TUNING.world_max_bodies);
         // Regenerated, not saved: the same game from the same seed loads the same herd.
         let mut again = Game::new(MASTER_SEED);
         set_player(&mut again, id.center(), Vec2::ZERO);

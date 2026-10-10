@@ -383,7 +383,7 @@ impl Game {
 
             if let (Some(home), false) = (body.home, body.alert || body.panic > 0.0) {
                 let back = home - body.position;
-                if back.length_squared() > HOME_LEASH * HOME_LEASH {
+                if back.length_squared() > self.tune.world_home_leash * self.tune.world_home_leash {
                     let own = Vec2::from_angle(body.wander);
                     let merged = own + (back.normalize() - own) * (dt * 1.5).min(1.0);
                     body.wander = merged.y.atan2(merged.x);

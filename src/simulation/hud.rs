@@ -395,7 +395,7 @@ impl Game {
 
     /// The chain's multiplier and the share of its window left, while one runs.
     pub fn streak_view(&self) -> Option<(f32, f32)> {
-        self.streak.view()
+        self.streak.view(&self.tune)
     }
 
     /// How long the current region has been announced, in seconds.

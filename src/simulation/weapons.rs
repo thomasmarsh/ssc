@@ -7,24 +7,6 @@
 use super::*;
 use crate::genome::Weapon;
 
-/// Hostile mines and ship mines that may exist at once.
-pub(super) const MAX_MINES: usize = 90;
-/// How close a target must come to arm a mine, and the countdown after.
-const HOSTILE_TRIGGER: f32 = 100.0;
-const HOSTILE_FUSE: f32 = 1.2;
-const FRIENDLY_TRIGGER: f32 = 110.0;
-const FRIENDLY_FUSE: f32 = 0.45;
-const HOSTILE_MINE_LIFE: f32 = 50.0;
-const FRIENDLY_MINE_LIFE: f32 = 60.0;
-/// Direct-hit damage of one pellet, before depth scaling.
-pub(super) const PELLET_DAMAGE: f32 = 18.0;
-const NEEDLE_DAMAGE: f32 = 2.2;
-const MISSILE_DAMAGE: f32 = 22.0;
-const ORB_DAMAGE: f32 = 12.0;
-const SPIRAL_DAMAGE: f32 = 9.0;
-pub(super) const MINE_DAMAGE: f32 = 30.0;
-pub(super) const MINE_BLAST: f32 = 125.0;
-
 /// How a shot is drawn and what it is: used by the renderer and by collision rules.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
@@ -111,7 +93,7 @@ impl Game {
                         m.origin,
                         aim * m.shot_speed + m.velocity * 0.3,
                         m.reach * 1.5 / m.shot_speed,
-                        PELLET_DAMAGE * sharp * share,
+                        self.tune.weapon_pellet_damage * sharp * share,
                     ));
                 }
             }
@@ -123,7 +105,7 @@ impl Game {
                         m.origin,
                         aim * speed * self.rng.range(0.9, 1.1),
                         m.reach * 1.3 / speed,
-                        NEEDLE_DAMAGE * sharp,
+                        self.tune.weapon_needle_damage * sharp,
                     );
                     needle.radius = 1.8;
                     needle.shape = Shape::Needle;
@@ -138,7 +120,7 @@ impl Game {
                         m.origin,
                         aim * (m.shot_speed * 0.55).max(140.0) + m.velocity * 0.3,
                         4.5,
-                        MISSILE_DAMAGE * sharp,
+                        self.tune.weapon_missile_damage * sharp,
                     );
                     missile.radius = 6.0;
                     missile.shape = Shape::Missile;
@@ -157,7 +139,7 @@ impl Game {
                         m.origin,
                         aim * speed,
                         m.reach * 1.4 / speed,
-                        ORB_DAMAGE * sharp,
+                        self.tune.weapon_orb_damage * sharp,
                     );
                     orb.radius = 4.5;
                     orb.shape = Shape::Orb;
@@ -172,7 +154,7 @@ impl Game {
                         m.origin,
                         aim * speed,
                         m.reach * 1.4 / speed,
-                        SPIRAL_DAMAGE * sharp,
+                        self.tune.weapon_spiral_damage * sharp,
                     );
                     orb.radius = 3.5;
                     orb.shape = Shape::Orb;
@@ -191,8 +173,8 @@ impl Game {
                         friendly: false,
                         age: 0.0,
                         fuse: None,
-                        damage: MINE_DAMAGE * sharp,
-                        blast: MINE_BLAST,
+                        damage: self.tune.weapon_mine_damage * sharp,
+                        blast: self.tune.weapon_mine_blast,
                     });
                 }
             }
@@ -202,7 +184,7 @@ impl Game {
     }
 
     pub(super) fn lay_mine(&mut self, mine: Mine) {
-        if self.mines.len() >= MAX_MINES {
+        if self.mines.len() >= self.tune.weapon_max_mines {
             self.mines.remove(0);
         }
         self.mines.push(mine);
@@ -247,15 +229,17 @@ impl Game {
                 let tripped = if mine.friendly {
                     hostile_targets
                         .iter()
-                        .any(|t| t.distance(mine.position) < FRIENDLY_TRIGGER)
+                        .any(|t| t.distance(mine.position) < self.tune.weapon_friendly_trigger)
                 } else {
-                    player.is_some_and(|(p, r)| p.distance(mine.position) < HOSTILE_TRIGGER + r)
+                    player.is_some_and(|(p, r)| {
+                        p.distance(mine.position) < self.tune.weapon_hostile_trigger + r
+                    })
                 };
                 if tripped {
                     mine.fuse = Some(if mine.friendly {
-                        FRIENDLY_FUSE
+                        self.tune.weapon_friendly_fuse
                     } else {
-                        HOSTILE_FUSE
+                        self.tune.weapon_hostile_fuse
                     });
                 }
             }
@@ -265,9 +249,9 @@ impl Game {
         }
         let life = |m: &Mine| {
             if m.friendly {
-                FRIENDLY_MINE_LIFE
+                self.tune.weapon_friendly_mine_life
             } else {
-                HOSTILE_MINE_LIFE
+                self.tune.weapon_hostile_mine_life
             }
         };
         let mut index = 0;
@@ -376,7 +360,7 @@ impl Game {
             if !self.pay_launch() {
                 return;
             }
-            self.arm_clock[0] = MISSILE_PERIOD;
+            self.arm_clock[0] = self.tune.weapon_missile_period;
             let count = usize::from(stats.missiles);
             for k in 0..count {
                 if self.bullets.len() >= MAX_BULLETS {
@@ -420,7 +404,7 @@ impl Game {
             if !self.pay_launch() {
                 return;
             }
-            self.arm_clock[2] = NOVA_PERIOD;
+            self.arm_clock[2] = self.tune.weapon_nova_period;
             let ring = 12 + 4 * usize::from(stats.nova);
             let phase = self.rng.range(0.0, TAU);
             for k in 0..ring {
@@ -437,10 +421,6 @@ impl Game {
         }
     }
 }
-
-/// Seconds between a missile pod's salvos, and between nova pulses.
-const MISSILE_PERIOD: f32 = 1.8;
-const NOVA_PERIOD: f32 = 1.3;
 
 #[cfg(test)]
 mod tests {
@@ -564,12 +544,16 @@ mod tests {
 
         game.discharge(Weapon::Projectile, 1, &m, 0.0);
         assert_eq!(game.bullets.len(), 1);
-        assert_eq!(game.bullets[0].damage, PELLET_DAMAGE);
+        assert_eq!(game.bullets[0].damage, DEFAULT_TUNING.weapon_pellet_damage);
         game.bullets.clear();
 
         game.discharge(Weapon::Projectile, 3, &m, 0.0);
         assert_eq!(game.bullets.len(), 3);
-        assert!(game.bullets.iter().all(|b| b.damage < PELLET_DAMAGE));
+        assert!(
+            game.bullets
+                .iter()
+                .all(|b| b.damage < DEFAULT_TUNING.weapon_pellet_damage)
+        );
         game.bullets.clear();
 
         game.discharge(Weapon::Needles, 24, &m, 0.0);
@@ -577,9 +561,13 @@ mod tests {
         let speed = game.bullets[0].velocity.length();
         let weak: f32 = game.bullets.iter().map(|b| b.damage).sum();
         assert!(speed > m.shot_speed * 1.8, "needles are fast");
-        assert!(game.bullets.iter().all(|b| b.damage < PELLET_DAMAGE / 4.0));
         assert!(
-            weak > PELLET_DAMAGE,
+            game.bullets
+                .iter()
+                .all(|b| b.damage < DEFAULT_TUNING.weapon_pellet_damage / 4.0)
+        );
+        assert!(
+            weak > DEFAULT_TUNING.weapon_pellet_damage,
             "in mass they outweigh a pellet: {weak}"
         );
         game.bullets.clear();

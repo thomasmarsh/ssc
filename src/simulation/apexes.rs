@@ -571,7 +571,7 @@ impl Game {
             .iter()
             .filter(|b| b.kind == BodyKind::Creature && SectorId::containing(b.position) == sector)
             .count();
-        if self.bodies.len() + self.food.len() + self.eggs.len() + 2 >= MAX_BODIES
+        if self.bodies.len() + self.food.len() + self.eggs.len() + 2 >= self.tune.world_max_bodies
             || here + 1 >= world::SECTOR_BODY_BUDGET as usize
         {
             return;
@@ -1178,7 +1178,9 @@ mod tests {
             }
             game.step(0.05, Input::default());
         }
-        assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
+        assert!(
+            game.bodies.len() + game.food.len() + game.eggs.len() < DEFAULT_TUNING.world_max_bodies
+        );
         let apexes = game
             .bodies
             .iter()
@@ -1418,7 +1420,10 @@ mod tests {
                 alive <= DEFAULT_TUNING.elder_escort_cap_enraged,
                 "{alive} escorts"
             );
-            assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
+            assert!(
+                game.bodies.len() + game.food.len() + game.eggs.len()
+                    < DEFAULT_TUNING.world_max_bodies
+            );
         }
         assert!(most >= 2, "the queen raised only {most}");
         assert!(most <= DEFAULT_TUNING.elder_escort_cap_enraged);
@@ -1604,7 +1609,10 @@ mod tests {
         for _ in 0..(300.0 / 0.05) as usize {
             set_player(&mut game, spot, Vec2::ZERO);
             game.step(0.05, Input::default());
-            assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
+            assert!(
+                game.bodies.len() + game.food.len() + game.eggs.len()
+                    < DEFAULT_TUNING.world_max_bodies
+            );
         }
         let apexes = game
             .bodies
