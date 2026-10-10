@@ -309,7 +309,7 @@ pub struct Travel {
     pub quote: TravelQuote,
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChartState {
     known: BTreeMap<SectorId, Known>,
     pins: BTreeMap<SectorId, PinLabel>,

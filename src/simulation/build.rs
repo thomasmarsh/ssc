@@ -101,7 +101,7 @@ pub(super) struct Work {
 pub(super) struct BuildState {
     pub works: Vec<Work>,
     /// Structures each territory has started this session (the budget `CIV_STRUCTURES`).
-    pub civ_started: std::collections::HashMap<u64, u8>,
+    pub civ_started: super::digest::DetMap<u64, u8>,
     /// Every structure the world has seen, as of the last sync: the memory that outlives
     /// unloaded sectors and the game. See `Game::sync_structures`.
     pub kept: BTreeMap<StructureKey, Structure>,

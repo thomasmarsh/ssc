@@ -23,6 +23,7 @@
 //!   enemy suffers one seeded raid roll when its sector reloads.
 
 use super::arsenal::Profile;
+use super::digest::{DetMap, DetSet};
 use super::skills::{Skill, SkillTab};
 use super::tuning as t;
 use super::upgrades::Rarity;
@@ -202,9 +203,9 @@ pub struct PadState {
     next_order: u64,
     /// Pads seen by learners (wild) and by each civilization (by territory).
     #[serde(skip)]
-    known_wild: HashSet<PadKey>,
+    known_wild: DetSet<PadKey>,
     #[serde(skip)]
-    known_civ: HashMap<u64, HashSet<PadKey>>,
+    known_civ: DetMap<u64, DetSet<PadKey>>,
     /// The ship is steering or firing, so a landed ship keeps its own heading.
     #[serde(skip)]
     aiming: bool,
@@ -235,8 +236,8 @@ impl Default for PadState {
             hidden_for: 0.0,
             cover_broken: 0.0,
             next_order: 0,
-            known_wild: HashSet::new(),
-            known_civ: HashMap::new(),
+            known_wild: DetSet::default(),
+            known_civ: DetMap::default(),
             aiming: false,
             note: 0.0,
         }

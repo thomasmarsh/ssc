@@ -101,7 +101,7 @@ pub const AUTO_PING_GAP: f32 = 6.0;
 pub struct LureState {
     pub lure: Option<Lure>,
     /// Sectors already pinged on entry this run, and seconds since the last free ping.
-    pinged: HashSet<SectorId>,
+    pinged: super::digest::DetSet<SectorId>,
     pub(super) since: f32,
     pub auto_ping: bool,
 }
@@ -117,7 +117,7 @@ impl Default for LureState {
     fn default() -> Self {
         Self {
             lure: None,
-            pinged: HashSet::new(),
+            pinged: super::digest::DetSet::default(),
             since: AUTO_PING_GAP,
             auto_ping: true,
         }

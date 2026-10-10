@@ -40,7 +40,7 @@ pub struct Grooming {
 pub struct ParasiteState {
     pub(super) latches: Vec<Latch>,
     /// Worms that were shaken off: seconds before they may fasten again.
-    pub(super) gap: HashMap<u64, f32>,
+    pub(super) gap: super::digest::DetMap<u64, f32>,
     /// Seconds the ship has been landed with worms aboard.
     pub(super) clean: f32,
     /// Seconds since the ship last fired.

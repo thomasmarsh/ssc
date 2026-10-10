@@ -628,6 +628,7 @@ mod tests {
         fly(&mut plain, 600);
         fly(&mut touched, 600);
         assert_eq!(print(&plain), print(&touched));
+        assert_eq!(plain.state_digest(), touched.state_digest());
         // And the scaled step is the plain step at the normal scale.
         let mut scaled = Game::new(crate::config::MASTER_SEED);
         for n in 0..600 {
@@ -640,6 +641,7 @@ mod tests {
             scaled.step_scaled(DT, input);
         }
         assert_eq!(print(&plain), print(&scaled));
+        assert_eq!(plain.state_digest(), scaled.state_digest());
     }
 
     #[test]
