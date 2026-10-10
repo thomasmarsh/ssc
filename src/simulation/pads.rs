@@ -157,6 +157,9 @@ pub struct PadState {
     /// Last pad actually landed on; survives save/load. A lost pad falls back to HOME.
     #[serde(default)]
     pub last_visited: Option<PadKey>,
+    /// Player knowledge: one reusable fleet configuration, independent of its source pad.
+    #[serde(default)]
+    pub drone_blueprint: Option<super::fleet::DroneModules>,
     #[serde(skip)]
     pub landed: Option<PadKey>,
     /// Field repair is running.
@@ -197,6 +200,7 @@ impl Default for PadState {
             pads: BTreeMap::new(),
             kits: 0,
             last_visited: None,
+            drone_blueprint: None,
             landed: None,
             repairing: false,
             auto_run: false,

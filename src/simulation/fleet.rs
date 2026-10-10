@@ -35,6 +35,15 @@ pub struct DroneModules {
 }
 
 impl DroneModules {
+    pub(super) fn label(self) -> &'static str {
+        match (self.cargo, self.mining) {
+            (false, false) => "STANDARD",
+            (true, false) => "CARGO POD",
+            (false, true) => "MINING HEAD",
+            (true, true) => "CARGO POD + MINING HEAD",
+        }
+    }
+
     pub(super) fn has(self, upgrade: DroneUpgrade) -> bool {
         match upgrade {
             DroneUpgrade::Cargo => self.cargo,
@@ -143,6 +152,14 @@ impl MiningDrone {
 }
 
 impl Game {
+    /// Bounded bench gallery: knowledge copied at another dock, without unit hardware.
+    pub fn stage_drone_blueprint_smoke(&mut self) {
+        self.pad.drone_blueprint = Some(DroneModules {
+            cargo: true,
+            mining: false,
+        });
+    }
+
     /// Materialize only loaded hosts. Flight follows saved progress and host rotation;
     /// pausing power freezes progress, while docking follows the rotating surface.
     pub fn mining_drone_views(&self) -> Vec<DroneView> {
@@ -265,6 +282,97 @@ impl Game {
             .to_vec()
     }
 
+    pub(super) fn drone_blueprint_price(&self) -> Vec<(Material, f32)> {
+        let mut price = vec![(Material::Metal, 0.0), (Material::Crystal, 0.0)];
+        if let Some(modules) = self.pad.drone_blueprint {
+            for upgrade in DroneUpgrade::ALL {
+                if modules.has(upgrade) {
+                    for (entry, (_, amount)) in
+                        price.iter_mut().zip(self.drone_template_price(upgrade))
+                    {
+                        entry.1 += amount;
+                    }
+                }
+            }
+        }
+        price
+    }
+
+    pub(super) fn drone_blueprint_block(&self, saving: bool) -> Option<&'static str> {
+        let pad = match self.landed_pad() {
+            None => return Some("LAND AT A PAD"),
+            Some(pad) => pad,
+        };
+        if !self.loadout.research.active(research::Tech::Automation) {
+            return Some("NEEDS AUTOMATION RESEARCH");
+        }
+        if !pad.power {
+            return Some("NEEDS LOCAL POWER");
+        }
+        if !pad.warehouse {
+            return Some("NEEDS WAREHOUSE");
+        }
+        if saving {
+            if pad.drone_template == DroneModules::default() {
+                Some("SET A TEMPLATE FIRST")
+            } else if self.pad.drone_blueprint == Some(pad.drone_template) {
+                Some("BLUEPRINT SAVED")
+            } else {
+                None
+            }
+        } else {
+            match self.pad.drone_blueprint {
+                None => Some("SAVE A BLUEPRINT FIRST"),
+                Some(modules)
+                    if DroneUpgrade::ALL.into_iter().all(|upgrade| {
+                        !modules.has(upgrade) || pad.drone_template.has(upgrade)
+                    }) =>
+                {
+                    Some("BLUEPRINT ALREADY INCLUDED")
+                }
+                Some(_) => None,
+            }
+        }
+    }
+
+    pub(super) fn save_drone_blueprint(&mut self) {
+        if let Some(why) = self.drone_blueprint_block(true) {
+            self.bench_failed(why.into());
+            return;
+        }
+        self.pad.drone_blueprint = Some(self.landed_pad().unwrap().drone_template);
+        self.bench_done("FLEET BLUEPRINT SAVED".into(), upgrades::Rarity::Common);
+    }
+
+    pub(super) fn apply_drone_blueprint(&mut self) {
+        if let Some(why) = self.drone_blueprint_block(false) {
+            self.bench_failed(why.into());
+            return;
+        }
+        if !self.cargo.spend(&self.drone_blueprint_price()) {
+            self.bench_failed("NEEDS FLEET BLUEPRINT MATERIALS".into());
+            return;
+        }
+        let modules = self.pad.drone_blueprint.unwrap();
+        let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
+        for upgrade in DroneUpgrade::ALL {
+            if modules.has(upgrade) {
+                Self::queue_drone_module(pad, upgrade);
+            }
+        }
+        self.bench_done("FLEET BLUEPRINT MERGED".into(), upgrades::Rarity::Common);
+    }
+
+    fn queue_drone_module(pad: &mut Pad, upgrade: DroneUpgrade) {
+        pad.drone_template.add(upgrade);
+        for drone in &mut pad.drones {
+            drone.ordered.add(upgrade);
+            if drone.remaining <= 0.0 && drone.cargo <= 0.0 {
+                drone.fitted = drone.ordered;
+            }
+        }
+    }
+
     pub(super) fn drone_template_block(&self, upgrade: DroneUpgrade) -> Option<&'static str> {
         match self.landed_pad() {
             None => Some("LAND AT A PAD"),
@@ -288,13 +396,7 @@ impl Game {
             return;
         }
         let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
-        pad.drone_template.add(upgrade);
-        for drone in &mut pad.drones {
-            drone.ordered.add(upgrade);
-            if drone.remaining <= 0.0 && drone.cargo <= 0.0 {
-                drone.fitted = drone.ordered;
-            }
-        }
+        Self::queue_drone_module(pad, upgrade);
         self.bench_done(
             format!("FLEET {} TEMPLATE SET", upgrade.label()),
             upgrades::Rarity::Common,
@@ -481,6 +583,189 @@ mod tests {
         game.cargo.crystal = 5.0;
         game.bench_select(BenchAction::DroneUpgrade(slot, upgrade));
         game.bench_confirm();
+    }
+
+    fn save_blueprint(game: &mut Game) {
+        for upgrade in DroneUpgrade::ALL {
+            game.bench_select(BenchAction::DroneTemplate(upgrade));
+            game.bench_confirm();
+        }
+        game.bench_select(BenchAction::SaveDroneBlueprint);
+        game.bench_confirm();
+        assert_eq!(
+            game.pad.drone_blueprint.unwrap().label(),
+            "CARGO POD + MINING HEAD"
+        );
+    }
+
+    #[test]
+    fn blueprint_reuses_configuration_across_pads_with_atomic_missing_module_payment() {
+        let (mut game, source, _) = setup();
+        save_blueprint(&mut game); // An empty fleet records knowledge, not hardware.
+        let target = (SectorId { x: 20, y: 20 }, 0);
+        let mut pad = game.pad.pads[&source].clone();
+        pad.key = target;
+        pad.home = false;
+        pad.center = Vec2::new(120_000.0, 120_000.0);
+        pad.drone_template = DroneModules::default();
+        pad.drones = vec![MiningDrone::default(); 3];
+        game.pad.pads.insert(target, pad);
+        game.pad.landed = Some(target);
+        retrofit(&mut game, 0, DroneUpgrade::Cargo);
+        retrofit(&mut game, 1, DroneUpgrade::Mining);
+        game.bench_select(BenchAction::ApplyDroneBlueprint);
+        assert_eq!(
+            game.drone_blueprint_price(),
+            vec![(Material::Metal, 80.0), (Material::Crystal, 20.0)]
+        );
+        game.cargo.metal = 80.0;
+        game.cargo.crystal = 19.0;
+        let before = game.pad.pads[&target].drones.clone();
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&target].drones, before);
+        assert_eq!(
+            game.pad.pads[&target].drone_template,
+            DroneModules::default()
+        );
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (80.0, 19.0));
+        game.cargo.crystal = 20.0;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (0.0, 0.0));
+        let modules = game.pad.drone_blueprint.unwrap();
+        assert_eq!(game.pad.pads[&target].drone_template, modules);
+        assert!(
+            game.pad.pads[&target]
+                .drones
+                .iter()
+                .all(|d| d.fitted == modules)
+        );
+        assert!(game.pad.pads[&source].drones.is_empty());
+        game.cargo.metal = 80.0;
+        game.cargo.crystal = 20.0;
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (80.0, 20.0));
+        game.bench_select(BenchAction::MiningDrone);
+        game.bench_confirm();
+        assert_eq!((game.cargo.metal, game.cargo.crystal), (0.0, 0.0));
+        assert_eq!(game.pad.pads[&target].drones[3].fitted, modules);
+    }
+
+    #[test]
+    fn blueprint_survives_source_loss_and_world_change_without_free_modules() {
+        let (mut game, key, _) = setup();
+        save_blueprint(&mut game);
+        let blueprint = game.pad.drone_blueprint;
+        game.pad.pads.remove(&key);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (game, _) = Game::from_save(state, generator);
+        assert_eq!(game.pad.drone_blueprint, blueprint);
+        let (mut game, report) = Game::from_save(game.save_state(), generator + 1);
+        assert!(!report.world_deltas_kept);
+        assert_eq!(game.pad.drone_blueprint, blueprint);
+        let key = game.pads().find(|p| p.home).unwrap().key;
+        game.pad.landed = Some(key);
+        game.bench_toggle();
+        game.bench_select(BenchAction::ApplyDroneBlueprint);
+        for (power, warehouse) in [(false, true), (true, false)] {
+            let pad = game.pad.pads.get_mut(&key).unwrap();
+            pad.power = power;
+            pad.warehouse = warehouse;
+            game.bench_confirm();
+            assert_eq!(game.pad.pads[&key].drone_template, DroneModules::default());
+        }
+        game.pad.pads.get_mut(&key).unwrap().warehouse = true;
+        game.loadout
+            .research
+            .known
+            .remove(&research::Tech::Automation);
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&key].drone_template, DroneModules::default());
+        game.loadout
+            .research
+            .known
+            .insert(research::Tech::Automation);
+        let before = game.cargo;
+        game.bench_confirm();
+        assert_eq!(game.cargo, before); // Empty target has no units to retrofit.
+        assert!(game.pad.pads[&key].drones.is_empty());
+        assert_eq!(
+            game.mining_drone_price(),
+            vec![(Material::Metal, 80.0), (Material::Crystal, 20.0)]
+        );
+        game.pad.landed = None;
+        assert_eq!(game.drone_blueprint_block(false), Some("LAND AT A PAD"));
+    }
+
+    #[test]
+    fn overwritten_blueprint_merges_without_removal_and_waits_for_saved_blocked_cargo() {
+        let (mut game, key, material) = setup();
+        assert_eq!(
+            game.drone_blueprint_block(false),
+            Some("SAVE A BLUEPRINT FIRST")
+        );
+        assert_eq!(
+            game.drone_blueprint_block(true),
+            Some("SET A TEMPLATE FIRST")
+        );
+        save_blueprint(&mut game);
+        // A second pad can replace the shared copy with its narrower configuration.
+        let source = (SectorId { x: 30, y: 30 }, 0);
+        let mut pad = game.pad.pads[&key].clone();
+        pad.key = source;
+        pad.home = false;
+        pad.drone_template = DroneModules {
+            cargo: true,
+            mining: false,
+        };
+        game.pad.pads.insert(source, pad);
+        game.pad.landed = Some(source);
+        game.bench_select(BenchAction::SaveDroneBlueprint);
+        let before = game.cargo;
+        game.bench_confirm();
+        assert_eq!(game.cargo, before);
+        assert_eq!(game.pad.drone_blueprint.unwrap().label(), "CARGO POD");
+        game.pad.landed = Some(key);
+        game.pad.pads.get_mut(&key).unwrap().drone_template = DroneModules::default();
+        game.cargo.metal = 40.0;
+        game.cargo.crystal = 10.0;
+        game.bench_select(BenchAction::MiningDrone);
+        game.bench_confirm();
+        retrofit(&mut game, 0, DroneUpgrade::Mining);
+        game.update_mining_drones(2.0);
+        let trip = game.pad.pads[&key].drones[0].clone();
+        game.cargo.metal = 20.0;
+        game.cargo.crystal = 5.0;
+        game.bench_select(BenchAction::ApplyDroneBlueprint);
+        game.bench_confirm();
+        let drone = &game.pad.pads[&key].drones[0];
+        assert_eq!(
+            (drone.cargo, drone.remaining, drone.fitted),
+            (trip.cargo, trip.remaining, trip.fitted)
+        );
+        assert!(drone.ordered.cargo && drone.ordered.mining);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut game, _) = Game::from_save(state, generator);
+        game.bodies.retain(|b| b.origin != Some(key));
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .add_capped(material, 300.0, 300.0);
+        game.update_mining_drones(8.0);
+        assert_eq!(game.pad.pads[&key].drones[0].fitted, trip.fitted);
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 10.0);
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .take(material, 10.0);
+        game.update_mining_drones(0.0);
+        let drone = &game.pad.pads[&key].drones[0];
+        assert_eq!(drone.fitted, drone.ordered);
+        assert_eq!(drone.cargo, 0.0);
+        assert_eq!(game.mined[&key], 10.0);
     }
 
     #[test]

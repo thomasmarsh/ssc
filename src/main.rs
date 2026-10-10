@@ -1738,6 +1738,9 @@ fn smoke_run(
                         ssc::simulation::fleet::DroneUpgrade::Cargo,
                     ));
             }
+            "mining-fleet-blueprint" => session
+                .game
+                .bench_select(ssc::simulation::BenchAction::ApplyDroneBlueprint),
             "mining-fleet-retrofit" => {
                 session
                     .game
@@ -2166,7 +2169,8 @@ fn smoke_bench(game: &mut Game, mode: &str) {
         | "mining-fleet"
         | "mining-fleet-status"
         | "mining-fleet-retrofit"
-        | "mining-fleet-template" => {
+        | "mining-fleet-template"
+        | "mining-fleet-blueprint" => {
             game.loadout.research.known.extend([
                 ssc::simulation::research::Tech::Fabrication,
                 ssc::simulation::research::Tech::Automation,
@@ -2177,6 +2181,9 @@ fn smoke_bench(game: &mut Game, mode: &str) {
             game.cargo.crystal = 30.0;
             game.bench_select(BenchAction::Warehouse);
             game.bench_confirm();
+            if mode == "mining-fleet-blueprint" {
+                game.stage_drone_blueprint_smoke();
+            }
             game.bench_select(BenchAction::MiningDrone);
             if mode.starts_with("mining-fleet") {
                 for _ in 0..ssc::simulation::fleet::MAX_DRONES - 1 {
@@ -2188,7 +2195,10 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 game.cargo.crystal = 10.0;
                 if matches!(
                     mode,
-                    "mining-fleet-status" | "mining-fleet-retrofit" | "mining-fleet-template"
+                    "mining-fleet-status"
+                        | "mining-fleet-retrofit"
+                        | "mining-fleet-template"
+                        | "mining-fleet-blueprint"
                 ) {
                     game.bench_confirm();
                     game.bench_select(BenchAction::MiningDroneStatus(
@@ -2208,6 +2218,11 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                         ));
                     }
                     game.bench_feedback = None;
+                    if mode == "mining-fleet-blueprint" {
+                        game.cargo.metal = 80.0;
+                        game.cargo.crystal = 20.0;
+                        game.bench_select(BenchAction::ApplyDroneBlueprint);
+                    }
                 }
             }
         }

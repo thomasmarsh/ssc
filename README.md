@@ -4,7 +4,7 @@ SSC is an arena shooter being rebuilt from its C++ prototype in Rust with Bevy 0
 
 Status: BUILT - a playable game with an endless procedural universe of sectors, a living ecosystem, civilizations and diplomacy, apex elders, realms, rare creature powers (Weaver, Slinger, Runekeeper and Seamer included), mining, parts, a three-tab bench, sonar and charting, a geometric HUD, procedural audio and developer toggles. BUILT - disk persistence with autosave history, explicit saves and CONTINUE / NEW GAME. TODO: human playtesting and balance, plus the items tagged `TODO:` across [docs/](docs/); nothing has been played by a human yet and all balance numbers are first guesses.
 
-Design direction: grow from a solo ship into a defended homestead and galactic supply/trade network. Six shared resources, peaceful suppliers, narrow research and continuing equipment grades are built; finite delivery/survey/pest jobs and stock-backed recurring player-haul agreements are built; Automation and up to four paid saved home-planetoid mining orders per pad with paid cargo/mining retrofits are built; the full technology graph, further jobs, further fleet modules/cross-pad templates/combat/salvage, and tankers are planned in [docs/GAME_LOOP.md](docs/GAME_LOOP.md); [docs/ROADMAP.md](docs/ROADMAP.md) distinguishes that target from built behavior.
+Design direction: grow from a solo ship into a defended homestead and galactic supply/trade network. Six shared resources, peaceful suppliers, narrow research and continuing equipment grades are built; finite delivery/survey/pest jobs and stock-backed recurring player-haul agreements are built; Automation and up to four paid saved home-planetoid mining orders per pad with paid cargo/mining retrofits and cross-pad blueprint reuse are built; the full technology graph, further jobs, further fleet modules/custom roles/combat/salvage, and tankers are planned in [docs/GAME_LOOP.md](docs/GAME_LOOP.md); [docs/ROADMAP.md](docs/ROADMAP.md) distinguishes that target from built behavior.
 
 ## Build and run
 
@@ -94,6 +94,8 @@ Xbox controllers use the existing gilrs input path and its built-in mappings. Fo
 | Settings (and quit) | Esc | Menu / Start |
 | Fullscreen | F11 | |
 | Title menu: continue / new game | Up, Down, Enter | D-pad, A |
+
+At a powered warehouse after Automation, SAVE FLEET BLUEPRINT copies the local template for reuse; MERGE FLEET BLUEPRINT pays only for missing modules at another pad. One shared copy is saved and can be overwritten; merges keep existing modules and wait for cargo unloading.
 
 The ship’s shouldered hull turns toward the left stick’s movement direction and holds its heading while coasting. The weapon spine, cannons and aim chevron turn independently toward weapon aim. Orange rear flames show main propulsion; blue front and side RCS jets show reverse thrust, strafing, braking and hull turns. These are inferred visual effects: movement and firing rules are unchanged. Equipment retains its rarity colors, and hull, shield and weapon indicators keep their existing meanings.
 

@@ -44,6 +44,8 @@ pub enum BenchAction {
     MiningDroneStatus(usize),
     DroneUpgrade(usize, fleet::DroneUpgrade),
     DroneTemplate(fleet::DroneUpgrade),
+    SaveDroneBlueprint,
+    ApplyDroneBlueprint,
     Research(research::Tech),
     Grade,
     Partnership,
@@ -154,6 +156,8 @@ impl Game {
                         BenchAction::MiningDrone,
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Cargo),
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Mining),
+                        BenchAction::SaveDroneBlueprint,
+                        BenchAction::ApplyDroneBlueprint,
                     ]
                 }))
                 .chain(
@@ -239,6 +243,8 @@ impl Game {
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
             Some(BenchAction::DroneTemplate(upgrade)) => self.buy_drone_template(upgrade),
+            Some(BenchAction::SaveDroneBlueprint) => self.save_drone_blueprint(),
+            Some(BenchAction::ApplyDroneBlueprint) => self.apply_drone_blueprint(),
             Some(BenchAction::DroneUpgrade(slot, upgrade)) => self.buy_drone_upgrade(slot, upgrade),
             Some(BenchAction::MiningDroneStatus(_)) => self.bench_failed("STATUS ONLY".into()),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
@@ -747,6 +753,33 @@ impl Game {
                     if why == "TEMPLATE SET" {
                         row.costs.clear();
                     }
+                }
+            }
+            BenchAction::SaveDroneBlueprint | BenchAction::ApplyDroneBlueprint => {
+                let saving = action == BenchAction::SaveDroneBlueprint;
+                row.group = "PAD FLEET";
+                row.text = if saving {
+                    "SAVE FLEET BLUEPRINT"
+                } else {
+                    "MERGE FLEET BLUEPRINT"
+                }
+                .into();
+                row.state = self
+                    .pad
+                    .drone_blueprint
+                    .map_or("NO BLUEPRINT", fleet::DroneModules::label)
+                    .into();
+                row.detail = if saving {
+                    "Copy this pad's template into one shared blueprint, replacing the previous copy. Free knowledge; retained if the source pad is lost."
+                } else {
+                    "Add the saved blueprint modules here. Pay only for missing unit modules; fit after unloading. Future builds pay template prices. No removal or refund."
+                }.into();
+                if !saving {
+                    row.costs = self.drone_blueprint_price();
+                }
+                if let Some(why) = self.drone_blueprint_block(saving) {
+                    row.ok = false;
+                    row.state = why.into();
                 }
             }
             BenchAction::DroneUpgrade(slot, upgrade) => {

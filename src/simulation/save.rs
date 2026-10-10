@@ -288,6 +288,7 @@ impl Game {
             // plant the home pad afresh below.
             game.pad.kits = state.pad.kits;
             game.pad.insured = state.pad.insured;
+            game.pad.drone_blueprint = state.pad.drone_blueprint;
         }
         game.adopt_farm(state.farm, keep);
         game.spawn_player_exact(state.ship.position);
