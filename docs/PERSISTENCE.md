@@ -34,6 +34,7 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 | `jam`, `parry`, `dash`, `veil`, `parasites`, `engulf`, `gripped`, `beam`, `mine_*`, `arm_clock`, `switch_clock`, `impact_gap` | ephemeral | short timers |
 | `ping`, `lure`, `feel`, `streak`, `notices`, `bench_feedback`, `unlock_*`, `cues`, `region`, `realms` | ephemeral | presentation and announcement state; announcements replay on load |
 | `loaded`, `active`, `focus`, `territory*`, `raid`, `civ_clock`, `food_clock`, `sanctuary`, `dev` | derived | recomputed on the first step |
+| `tune` (tunables overrides, `tuning`) | delta | Only entries that differ from the default, by name, omitted when empty; applied before sectors load so `Regen` entries shape the world. An entry a newer build dropped or that is now out of range or breaks a rule is skipped (docs/DEVTOOLS.md Phase B) |
 
 Recurring agreements are an additive defaulted map in `jobs`: supplier ID, capital, player PadKey, remaining finite lots, simulation cooldown, pause, and terminal outcome. Four open / 128 lifetime records; successful handoff pays/decrements once, pause and suspension stop cooldown, no wall-clock catch-up. Endpoint loss and generator mismatch close stock permanently without touching ship cargo. Generation/save versions stay unchanged; no migration code.
 

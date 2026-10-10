@@ -209,6 +209,34 @@ impl Session {
     }
 }
 
+/// `SSC_TUNING=<path>`, honoured only with `SSC_DEV=1` (like the other developer hooks): a RON
+/// map of tunable name to number, for example `{ "adapt_max": 0.4 }` (see docs/DEVTOOLS.md).
+fn dev_tuning_file() -> Option<String> {
+    if !ssc::simulation::dev::enabled() {
+        return None;
+    }
+    let path = std::env::var_os("SSC_TUNING")?;
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            eprintln!("tuning: cannot read {}: {e}", path.to_string_lossy());
+            None
+        }
+    }
+}
+
+/// Prints what an overrides file did: what applied, and each entry that was refused.
+fn report_tuning(report: &ssc::simulation::tunables::OverrideReport) {
+    eprintln!(
+        "tuning: applied {} override(s), {} problem(s)",
+        report.applied.len(),
+        report.problems.len()
+    );
+    for problem in &report.problems {
+        eprintln!("tuning: {problem}");
+    }
+}
+
 impl Default for Session {
     fn default() -> Self {
         let saved = autosave::load();
@@ -227,7 +255,22 @@ impl Default for Session {
                 .unwrap_or_default();
             titlemenu::TitleMenu::new(saved.is_some(), summary)
         });
-        let game = saved.unwrap_or_else(|| Game::new(ssc::config::MASTER_SEED));
+        let overrides = dev_tuning_file();
+        let game = match (saved, overrides) {
+            // A continued save keeps its own tuning; the file is applied on top.
+            (Some(mut game), Some(text)) => {
+                report_tuning(&game.tune_load_overrides(&text));
+                game
+            }
+            (Some(game), None) => game,
+            // A fresh world is generated under the file, so generation entries apply.
+            (None, Some(text)) => {
+                let (tune, report) = ssc::simulation::Tunables::from_overrides(&text);
+                report_tuning(&report);
+                Game::with_tuning(ssc::config::MASTER_SEED, tune)
+            }
+            (None, None) => Game::new(ssc::config::MASTER_SEED),
+        };
         Self {
             settled_deaths: game.run.deaths,
             game,
@@ -624,7 +667,8 @@ fn controls(
 
 /// Starts a fresh game.
 fn restart(session: &mut Session) {
-    session.game = Game::new(ssc::config::MASTER_SEED);
+    // A developer's tuning overrides carry into the new game (and shape its generation).
+    session.game = Game::with_tuning(ssc::config::MASTER_SEED, session.game.tune);
     session.settled_deaths = 0;
     session.recorded = false;
     session.new_best = false;

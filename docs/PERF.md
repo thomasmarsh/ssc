@@ -69,6 +69,10 @@ Profile (2026-10-10, same machine, mean ms per tick), busiest scenario `long_bus
 
 `creatures` (wildlife, steering, flocks, bases, turrets) is 40 to 55 percent of the tick and `resolve` (contacts) the next biggest, growing fastest with body count (0.057 ms in `long_busy`, 546 bodies). Those two are where scaling work should look first. `world` dominates `home_idle` only because the first tick streams and populates sectors.
 
+## Reading tunables on hot paths
+
+Gameplay numbers (`src/simulation/tuning.rs`, the tunables registry) are read as plain fields of the resolved `Tunables` struct: `self.tune.<name>` in a `Game` method, or a `&Tunables` parameter. Never a map, string, `Arc`/`RefCell` or `dyn` lookup per read, and in a loop over bodies read the field (do not copy the 1.4 KB struct per body). The by-name `get`/`set` path is for consoles, panels and files only. The registry migration moved 338 entries and `simperf` stayed within noise.
+
 ## Not built
 
 No allocation counters. Timing is wall time per phase, not per system inside a phase.

@@ -16,7 +16,7 @@ Do not read all of `docs/` up front. `BESTIARY.md`, `UNIVERSE.md` and `FLOW.md` 
 - `docs/GAME_LOOP.md`: the 2026-10-09 target loop, resources, provenance, technology, grade scaling, jobs/trade, fleets, homesteads, open defaults, and slice acceptance gates.
 - `docs/WORKSTREAMS.md`: the big upcoming areas (farming, machines and trade, megastructures, fast travel, weavers and asteroid habitats, apex bodies, nested creatures, swarms, urban/wild/desert feelings, gamepad), each with goal, design, slices, dependencies, open questions. The thinking for the queue below.
 - `docs/PLAYTEST.md`: what the user should check by feel, with the knob behind each question.
-- `docs/DEVTOOLS.md`: developer tooling plan (toggles built; tunables registry and overlay queued).
+- `docs/DEVTOOLS.md`: developer tooling plan (toggles built; tunables registry built for `tuning.rs`, overlay queued).
 - `docs/ROADMAP.md`: gameplay and progression. `docs/FLOW.md`: arcade flow, HUD, core loop, P0/P1/P2 list. `docs/BENCH.md`: bench. `docs/DISCOVERY.md`: sonar discovery. `docs/BESTIARY.md`: creatures, powers, organs, apex. `docs/UNIVERSE.md`: procedural universe. `docs/MIGRATION.md`: architecture, invariants, known caveats. `docs/HOOKS.md`: every `SSC_*` screenshot and debug hook.
 - `docs/PROCGEN.md`: the L-system and Plan foundation (`src/grammar.rs`): templates, salting, caps, how plants, bodies, builders and megastructures consume a Plan, and the shape-grammar recommendation.
 - Code: `src/simulation.rs` and `src/simulation/` (headless rules), `src/world.rs` and `src/genome.rs` (generation), `src/main.rs` and `src/presentation.rs` (Bevy adapter, never owns rules), `src/config.rs` (shared config such as `MASTER_SEED`), `src/simulation/dev.rs` and `src/devpanel.rs` (dev toggles, `SSC_DEV=1`, backquote).
@@ -52,7 +52,7 @@ The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow 
 5. [L] I hubs/distribution and player-grown megastructure districts. J voluntary colony citizens deferred pending a separate design; H2 conquered-community politics is already planned.
 6. Alongside: remaining D machine jobs, DEVTOOLS B/C including E2p drift temperature/timescale and profile/score readouts (direct headless controls if B/C are still unbuilt), contextual/controller panel polish and compact chart sidebar overflow/scrolling, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
-Refactor series: [1 done] safety net; [2 done] named tick phases with opt-in `profile` timing; next: tunables registry foundation (DEVTOOLS Phase B) with resolved-struct accessor; civ state aggregate. Each slice must keep the goldens unchanged and `simperf` within the PERF.md regression rule.
+Refactor series: [1 done] safety net; [2 done] named tick phases with opt-in `profile` timing; [3 done] tunables registry and resolved struct for `tuning.rs` (DEVTOOLS Phase B); next: civ state aggregate, then the remaining const modules into the registry (power, range, farm, food, world, creature, weapons, society drift temperature; `Cargo` and `Body::ore` for `CAP` and `PLANETOID_BUDGET`), then adapter splits, then the Phase C overlay on `Game::tune_*`. Each slice must keep the goldens unchanged and `simperf` within the PERF.md regression rule.
 
 Creature backlog remains open: Foamback; Oozer small prey/nucleus/pinch/spit/gap/path and continuous perimeter/reach tuning; remaining organs and realm-discovery follow-ups; swarms/rally dispatch and herd map/sonar; elder weak points if needed. Builders still need visible gathering and player interaction. See BESTIARY/WORKSTREAMS for their built status. These do not block the first economy milestone.
 
@@ -61,6 +61,8 @@ Other backlog: large cross-sector planets with diggable/navigable interiors, mac
 Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; tankers for any material with compatible local storage; tanker construction at established planetoid pads; a useful solo homestead before citizens; player and civilization conquest share political rules; claims can face organized rebellion; local reports drive observer-specific fears/sympathies; destruction, control and community survival stay distinct; society profiles come from coherent Perlin fields, with compact meaningful coordinates and sparse interactions; cultures remain fixed at drift temperature 0 until explicitly warmed in later playtests, while pressures/history still change policy. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Refactor slice 3: typed tunables registry (`tunables!`, `src/simulation/tunables.rs`, `tune.rs`): 338 gameplay numbers of `tuning.rs` read as `self.tune.<name>`, clamped and rule-checked `tune_set`, command line, `SSC_TUNING` overrides file (dev only), DEV tag, digest and save; goldens and perf unchanged.
 
 - Refactor slice 2: `Game::step` is 14 named phases (`src/simulation/phases.rs`, order in MIGRATION.md), body timer and rock integration pulled out with their literals in `tuning.rs`, and the `profile` feature gives per-phase timing in `simperf`; goldens and perf unchanged.
 
@@ -76,7 +78,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Territorial politics modeled: local political reports, attributed civilization destruction, claims/control/legitimacy, surviving communities, funded rebellion and foreign trade/conflict responses; E2c/H2 gates documented, implementation remains TODO.
 
 - Loaded fleet kinetic hazards: swept free rocks/hostile solid creatures use relative motion and shared impact damage/cooldown, saved finite losses and wreck cargo; Metal loss capture checked. Targeting, combat modules, scavengers, and remote incidents remain next.
-
-- Fleet early recall: free saved return at the current flight fraction with launch-reserved cargo and dispatch hold; remote reload, power/full-store blockage, and queued fitting covered; compact receipt/flight captures checked. Targeting, kinetic impacts, and combat modules remain next.
-
-- Diplomacy target reconciled: independent trust/friction, posture/ROE, commercial terms and asymmetric real supply dependency; E2a/E2b/H1 gates documented, implementation remains TODO.
