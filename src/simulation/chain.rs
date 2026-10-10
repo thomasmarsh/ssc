@@ -279,6 +279,19 @@ impl Game {
         }
     }
 
+    /// How many bodies of `body`'s creature carry its gun (the divisor of the burst budget):
+    /// the mounts of its jointed plan, else the genome's hardpoints.
+    pub(super) fn armed_count(&self, body: &Body) -> u32 {
+        let chain = body.chain.and_then(|c| self.chains.get(&c));
+        let n = match chain {
+            Some(chain) if chain.mounted => chain.parts.iter().filter(|p| p.mount).count(),
+            _ => (0..body.genome.parts().min(255))
+                .filter(|p| body.genome.armed(*p as u8))
+                .count(),
+        };
+        n.max(1) as u32
+    }
+
     /// Every decoration of every grammar body, placed in the world from the bodies' current
     /// poses (a decoration of a destroyed part is gone with it).
     pub fn chain_decorations(&self) -> Vec<PlacedDecoration> {

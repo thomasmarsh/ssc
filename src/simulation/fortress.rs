@@ -105,7 +105,15 @@ impl Game {
                         velocity: Vec2::ZERO,
                         reach: self.tune.fort_turret_reach,
                         shot_speed: self.tune.fort_shot_speed,
-                        sharpness: genes.sharpness(),
+                        sharpness: genes.sharpness()
+                            * super::burst::structure_scale(
+                                &self.tune,
+                                &genes,
+                                weapon,
+                                volley,
+                                true,
+                                self.tune.fort_turret_reach,
+                            ),
                         pith: 0.0,
                     };
                     let spin = self.discharge(weapon, volley, &muzzle, spin);

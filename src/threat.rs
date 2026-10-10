@@ -15,6 +15,7 @@ use crate::power::Power;
 use crate::range::ring;
 use crate::realm;
 use crate::simulation::BodyKind;
+use crate::simulation::burst::{hit_fraction, weapon_numbers};
 use crate::simulation::tuning::{DEFAULT, Tunables};
 use crate::simulation::upgrades::{Loadout, Rarity, Source, Stats, roll_part};
 use crate::world::{self, Rng, SectorId, SectorParams, Spawn};
@@ -26,7 +27,7 @@ pub const WINDOW: f32 = 1.0;
 /// The contact cooldown after a ram (`ram_contact`).
 const CONTACT_COOLDOWN: f32 = 0.65;
 /// Mean of the per-body fire stagger `(id % 7) * 0.13`.
-const STAGGER: f32 = 0.39;
+pub(crate) const STAGGER: f32 = 0.39;
 
 /// What kind of thing an organism is, for grouping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -218,33 +219,6 @@ pub fn tier_at(seed: u64, depth: f32, maxed: bool, graded: bool) -> Tier {
     }
 }
 
-/// The share of a volley expected to land on a target of `radius` at `distance`.
-fn hit_fraction(weapon: Weapon, count: u32, distance: f32, radius: f32) -> f32 {
-    let n = count.max(1) as f32;
-    let d = distance.max(40.0);
-    match weapon {
-        Weapon::Projectile if count <= 1 => 1.0,
-        Weapon::Projectile => {
-            let spacing = d * 0.11;
-            (1.0 + 2.0 * (radius + 3.0) / spacing).floor().min(n) / n
-        }
-        // A uniform cone of +/- 0.055 rad.
-        Weapon::Needles => ((radius + 1.8) / (d * 0.055)).min(1.0),
-        Weapon::Missile => 1.0,
-        Weapon::Nova | Weapon::Spiral => {
-            (2.0 * (radius + 4.5) / d / std::f32::consts::TAU).min(1.0)
-        }
-        Weapon::Mine => {
-            if d < 250.0 {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        Weapon::None | Weapon::Tether => 0.0,
-    }
-}
-
 /// How many of a genome's bodies carry its gun (the same rule as `Game::armed_part`).
 fn armed_parts(g: &Genome) -> u32 {
     if g.weapon == Weapon::None {
@@ -266,23 +240,6 @@ fn armed_parts(g: &Genome) -> u32 {
         .filter(|p| g.armed(*p as u8))
         .count()
         .max(1) as u32
-}
-
-/// Seconds between volleys, the shot damage before sharpness and the shots per volley.
-fn weapon_numbers(weapon: Weapon, volley: u8, tune: &Tunables) -> (f32, u32, f32) {
-    let count = u32::from(volley.max(1));
-    match weapon {
-        Weapon::Projectile => {
-            let share = if count == 1 { 1.0 } else { 0.7 };
-            (tune.weapon_pellet_damage * share, count, 1.0)
-        }
-        Weapon::Needles => (tune.weapon_needle_damage, count, 1.3),
-        Weapon::Missile => (tune.weapon_missile_damage, count, 1.0),
-        Weapon::Nova => (tune.weapon_orb_damage, count, 1.0),
-        Weapon::Spiral => (tune.weapon_spiral_damage, count, 0.1),
-        Weapon::Mine => (tune.weapon_mine_damage, count, 1.8),
-        Weapon::None | Weapon::Tether => (0.0, 0, 1.0),
-    }
 }
 
 /// Effective speed of the projectile of a weapon at the muzzle.
@@ -311,7 +268,10 @@ fn assess_genome(
     let sharp = phenotype.sharpness();
     let armed = armed_parts(g);
     let (base_damage, shots, pace) = weapon_numbers(g.weapon, g.volley, tune);
-    let shot_damage = base_damage * sharp;
+    // The burst budget (docs/BALANCE.md 5.4) is held at fire time by the simulation; the
+    // model reads the same scale so its numbers are what is played.
+    let scale = crate::simulation::burst::genome_scale(g, &phenotype, armed, tune);
+    let shot_damage = base_damage * sharp * scale;
     let aggression = phenotype.aggression.max(0.2);
     let rage = if g.rage > 0.0 { 0.4 / 1.15 } else { 1.0 };
     let period = ((g.fire_period + STAGGER) * pace / aggression).max(0.05);
@@ -331,6 +291,7 @@ fn assess_genome(
         let n = u32::from(tune.barrage_shots_enraged);
         let share = if n == 1 { 1.0 } else { 0.7 };
         let each = tune.weapon_pellet_damage * share * tune.barrage_share * sharp;
+        let each = each * crate::simulation::burst::barrage_scale(tune, threat, each, n);
         let barrage = each * n as f32;
         burst_potential = burst_potential.max(barrage);
         let landed = barrage * hit_fraction(Weapon::Projectile, n, tune.barrage_range, SHIP_RADIUS);
@@ -482,7 +443,20 @@ fn assess_structure(spawn: &Spawn, tune: &Tunables) -> Option<Organism> {
     } else {
         tune.ecology_turret_reach
     };
-    let shot_damage = base_damage * sharp;
+    let reach_for_budget = if fort {
+        tune.fort_turret_reach
+    } else {
+        tune.ecology_turret_reach
+    };
+    let scale = crate::simulation::burst::structure_scale(
+        tune,
+        &spawn.phenotype,
+        weapon,
+        volley,
+        fort,
+        reach_for_budget,
+    );
+    let shot_damage = base_damage * sharp * scale;
     let volley_damage = shot_damage * shots as f32;
     let burst_potential = volley_damage * (1.0 + (WINDOW / period).floor());
     let at = (reach * 0.5).clamp(150.0, 500.0);
@@ -796,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn a_needle_blaster_can_end_the_bare_ship_in_one_window() {
+    fn a_needle_blaster_is_held_to_the_burst_budget() {
         let mut species = Species::bogey();
         species.genome.weapon = Weapon::Needles;
         species.genome.volley = 96;
@@ -808,8 +782,16 @@ mod tests {
         let needle = &organisms[0];
         assert!(needle.shot_damage < 3.0, "each needle is weak alone");
         let bare = tier_bare();
-        assert!(needle.potential_ratio(&bare) > 1.0);
-        assert!(needle.burst_ratio(&bare) > 1.0);
+        // Still a spray (every needle lighter), but a window never beats the budget.
+        assert_eq!(needle.shots, 96);
+        let volley = needle.volley_damage * needle.armed_parts as f32 / bare.pool(0.0);
+        assert!(volley <= DEFAULT.balance_volley_cap + 1e-3, "{volley}");
+        assert!(
+            needle.potential_ratio(&bare) <= DEFAULT.balance_window_cap * 3.0,
+            "{}",
+            needle.potential_ratio(&bare)
+        );
+        assert!(needle.burst_ratio(&bare) <= DEFAULT.balance_window_cap + 1e-3);
         assert!(
             needle.max_hit < 10.0,
             "no single hit comes close to the pool"
@@ -1026,9 +1008,38 @@ mod tests {
         assert!(d.max < 1.5, "fastest organism {:.2} of the ship", d.max);
     }
 
+    /// The budget of docs/BALANCE.md 5.4 holds for every hostile organism of every sampled
+    /// sector (rings 0 to 80): one volley within the volley cap and the expected window within
+    /// the window cap of the reference pool at the organism's own level.
+    #[test]
+    fn bursts_stay_within_the_caps_of_the_reference_pool() {
+        for r in (0..=14).chain([20, 30, 50, 80]) {
+            for id in ring_sectors(r, 8) {
+                for o in assess_sector(MASTER_SEED, id).organisms {
+                    if !is_hostile(&o) || o.class == Class::Apex {
+                        continue;
+                    }
+                    let pool = crate::simulation::burst::pool_ref(o.threat, o.pith, &DEFAULT);
+                    let volley = o.volley_damage * o.armed_parts as f32;
+                    assert!(
+                        volley <= DEFAULT.balance_volley_cap * pool * 1.001,
+                        "ring {r} {id:?} {}: volley {volley:.0} of {pool:.0}",
+                        o.name
+                    );
+                    assert!(
+                        o.burst_expected <= DEFAULT.balance_window_cap * pool * 1.001,
+                        "ring {r} {id:?} {}: window {:.0} of {pool:.0}",
+                        o.name,
+                        o.burst_expected
+                    );
+                }
+            }
+        }
+    }
+
     /// Target: no wild hunter ends a typical kit in one window anywhere up to ring 14.
     #[test]
-    #[ignore = "target of docs/BALANCE.md change 1: needle, missile and mine volleys are capped by the pool"]
+    #[ignore = "waits on docs/BALANCE.md change 2: the typical kit's pool is 0.15 to 1.0 of pool_ref, so a capped burst still beats it deep down"]
     fn target_no_wild_alpha_against_a_typical_kit() {
         for r in 0..=14 {
             let tier = tier_at(MASTER_SEED, r as f32, false, false);

@@ -16,6 +16,7 @@ mod bench_feedback;
 mod brain;
 mod breakup;
 mod build;
+pub mod burst;
 mod chain;
 mod chart;
 mod civ;
@@ -3880,7 +3881,10 @@ mod tests {
             ..Genome::smarty()
         };
         spawn(&mut game, &Species::of(armed), Vec2::new(0.0, 500.0));
-        game.step(DT, Input::default());
+        // The first shot waits out the windup (`balance_windup_min`).
+        for _ in 0..45 {
+            game.step(DT, Input::default());
+        }
         assert!(game.bullets.iter().any(|b| !b.friendly));
         let mut game = empty_game();
         let hook = Genome {
@@ -3888,7 +3892,9 @@ mod tests {
             ..Genome::fatso()
         };
         spawn(&mut game, &Species::of(hook), Vec2::new(0.0, 400.0));
-        game.step(DT, Input::default());
+        for _ in 0..45 {
+            game.step(DT, Input::default());
+        }
         assert_eq!(game.tethers.len(), 1);
         // Without a siphoning diet the cord drags but does not feed.
         for _ in 0..200 {

@@ -308,6 +308,7 @@ impl Game {
                     && player_distance < self.tune.creature_rage_pursuit_range
                     // A calm civilization's person hurt by wildlife is not enraged at the ship.
                     && (!posture.calm || self.civs.struck.contains_key(&body.id)));
+            let was_alert = body.alert;
             body.alert = by_distance || (warned && !posture.calm) || provoked || posture.rallied;
             if hidden_long {
                 // Out of sight long enough: only a harm done to it keeps a creature on the hunt.
@@ -326,6 +327,10 @@ impl Game {
             }
             if (civ.is_some() && posture.calm) || body.panic > 0.0 {
                 body.alert = false;
+            }
+            // First fire after turning hostile waits for a windup (docs/BALANCE.md 5.4).
+            if body.alert && !was_alert {
+                body.fire_cooldown = body.fire_cooldown.max(self.tune.balance_windup_min);
             }
             // A rooted creature does not steer: it holds its place, turning to face a threat.
             if body.root.is_some() {
@@ -656,7 +661,15 @@ impl Game {
                 }
                 weapon => {
                     let range = g.weapon_range * if body.enraged { 1.1875 } else { 1.0 };
-                    if distance < range && self.bullets.len() < MAX_BULLETS {
+                    // A creature fires only at what it could see.
+                    let sight = if self.tune.balance_sight_reach > 0.0 {
+                        g.sight * body.genes.sensor_acuity * self.tune.balance_sight_reach
+                    } else {
+                        f32::INFINITY
+                    };
+                    if distance < range && distance <= sight && self.bullets.len() < MAX_BULLETS {
+                        let armed = self.armed_count(body);
+                        let budget = super::burst::genome_scale(&g, &body.genes, armed, &self.tune);
                         let muzzle = weapons::Muzzle {
                             civilization: self.civ_of(body).map(|(id, _)| id),
                             origin: body.position + direction * (body.radius + 5.0),
@@ -668,7 +681,7 @@ impl Game {
                             } else {
                                 g.shot_speed
                             },
-                            sharpness: body.genes.sharpness(),
+                            sharpness: body.genes.sharpness() * budget,
                             pith: g.bypass_share(),
                         };
                         let spin = body.spin;

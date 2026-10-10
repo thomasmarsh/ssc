@@ -450,7 +450,10 @@ mod tests {
     fn a_leech_fires_latches_reels_drags_and_siphons() {
         let mut game = empty_game();
         let id = leech(&mut game, Vec2::new(0.0, 400.0));
-        game.step(DT, Input::default());
+        // It winds up (`balance_windup_min`) before the cord leaves.
+        for _ in 0..37 {
+            game.step(DT, Input::default());
+        }
         assert_eq!(game.tethers.len(), 1);
         assert!(!game.tethered(), "the tip should still be flying");
         for _ in 0..60 {

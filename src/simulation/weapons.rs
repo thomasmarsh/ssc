@@ -746,7 +746,7 @@ mod tests {
                 .find(|b| b.id == id)
                 .unwrap()
                 .fire_cooldown = 0.0;
-            for _ in 0..30 {
+            for _ in 0..60 {
                 game.step(DT, Input::default());
             }
             let fired = game.bullets.len() + game.mines.len();

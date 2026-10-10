@@ -1,6 +1,6 @@
 # Balance: how hard is an enemy, a sector and an island
 
-Status: MEASURED and PROPOSED, nothing here is built in the simulation. The tool (`src/threat.rs`, `src/bin/threat.rs`, `src/threat_baseline.txt`) is built and kept current by tests. Every number below was produced by `cargo run --release --no-default-features --bin threat -- --seeds 3 --per-ring 40 --rings 0,1,2,3,4,5,6,8,10,14,20,30,50,80` (master seed and two derived seeds, `Tunables::DEFAULT`, generation as of GENERATOR_VERSION 36). Re-run it after any generation or tuning change; the figures are a snapshot, the method is the deliverable.
+Status: MEASURED and PROPOSED; slice 1 (the burst budget, section 8) is BUILT, the rest is not. The tables of sections 2 to 3 below are the pre-slice-1 snapshot unless marked; section 3.3 carries the after numbers. The tool (`src/threat.rs`, `src/bin/threat.rs`, `src/threat_baseline.txt`) is built and kept current by tests. Every number below was produced by `cargo run --release --no-default-features --bin threat -- --seeds 3 --per-ring 40 --rings 0,1,2,3,4,5,6,8,10,14,20,30,50,80` (master seed and two derived seeds, `Tunables::DEFAULT`, generation as of GENERATOR_VERSION 36). Re-run it after any generation or tuning change; the figures are a snapshot, the method is the deliverable.
 
 Design feedback this answers: the game feels either trivially easy or suddenly lethal from a confluence of events; tiny creatures one-shot a maxed ship by blasting nails; all enemies move at roughly the same slow speed; apex elders have obvious strategies; mining for small upgrades is a grind. Sections 1 to 4 say what is true, section 5 onward is the proposed model.
 
@@ -104,7 +104,24 @@ Rings 1 to 4 are as designed: a bare ship (pool 160) never faces a window burst 
 | 50 | 58% / 65% | 21% / 47% | 3% / 3% | 0% | 6400 |
 | 80 | 69% / 75% | 28% / 43% | 16% / 25% | 0% | 6400 |
 
-A maxed ship with no supplier grade is killed in one window in 18 percent of ring 10 sectors and 16 to 25 percent of ring 80 sectors. Examples in rings 14 and below, from the master seed (sector, organism, burst expected against the maxed pool): (5,4) and (5,5) Krazulisk Needles x108, 1023 and 1080 against 1010; (-10,-6), (-10,-2) and (-10,0) Krabalisk Needles x105 to 106, 1432, 1323 and 1306 against 1238. These match the report of "an experienced maxed-out player killed in an inner ring". A maxed ship with the supplier's grade for that depth is essentially never one-shot (0 to 1 percent), which says what the missing piece is: the player's kit saturates, the enemy's burst does not.
+**After slice 1 (burst budget at fire time, same command, 3 seeds x 40 per ring, `exp` / `pot`):**
+
+| ring | bare | typical | maxed | maxed+grade |
+| --- | --- | --- | --- | --- |
+| 4 | 0% / 1% | 0% / 1% | 0% | 0% |
+| 5 | 8% / 12% | 0% / 1% | 0% / 1% | 0% |
+| 6 | 9% / 12% | 0% | 0% | 0% |
+| 8 | 21% / 31% | 2% / 3% | 0% | 0% |
+| 10 | 31% / 47% | 27% / 28% | 0% | 0% |
+| 14 | 19% / 54% | 17% / 52% | 0% / 1% | 0% |
+| 20 | 38% / 72% | 0% / 2% | 0% | 0% |
+| 30 | 47% / 69% | 0% | 0% | 0% |
+| 50 | 51% / 65% | 11% / 22% | 0% | 0% |
+| 80 | 65% / 75% | 0% / 9% | 0% / 2% | 0% |
+
+No sampled sector up to ring 14 kills a maxed ship in one window any more (was 18 percent at ring 10, 2 percent at ring 5, 7 to 16 percent at rings 20 and 80). The bare and typical kits are still one-shot in deep rings because the cap is a ratio of the *reference* pool `148 * lambda^0.8` and the typical kit's pool is only 0.15 to 1.0 of it; closing that is slice 2 (the pool must grow with the level), so `target_no_wild_alpha_against_a_typical_kit` stays ignored and `bursts_stay_within_the_caps_of_the_reference_pool` holds the budget instead (rings 0 to 80, every hostile organism).
+
+Before slice 1: a maxed ship with no supplier grade is killed in one window in 18 percent of ring 10 sectors and 16 to 25 percent of ring 80 sectors. Examples in rings 14 and below, from the master seed (sector, organism, burst expected against the maxed pool): (5,4) and (5,5) Krazulisk Needles x108, 1023 and 1080 against 1010; (-10,-6), (-10,-2) and (-10,0) Krabalisk Needles x105 to 106, 1432, 1323 and 1306 against 1238. These match the report of "an experienced maxed-out player killed in an inner ring". A maxed ship with the supplier's grade for that depth is essentially never one-shot (0 to 1 percent), which says what the missing piece is: the player's kit saturates, the enemy's burst does not.
 
 ### 3.4 The one-shot outliers and the genome features behind them
 
@@ -117,6 +134,8 @@ Worst expected window burst per ring, rings 1 to 14: ring 2 to 4 is a Bogey (Pro
 | 8 | Krabathra, sector (7,8) | 1359 | 24 | Needles x106, radius 12, sharpness 2.91 |
 | 10 | Krabathra, sector (-10,10) | 1607 | 31 | Needles x103, radius 8, sharpness 3.55 |
 | 14 | Krabathra, sector (-7,14) | 1747 | 36 | Needles x104, radius 6, sharpness 3.82 |
+
+Slice 1 note: features 1, 2 and 7 below are now held by `simulation/burst.rs`; the worst needle blaster per ring is 278 (ring 5) to 450 (ring 14) expected against 1080 to 1747 before, still a 100-needle spray with each needle 3 to 4 times lighter. Features 4 (windup) and 8 (sight) are enforced in `creature::fire_weapons`.
 
 The features that make it, in order of effect (all are genes or generation rules, none is an enum branch):
 
@@ -328,11 +347,13 @@ Structural versus tunable summary: of the above, the skill cap, organ levels, or
 
 | # | Change | Expected effect | Risk | Size |
 | --- | --- | --- | --- | --- |
-| 1 | **Burst budget at fire time** (5.4): scale damage per shot by `min(1, cap / volley sum)` against `pool_ref(lambda)`, windup of 0.6 s on first fire, no firing beyond own sight. Tunables `balance_*`. | removes every measured one-shot (sections 3.3, 3.4) while keeping needle sprays; the `target_no_wild_alpha` test passes | needles feel weaker per shot; goldens bless; enemy fire patterns change | M |
+| 1 | **DONE (2026-10-10).** **Burst budget at fire time** (5.4): scale damage per shot by `min(1, cap / volley sum)` against `pool_ref(lambda)`, windup of 0.6 s on first fire, no firing beyond own sight. Tunables `balance_*`. | removes every measured one-shot (sections 3.3, 3.4) while keeping needle sprays; the `target_no_wild_alpha` test passes | needles feel weaker per shot; goldens bless; enemy fire patterns change | M |
 | 2 | **Soft stat ceilings and unbounded upgrade levels** (5.6): move `Stats::compute` ceilings to the registry, replace the clamps by the log law, remove `SKILL_MAX` as a table index, tie the buyable level to the best society grade. | a maxed kit keeps growing with grade, the verdict ratio stays in band, upgrades never "hit the max"; fixes the 20 to 100x spread of 3.1 | wide change in `upgrades.rs`, `skills.rs`, `organs.rs`, saved level widths; needs a `SAVE_VERSION` bump | L |
 | 3 | **Speed as a priced axis** (5.5): sample `speed` against pool and weapon, add the fast skirmisher class, hold the distribution. | enemies stop being one slow band, runs are no longer uniformly escapable, fast things are fragile | changes feel everywhere, wild genomes shift (`GENERATOR_VERSION` bump, goldens bless) | M |
 | 4 | **Island layer** (6.7 slice B1) with level readout, edge ramp and wilds. | difficulty becomes a readable choice instead of distance; always an on-ramp; fixes "inner ring" cliffs by construction | generation change, sector map and tests that depend on the neighborhood of HOME ("known fragility"); needs the readout UI | L |
 | 5 | **HUD and map verdict with burst** (6.4, 6.5): the sixth `trivial` band, a `burst_ratio` of the worst visible organism, `IslandReadout` on banner, map and sonar. | the player sees "WARNING: one volley is 80 percent of your pool" before engaging; removes the blind spot of 3.1 | UI work only, no simulation change; text budget on the HUD | S |
+
+Slice 1 as built: tunables `balance_ref_exponent`, `balance_volley_cap` (0.35), `balance_window_cap` (0.7), `balance_telegraph_cap` (1.0), `balance_windup_min` (0.6 s) and `balance_sight_reach` (1.0) in `tuning.rs`; `simulation/burst.rs` computes the per-shot scale from the genome, armed parts, fire rate (rage) and the expected hit share at half range, and is called by creature fire, station arms, fortress turrets and apex barrages; the threat model calls the same function, so its numbers are what is played. Not in this slice: the per-projectile and contact bite cap (0.08 of the pool, which would nerf ordinary Bogey pellets), the 0.45 s flight-time floor, and a visible windup cue (the delay is there, the telegraph art is not). Goldens and the threat baseline were re-blessed because fire patterns change by design (first shot waits 0.6 s after a creature turns hostile, no shots beyond own sight, heavy volleys lighter per shot).
 
 Items 1 and 5 are the cheapest correction of the "suddenly lethal" feel and can ship before 2 to 4; item 4 is what makes the rest meaningful at scale. Items 2 and 4 together are what let level rise without bound.
 

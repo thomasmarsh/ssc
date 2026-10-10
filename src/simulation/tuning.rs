@@ -749,6 +749,22 @@ tuning_life::groups! {
         tag_range: f32 = 2600.0, 0.0, 100_000.0, Distance;
     }
 
+    // ---- balance: burst budget ---------------------------------------------------------------------
+    group "balance" {
+        /// Exponent of the reference pool: pool_ref(lambda) is the bare ship's hull plus shield times threat to this power (docs/BALANCE.md 5.1).
+        balance_ref_exponent: f32 = 0.8, 0.0, 2.0, Multiplier;
+        /// One volley of one creature, every armed part and every shot landing, is at most this share of the reference pool (shots are scaled at fire time).
+        balance_volley_cap: f32 = 0.35, 0.01, 100.0, Multiplier;
+        /// What a creature's guns can land in one second is at most this share of the reference pool.
+        balance_window_cap: f32 = 0.7, 0.01, 100.0, Multiplier;
+        /// A telegraphed barrage is at most this share of the reference pool.
+        balance_telegraph_cap: f32 = 1.0, 0.01, 100.0, Multiplier;
+        /// Seconds between a creature turning hostile and its first shot.
+        balance_windup_min: f32 = 0.6, 0.0, 10.0, Seconds;
+        /// A creature fires only within this multiple of its own sight (zero turns the rule off).
+        balance_sight_reach: f32 = 1.0, 0.0, 10.0, Multiplier;
+    }
+
     // ---- drops -----------------------------------------------------------------------------------
     group "drops" {
         /// A creature's drop chance is multiplied by this plus hardness slope times (hull + shield) / reference.

@@ -48,7 +48,7 @@ Decide per slice, and say which in one line.
 
 This is the single work plan. Design and acceptance detail live in the linked docs: [docs/GAME_LOOP.md](docs/GAME_LOOP.md) section 13 (economy and politics slices A to J), [docs/UI.md](docs/UI.md) (graphical menus), [docs/DEVTOOLS.md](docs/DEVTOOLS.md) (tooling), [docs/PERF.md](docs/PERF.md) (goldens, simperf). Sizes: [S] in-session, [M] one agent session, [L] one long agent session or two. Validation keys: **goldens** = the four pinned digests pass unblessed (`cargo test --no-default-features golden`); **bless** = a deliberate behavior change, regenerate with `SSC_BLESS=1` and explain why in the commit; **gen** = HOME golden and generation tests unchanged, otherwise salted streams plus a `GENERATOR_VERSION` bump (now 36, `src/sectormap.rs`) recorded in the touched docs; **save** = additive `#[serde(default)]` fields, or a `SAVE_VERSION` bump (now 4) that refuses older saves, never migration code (before 1.0); **perf** = `simperf` within the PERF.md rule; **shots** = bounded `SSC_*` captures at 1280x800 and 640x480, looked at. Every slice also keeps tests, clippy and fmt clean and updates its doc's status and `TODO:` tags.
 
-0. Human playtest at any time ([docs/PLAYTEST.md](docs/PLAYTEST.md)). Balance stays provisional; the measured balance gaps and five ranked slices (burst budget, unbounded upgrade levels, speed axis, island layer, burst-aware verdict) are in [docs/BALANCE.md](docs/BALANCE.md) section 8, none built yet.
+0. Human playtest at any time ([docs/PLAYTEST.md](docs/PLAYTEST.md)). Balance stays provisional; the measured balance gaps and five ranked slices (burst budget, unbounded upgrade levels, speed axis, island layer, burst-aware verdict) are in [docs/BALANCE.md](docs/BALANCE.md) section 8; slice 1 (burst budget, `src/simulation/burst.rs`) is built, the rest are not.
 
 **Wave 0 (in-session, before wave 1)**
 
@@ -88,7 +88,7 @@ Sizes, owns and dependencies are in the doc; this is the order. `B` = blesses th
 - **K3 [M] AreaReadout** (verdict, star-map coloring and skirt path, banner; subsumes BALANCE slice 5), **K2 [M] close the `Gap` damage channels** (`threat.rs`, B) and **K7 [M] Resonance** (tags and table in `Loadout::stats()`): parallel after K1 and K4.
 - **K6 [M] Organ catalog** (S) and **K8 [M] Underpowered buffs** (B, goldens): parallel, disjoint.
 - **K5 [L] Keepers and realm power affinity** (G, B; alone), then **K9 [S] gate certificate properties**.
-- Independent and cheaper: BALANCE slices 1 (burst budget) and 5 (verdict with burst) should land first or beside K1; `gate_burst` assumes the caps hold.
+- Independent and cheaper: BALANCE slice 1 (burst budget) is DONE and slice 5 (verdict with burst) should land beside K1; `gate_burst` assumes the caps hold.
 
 **Later (plan file ownership when the wave before it lands)**
 

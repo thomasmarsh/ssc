@@ -240,7 +240,8 @@ impl Game {
             self.bodies[index].radius,
             self.bodies[index].genes.sharpness(),
         );
-        let aggression = self.bodies[index].genes.aggression.max(0.3);
+        let genes = self.bodies[index].genes;
+        let aggression = genes.aggression.max(0.3);
         self.bodies[index].angle = (target - center).to_angle();
         // A civilization's station that is not at war with the ship holds its fire.
         if let Some(&(tid, _)) = self.bodies[index]
@@ -286,6 +287,15 @@ impl Game {
         }
         for (origin, weapon, spin) in shots {
             let aim = (target - origin).normalize_or_zero();
+            let count = if weapon == Weapon::Mine { 3 } else { volley };
+            let budget = super::burst::structure_scale(
+                &self.tune,
+                &genes,
+                weapon,
+                count,
+                false,
+                self.tune.ecology_turret_reach,
+            );
             let muzzle = weapons::Muzzle {
                 civilization: self.bodies[index]
                     .origin
@@ -296,10 +306,9 @@ impl Game {
                 velocity: Vec2::ZERO,
                 reach: self.tune.ecology_turret_reach,
                 shot_speed: 380.0,
-                sharpness,
+                sharpness: sharpness * budget,
                 pith: 0.0,
             };
-            let count = if weapon == Weapon::Mine { 3 } else { volley };
             self.discharge(weapon, count, &muzzle, spin);
         }
     }

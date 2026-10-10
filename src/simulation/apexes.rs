@@ -436,6 +436,14 @@ impl Game {
                     ),
                     enraged,
                 );
+                // The fan stays within the telegraph budget of the reference pool.
+                let threat = self.bodies[index].genes.threat;
+                let each = self.tune.weapon_pellet_damage
+                    * if shots == 1 { 1.0 } else { 0.7 }
+                    * sharp
+                    * self.tune.barrage_share;
+                let budget =
+                    super::burst::barrage_scale(&self.tune, threat, each, u32::from(shots));
                 let muzzle = weapons::Muzzle {
                     civilization: None,
                     origin,
@@ -443,7 +451,7 @@ impl Game {
                     velocity: Vec2::ZERO,
                     reach: self.tune.barrage_reach,
                     shot_speed: self.tune.barrage_speed,
-                    sharpness: sharp * self.tune.barrage_share,
+                    sharpness: sharp * self.tune.barrage_share * budget,
                     pith: 0.0,
                 };
                 self.discharge(crate::genome::Weapon::Projectile, shots, &muzzle, 0.0);
