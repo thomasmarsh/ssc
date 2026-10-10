@@ -85,6 +85,15 @@ These supplement CLAUDE.md.
 - Delegated work has been done by one fresh subagent at a time with a detailed brief (reading list, rules, exact design, tests, final report of commits and tuning numbers); slices edit overlapping files, so keep them sequential. Ask before any feature that spawns a large swarm.
 - The correct term is "sector" (an earlier wrong name "quadrant" was renamed everywhere; `SSC_CAMERA=quadrant` stays as an alias).
 
+## Guarantees (enforced by tests)
+
+Details, limits and how to bless are in [PERF.md](PERF.md).
+- Determinism: same seed and inputs give identical state digests at every checkpoint (`Game::state_digest`, seven named sub-digests).
+- Pinned scenarios: four headless runs (HOME idle, ring 3 busy, a fortified city, a five-minute run) have golden digests; `cargo test --no-default-features golden`. Bless only for deliberate behavior changes (`SSC_BLESS=1`).
+- Saves: save text is a fixed point under load, and two loads of one save continue identically. A reloaded run is not digest-identical to an uninterrupted one (ephemeral state is regenerated).
+- Generation is independent of visit order; dev toggles at default change nothing; long steps clamp to 50 ms.
+- Performance: `simperf` baselines per-tick cost; a digest mismatch there is a behavior change.
+
 ## Known caveats
 
 - Nothing has been played by a human. All balance numbers are first guesses; emergent weirdness comes first and balance is tamed afterwards, so far sectors may be unplayable. TODO: a real playtest pass, watching: depth 6 to 8 civilizations against a bare ship (threat x5 at depth 6 to 8, tier 3 fortress capital x16 to 21), apex archetypes (the Lasher and Warden looked weak only in a parked-ship test), the ring 1/2/3 ramp, the first civilization via ping, parry/dash/shove skill prices and gates, auto-repair, jam and glitch feel, nebula strength, HUD layout in a real window, whether keyboard-only dash (always facing) feels right.

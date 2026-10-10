@@ -52,6 +52,8 @@ The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow 
 5. [L] I hubs/distribution and player-grown megastructure districts. J voluntary colony citizens deferred pending a separate design; H2 conquered-community politics is already planned.
 6. Alongside: remaining D machine jobs, DEVTOOLS B/C including E2p drift temperature/timescale and profile/score readouts (direct headless controls if B/C are still unbuilt), contextual/controller panel polish and compact chart sidebar overflow/scrolling, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
+Refactor series: [1 done] safety net; next: name tick phases in `Game::step` with per-phase timing; tunables registry foundation (DEVTOOLS Phase B) with resolved-struct accessor; civ state aggregate. Each slice must keep the goldens unchanged and `simperf` within the PERF.md regression rule.
+
 Creature backlog remains open: Foamback; Oozer small prey/nucleus/pinch/spit/gap/path and continuous perimeter/reach tuning; remaining organs and realm-discovery follow-ups; swarms/rally dispatch and herd map/sonar; elder weak points if needed. Builders still need visible gathering and player interaction. See BESTIARY/WORKSTREAMS for their built status. These do not block the first economy milestone.
 
 Other backlog: large cross-sector planets with diggable/navigable interiors, machine sites, civilization anchors, expanded suitable farm surfaces and deep heat (geothermal use open; WORKSTREAMS section 15, P1-P4); density/feeling view-model and measurements, weaver rock care, hyperlanes, generated ruins/living megastructures, local stash overflow, skill merging, and specimen log. Do not follow the historical 19 -> 20 generation batch; use the actual current version. No save-migration fixtures or code before 1.0.
@@ -59,6 +61,8 @@ Other backlog: large cross-sector planets with diggable/navigable interiors, mac
 Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; tankers for any material with compatible local storage; tanker construction at established planetoid pads; a useful solo homestead before citizens; player and civilization conquest share political rules; claims can face organized rebellion; local reports drive observer-specific fears/sympathies; destruction, control and community survival stay distinct; society profiles come from coherent Perlin fields, with compact meaningful coordinates and sparse interactions; cultures remain fixed at drift temperature 0 until explicitly warmed in later playtests, while pressures/history still change policy. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Refactor safety net: `Game::state_digest` (seven named sub-digests), four pinned headless scenarios, determinism/save/generation guarantee tests and the `simperf` baseline runner; see `docs/PERF.md`.
 
 - Narrow E2a engagement: saved PEACE/30-second attributed ship defense/explicit headless war, shared combat/service gates and impact-time projectile authorization. Hostile opinion grants no targets; trust/friction, posture and autonomous operations remain next.
 
@@ -74,5 +78,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Fleet early recall: free saved return at the current flight fraction with launch-reserved cargo and dispatch hold; remote reload, power/full-store blockage, and queued fitting covered; compact receipt/flight captures checked. Targeting, kinetic impacts, and combat modules remain next.
 
 - Diplomacy target reconciled: independent trust/friction, posture/ROE, commercial terms and asymmetric real supply dependency; E2a/E2b/H1 gates documented, implementation remains TODO.
-
-- Loaded fleet hazards: hostile mines/missile/area bursts and dt-scaled hostile creature overlap share saved hull and finite wreck losses; friendly/calm/phased exclusions and conservation covered. Targeting, kinetic impacts, and remote incidents remain next.
