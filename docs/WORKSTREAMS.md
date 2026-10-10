@@ -110,6 +110,7 @@ Goal: simple controls on the pad with no overlaps and nothing that needs the key
 - Today: see the controls table in `README.md`. The pad already has most actions mapped, with overlaps (Select doubles as interact, face buttons mean different things per screen) and `TODO:` some actions with no pad route (check settings, restart, specific bench actions, dev panel is guide only).
 - Plan: (1) audit: list every action, its keyboard key and pad binding in one table, flag keyboard-only actions and double bindings; (2) a control budget: design a final map before any new feature adds controls, keep one contextual interact button for plant, enter lane, trade and bench; (3) implement the remap with a single input module test that every action has a pad route and no two actions in the same context share a button; (4) on-screen glyphs follow the active device.
 - Slices: audit and map doc first (docs only), then implementation. Do it before workstreams 1, 2 and 4 add inputs.
+- Plan (2026-10-10): this workstream is SEED slice U5 of the graphical UI series ([UI.md](UI.md)); U1 builds the shared focus model that gives every menu a controller route, and U5 adds the action table test, device glyphs and the generated controls reference.
 
 ## 11. Builder creatures
 
@@ -131,7 +132,8 @@ Goal: save and load the run and the player-shaped world. Decided (Thomas): wante
 
 ## Cross-cutting
 
-- Developer tooling (`docs/DEVTOOLS.md`): Phase A done. B (tunables registry), C (overlay) and D (separate app) queued. Each new workstream should register its numbers in the registry once B exists.
+- Developer tooling (`docs/DEVTOOLS.md`): Phase A and the `src/simulation/` tunables registry (Phase B, about 750 entries) are built; the generation side and the tuning console (Phase C, on the UI foundation) are SEED slices C1 to C3b and U1; D is decided later. Every new workstream registers its numbers in the registry.
+- Graphical menus (`docs/UI.md`): a gamepad-first `bevy_ui` widget layer (no mouse cursor assumed) over headless view-models, then the text menus convert (SEED U1 to U5).
 - Playtest after each major workstream: all balance is first-guess.
 - Order of operations: see the next section.
 
@@ -168,7 +170,7 @@ Goal: planets can become very large, potentially wider than a sector, and provid
 
 ## Order of operations (revised 2026-10-10)
 
-The authoritative dependency/acceptance table is [GAME_LOOP.md](GAME_LOOP.md) section 13. [SEED.md](../SEED.md) holds the active queue. The earlier fixed generation batch, 19 -> 20 version instruction, and completed foundation phases are superseded; use the actual generator version and independent salted streams for each intentional generation change.
+The authoritative dependency/acceptance table is [GAME_LOOP.md](GAME_LOOP.md) section 13. [SEED.md](../SEED.md) holds the active queue, including the UI (U) and cleanup (C) slices that run alongside the economy order below. The earlier fixed generation batch, 19 -> 20 version instruction, and completed foundation phases are superseded; use the actual generator version and independent salted streams for each intentional generation change.
 
 1. **First frontier:** A shared resources/HUD; B peaceful basic procurement plus honest loot; narrow C technology, bounded capture, and grade scaling. Land B's substitute sources with removal of wildlife gear. Confirm both peaceful and warlike paths to a harder frontier.
 2. **Working home:** D local refinery/water/crops/production; narrow E delivery and research partnership. Require persistent transactions and useful recipes, not a complete market.
@@ -185,7 +187,8 @@ Cross-cutting dependencies:
 - Budget bodies, fleet records, jobs, routes, retained outcomes, political actors/communities/claims, report links/evidence, resistance operations, and catch-up events. Preserve irreversible control/collapse and one-shot settlement continuity when compacting history. Unloaded operations are explicit bounded state transitions; closing the game grants no wall-clock production by default.
 - Use a shared cross-sector plan query for generated layouts and lanes; player construction additionally needs mutable ownership and paid-progress deltas.
 - Audit context/controller navigation as each panel lands. Trade, planting, bench, and site actions use existing context conventions.
-- Register constants in DEVTOOLS B when available; tooling never blocks a feature. Human playtest after each milestone.
+- Register new gameplay numbers in the tunables registry (DEVTOOLS Phase B); tooling never blocks a feature.
+- New panels are built on the UI foundation once U1 lands ([UI.md](UI.md)): view-models in, intents out, gamepad and keyboard complete on their own, mouse optional. Human playtest after each milestone.
 
 Backlog alongside this order: creature fill, rally forces, weaver care, density/feeling work, hyperlanes, generated megastructures, and polish. They remain open, but no longer define the economy's prerequisites unless a slice explicitly needs them.
 

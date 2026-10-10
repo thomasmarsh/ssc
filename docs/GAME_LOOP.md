@@ -94,7 +94,7 @@ Built: show **Metal, Volatiles, Crystal, Biomass, Fuel, Water** as six fixed com
 
 Keep the cluster compact: two rows of three at narrow sizes, with stable ordering and no overlap with weapon, organ, or ability indicators. The weapon's arc shows its actual consumable reserve, without calling raw volatiles "fuel." In flight, water means the ship reserve. While docked or inspecting a site, a clearly labeled SITE panel shows local stocks, consumption, incoming deliveries, and shortages; do not substitute a planet's water for the ship's number.
 
-The three-tab ship bench remains the equipment surface. Site management, trade, jobs, and research are contextual panels with the same navigation and confirmation conventions. A transaction shows what will be delivered, what it costs, whose inventory pays, and any requirement. Receipts report the actual outcome. New panels need a controller route and layout bounds, not a new flight key per subsystem.
+The three-tab ship bench remains the equipment surface. Site management, trade, jobs, and research are contextual panels with the same navigation and confirmation conventions. A transaction shows what will be delivered, what it costs, whose inventory pays, and any requirement. Receipts report the actual outcome. New panels need a controller route and layout bounds, not a new flight key per subsystem. Menus are moving from text lines to a graphical widget layer over the same view-models ([UI.md](UI.md)); new site, trade and fleet panels should be built on it once it lands.
 
 ## 5. Loot, organs, and civilization knowledge
 
@@ -424,7 +424,7 @@ Before 1.0, default additive fields or bump `SAVE_VERSION` and refuse incompatib
 
 ## 13. Implementation slices and acceptance gates
 
-Each slice must create a playable payoff and update built status. Implementation estimates and balance numbers remain open. Current priority after built A/B/narrow C/D/E is E2p -> E2a -> remaining F/G -> E2b/E2c -> H1 -> H2 -> I, with J deferred. E2p/E2a are the next civilization foundation and have no G/full-F dependency; early integration uses existing contact/combat and actual modeled facts. E2b/E2c can advance independently of G once the foundation works, while H1 still needs G and real demand. The table below records scope/dependencies; SEED owns the active queue.
+Each slice must create a playable payoff and update built status. Implementation estimates and balance numbers remain open. Current priority after built A/B/narrow C/D/E and E2p is E2a -> remaining F/G -> E2b/E2c -> H1 -> H2 -> I, with J deferred. E2p/E2a are the next civilization foundation and have no G/full-F dependency; early integration uses existing contact/combat and actual modeled facts. E2b/E2c can advance independently of G once the foundation works, while H1 still needs G and real demand. The table below records scope/dependencies; SEED owns the active queue.
 
 | Slice | Deliverable | Depends on | Acceptance gate |
 | --- | --- | --- | --- |

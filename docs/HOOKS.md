@@ -1,6 +1,6 @@
 # Bounded screenshot hooks (SSC_* environment variables)
 
-Status: built. Every hook below exists in code (list generated from `grep -rhoE "SSC_[A-Z_]+" src`; the staging code is in `src/main.rs` `smoke_*` functions and the `smoke` system, plus `src/presentation.rs` and `src/simulation/dev.rs`).
+Status: built. Every hook below exists in code (list generated from `grep -rhoE "SSC_[A-Z_]+" src`; the staging code is in `src/smoke.rs`, split by hook family, plus `src/presentation/` and `src/simulation/dev.rs`). Menu conversions to the graphical UI ([UI.md](UI.md)) keep every hook and its staging.
 
 Almost all hooks only act when `SSC_SMOKE_FRAMES` is set, so they can never run in ordinary play. The exceptions are `SSC_OFFSCREEN`, `SSC_OFFSCREEN_SIZE`, `SSC_REDUCE_EFFECTS` and `SSC_DEV`. A typical bounded gallery:
 

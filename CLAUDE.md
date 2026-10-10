@@ -6,7 +6,7 @@ A space combat game: Rust and Bevy 0.19, rebuilt from a C++ proof of concept (pr
 
 - Read `docs/UNIVERSE.md` (procedural universe, genomes, what is built), `docs/MIGRATION.md` (architecture and where to iterate), `docs/ROADMAP.md` (built-to-target milestones), and the relevant section of `docs/GAME_LOOP.md` (2026-10-09 target and acceptance gates) before changing anything.
 - Gameplay numbers of `src/simulation/tuning.rs` are a typed tunables registry (`self.tune.<name>`, ranges and cross-field rules, `Game::tune_set`, `SSC_TUNING`); add or change numbers there, never as scattered literals (`docs/DEVTOOLS.md`, Phase B).
-- `src/simulation.rs` (and `src/simulation/`) is headless, deterministic gameplay; `src/world.rs` and `src/genome.rs` are generation; `src/main.rs` and `src/presentation.rs` are the Bevy adapter. Rendering never owns game rules.
+- `src/simulation.rs` (and `src/simulation/`) is headless, deterministic gameplay; `src/world.rs` and `src/genome.rs` are generation; `src/main.rs`, `src/presentation/` and `src/smoke.rs` are the Bevy adapter (menus are moving to a gamepad-first widget layer, `docs/UI.md`). Rendering never owns game rules.
 
 ## Commands
 

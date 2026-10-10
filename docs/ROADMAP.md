@@ -44,7 +44,7 @@ The older proposals for three permanent materials, universal raw-only advanced p
 | Network and megastructure | I hubs/districts | Connect multiple suppliers and factories; grow a chosen home across sectors | Reserve policies, bottleneck visibility, cross-sector persistence, hard budgets |
 | Settlement, if useful | J citizens | Attract specialists and workers through supplied, safe housing | Separate citizen design; useful solo home remains viable |
 
-Current priority is remaining E2a opinion/posture/operations after the built E2p and shared engagement foundations, before remaining F/G. Broader fleet targeting reuses that authorization; routes and later trade reuse the same actor/profile rules. E2b/E2c need the foundation but may advance before G; full H1 requires G and actual demand. Implement a narrow complete loop before adding every recipe, organ, mission template, or market rule. GAME_LOOP section 13 lists each slice's dependencies and acceptance gate. Human playtesting follows each milestone; numbers remain first guesses.
+Current gameplay priority is remaining E2a opinion/posture/operations after the built E2p and shared engagement foundations, before remaining F/G. Alongside it run the graphical UI series ([UI.md](UI.md)) and the remaining refactor cleanups; [SEED.md](../SEED.md) orders all three tracks in waves with file ownership. Broader fleet targeting reuses that authorization; routes and later trade reuse the same actor/profile rules. E2b/E2c need the foundation but may advance before G; full H1 requires G and actual demand. Implement a narrow complete loop before adding every recipe, organ, mission template, or market rule. GAME_LOOP section 13 lists each slice's dependencies and acceptance gate. Human playtesting follows each milestone; numbers remain first guesses.
 
 ## Future combat ideas (2026-10-10, TODO)
 
@@ -64,10 +64,11 @@ These are eventual ideas to explore, not implemented behavior or the next ordere
 
 - TODO: very large planets, potentially wider than a sector, with continuous diggable terrain, cave/tunnel ship navigation and exploration inspired by PixelJunk Shooter, reachable interior machines, and planetary civilization anchors. Most worlds remain barren rock; suitable worlds gain more surface farming area. Deep large-planet interiors become hotter/dangerous toward the core; geothermal energy remains a possible payoff. Proposed P1-P4 slices and gates live in [WORKSTREAMS section 15](WORKSTREAMS.md#15-large-planets-and-explorable-interiors-2026-10-10-todo); current E2a/F/G priority is unchanged.
 - TODO: human playtests of early progression, civilization contact, realm counters, and deep-space combat; [PLAYTEST.md](PLAYTEST.md).
-- TODO: docking assist, BEST BUY guidance, automatic local stash overflow, controller-first panels/map, optional skill merging, specimen log, and other FLOW polish. Automatic overflow is local to a connected pad, never a free galactic inventory.
+- TODO: graphical, gamepad-first menus (no mouse cursor assumed) replacing today's text panels (bench, pads, contact, agreements, chart, title, settings, help; [UI.md](UI.md), SEED U1 to U5).
+- TODO: docking assist, BEST BUY guidance, automatic local stash overflow, optional skill merging, specimen log, and other FLOW polish. Automatic overflow is local to a connected pad, never a free galactic inventory.
 - TODO: remaining bestiary work, including organs and the Foamback/Oozer follow-ups; [BESTIARY.md](BESTIARY.md). New specimens follow the target reward provenance.
 - TODO: sniping/balance leftovers: accuracy spread at range, realm effects on civilizations, well-mode tilts, realm mining/symbiosis stress, and a clearer Dead Reach fizzle message. Keep reaction windows and projectile budgets intact while raising equipment grade.
-- TODO: hyperlanes and remote travel, generated ruined/living megastructures, feelings/density work, rally forces, and developer tooling. These support the loop without blocking the first economy milestone.
+- TODO: hyperlanes and remote travel, generated ruined/living megastructures, feelings/density work, rally forces, and the rest of developer tooling ([DEVTOOLS.md](DEVTOOLS.md)). These support the loop without blocking the first economy milestone.
 - TODO: random pad boons remain a separate earlier idea; jobs now have explicit earned boons. Revisit random choices after the reward model is playable.
 
 ## Guardrails and unresolved choices

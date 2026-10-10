@@ -1,10 +1,10 @@
 # Developer tooling plan
 
-Status: PARTIAL - Phase A is built (see its status note). Phase B is built for the whole `src/simulation/` tree (about 750 entries, see its status note); the generation-side modules outside it are still plain consts. TODO: the rest of Phase B, Phase C (live tuning overlay), Phase D (separate tuning app, decide later), and the Phase A skips (ring teleport, hide HUD, force a realm view, show-state toggles).
+Status: PARTIAL - Phase A is built (see its status note). Phase B is built for the whole `src/simulation/` tree (about 750 entries, see its status note); the generation-side modules outside it are still plain consts. TODO, scheduled as [SEED.md](../SEED.md) slices: culture drift registration (C1), hold cap and planetoid budget (C2), the generation-side constants (C3a, C3b), and Phase C as the first consumer of the graphical UI foundation (U1, [UI.md](UI.md)). Phase D (separate tuning app) is decided later; the Phase A skips (ring teleport, hide HUD, force a realm view, show-state toggles) are backlog, natural as tabs of the U1 console.
 
 Goal: stop hardcoding, make the game tunable live, and make testing any part of it quick. Status notes go at the end of each phase as it lands.
 
-## Facts (2026-10-08)
+## Facts (2026-10-08, historical: the registry now holds about 750 entries)
 
 - About 995 numeric `const`s, 249 of them already in `src/simulation/tuning.rs`; the rest are scattered (food, tether, world, ecology, creature, weapons, presentation).
 - About 40 `SSC_*` env hooks drive bounded screenshots and specimens ([HOOKS.md](HOOKS.md)); the in-game dev control is Phase A below.
@@ -15,7 +15,7 @@ Goal: stop hardcoding, make the game tunable live, and make testing any part of 
 
 - Dev features are off by default and cannot change a normal run: no effect on generation, RNG draws or the HOME golden test unless a developer turns something on. A dev-touched run is marked (HUD tag, and no leaderboard or legacy credit if those exist).
 - Gate behind `SSC_DEV=1` (runtime) so release builds do not need a separate feature flag; revisit if packaging needs it stripped.
-- No new heavy dependency without asking (for example egui). Prefer the existing gizmo and text panels (see `src/settings.rs`).
+- No new heavy dependency without asking (for example egui). Dev screens use the shared `bevy_ui` widget layer of [UI.md](UI.md) once it lands (U1); until then, the existing gizmo and text panels.
 
 ## Phase A: developer toggles (build first)
 
@@ -55,22 +55,22 @@ Status (2026-10-10): built for `src/simulation/tuning.rs` (338 entries, slice 3)
 **Regen.** `Regen` entries (`relic_one_in`, `relic_from`, `pool_full_threat`, `pool_none_threat`) set `tuning_needs_regen()` when changed on a loaded game. Regenerating already-loaded sectors is not built: a reload, restart or `with_tuning` applies them.
 
 **Left outside the registry.**
-- Generation-side modules at the top level of `src/` (power, range, world, territory, well, realm, apex, affinity, genome, anatomy, grammar, hosted): changing those numbers is `Regen`-class and must go through generator versioning (`GENERATOR_VERSION`). Deliberately a separate slice. `attach::SPACING` stays a const for the same reason (generation reads it through `hosted`).
+- Generation-side modules at the top level of `src/` (power, range, world, territory, well, realm, apex, affinity, genome, anatomy, grammar, hosted): changing those numbers is `Regen`-class and must go through generator versioning (`GENERATOR_VERSION`). Deliberately separate slices (SEED C3a, C3b): defaults must draw identically so no version bump is needed, and any draw change stops for a bump. `attach::SPACING` stays a const for the same reason (generation reads it through `hosted`).
 - Structural consts in the simulation modules: stream salts, array sizes and level counts, caches and log bounds (`RECORD_CAP`, `MAX_EVENTS`, `MAX_EFFECTS`, `MAX_BULLETS` which preallocate), HUD and layout numbers (hull segments, threat pips, arrow counts, region fade, `LOW`), camera shake and hit-stop numbers of `feel.rs` (pure value types read by the adapter), the ooze skin spring constants (visual only), brain input scales, `ACTIVE_HALF` and `UNLOAD_DISTANCE` (streaming geometry), `GRAIN`, and `DRONE_HEALTH`'s serde default (the live value is `fleet_drone_health`).
 - Price tables keyed by `Material` (`KIT_PRICE`, `DRONE_PRICE`, the production prices, agreement and job lots): not numeric scalars yet.
-- `CAP` (the hold) and `PLANETOID_BUDGET` (`Body::ore`): still consts; threading `Cargo` and `Body::ore` touches about 60 call sites without game access and was not attempted.
+- `CAP` (the hold) and `PLANETOID_BUDGET` (`Body::ore`): still consts; threading `Cargo` and `Body::ore` touches about 60 call sites without game access and was not attempted (SEED C2; `PLANETOID_BUDGET` sets a planetoid's total against the saved `mined` ledger, so decide `Live` versus `Regen` there).
 - The culture drift temperature and timescale: still configured through `Game::configure_culture_drift` (see below); not registered yet.
 - `society_defense_seconds` is an `f32` entry read as `f64`.
 
-## Phase C: live tuning overlay (TODO)
+## Phase C: live tuning overlay (TODO, slice U1)
 
-A dev panel listing registry groups with sliders or step keys, a search box, a "modified" filter, reset per value and all, and save or load of an overrides file (RON or JSON, committed examples allowed). Entries flagged as needing regen show a regenerate-universe button. Overrides apply immediately to the headless `Game`.
+No longer deferred: the user's graphical-menu direction (2026-10-10) makes this console the first consumer of the UI foundation ([UI.md](UI.md), SEED slice U1). A dev panel listing registry groups with sliders or step keys, a search box, a "modified" filter, reset per value and all, and save or load of an overrides file (RON or JSON, committed examples allowed). Entries flagged as needing regen show a regenerate-universe button. Overrides apply immediately to the headless `Game`.
 
 ## Procedural culture controls (headless built; panel TODO)
 
 [GAME_LOOP.md](GAME_LOOP.md) section 9.4 owns the generated behavior model. Cultural coordinates come from coherent Perlin fields, rather than hand-tuned faction presets. The playtest control is global drift speed: `culture_drift_temperature`, finite/clamped 0..1, default exactly 0, plus a separate positive long-period cultural timescale. Normal play starts with fixed culture; raising temperature is an explicit future playtest action, never an automatic ramp. Keep drift independent of decision fidelity, real supply/attacks/history and ordinary simulation time scale.
 
-Registering temperature and timescale is still TODO (the registry has no entry that routes through `configure_culture_drift` yet, to keep one source of truth for the saved effective controls). Expose reset/step controls in Phase C, with requested/effective values, saved phase and FROZEN/DRIFTING status. Neither control requires regeneration; changes take effect on future phase advancement without resampling or jumping cultures. Turning temperature back to zero freezes the current phase, not the original generated epoch. Reject nonfinite settings and clamp finite range violations visibly. Effective values and phase persist with the run; an explicitly overridden dev run is marked normally.
+Registering temperature and timescale is still TODO, scheduled as SEED slice C1: the entries route through `configure_culture_drift` so the saved culture clock stays the one source of truth for the effective controls (the overrides map never stores a second copy). Expose reset/step controls in Phase C, with requested/effective values, saved phase and FROZEN/DRIFTING status. Neither control requires regeneration; changes take effect on future phase advancement without resampling or jumping cultures. Turning temperature back to zero freezes the current phase, not the original generated epoch. Reject nonfinite settings and clamp finite range violations visibly. Effective values and phase persist with the run; an explicitly overridden dev run is marked normally.
 
 Culture playtests have direct headless controls pending the tunables registry: `Game::configure_culture_drift(temperature, timescale)` returns acceptance, `culture_clock()` exposes effective values/phase, and `civilization_profile(actor)` exposes the current generated vector. Temperature defaults exactly 0, clamps finite inputs to 0..1, and rejects nonfinite inputs; timescale must be finite and positive (default 86,400 simulation seconds). Controls/phase are saved and never reapplied from the environment. Any nondefault culture state shows DEV, including a refrozen warmed run. TODO: registry/overlay controls and score breakdowns; there is no desktop drift-control row yet. Optional dev readouts show latent cultural fields, generated coordinates, current need/history modifiers, bounded decision imperfection, and per-action score/rejection reasons. Player flows show understandable tendencies and causes, not raw matrices. Gate: zero-default and refreeze behavior remain exact over long runs, attacks, unload/reload and time partitions; raising temperature moves smoothly without catch-up, rerolls or permission changes. Registry sliders and score readouts remain planned; the direct headless controls above are built.
 
@@ -80,4 +80,4 @@ Only if the in-game overlay proves too cramped: a second binary that edits the o
 
 ## Order and delegation
 
-A, then B in several slices, then C. One subagent at a time, long concrete briefs, commit per slice.
+A and most of B are built. The remaining order, file ownership and which slices may run in parallel are in [SEED.md](../SEED.md) (C1, C2, C3a, C3b, U1). Long concrete briefs, commit per slice.
