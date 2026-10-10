@@ -284,13 +284,15 @@ impl Game {
         self.update_arms(dt, input.fire);
         self.pad_noise(tick.shots.0, tick.shots.1);
         if self.stats.shears {
-            // Shears cut a weak cord the moment it latches and wear a stout one through.
+            // Shears cut a weak cord the moment it latches and wear a stout one through
+            // (every cord at once with the lunatic field resonating).
+            let field = self.resonance_verb(super::resonance::Verb::FieldCuts);
             for tether in self
                 .tethers
                 .iter_mut()
                 .filter(|t| t.kind == TetherKind::Latch)
             {
-                if tether.max_health <= self.tune.tether_shears_instant {
+                if field || tether.max_health <= self.tune.tether_shears_instant {
                     tether.health = 0.0;
                 } else if tether.attached() {
                     tether.health -= self.tune.tether_shears_rate * dt;

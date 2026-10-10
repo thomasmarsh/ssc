@@ -418,10 +418,17 @@ impl Game {
         if level == 0 || !matches!(fallen.kind, BodyKind::Creature | BodyKind::Base) {
             return;
         }
+        // With a Remora aboard a kill also ends the recently-hit wait (resonance).
+        let quiet = self
+            .resonance_verb(super::resonance::Verb::KillMends)
+            .then_some(self.tune.remora_quiet);
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
             && ship.position.distance(fallen.position) < 1500.0
         {
             ship.health = (ship.health + 3.0 * f32::from(level)).min(ship.max_health);
+            if let Some(quiet) = quiet {
+                ship.since_hit = ship.since_hit.max(quiet);
+            }
         }
     }
 

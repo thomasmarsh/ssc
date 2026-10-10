@@ -250,6 +250,10 @@ tuning_life::groups! {
         veil_time: f32 = 0.35, 0.0, 30.0, Seconds;
         /// A Skipjack dash hops an obstacle thinner than this.
         skip_thick: f32 = 80.0, 0.0, 5000.0, Distance;
+        /// Radius within which a perfect parry scatters creatures when Faraday resonates with parry.
+        resonance_scatter_radius: f32 = 200.0, 0.0, 2000.0, Distance;
+        /// Seconds creatures scatter after such a parry.
+        resonance_scatter_time: f32 = 1.5, 0.0, 20.0, Seconds;
         /// SYMBIOSIS first-level price in volatiles.
         price_symbiosis_volatiles: f32 = 40.0, 0.0, 100_000.0, Amount;
         /// SYMBIOSIS first-level price in crystal.

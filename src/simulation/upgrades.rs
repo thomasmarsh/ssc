@@ -937,7 +937,7 @@ impl Loadout {
             .map(|(i, _)| i)
     }
 
-    fn effects(&self) -> impl Iterator<Item = &Effect> {
+    pub(super) fn effects(&self) -> impl Iterator<Item = &Effect> {
         self.parts
             .iter()
             .flat_map(|p| &p.effects)
@@ -946,8 +946,13 @@ impl Loadout {
 
     /// The ship as it is flying now: parts, the active profile and the running boosts.
     pub fn stats(&self) -> Stats {
+        // Resonance bonuses (`resonance.rs`) are ordinary stat effects, capped there; a
+        // loadout with no pair aboard adds nothing and is bit-identical.
         self.apply_grade(Stats::compute(
-            self.effects().copied().chain(self.arsenal.active_effect()),
+            self.effects()
+                .copied()
+                .chain(self.arsenal.active_effect())
+                .chain(self.resonance_effects()),
         ))
     }
 

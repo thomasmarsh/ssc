@@ -334,6 +334,12 @@ impl BenchView {
         } else {
             wrap_words(&row.state, layout.text_cols)
         };
+        // The resonance sentences close the description (so a squeezed pane keeps them): the
+        // pair is stated on both partners, ACTIVE when built and a hint when not.
+        let mut description = wrap_words(&row.detail, layout.text_cols);
+        for (_, line) in game.resonance_lines(row.action) {
+            description.extend(wrap_words(&line, layout.text_cols));
+        }
         let mut detail = DetailView {
             title: wrap_capped(&row.text, layout.title_cols, 2),
             group: row.group,
@@ -346,7 +352,7 @@ impl BenchView {
             },
             state,
             costs,
-            description: wrap_words(&row.detail, layout.text_cols),
+            description,
             shortened: false,
         };
         let metas = meta_lines(&detail, layout.inner_w - 2.0 * DETAIL_PAD);

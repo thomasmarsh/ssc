@@ -153,16 +153,21 @@ impl Game {
         if let Some(seconds) = self.veil_time() {
             // The Veil: intangible (and safe) for a moment after the jump.
             self.veil = seconds;
+            if self.resonance_verb(super::resonance::Verb::DashReadiesParry) {
+                self.parry.cooldown = 0.0;
+            }
             self.player_invulnerability = self.player_invulnerability.max(seconds);
             if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
                 ship.phased = true;
             }
         }
-        // Weak cords cannot hold a ship that has just left.
+        // Weak cords cannot hold a ship that has just left (all of them, with the Skipjack
+        // node and shears resonating).
+        let cut_all = self.resonance_verb(super::resonance::Verb::DashCuts);
         for tether in self.tethers.iter_mut().filter(|c| {
             c.kind == TetherKind::Latch
                 && c.attached()
-                && c.max_health <= self.tune.tether_shears_instant
+                && (cut_all || c.max_health <= self.tune.tether_shears_instant)
         }) {
             tether.health = 0.0;
         }

@@ -201,6 +201,9 @@ impl Game {
             self.parry.flash = self.tune.parry_flash;
             self.shake_off();
             cues.push(Cue::PerfectParry { at: origin });
+            if self.resonance_verb(super::resonance::Verb::ParryScatter) {
+                self.parry_scatter(origin);
+            }
         }
         for cue in cues {
             self.cue(cue);

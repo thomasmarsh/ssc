@@ -64,6 +64,7 @@ mod realms;
 mod regions;
 mod regrow;
 pub mod research;
+mod resonance;
 mod rift;
 mod root;
 pub mod run;
@@ -1076,6 +1077,8 @@ impl Game {
         let stats = self.stats;
         let reach = self.realm_effects().weapon_range;
         let active = self.loadout.arsenal.active;
+        // Veil resonating with homing: shots fired while the veil lasts seek at full level.
+        let veil_seeks = self.veil > 0.0 && self.resonance_verb(resonance::Verb::VeilSeeks);
         let Some(player) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
             return;
         };
@@ -1137,7 +1140,11 @@ impl Game {
                 }
                 shot.damage = stats.damage * share;
                 shot.pierce = stats.pierce;
-                shot.homing = stats.homing;
+                shot.homing = if veil_seeks {
+                    stats.homing.max(upgrades::Trait::Homing.cap())
+                } else {
+                    stats.homing
+                };
                 shot.blast = stats.blast;
                 shot.profile = Some(active);
                 self.bullets.push(shot);
