@@ -188,6 +188,7 @@ pub fn setup(mut commands: Commands) {
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     session: Res<Session>,
     keys: Res<ButtonInput<KeyCode>>,
