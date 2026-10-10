@@ -16,6 +16,7 @@ Do not read all of `docs/` up front. `BESTIARY.md`, `UNIVERSE.md` and `FLOW.md` 
 - `docs/GAME_LOOP.md`: the 2026-10-09 target loop, resources, provenance, technology, grade scaling, jobs/trade, fleets, homesteads, open defaults, and slice acceptance gates.
 - `docs/WORKSTREAMS.md`: the big areas (farming, machines and trade, megastructures, fast travel, weavers and asteroid habitats, apex bodies, nested creatures, swarms, urban/wild/desert feelings, gamepad), each with goal, design, slices, dependencies, open questions. Background thinking; the queue below is the order.
 - `docs/PLAYTEST.md`: what the user should check by feel, with the knob behind each question.
+- `docs/BALANCE.md`: measured difficulty (enemy burst, speed, player tiers, which sectors kill whom), the proposed unbounded difficulty model with islands, the five ranked balance slices, and the checklist for adding a feature (`src/threat.rs`, `cargo run --release --no-default-features --bin threat`; tests `cargo test --no-default-features threat`).
 - `docs/DEVTOOLS.md`: developer tooling plan (toggles and the `src/simulation/` tunables registry built; generation-side registry and the tuning console queued).
 - `docs/UI.md`: graphical menus: the UI foundation contract and the order in which text menus convert (slices U1 to U5 below).
 - `docs/ROADMAP.md`: gameplay and progression. `docs/FLOW.md`: arcade flow, HUD, core loop, P0/P1/P2 list. `docs/BENCH.md`: bench. `docs/DISCOVERY.md`: sonar discovery. `docs/BESTIARY.md`: creatures, powers, organs, apex. `docs/UNIVERSE.md`: procedural universe. `docs/MIGRATION.md`: architecture, invariants, known caveats. `docs/HOOKS.md`: every `SSC_*` screenshot and debug hook.
@@ -46,7 +47,7 @@ Decide per slice, and say which in one line.
 
 This is the single work plan. Design and acceptance detail live in the linked docs: [docs/GAME_LOOP.md](docs/GAME_LOOP.md) section 13 (economy and politics slices A to J), [docs/UI.md](docs/UI.md) (graphical menus), [docs/DEVTOOLS.md](docs/DEVTOOLS.md) (tooling), [docs/PERF.md](docs/PERF.md) (goldens, simperf). Sizes: [S] in-session, [M] one agent session, [L] one long agent session or two. Validation keys: **goldens** = the four pinned digests pass unblessed (`cargo test --no-default-features golden`); **bless** = a deliberate behavior change, regenerate with `SSC_BLESS=1` and explain why in the commit; **gen** = HOME golden and generation tests unchanged, otherwise salted streams plus a `GENERATOR_VERSION` bump (now 36, `src/sectormap.rs`) recorded in the touched docs; **save** = additive `#[serde(default)]` fields, or a `SAVE_VERSION` bump (now 4) that refuses older saves, never migration code (before 1.0); **perf** = `simperf` within the PERF.md rule; **shots** = bounded `SSC_*` captures at 1280x800 and 640x480, looked at. Every slice also keeps tests, clippy and fmt clean and updates its doc's status and `TODO:` tags.
 
-0. Human playtest at any time ([docs/PLAYTEST.md](docs/PLAYTEST.md)). Balance stays provisional.
+0. Human playtest at any time ([docs/PLAYTEST.md](docs/PLAYTEST.md)). Balance stays provisional; the measured balance gaps and five ranked slices (burst budget, unbounded upgrade levels, speed axis, island layer, burst-aware verdict) are in [docs/BALANCE.md](docs/BALANCE.md) section 8, none built yet.
 
 **Wave 0 (in-session, before wave 1)**
 

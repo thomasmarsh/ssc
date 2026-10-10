@@ -26,5 +26,6 @@ pub mod simulation;
 pub mod structure;
 pub mod synth;
 pub mod territory;
+pub mod threat;
 pub mod well;
 pub mod world;
