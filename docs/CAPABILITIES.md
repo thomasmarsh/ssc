@@ -351,7 +351,7 @@ Sizes: S in-session, M one agent session, L one long session or two. Versions: *
 
 | # | Slice | Size | Owns | Depends | Versions | Parallel with |
 | --- | --- | --- | --- | --- | --- | --- |
-| K0 | **Channel taxonomy and coverage tables.** New `src/capability.rs`: `Channel`, `Cap`, exhaustive `power::channel`, `weapon::channel`, `covers` for organs, traits, skills, `coverage(&Loadout)`; no behavior | S | `src/capability.rs`, `src/lib.rs`, tests, this doc | none | none | K4 |
+| K0 | **DONE. Channel taxonomy and coverage tables.** New `src/capability.rs`: `Channel`, `Cap`, exhaustive `power::channel`, `weapon::channel`, `covers` for organs, traits, skills, `coverage(&Loadout)`; no behavior | S | `src/capability.rs`, `src/lib.rs`, tests, this doc | none | none | K4 |
 | K1 | **Threat integration.** `Tier.cover`, cover in flair, disables edges, `share[c]` and `gate_burst[c]` on `SectorReport`, `--only channels`, `typical+wards` tiers, BALANCE tables. Baseline unchanged at cover 0 | M | `src/threat.rs`, `src/bin/threat.rs`, `src/threat_baseline.txt`, BALANCE | K0 | B | K4 |
 | K2 | **Close the `Gap` damage channels** (lunge, charge, bite, sting, cords, wells, maws, latch/engulf). Needed for honest `share[c]` | M | `src/threat.rs` (after K1) | K1 | B | none (same file) |
 | K3 | **AreaReadout.** `AreaProfile`, verdict, star-map coloring and skirt path, banner and HUD tag, sonar hints; subsumes BALANCE slice 5 | M | `src/capability.rs` (readout part), `simulation/hud.rs`, `src/chartview.rs`, `ui/screens/chart.rs`, `presentation/hud_text.rs` | K0, K1 | none | K4 |

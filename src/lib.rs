@@ -6,6 +6,7 @@ pub mod backdrop;
 pub mod biome;
 pub mod bodyplan;
 pub mod builder;
+pub mod capability;
 pub mod config;
 pub mod culture;
 pub mod development;
