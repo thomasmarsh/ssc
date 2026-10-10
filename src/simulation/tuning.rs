@@ -765,12 +765,12 @@ tuning_life::groups! {
         balance_windup_min: f32 = 0.6, 0.0, 10.0, Seconds;
         /// A creature fires only within this multiple of its own sight (zero turns the rule off).
         balance_sight_reach: f32 = 1.0, 0.0, 10.0, Multiplier;
-    }
-
         /// Share of incoming damage a fully trained parry turns aside; a disabling power removes it for its duty (docs/CAPABILITIES.md 5.3).
         balance_parry_mitigation: f32 = 0.25, 0.0, 0.95, Multiplier;
         /// Share of incoming damage a fully trained dash slips; a disabling power removes it for its duty.
         balance_dash_mitigation: f32 = 0.15, 0.0, 0.95, Multiplier;
+    }
+
     // ---- drops -----------------------------------------------------------------------------------
     group "drops" {
         /// A creature's drop chance is multiplied by this plus hardness slope times (hull + shield) / reference.
