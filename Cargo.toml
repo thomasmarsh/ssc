@@ -22,6 +22,8 @@ ron = "0.12"
 glam = { version = "0.32", features = ["serde"] }
 
 [features]
+# Opt-in wall-time accounting per tick phase (`Game::phase_timings`); costs nothing when off.
+profile = []
 default = ["desktop"]
 desktop = [
     "bevy/default_app", "bevy/bevy_winit", "bevy/multi_threaded",

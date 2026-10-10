@@ -246,6 +246,9 @@ impl Game {
             lives,
             dev,
             game_over,
+            // Wall-clock profiling, not state.
+            #[cfg(feature = "profile")]
+                profile: _,
             time,
             player_invulnerability,
             focus,

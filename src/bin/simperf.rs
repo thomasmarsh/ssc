@@ -23,6 +23,9 @@ struct Report {
     loaded: usize,
     digest: String,
     golden_ok: bool,
+    /// Mean ms per tick of each phase; only with `--features profile`.
+    #[cfg(feature = "profile")]
+    phases: Vec<(&'static str, f64)>,
 }
 
 fn percentile(sorted: &[f64], p: f64) -> f64 {
@@ -70,6 +73,8 @@ fn measure(scenario: &'static scenario::Scenario) -> (Report, Vec<scenario::Chec
         loaded: run.loaded_sectors(),
         digest: format!("{digest:#018x}"),
         golden_ok: scenario::verify(scenario.name, &checkpoints).is_ok(),
+        #[cfg(feature = "profile")]
+        phases: game.phase_timings(),
     };
     (report, checkpoints)
 }
@@ -167,6 +172,10 @@ fn main() -> ExitCode {
             );
         }
     }
+    #[cfg(feature = "profile")]
+    if !json {
+        print_phases(&reports);
+    }
     if reports.iter().all(|r| r.golden_ok) {
         ExitCode::SUCCESS
     } else {
@@ -175,6 +184,31 @@ fn main() -> ExitCode {
         );
         ExitCode::FAILURE
     }
+}
+
+/// Mean ms per tick by phase, one column per scenario. Includes the timing calls themselves
+/// (two clock reads per phase), so the sum slightly exceeds the untimed tick.
+#[cfg(feature = "profile")]
+fn print_phases(reports: &[Report]) {
+    println!("\nmean ms per tick by phase (profile build)");
+    print!("{:<14}", "phase");
+    for r in reports {
+        print!(" {:>12}", r.name);
+    }
+    println!();
+    let rows = reports.first().map_or(0, |r| r.phases.len());
+    for i in 0..rows {
+        print!("{:<14}", reports[0].phases[i].0);
+        for r in reports {
+            print!(" {:>12.5}", r.phases[i].1);
+        }
+        println!();
+    }
+    print!("{:<14}", "total");
+    for r in reports {
+        print!(" {:>12.5}", r.phases.iter().map(|p| p.1).sum::<f64>());
+    }
+    println!();
 }
 
 fn usage(why: &str) -> ExitCode {

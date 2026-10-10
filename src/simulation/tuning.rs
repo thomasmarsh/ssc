@@ -6,6 +6,23 @@
 
 use super::Material;
 
+// ---- per-tick body physics and timers (see `phases`) ---------------------------------------------
+
+/// Seconds a body must go unhit before its shield starts to recharge.
+pub const SHIELD_RECHARGE_DELAY: f32 = 2.0;
+/// Shield points per second every non-player body recharges (the ship uses its `recharge` stat).
+pub const NPC_SHIELD_RATE: f32 = 6.0;
+/// Health per second a dust-grazing creature recovers.
+pub const DUST_HEAL: f32 = 1.5;
+/// A free rock faster than this slowly sheds its excess speed (units per second).
+pub const ASTEROID_SPEED_FLOOR: f32 = 120.0;
+/// Rate (per second) at which a free rock's excess speed decays toward the floor.
+pub const ASTEROID_DRAG: f32 = 0.5;
+/// Radians per second a free rock turns.
+pub const ASTEROID_SPIN: f32 = 0.3;
+/// Radians per second a planetoid turns.
+pub const PLANETOID_SPIN: f32 = 0.02;
+
 // ---- realms (see `realm` and `realms`) ----------------------------------------------------------
 
 /// Seconds the ship must hold a new realm before it is announced, and the least gap between two

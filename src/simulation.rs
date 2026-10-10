@@ -53,6 +53,7 @@ pub mod organs;
 mod pads;
 mod parasite;
 mod parry;
+pub mod phases;
 mod ping;
 mod powers;
 mod procurement;
@@ -145,8 +146,6 @@ const MAX_EFFECTS: usize = 128;
 /// Hard ceiling on loaded bodies; shattering and breeding stop short of it.
 const MAX_BODIES: usize = 1500;
 /// A destroyed rock splits into pieces this much smaller, unless they would be tiny.
-/// Radians per second a planetoid turns.
-const PLANETOID_SPIN: f32 = 0.02;
 const SHARD_FACTOR: f32 = 0.62;
 const MIN_SHARD_RADIUS: f32 = 13.0;
 /// Creatures bred by a base wander no farther than this from it before turning back.
@@ -173,8 +172,6 @@ const NEEDLE_SHARE: f32 = 0.28;
 /// Seekers notice targets this close, and bend this fast per level.
 const SEEK_RANGE: f32 = 650.0;
 const SEEK_TURN: f32 = 2.4;
-/// Health per second a dust-grazing creature recovers.
-const DUST_HEAL: f32 = 1.5;
 /// A body touched by a flinging creature is thrown at least this fast (scaled by the
 /// fling gene), and never faster than the cap.
 const FLING_SPEED: f32 = 520.0;
@@ -527,6 +524,9 @@ pub struct Game {
     /// Developer toggles; all off unless the panel (SSC_DEV=1) turns them on. See `dev`.
     pub dev: dev::DevState,
     pub game_over: bool,
+    /// Per-phase wall time of the tick; present only with the `profile` feature.
+    #[cfg(feature = "profile")]
+    profile: phases::Profile,
     pub time: f32,
     pub player_invulnerability: f32,
     /// Last known player position; anchors the active region while the player is dead.
@@ -689,6 +689,8 @@ impl Game {
             lives: 3,
             dev: dev::DevState::default(),
             game_over: false,
+            #[cfg(feature = "profile")]
+            profile: phases::Profile::default(),
             time: 0.0,
             player_invulnerability: 2.0,
             focus: Vec2::ZERO,
@@ -798,245 +800,6 @@ impl Game {
             .iter()
             .filter(|body| body.active && body.kind == BodyKind::Creature)
             .count()
-    }
-
-    /// Intended for a fixed 1/60-second caller. Rejects invalid durations and caps
-    /// a single step at 50 ms, preventing a resumed window from causing huge jumps.
-    pub fn step(&mut self, dt: f32, input: Input) {
-        if self.game_over || !dt.is_finite() || dt <= 0.0 {
-            return;
-        }
-        let dt = dt.min(0.05);
-        self.sync_dev();
-        // A perfect parry freezes everything for a few ticks.
-        if self.hold_hit_stop(dt) {
-            return;
-        }
-        // Mining and firing exclude each other: the beam wins while it is held.
-        let input = Input {
-            fire: input.fire && !input.mine,
-            ..input
-        };
-        // A confused pilot's hands deliver a bent input, and a jammed gun does not fire.
-        let input = self.scramble_input(input);
-        let input = if self.jammed(JamSystem::Weapons) {
-            if input.fire {
-                self.cue(Cue::Refused);
-            }
-            Input {
-                fire: false,
-                ..input
-            }
-        } else {
-            input
-        };
-        let in_flight = self.bullets.len();
-        let mut ship_before = self.player().map(|p| (p.shield, p.health));
-        let sources = self.incoming_sources();
-        self.time += dt;
-        self.societies.advance(dt);
-        self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
-        self.streak.tick(dt);
-        self.feel.tick(dt);
-        for effect in &mut self.effects {
-            effect.remaining -= dt;
-        }
-        self.effects.retain(|effect| effect.remaining > 0.0);
-        self.update_jam(dt, input.fire);
-        self.update_lure(dt);
-        self.update_legacy(dt);
-        let jumped = self.update_chart(dt);
-        if let Some(before) = ship_before.as_mut() {
-            before.0 -= jumped;
-        }
-        self.stream_sectors();
-        self.note_sector();
-        let start = self.player().map(|p| p.position);
-        self.update_civilizations(dt);
-        self.update_region(dt);
-        self.update_realm(dt);
-        self.update_loadout(dt, &input);
-        self.update_organs(dt);
-        self.update_builders(dt);
-        let recharge = self.stats.recharge;
-        let electrolyzing = input.brake && input.mine;
-        let beaming = self.beam.is_some() || electrolyzing;
-        for body in self.bodies.iter_mut().filter(|b| b.active) {
-            body.fire_cooldown = (body.fire_cooldown - dt).max(0.0);
-            body.contact_cooldown = (body.contact_cooldown - dt).max(0.0);
-            body.panic = (body.panic - dt).max(0.0);
-            body.since_hit += dt;
-            body.provoked = (body.provoked - dt).max(0.0);
-            body.shoved = (body.shoved - dt).max(0.0);
-            body.sling_free = (body.sling_free - dt).max(0.0);
-            body.sling_thrown = (body.sling_thrown - dt).max(0.0);
-            body.rift_redirected = (body.rift_redirected - dt).max(0.0);
-            body.rift_grace = (body.rift_grace - dt).max(0.0);
-            body.rune_pushed = (body.rune_pushed - dt).max(0.0);
-            body.shove_clock = (body.shove_clock - dt).max(0.0);
-            body.grip_free = (body.grip_free - dt).max(0.0);
-            if body.since_hit > 2.0 && !(beaming && body.kind == BodyKind::Player) {
-                let rate = if body.kind == BodyKind::Player {
-                    recharge
-                } else {
-                    6.0
-                };
-                body.shield = (body.shield + dt * rate).min(body.max_shield);
-            }
-            if body.kind == BodyKind::Creature && body.genome.diet == Diet::Dust {
-                body.health = (body.health + dt * DUST_HEAL).min(body.max_health);
-            }
-        }
-        let drones_before = self.mining_drone_views();
-        self.update_farm();
-        self.update_pads(dt, &input);
-        let shots = (self.bullets.len(), self.mines.len());
-        self.control_player(dt, input);
-        self.electrolysis = None;
-        let drained = self.update_mining(dt, input.mine && !electrolyzing);
-        let drained = if electrolyzing {
-            drained + self.update_electrolysis(dt)
-        } else {
-            drained
-        };
-        self.update_grip(dt);
-        self.update_regrowth(dt);
-        if let Some(before) = ship_before.as_mut() {
-            before.0 -= drained;
-        }
-        self.update_arms(dt, input.fire);
-        self.pad_noise(shots.0, shots.1);
-        if self.stats.shears {
-            // Shears cut a weak cord the moment it latches and wear a stout one through.
-            for tether in self
-                .tethers
-                .iter_mut()
-                .filter(|t| t.kind == TetherKind::Latch)
-            {
-                if tether.max_health <= tether::SHEARS_INSTANT {
-                    tether.health = 0.0;
-                } else if tether.attached() {
-                    tether.health -= tether::SHEARS_RATE * dt;
-                }
-            }
-        }
-        // Developer toggle: frozen enemies skip what makes them move, hunt and shoot.
-        let frozen = self.dev.freeze_enemies;
-        if !frozen {
-            self.update_wildlife(dt);
-            self.steer_creatures(dt);
-        }
-        self.update_civ_mining(dt);
-        self.update_roots(dt);
-        if !frozen {
-            self.update_flocks(dt);
-            self.update_bases(dt);
-            self.update_turrets(dt);
-        }
-        self.tend_broods(dt);
-        self.graze();
-        self.update_food(dt);
-        self.update_metabolism(dt);
-        self.graze_plankton();
-        self.graze_plants(dt);
-        self.update_blight(dt);
-        self.update_tending(dt);
-        if !frozen {
-            self.hunt(dt);
-        }
-        self.update_growth(dt);
-        self.update_reproduction(dt);
-        self.update_eggs(dt);
-        self.update_tethers(dt);
-        self.update_chains(dt);
-        self.update_apexes(dt);
-        self.update_adapt(dt);
-        self.update_rifts(dt);
-        self.update_engulf_hold(dt);
-        self.update_powers(dt);
-        // After steering, so a remora's drift to a calm ship wins over its shyness.
-        self.update_parasites(dt, input.fire);
-        self.update_splits(dt);
-        self.update_song_rings(dt);
-        if !frozen {
-            self.fire_weapons();
-        }
-        self.cue_new_shots(in_flight);
-        self.update_wells(dt);
-        self.apply_gravity(dt);
-        let rift_before: Vec<_> = if self.rifts.is_empty() {
-            Vec::new()
-        } else {
-            self.bodies.iter().map(|b| (b.id, b.position)).collect()
-        };
-        let impact_before: HashMap<_, _> = if drones_before.is_empty() {
-            HashMap::new()
-        } else {
-            self.bodies.iter().map(|b| (b.id, b.position)).collect()
-        };
-        let shove_cap = self.loadout.skills.shove_speed_cap();
-        for body in self.bodies.iter_mut().filter(|b| b.active) {
-            if body.shoved > 0.0 && body.kind == BodyKind::Asteroid {
-                body.velocity = body.velocity.clamp_length_max(shove_cap);
-            }
-            if !is_fixed(body) {
-                body.position += body.velocity * dt;
-            }
-            if body.kind == BodyKind::Asteroid && !body.pinned {
-                // Flung rocks slowly lose their excess speed rather than ricocheting forever.
-                let speed = body.velocity.length();
-                if speed > 120.0 {
-                    body.velocity *= (120.0 + (speed - 120.0) * (-0.5 * dt).exp()) / speed;
-                }
-                body.angle += dt * 0.3;
-            } else if body.rock == RockKind::Planetoid {
-                body.angle += dt * PLANETOID_SPIN;
-            }
-        }
-        self.damage_drone_impacts(dt, &drones_before, &impact_before);
-        // Rooted life rides its host, and again after contacts have shoved the host.
-        self.sync_roots();
-        self.transit_bodies(&rift_before);
-        self.contain_in_active_region();
-        self.resolve_contacts();
-        self.sync_roots();
-        self.sync_latches();
-        // After contacts, so an impact cannot leave a joint stretched past its limit.
-        self.constrain_chains();
-        self.damage_drone_contacts(dt);
-        self.update_parry(dt);
-        self.update_dash(dt);
-        self.move_bullets(dt);
-        self.shoot_flocks(dt);
-        self.update_mines(dt);
-        self.update_rune_fields(dt);
-        self.update_husks();
-        self.update_pickups(dt);
-        self.apply_dev();
-        let travelled = match (start, self.player()) {
-            (Some(from), Some(ship)) => from.distance(ship.position),
-            _ => 0.0,
-        };
-        let taken = match (ship_before, self.player()) {
-            (Some((shield, health)), Some(ship)) => {
-                (shield + health - ship.shield - ship.health.max(0.0)).max(0.0)
-            }
-            (Some((shield, health)), None) => shield + health,
-            _ => 0.0,
-        };
-        self.note_step(dt, travelled, taken);
-        self.chart_ship_damaged(taken);
-        self.update_diplomacy(dt);
-        self.update_apex();
-        self.update_breakups(dt);
-        self.remove_destroyed();
-        self.prune_slings();
-        self.cleanup_rifts();
-        self.update_ping(dt);
-        self.update_jobs();
-        self.update_agreements(dt);
-        self.cue_player_damage(ship_before, sources);
-        self.cue_heartbeat(dt);
     }
 
     /// Loads sectors the player can reach, unloads distant ones, and flags which
