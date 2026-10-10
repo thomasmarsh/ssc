@@ -40,6 +40,7 @@ pub enum BenchAction {
     WaterTank,
     Warehouse,
     WaterExtractor,
+    MiningDrone,
     Research(research::Tech),
     Grade,
     Partnership,
@@ -147,6 +148,7 @@ impl Game {
                         BenchAction::WaterTank,
                         BenchAction::Warehouse,
                         BenchAction::WaterExtractor,
+                        BenchAction::MiningDrone,
                     ]
                 }))
                 .chain(Material::ALL.map(BenchAction::Stash))
@@ -222,6 +224,7 @@ impl Game {
             Some(BenchAction::Warehouse) => self.buy_warehouse(),
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
+            Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
             Some(BenchAction::Partnership) => self.buy_partnership(),
             Some(BenchAction::Agreement(id)) => self.act_agreement(id),
@@ -678,6 +681,28 @@ impl Game {
                 } else {
                     row.costs = production::WATER_EXTRACTOR_PRICE.to_vec();
                     if let Some(why) = self.water_extractor_block() {
+                        row.ok = false;
+                        row.state = why.into();
+                    }
+                }
+            }
+            BenchAction::MiningDrone => {
+                row.group = "PAD FLEET";
+                row.text = "BUILD MINING DRONE".into();
+                row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. No flight/combat yet.".into();
+                if let Some(pad) = self.landed_pad().filter(|p| p.drone.is_some()) {
+                    row.text = "MINING DRONE".into();
+                    row.ok = false;
+                    let material =
+                        mining::material_of(self.seed, RockKind::Planetoid, Some(pad.key));
+                    row.state = format!(
+                        "{} - {}",
+                        material.label(),
+                        pad.drone.as_ref().unwrap().status(pad, material)
+                    );
+                } else {
+                    row.costs = fleet::DRONE_PRICE.to_vec();
+                    if let Some(why) = self.mining_drone_block() {
                         row.ok = false;
                         row.state = why.into();
                     }

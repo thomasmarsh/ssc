@@ -2102,6 +2102,19 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 .insert(ssc::simulation::research::Tech::Fabrication);
             game.bench_select(BenchAction::Power);
         }
+        "mining-drone" => {
+            game.loadout
+                .research
+                .known
+                .insert(ssc::simulation::research::Tech::Fabrication);
+            game.bench_select(BenchAction::Power);
+            game.bench_confirm();
+            game.cargo.metal = 100.0;
+            game.cargo.crystal = 30.0;
+            game.bench_select(BenchAction::Warehouse);
+            game.bench_confirm();
+            game.bench_select(BenchAction::MiningDrone);
+        }
         "water-extractor" => {
             game.loadout
                 .research

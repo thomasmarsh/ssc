@@ -106,6 +106,8 @@ pub struct Pad {
     pub water_extractor: bool,
     #[serde(default)]
     pub power: bool,
+    #[serde(default)]
+    pub drone: Option<super::fleet::MiningDrone>,
     /// Deployment order: the oldest is dismantled first.
     pub order: u64,
     /// The home-base pad on HOME's planetoid, there from the start: never dismantled for a
@@ -363,6 +365,7 @@ impl Game {
                 water_tank: false,
                 water_extractor: false,
                 power: false,
+                drone: None,
                 warehouse: false,
             },
         );
@@ -756,6 +759,7 @@ impl Game {
                 water_tank: false,
                 water_extractor: false,
                 power: false,
+                drone: None,
                 warehouse: false,
             },
         );
@@ -918,6 +922,7 @@ impl Game {
         self.observe_pads();
         self.besiege_pads(dt);
         self.update_production(dt);
+        self.update_mining_drones(dt);
     }
 
     fn update_landed(&mut self, dt: f32, input: &Input) {
@@ -1829,6 +1834,7 @@ mod tests {
                     water_tank: false,
                     water_extractor: false,
                     power: false,
+                    drone: None,
                     warehouse: false,
                 },
             );
@@ -2567,6 +2573,7 @@ mod tests {
                 water_tank: false,
                 water_extractor: false,
                 power: false,
+                drone: None,
                 warehouse: false,
             },
         );
@@ -3197,6 +3204,7 @@ mod tests {
                     water_tank: false,
                     water_extractor: false,
                     power: false,
+                    drone: None,
                     warehouse: false,
                 },
             );

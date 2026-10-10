@@ -36,6 +36,8 @@ Delta = saved. Derived = recomputed on load. Ephemeral = dropped. "Later" = not 
 
 Recurring agreements are an additive defaulted map in `jobs`: supplier ID, capital, player PadKey, remaining finite lots, simulation cooldown, pause, and terminal outcome. Four open / 128 lifetime records; successful handoff pays/decrements once, pause and suspension stop cooldown, no wall-clock catch-up. Endpoint loss and generator mismatch close stock permanently without touching ship cargo. Generation/save versions stay unchanged; no migration code.
 
+Mining orders are additive defaulted `Pad.drone` records: finite cargo, work/return countdown, and empty-deposit status. Home/order identity is the enclosing PadKey; ore uses the shared `mined`/`regrow_stamp` ledger. Dispatch removes local fuel and reserves ore once; delivery removes only accepted cargo. Save/unload never recharges fuel or refreshes ore. Pad loss or generator mismatch drops drone/cargo; remote combat and salvage are pending. No save/generator bump or migration code.
+
 ## Format and versioning
 
 RON text, `Save(version: N, generator: G, state: (...))`, human readable and diffable. `version` is this layout (`SAVE_VERSION`), `generator` is `GENERATOR_VERSION` when it was written.

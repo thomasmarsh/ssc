@@ -90,6 +90,12 @@ Generator version stays **19**: generated content, map compatibility, spawn indi
 
 Are paired part action rows clearer than a separate action selector? Does wrapping from the last organ to mining feel natural? Are group headings and the selected action clear on a small physical display? Does the unowned weapon explanation set the right expectation about finding profiles? Are partial repair and full-slot organ replacement understandable before confirmation? Does Q/X stash withdrawal remain easy to discover? Are four seconds enough to read the receipt while buying repeatedly? Is the paid no-better-roll outcome clear and fair? Do the two changed stats plus the full current description provide enough detail? Does availability guidance clearly distinguish meeting the part gate from buying the skill? Is the shared chime and single ring noticeable without becoming intrusive?
 
+## Mining drone order
+
+PARTS at a landed powered warehouse offers BUILD MINING DRONE (40M 10C, Fabrication). The built row reports home-deposit work/return, cargo blocked by storage, empty deposit, missing fuel, or missing power. Each trip uses 1 local F for up to 10 ore, 10s work + 5s return. No repeat payment. See GAME_LOOP section 10 for persistence and current fleet limits.
+
+The `mining-drone` gallery selects construction with prerequisites built; `SSC_BENCH_RESULT=1` confirms the real paid action. Both 640x480 Metal captures were inspected: full trip terms, costs, paid receipt, and built missing-fuel status fit. Four scenario tests cover atomic gates/payment, shared loaded depletion and delayed delivery, saved unloaded cargo/storage blockage/fuel exhaustion, and power/deposit/generator stops. Human balance and travel feel remain unverified.
+
 ## Finite HOME raw inputs
 
 PARTS offers BUY VOLATILES +20 for 10M at HOME, with remaining stock or a precise refusal in the selected state. Ten lots per run are saved; there is no restock. Store the bought feedstock through the volatile stash row to run a refinery, then Q / X retrieves fuel. The `raw-input` gallery selects this offer; `SSC_BENCH_RESULT=1` confirms it.
