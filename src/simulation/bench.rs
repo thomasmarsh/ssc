@@ -749,7 +749,7 @@ impl Game {
                     None => "MINE HOME DEPOSIT".into(),
                     Some((id, x, y)) => format!("MINE ({}, {}) AT {}, {}", id.x, id.y, x, y),
                 };
-                row.detail = "Known planets <=6000 units. Unload old cargo first. Travel +distance/300s each way; same fuel. No combat.".into();
+                row.detail = "Known deposits <=6000. One material/trip; skip full stores. Unload first. Travel +distance/300s each way; same fuel.".into();
                 if let Some(why) = self.drone_deposit_block(mark) {
                     row.ok = false;
                     row.state = why.into();

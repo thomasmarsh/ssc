@@ -1746,13 +1746,13 @@ fn smoke_run(
                         ssc::simulation::fleet::DroneUpgrade::Cargo,
                     ));
             }
-            "mining-fleet-deposit" => {
-                if let Some(action) = session
-                    .game
-                    .drone_deposit_actions()
-                    .into_iter()
-                    .find(|a| matches!(a, ssc::simulation::BenchAction::DroneDeposit(Some(_))))
-                {
+            "mining-fleet-deposit" | "mining-fleet-rock" => {
+                let action = if mode == "mining-fleet-rock" {
+                    session.game.stage_drone_rock_smoke()
+                } else {
+                    session.game.stage_drone_deposit_smoke()
+                };
+                if let Some(action) = action {
                     session.game.bench_select(action);
                 }
             }
@@ -2189,7 +2189,8 @@ fn smoke_bench(game: &mut Game, mode: &str) {
         | "mining-fleet-retrofit"
         | "mining-fleet-template"
         | "mining-fleet-blueprint"
-        | "mining-fleet-deposit" => {
+        | "mining-fleet-deposit"
+        | "mining-fleet-rock" => {
             game.loadout.research.known.extend([
                 ssc::simulation::research::Tech::Fabrication,
                 ssc::simulation::research::Tech::Automation,
@@ -2219,6 +2220,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                         | "mining-fleet-template"
                         | "mining-fleet-blueprint"
                         | "mining-fleet-deposit"
+                        | "mining-fleet-rock"
                 ) {
                     game.bench_confirm();
                     game.bench_select(BenchAction::MiningDroneStatus(
@@ -2238,8 +2240,12 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                         ));
                     }
                     game.bench_feedback = None;
-                    if mode == "mining-fleet-deposit"
-                        && let Some(action) = game.stage_drone_deposit_smoke()
+                    if matches!(mode, "mining-fleet-deposit" | "mining-fleet-rock")
+                        && let Some(action) = if mode == "mining-fleet-rock" {
+                            game.stage_drone_rock_smoke()
+                        } else {
+                            game.stage_drone_deposit_smoke()
+                        }
                     {
                         game.bench_select(action);
                     }

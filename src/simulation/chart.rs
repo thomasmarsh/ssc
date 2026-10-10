@@ -416,7 +416,7 @@ impl Game {
         }
     }
 
-    /// Known planetoid centers, bounded to the fleet's local working radius.
+    /// Known planetoid and free-lode centers, bounded to the fleet's local working radius.
     pub(super) fn fleet_deposit_marks(&self, center: Vec2) -> Vec<(SectorId, i32, i32)> {
         let sector = SectorId::containing(center);
         self.chart
@@ -428,7 +428,7 @@ impl Game {
                     .marks
                     .values()
                     .filter(move |mark| {
-                        (mark.kind == EchoKind::Planetoid || mark.renewable)
+                        (matches!(mark.kind, EchoKind::Planetoid | EchoKind::Lode))
                             && mark.position.distance(center) <= SECTOR_SIZE
                             && mark.position.distance(center) > 1.0
                     })
@@ -864,7 +864,7 @@ mod tests {
         });
         assert_eq!(
             game.fleet_deposit_marks(center),
-            vec![(SectorId::ORIGIN, 1000, 0)]
+            vec![(SectorId::ORIGIN, 1000, 0), (SectorId::ORIGIN, 2000, 0)]
         );
     }
 
