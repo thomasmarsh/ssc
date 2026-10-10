@@ -260,21 +260,8 @@ impl Game {
             territory_name,
             raid,
             territory_sector,
-            civ_lineages,
-            civ_bases,
-            civ_works,
-            civ_mining,
-            civ_colors,
-            civ_territories,
-            civ_fall,
-            civ_brains,
-            civ_regard,
-            societies,
-            civ_hits,
-            civ_struck,
+            civs,
             fauna,
-            civ_clock,
-            civ_rng,
             apexes,
             apex_seen,
             apex_state,
@@ -313,6 +300,23 @@ impl Game {
             feel,
             lure,
         } = self;
+
+        let civstate::Civs {
+            lineages,
+            bases,
+            works,
+            mining,
+            colors,
+            territories,
+            fall,
+            brains,
+            regard,
+            societies,
+            hits,
+            struck,
+            clock: civ_clock,
+            rng: civ_rng,
+        } = civs;
 
         let mut h = Hasher::new("clock");
         h.put(seed);
@@ -403,18 +407,18 @@ impl Game {
         let ship = h.finish();
 
         let mut h = Hasher::new("civilization");
-        h.map(civ_lineages);
-        h.map(civ_bases);
-        h.map(civ_works);
-        h.put(civ_mining);
-        h.map(civ_colors);
-        h.map(civ_territories);
-        h.map(civ_fall);
-        h.map(civ_brains);
-        h.put(civ_regard);
+        h.map(lineages);
+        h.map(bases);
+        h.map(works);
+        h.put(mining);
+        h.map(colors);
+        h.map(territories);
+        h.map(fall);
+        h.map(brains);
+        h.put(regard);
         h.put(societies);
-        h.put(civ_hits);
-        h.map(civ_struck);
+        h.put(hits);
+        h.map(struck);
         h.put(fauna);
         h.put(territory);
         h.put(territory_name);

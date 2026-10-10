@@ -126,10 +126,11 @@ pub(super) fn civil_target(body: &Body) -> bool {
 impl Game {
     /// The regard of a civilization (what it would start at if never met).
     pub fn civ_regard(&self, territory: u64) -> f32 {
-        match self.civ_regard.get(&territory) {
+        match self.civs.regard.get(&territory) {
             Some(r) => r.value,
             None => self
-                .civ_territories
+                .civs
+                .territories
                 .get(&territory)
                 .map_or(self.tune.regard_start, |t| start_value(t, &self.tune)),
         }
@@ -138,10 +139,11 @@ impl Game {
     /// How the civilization stands toward the ship. A territory the game has never registered
     /// (a test's stand-in) is hostile, as every civilization used to be.
     pub fn civ_tier(&self, territory: u64) -> Tier {
-        match self.civ_regard.get(&territory) {
+        match self.civs.regard.get(&territory) {
             Some(r) => r.tier,
             None => self
-                .civ_territories
+                .civs
+                .territories
                 .get(&territory)
                 .map_or(Tier::Hostile, |t| {
                     Tier::of(start_value(t, &self.tune), &self.tune)
@@ -160,9 +162,10 @@ impl Game {
     }
 
     pub(super) fn regard_mut(&mut self, territory: u64) -> Option<&mut Regard> {
-        let t = *self.civ_territories.get(&territory)?;
+        let t = *self.civs.territories.get(&territory)?;
         Some(
-            self.civ_regard
+            self.civs
+                .regard
                 .entry(territory)
                 .or_insert_with(|| Regard::start(&t, &self.tune)),
         )
@@ -182,7 +185,7 @@ impl Game {
     /// Turns every civilization met so far hostile (tests that stage a war use it).
     #[cfg(test)]
     pub(super) fn provoke_all(&mut self) {
-        for id in self.civ_territories.keys().copied().collect::<Vec<_>>() {
+        for id in self.civs.territories.keys().copied().collect::<Vec<_>>() {
             self.set_regard(id, -80.0);
             self.set_civilization_war(id, true);
         }
@@ -203,17 +206,17 @@ impl Game {
 
     /// Re-reads the tier after a change in value, with the banner and effects of crossing a line.
     fn settle_tier(&mut self, territory: u64) {
-        let Some(&Regard { value, tier, .. }) = self.civ_regard.get(&territory) else {
+        let Some(&Regard { value, tier, .. }) = self.civs.regard.get(&territory) else {
             return;
         };
         let now = tier.settle(value, &self.tune);
         if now == tier {
             return;
         }
-        let Some(civ) = self.civ_territories.get(&territory).copied() else {
+        let Some(civ) = self.civs.territories.get(&territory).copied() else {
             return;
         };
-        if let Some(r) = self.civ_regard.get_mut(&territory) {
+        if let Some(r) = self.civs.regard.get_mut(&territory) {
             r.tier = now;
         }
         let name = civ.name(self.seed);
@@ -252,9 +255,10 @@ impl Game {
     /// A civilization warms to friendship: it forgets what it drilled against the ship and,
     /// the first time, shares its charts of its own land.
     fn befriended(&mut self, civ: Territory) {
-        self.civ_brains.remove(&civ.id);
+        self.civs.brains.remove(&civ.id);
         let first = self
-            .civ_regard
+            .civs
+            .regard
             .get_mut(&civ.id)
             .is_some_and(|r| !std::mem::replace(&mut r.shared, true));
         if !first {
@@ -284,7 +288,7 @@ impl Game {
     /// Per tick, at the end of the step before the dead are cleared: charges what the ship
     /// struck, lets timers run and lets regard recover.
     pub(super) fn update_diplomacy(&mut self, dt: f32) {
-        let hits = std::mem::take(&mut self.civ_hits);
+        let hits = std::mem::take(&mut self.civs.hits);
         for (id, dealt) in hits {
             let Some(body) = self.bodies.iter().find(|b| b.id == id) else {
                 continue;
@@ -295,32 +299,33 @@ impl Game {
                     .map(|(tid, _)| (tid, self.tune.hurt_member)),
                 _ => body
                     .origin
-                    .and_then(|o| self.civ_bases.get(&o).or_else(|| self.civ_works.get(&o)))
+                    .and_then(|o| self.civs.bases.get(&o).or_else(|| self.civs.works.get(&o)))
                     .map(|(tid, _)| (*tid, self.tune.hurt_structure)),
             };
             if let Some((tid, per_point)) = owner {
                 if dealt > 0.0 {
                     self.civil_player_harm(tid);
                 }
-                self.civ_struck.insert(id, self.time);
+                self.civs.struck.insert(id, self.time);
                 self.shift_regard(tid, -per_point * dealt);
             }
         }
-        if self.civ_struck.len() > 64 {
+        if self.civs.struck.len() > 64 {
             let now = self.time;
-            self.civ_struck
+            self.civs
+                .struck
                 .retain(|_, at| now - *at < self.tune.kill_window);
         }
         let here = self
             .territory
             .filter(|c| self.civ_standing(c.id) != Standing::Fallen);
-        let ids: Vec<u64> = self.civ_regard.keys().copied().collect();
+        let ids: Vec<u64> = self.civs.regard.keys().copied().collect();
         for tid in ids {
-            let Some(civ) = self.civ_territories.get(&tid).copied() else {
+            let Some(civ) = self.civs.territories.get(&tid).copied() else {
                 continue;
             };
             let inside = here.is_some_and(|c| c.id == tid);
-            let Some(r) = self.civ_regard.get_mut(&tid) else {
+            let Some(r) = self.civs.regard.get_mut(&tid) else {
                 continue;
             };
             r.calm += dt;
@@ -344,7 +349,8 @@ impl Game {
             return;
         }
         let struck = self
-            .civ_struck
+            .civs
+            .struck
             .remove(&body.id)
             .is_some_and(|at| self.time - at < self.tune.kill_window);
         if !struck {
@@ -363,7 +369,7 @@ impl Game {
             }),
             _ => body
                 .origin
-                .and_then(|o| self.civ_bases.get(&o).or_else(|| self.civ_works.get(&o)))
+                .and_then(|o| self.civs.bases.get(&o).or_else(|| self.civs.works.get(&o)))
                 .map(|&(tid, role)| {
                     (
                         tid,
@@ -402,7 +408,7 @@ impl Game {
         self.shift_regard(civ.id, -cost);
         let name = civ.name(self.seed);
         let tier = self.civ_tier(civ.id);
-        let warn = self.civ_regard.get_mut(&civ.id).filter(|r| r.warn <= 0.0);
+        let warn = self.civs.regard.get_mut(&civ.id).filter(|r| r.warn <= 0.0);
         if let Some(r) = warn
             && tier != Tier::Friendly
         {
@@ -426,7 +432,7 @@ impl Game {
             .iter()
             .filter(|b| b.kind == BodyKind::Base && b.active)
             .filter_map(|b| {
-                let (tid, role) = *self.civ_bases.get(&b.origin?)?;
+                let (tid, role) = *self.civs.bases.get(&b.origin?)?;
                 matches!(role, CivRole::Capital | CivRole::Outpost).then_some((b, tid))
             })
             .filter(|(b, _)| b.position.distance(ship) <= self.tune.tithe_range + b.radius)
@@ -438,7 +444,7 @@ impl Game {
                 );
                 da.total_cmp(&db).then(a.1.cmp(&b.1))
             })
-            .and_then(|(_, tid)| self.civ_territories.get(&tid).copied())
+            .and_then(|(_, tid)| self.civs.territories.get(&tid).copied())
     }
 
     /// The material a tithe would take: what the hold has most of (ties go metal, volatiles,
@@ -483,7 +489,7 @@ impl Game {
         };
         self.register_territory(civ);
         let name = civ.name(self.seed);
-        if self.civ_regard.get(&civ.id).is_some_and(|r| r.gift > 0.0) {
+        if self.civs.regard.get(&civ.id).is_some_and(|r| r.gift > 0.0) {
             return Err(TitheError::TooSoon);
         }
         let Some(kind) = self.tithe_material() else {
@@ -635,7 +641,7 @@ impl Game {
 
     /// The tiers of every civilization the ship has dealt with, for the HUD and the chart.
     pub fn civ_met(&self, territory: u64) -> Option<Tier> {
-        self.civ_regard.get(&territory).map(|r| r.tier)
+        self.civs.regard.get(&territory).map(|r| r.tier)
     }
 }
 
@@ -711,19 +717,17 @@ mod tests {
     fn at_the_outpost() -> (Game, Territory, Vec2) {
         let o = outpost(SEED);
         let mut game = visit(o.capital.center());
-        let seat = game
-            .bodies
-            .iter()
-            .find(|b| {
-                b.kind == BodyKind::Base
-                    && b.origin
-                        .and_then(|k| game.civ_bases.get(&k))
-                        .is_some_and(|(_, role)| {
-                            matches!(*role, CivRole::Outpost | CivRole::Capital)
-                        })
-            })
-            .map(|b| b.position)
-            .expect("the outpost has a seat");
+        let seat =
+            game.bodies
+                .iter()
+                .find(|b| {
+                    b.kind == BodyKind::Base
+                        && b.origin.and_then(|k| game.civs.bases.get(&k)).is_some_and(
+                            |(_, role)| matches!(*role, CivRole::Outpost | CivRole::Capital),
+                        )
+                })
+                .map(|b| b.position)
+                .expect("the outpost has a seat");
         let ship = seat + Vec2::new(250.0, 0.0);
         hold(&mut game, ship, 0.1);
         (game, o, ship)
@@ -960,14 +964,14 @@ mod tests {
                 .filter(|n| n.text.contains("dislike you mining"))
                 .count()
         };
-        game.civ_regard.get_mut(&t.id).unwrap().warn = 0.0;
+        game.civs.regard.get_mut(&t.id).unwrap().warn = 0.0;
         game.civ_mined(1.0);
         game.civ_mined(1.0);
         assert!(warnings(&game) <= 1);
         // Outside any claim the beam is free.
         let mut away = visit(Vec2::ZERO);
         away.civ_mined(100.0);
-        assert!(away.civ_regard.is_empty() || away.civ_regard.values().all(|r| r.value >= 0.0));
+        assert!(away.civs.regard.is_empty() || away.civs.regard.values().all(|r| r.value >= 0.0));
     }
 
     #[test]
@@ -1038,10 +1042,10 @@ mod tests {
         let base = game
             .bodies
             .iter()
-            .find(|b| b.origin.is_some_and(|o| game.civ_bases.contains_key(&o)))
+            .find(|b| b.origin.is_some_and(|o| game.civs.bases.contains_key(&o)))
             .map(|b| b.id)
             .unwrap();
-        game.civ_hits.push((base, 10.0));
+        game.civs.hits.push((base, 10.0));
         game.step(DT, Input::default());
         game.bodies
             .iter_mut()
@@ -1099,7 +1103,7 @@ mod tests {
             .iter()
             .find(|b| {
                 b.kind == BodyKind::Base
-                    && b.origin.is_some_and(|o| game.civ_bases.contains_key(&o))
+                    && b.origin.is_some_and(|o| game.civs.bases.contains_key(&o))
             })
             .map(|b| b.position)
             .unwrap();
@@ -1197,7 +1201,7 @@ mod tests {
     fn a_fallen_civilization_takes_no_tithe() {
         let (mut game, o, _) = at_the_outpost();
         game.cargo.metal = 100.0;
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             o.id,
             Fall {
                 capital: true,
@@ -1212,7 +1216,7 @@ mod tests {
         let t = find(CivShape::Horde);
         let mut game = visit(t.capital.center() + Vec2::new(0.0, 2500.0));
         let id = t.id;
-        game.civ_brains.insert(id, Box::new(Brain::new(7)));
+        game.civs.brains.insert(id, Box::new(Brain::new(7)));
         let pull = |game: &Game| game.doctrine_pull(id);
         game.set_regard(id, -80.0);
         let hostile = pull(&game);
@@ -1239,7 +1243,7 @@ mod tests {
             game.civ_mined(80.0);
             hold(&mut game, spot, 30.0);
             let victim = spawn(&mut game, &t.member(SEED), spot + Vec2::new(0.0, 500.0));
-            game.civ_hits.push((victim, 12.0));
+            game.civs.hits.push((victim, 12.0));
             hold(&mut game, spot, 5.0);
             game.civ_mined(200.0);
             hold(&mut game, spot, 60.0);

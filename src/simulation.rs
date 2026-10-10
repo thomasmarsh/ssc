@@ -20,6 +20,7 @@ mod chain;
 mod chart;
 mod civ;
 mod civmine;
+mod civstate;
 mod creature;
 mod cues;
 mod dash;
@@ -551,29 +552,10 @@ pub struct Game {
     pub territory_name: String,
     pub raid: Option<Raid>,
     territory_sector: Option<SectorId>,
-    /// Lineage -> (territory, role) of every civilization lineage met, and the capital bases
-    /// by spawn, the territories met, their lasting falls and their shared brains.
-    civ_lineages: HashMap<u64, (u64, CivRole)>,
-    civ_bases: HashMap<(SectorId, u32), (u64, CivRole)>,
-    /// Walls and turrets of fortified cities by spawn: (territory, role).
-    civ_works: HashMap<(SectorId, u32), (u64, CivRole)>,
-    /// Per-territory mining: miners, the stash at the capital and the ore budget.
-    civ_mining: BTreeMap<u64, civmine::Mining>,
-    civ_colors: HashMap<u64, [f32; 3]>,
-    civ_territories: HashMap<u64, Territory>,
-    civ_fall: HashMap<u64, Fall>,
-    civ_brains: HashMap<u64, Box<Brain>>,
-    /// What each civilization met thinks of the ship, the ship's recent hits on civil bodies
-    /// (body, damage) awaiting the end of the step, and when each body was last struck; see
-    /// `diplomacy`.
-    civ_regard: BTreeMap<u64, Regard>,
-    societies: society::Societies,
-    civ_hits: Vec<(u64, f32)>,
-    civ_struck: HashMap<u64, f32>,
+    /// All civilization state, one owned aggregate; see `civstate`.
+    civs: civstate::Civs,
     /// Wildlife stances toward civilizations; see `wildlife`.
     fauna: wildlife::Fauna,
-    civ_clock: f32,
-    civ_rng: Rng,
     /// Apex elders generated in the sectors met, and which have been announced; see `apexes`.
     apexes: BTreeMap<(SectorId, u32), ApexInfo>,
     apex_seen: HashSet<(SectorId, u32)>,
@@ -712,18 +694,7 @@ impl Game {
             territory_name: String::new(),
             raid: None,
             territory_sector: None,
-            civ_lineages: HashMap::new(),
-            civ_bases: HashMap::new(),
-            civ_works: HashMap::new(),
-            civ_mining: BTreeMap::new(),
-            civ_colors: HashMap::new(),
-            civ_territories: HashMap::new(),
-            civ_fall: HashMap::new(),
-            civ_brains: HashMap::new(),
-            civ_regard: BTreeMap::new(),
-            societies: society::Societies::default(),
-            civ_hits: Vec::new(),
-            civ_struck: HashMap::new(),
+            civs: civstate::Civs::new(seed),
             fauna: wildlife::Fauna::default(),
             apexes: BTreeMap::new(),
             apex_seen: HashSet::new(),
@@ -733,8 +704,6 @@ impl Game {
             splits: Vec::new(),
             song_rings: Vec::new(),
             apex_rng: Rng::new(seed ^ crate::apex::APEX_SALT),
-            civ_clock: 0.0,
-            civ_rng: Rng::new(seed ^ crate::territory::TERRITORY_SALT),
             sanctuary: true,
             region: regions::RegionState::default(),
             realms: realms::RealmState::default(),
@@ -1061,10 +1030,12 @@ impl Game {
             }
             if let Some(tag) = spawn.civ {
                 if matches!(tag.role, CivRole::Wall | CivRole::Turret) {
-                    self.civ_works
+                    self.civs
+                        .works
                         .insert((id, spawn.index), (tag.territory, tag.role));
                 } else if spawn.base_kind.is_some() {
-                    self.civ_bases
+                    self.civs
+                        .bases
                         .insert((id, spawn.index), (tag.territory, tag.role));
                 }
                 self.civ_dress(&mut body, tag, spawn.species.as_ref());
@@ -1421,7 +1392,7 @@ impl Game {
                     rammed += dealt;
                     ship_rammed |= dealt > 0.0;
                     if dealt > 0.0 && diplomacy::civil_target(b) {
-                        self.civ_hits.push((b.id, dealt));
+                        self.civs.hits.push((b.id, dealt));
                     }
                 }
                 if b.kind == BodyKind::Player && b.contact_cooldown <= 0.0 {
@@ -1429,7 +1400,7 @@ impl Game {
                     rammed += dealt;
                     ship_rammed |= dealt > 0.0;
                     if dealt > 0.0 && diplomacy::civil_target(a) {
-                        self.civ_hits.push((a.id, dealt));
+                        self.civs.hits.push((a.id, dealt));
                     }
                 }
             }
@@ -1505,13 +1476,15 @@ impl Game {
             })
             .collect();
         let permitted_ship: HashSet<_> = self
-            .civ_territories
+            .civs
+            .territories
             .keys()
             .copied()
             .filter(|id| self.civilization_may_attack(*id, CivilTarget::Ship))
             .collect();
         let permitted_fleet: HashSet<_> = self
-            .civ_territories
+            .civs
+            .territories
             .keys()
             .copied()
             .filter(|id| self.civilization_may_attack(*id, CivilTarget::Fleet))
@@ -1806,7 +1779,7 @@ impl Game {
                         bubble_hits.push((body.id, bullet.damage * boost * guarded * reach));
                     }
                     if bullet.friendly && dealt > 0.0 && diplomacy::civil_target(body) {
-                        self.civ_hits.push((body.id, dealt));
+                        self.civs.hits.push((body.id, dealt));
                     }
                     if !is_fixed(body) {
                         body.velocity += bullet.velocity.normalize_or_zero()
@@ -1971,7 +1944,7 @@ impl Game {
                         self.run.damage_dealt += dealt;
                     }
                     if dealt > 0.0 && diplomacy::civil_target(body) {
-                        self.civ_hits.push((body.id, dealt));
+                        self.civs.hits.push((body.id, dealt));
                     }
                 } else if !friendly
                     && body.kind == BodyKind::Player

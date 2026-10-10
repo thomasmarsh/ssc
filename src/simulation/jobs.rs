@@ -502,7 +502,7 @@ mod tests {
             .find(|b| {
                 b.kind == BodyKind::Base
                     && b.origin.is_some_and(|o| {
-                        game.civ_bases.get(&o).is_some_and(|(id, _)| *id == civ.id)
+                        game.civs.bases.get(&o).is_some_and(|(id, _)| *id == civ.id)
                     })
             })
             .unwrap();
@@ -669,7 +669,7 @@ mod tests {
         game.bodies.retain(|b| {
             b.kind != BodyKind::Creature
                 || b.origin.is_none_or(|o| o.0 != civ.capital)
-                || game.civ_lineages.contains_key(&b.species)
+                || game.civs.lineages.contains_key(&b.species)
         });
         assert!(game.pest_offer(&civ).is_none());
         let mut ineligible = victim.clone();
@@ -706,7 +706,7 @@ mod tests {
                     game.bench_confirm();
                 }
                 Status::SupplierLost => {
-                    game.civ_fall.entry(civ.id).or_default().capital = true;
+                    game.civs.fall.entry(civ.id).or_default().capital = true;
                     game.update_jobs();
                 }
                 Status::WorldChanged => {
@@ -779,7 +779,7 @@ mod tests {
         assert!(game.partnership_block().is_some());
         assert_eq!(game.grade_price()[2].1, 10.0);
         game.set_regard(civ.id, 65.0);
-        game.civ_fall.entry(civ.id).or_default().capital = true;
+        game.civs.fall.entry(civ.id).or_default().capital = true;
         assert!(!game.partnership_service());
         assert_eq!(game.grade_price()[2].1, 10.0);
         assert!(game.loadout.research.active(Tech::Frontier));
@@ -943,7 +943,7 @@ mod tests {
         );
         game.teleport(Vec2::ZERO);
         game.step(1.0 / 60.0, Input::default());
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             civ.id,
             Fall {
                 capital: true,

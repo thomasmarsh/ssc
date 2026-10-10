@@ -608,9 +608,10 @@ mod tests {
         let id = territory_sector(seed);
         let tid = world::territory(seed, id).unwrap().id;
         let mut game = empty_game();
-        game.civ_territories
+        game.civs
+            .territories
             .insert(tid, world::territory(seed, id).unwrap());
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             tid,
             crate::territory::Fall {
                 capital: true,

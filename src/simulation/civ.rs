@@ -198,14 +198,14 @@ impl Game {
         if body.kind != BodyKind::Creature {
             return None;
         }
-        self.civ_lineages.get(&body.species).copied()
+        self.civs.lineages.get(&body.species).copied()
     }
 
     /// Remembers a territory (and its tint) the first time it is met.
     pub(super) fn register_territory(&mut self, t: Territory) {
-        self.societies.register(t);
-        if self.civ_territories.insert(t.id, t).is_none() {
-            self.civ_colors.insert(t.id, t.color(self.seed));
+        self.civs.societies.register(t);
+        if self.civs.territories.insert(t.id, t).is_none() {
+            self.civs.colors.insert(t.id, t.color(self.seed));
         }
     }
 
@@ -217,14 +217,15 @@ impl Game {
             }
             BodyKind::Base | BodyKind::Asteroid => {
                 let key = body.origin?;
-                self.civ_bases
+                self.civs
+                    .bases
                     .get(&key)
-                    .or_else(|| self.civ_works.get(&key))?
+                    .or_else(|| self.civs.works.get(&key))?
                     .0
             }
             _ => self.civ_of(body)?.0,
         };
-        self.civ_colors.get(&tid).copied()
+        self.civs.colors.get(&tid).copied()
     }
 
     /// True for the boss of a civilization.
@@ -233,23 +234,25 @@ impl Game {
     }
 
     pub fn civ_fall(&self, territory: u64) -> Fall {
-        self.civ_fall.get(&territory).copied().unwrap_or_default()
+        self.civs.fall.get(&territory).copied().unwrap_or_default()
     }
 
     pub fn civ_standing(&self, territory: u64) -> Standing {
-        self.civ_territories
+        self.civs
+            .territories
             .get(&territory)
             .map_or(Standing::Thriving, |t| t.standing(self.civ_fall(t.id)))
     }
 
     /// The shared doctrine of a civilization, if it has formed one.
     pub fn civ_doctrine(&self, territory: u64) -> Option<&Brain> {
-        self.civ_brains.get(&territory).map(|b| &**b)
+        self.civs.brains.get(&territory).map(|b| &**b)
     }
 
     /// Whether a civilization is a peaceful settlement: it never raids and never hunts a pad.
     pub(super) fn civ_peaceful(&self, territory: u64) -> bool {
-        self.civ_territories
+        self.civs
+            .territories
             .get(&territory)
             .is_some_and(|t| t.peaceful())
     }
@@ -310,13 +313,15 @@ impl Game {
             domain: self.territory.map(|t| t.id),
             raid: self.raid.as_ref().map(|r| (r.territory, r.stage())),
             ended: self
-                .civ_territories
+                .civs
+                .territories
                 .values()
                 .filter(|t| t.standing(self.civ_fall(t.id)) == Standing::Fallen)
                 .map(|t| t.id)
                 .collect(),
             permitted: self
-                .civ_territories
+                .civs
+                .territories
                 .keys()
                 .copied()
                 .filter(|t| self.civilization_may_attack(*t, CivilTarget::Ship))
@@ -334,7 +339,8 @@ impl Game {
     /// a leash to where it was placed, the doctrine's brain, and an elder's extra hull.
     pub(super) fn civ_dress(&mut self, body: &mut Body, tag: CivTag, species: Option<&Species>) {
         if let Some(species) = species {
-            self.civ_lineages
+            self.civs
+                .lineages
                 .insert(species.lineage, (tag.territory, tag.role));
         }
         if body.kind != BodyKind::Creature {
@@ -346,7 +352,7 @@ impl Game {
             body.health = body.max_health;
         }
         if body.brain.is_some()
-            && let Some(table) = self.civ_brains.get(&tag.territory)
+            && let Some(table) = self.civs.brains.get(&tag.territory)
         {
             body.brain = Some(Box::new(table.learned_copy()));
         }
@@ -391,9 +397,9 @@ impl Game {
             }
         }
         self.update_raid(dt);
-        self.civ_clock -= dt;
-        if self.civ_clock <= 0.0 {
-            self.civ_clock = SHARE_PERIOD;
+        self.civs.clock -= dt;
+        if self.civs.clock <= 0.0 {
+            self.civs.clock = SHARE_PERIOD;
             self.share_doctrine();
         }
     }
@@ -464,7 +470,7 @@ impl Game {
             Some(pad) => (pad, true),
             None => (ship, false),
         };
-        let heading = Vec2::from_angle(self.civ_rng.f32() * TAU) * ARRIVAL;
+        let heading = Vec2::from_angle(self.civs.rng.f32() * TAU) * ARRIVAL;
         let mut sent = 0;
         for k in 0..count.min(CIV_CAP.saturating_sub(alive)) {
             let escorts = t.shape != crate::territory::CivShape::Horde && k % 3 == 2;
@@ -473,7 +479,7 @@ impl Game {
             } else {
                 member
             };
-            let at = mark + heading + self.civ_rng.direction() * self.civ_rng.range(0.0, 260.0);
+            let at = mark + heading + self.civs.rng.direction() * self.civs.rng.range(0.0, 260.0);
             let sector = SectorId::containing(at);
             // A party aimed at a pad must still arrive inside the simulated region.
             if at_pad && !self.active.contains(&sector) {
@@ -499,9 +505,9 @@ impl Game {
             body.velocity = (mark - at).normalize_or_zero() * species.genome.cruise;
             body.wander = (mark - at).to_angle();
             body.angle = body.wander;
-            body.fire_cooldown = 1.5 + self.civ_rng.f32() * 2.0;
+            body.fire_cooldown = 1.5 + self.civs.rng.f32() * 2.0;
             if body.brain.is_some()
-                && let Some(table) = self.civ_brains.get(&t.id)
+                && let Some(table) = self.civs.brains.get(&t.id)
             {
                 body.brain = Some(Box::new(table.learned_copy()));
             }
@@ -525,7 +531,7 @@ impl Game {
     pub(super) fn share_doctrine(&mut self) {
         let mut territories: Vec<u64> = Vec::new();
         for body in self.bodies.iter().filter(|b| b.active && b.brain.is_some()) {
-            if let Some((tid, _)) = self.civ_lineages.get(&body.species)
+            if let Some((tid, _)) = self.civs.lineages.get(&body.species)
                 && !territories.contains(tid)
             {
                 territories.push(*tid);
@@ -533,12 +539,12 @@ impl Game {
         }
         for tid in territories {
             let pull = TABLE_PULL * self.doctrine_pull(tid);
-            let mut table = self.civ_brains.remove(&tid);
+            let mut table = self.civs.brains.remove(&tid);
             for body in self.bodies.iter().filter(|b| b.active) {
                 let Some(brain) = body.brain.as_deref() else {
                     continue;
                 };
-                if self.civ_lineages.get(&body.species).map(|c| c.0) != Some(tid)
+                if self.civs.lineages.get(&body.species).map(|c| c.0) != Some(tid)
                     || !brain.is_trained()
                 {
                     continue;
@@ -553,14 +559,14 @@ impl Game {
             }
             if let Some(table) = table {
                 for body in self.bodies.iter_mut().filter(|b| b.active) {
-                    if self.civ_lineages.get(&body.species).map(|c| c.0) != Some(tid) {
+                    if self.civs.lineages.get(&body.species).map(|c| c.0) != Some(tid) {
                         continue;
                     }
                     if let Some(brain) = body.brain.as_deref_mut() {
                         brain.blend_toward(&table, MEMBER_PULL);
                     }
                 }
-                self.civ_brains.insert(tid, table);
+                self.civs.brains.insert(tid, table);
             }
         }
     }
@@ -574,7 +580,7 @@ impl Game {
         let territory = match body.kind {
             BodyKind::Base => body
                 .origin
-                .and_then(|o| self.civ_bases.get(&o))
+                .and_then(|o| self.civs.bases.get(&o))
                 .filter(|(_, role)| *role == CivRole::Capital)
                 .map(|(t, _)| (*t, false)),
             BodyKind::Creature => match self.civ_of(body) {
@@ -586,14 +592,14 @@ impl Game {
         let Some((tid, elder)) = territory else {
             return;
         };
-        let Some(t) = self.civ_territories.get(&tid).copied() else {
+        let Some(t) = self.civs.territories.get(&tid).copied() else {
             return;
         };
-        if !body.hostile_rock_kill && self.civ_struck.contains_key(&body.id) {
+        if !body.hostile_rock_kill && self.civs.struck.contains_key(&body.id) {
             self.capture_knowledge(&t);
         }
         let before = t.standing(self.civ_fall(tid));
-        let fall = self.civ_fall.entry(tid).or_default();
+        let fall = self.civs.fall.entry(tid).or_default();
         if elder {
             fall.elder = true;
         } else {
@@ -762,7 +768,7 @@ mod tests {
             game.register_territory(t);
             game.set_regard(t.id, -80.0);
             assert!(game.set_civilization_war(t.id, true));
-            game.civ_lineages.insert(t.id, (t.id, CivRole::Member));
+            game.civs.lineages.insert(t.id, (t.id, CivRole::Member));
             game.territory_sector = Some(SectorId::ORIGIN);
             game.territory = inside.then_some(t);
             let near = spawn(&mut game, &species, Vec2::new(0.0, 900.0));
@@ -900,7 +906,7 @@ mod tests {
                 .iter()
                 .find(|b| {
                     b.origin
-                        .and_then(|o| game.civ_bases.get(&o))
+                        .and_then(|o| game.civs.bases.get(&o))
                         .is_some_and(|c| c.1 == CivRole::Capital)
                 })
                 .map(|b| b.id)
@@ -937,7 +943,7 @@ mod tests {
         let base = game
             .bodies
             .iter()
-            .find(|b| b.origin.is_some_and(|o| game.civ_bases.contains_key(&o)))
+            .find(|b| b.origin.is_some_and(|o| game.civs.bases.contains_key(&o)))
             .map(|b| b.id)
             .unwrap();
         game.bodies
@@ -966,7 +972,7 @@ mod tests {
         assert!(
             game.bodies
                 .iter()
-                .all(|b| !b.origin.is_some_and(|o| game.civ_bases.contains_key(&o))),
+                .all(|b| !b.origin.is_some_and(|o| game.civs.bases.contains_key(&o))),
             "no capital returns"
         );
         assert!(
@@ -1014,7 +1020,7 @@ mod tests {
         let species = t.member(SEED);
         let mut game = empty_game();
         game.register_territory(t);
-        game.civ_lineages.insert(t.id, (t.id, CivRole::Member));
+        game.civs.lineages.insert(t.id, (t.id, CivRole::Member));
         let a = spawn(&mut game, &species, Vec2::new(0.0, 3000.0));
         let b = spawn(&mut game, &species, Vec2::new(300.0, 3000.0));
         // Train A by letting it watch a circling ship.

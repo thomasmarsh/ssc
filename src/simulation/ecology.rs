@@ -151,7 +151,7 @@ impl Game {
             // can build a guardian; otherwise the stash piles up) instead of the trickle.
             let capital = self.bodies[index]
                 .origin
-                .and_then(|o| self.civ_bases.get(&o))
+                .and_then(|o| self.civs.bases.get(&o))
                 .filter(|(_, role)| *role == crate::territory::CivRole::Capital)
                 .map(|(tid, _)| *tid);
             let mining_on = capital.is_some_and(|t| self.civ_mining_active(t));
@@ -176,7 +176,7 @@ impl Game {
                 }
                 _ => false,
             };
-            let feed = match capital.and_then(|t| self.civ_mining.get_mut(&t)) {
+            let feed = match capital.and_then(|t| self.civs.mining.get_mut(&t)) {
                 Some(mining) if can_build => mining.withdraw(civmine::FEED_RATE * dt),
                 _ => 0.0,
             };
@@ -250,7 +250,7 @@ impl Game {
         // A civilization's station that is not at war with the ship holds its fire.
         if let Some(&(tid, _)) = self.bodies[index]
             .origin
-            .and_then(|o| self.civ_bases.get(&o))
+            .and_then(|o| self.civs.bases.get(&o))
             && !self.civilization_may_attack(tid, CivilTarget::Ship)
         {
             return;
@@ -294,7 +294,7 @@ impl Game {
             let muzzle = weapons::Muzzle {
                 civilization: self.bodies[index]
                     .origin
-                    .and_then(|o| self.civ_bases.get(&o))
+                    .and_then(|o| self.civs.bases.get(&o))
                     .map(|(id, _)| *id),
                 origin,
                 aim,

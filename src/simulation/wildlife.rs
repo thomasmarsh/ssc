@@ -77,7 +77,7 @@ struct Thing {
 impl Game {
     /// The disposition of a lineage toward a registered civilization at a world position.
     pub fn fauna_affinity(&self, body: &Body, tid: u64) -> Option<f32> {
-        let civ = self.civ_territories.get(&tid)?;
+        let civ = self.civs.territories.get(&tid)?;
         Some(affinity::affinity(
             self.seed,
             body.species,
@@ -93,9 +93,10 @@ impl Game {
             BodyKind::Creature if !b.follower => self.civ_of(b).map(|c| c.0),
             BodyKind::Base => {
                 let key = b.origin?;
-                self.civ_bases
+                self.civs
+                    .bases
                     .get(&key)
-                    .or_else(|| self.civ_works.get(&key))
+                    .or_else(|| self.civs.works.get(&key))
                     .map(|c| c.0)
             }
             _ => None,
@@ -112,14 +113,14 @@ impl Game {
             let Some(tid) = self.civil_owner(b) else {
                 continue;
             };
-            if !self.civ_territories.contains_key(&tid)
+            if !self.civs.territories.contains_key(&tid)
                 || self.civ_standing(tid) == Standing::Fallen
             {
                 continue;
             }
             let turret = b.kind == BodyKind::Base
                 && b.origin
-                    .and_then(|o| self.civ_works.get(&o))
+                    .and_then(|o| self.civs.works.get(&o))
                     .is_some_and(|c| c.1 == CivRole::Turret);
             things.push(Thing {
                 id: b.id,
@@ -149,7 +150,7 @@ impl Game {
                 && !b.consumed
                 && b.root.is_none()
                 && b.parent.is_none()
-                && !self.civ_lineages.contains_key(&b.species)
+                && !self.civs.lineages.contains_key(&b.species)
                 && self.apex_of(b).is_none()
         }) {
             let mut best: Option<(f32, usize)> = None;
@@ -267,7 +268,7 @@ impl Game {
         if self.civ_standing(st.tid) == Standing::Fallen {
             return;
         }
-        let Some(civ) = self.civ_territories.get(&st.tid).copied() else {
+        let Some(civ) = self.civs.territories.get(&st.tid).copied() else {
             return;
         };
         let name = civ.name(self.seed);
@@ -322,7 +323,7 @@ impl Game {
             b.active
                 && b.kind == BodyKind::Creature
                 && !b.follower
-                && !self.civ_lineages.contains_key(&b.species)
+                && !self.civs.lineages.contains_key(&b.species)
                 && self.apex_of(b).is_none()
         }) {
             let d = b.position.distance_squared(ship);
@@ -603,7 +604,8 @@ mod tests {
 
     fn member_at(game: &mut Game, t: &Territory, at: Vec2) -> u64 {
         let species = t.member(SEED);
-        game.civ_lineages
+        game.civs
+            .lineages
             .insert(species.lineage, (t.id, CivRole::Member));
         spawn(game, &species, at)
     }
@@ -801,7 +803,7 @@ mod tests {
             b.health = 60.0;
             b.max_health = 60.0;
         }
-        game.civ_bases.insert(key, (t.id, CivRole::Outpost));
+        game.civs.bases.insert(key, (t.id, CivRole::Outpost));
         let species = species_that_is(Disposition::Hostile, brute(), &t, SPOT);
         for k in 0..3 {
             spawn(

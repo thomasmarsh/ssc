@@ -135,7 +135,7 @@ impl Game {
                                 _ => b.enraged || is_hurt(b),
                             },
                         alarm_range: g.alarm,
-                        civil: creature && self.civ_lineages.contains_key(&b.species),
+                        civil: creature && self.civs.lineages.contains_key(&b.species),
                     }
                 })
                 .collect();
@@ -211,7 +211,7 @@ impl Game {
             // An Oozer eats rocks, so rocks do not push it away.
             let rock_eater = crate::power::Power::Engulf.active(&g);
             let mut prey: Option<(f32, Vec2)> = None;
-            let civ = self.civ_lineages.get(&body.species).copied();
+            let civ = self.civs.lineages.get(&body.species).copied();
             let pull = pulls.get(&body.id).copied();
             let mut civil_near: Option<(f32, Vec2)> = None;
             let hunting = body.hunts_prey();
@@ -324,7 +324,7 @@ impl Game {
                 || (body.enraged
                     && player_distance < RAGE_PURSUIT_RANGE
                     // A calm civilization's person hurt by wildlife is not enraged at the ship.
-                    && (!posture.calm || self.civ_struck.contains_key(&body.id)));
+                    && (!posture.calm || self.civs.struck.contains_key(&body.id)));
             body.alert = by_distance || (warned && !posture.calm) || provoked || posture.rallied;
             if hidden_long {
                 // Out of sight long enough: only a harm done to it keeps a creature on the hunt.

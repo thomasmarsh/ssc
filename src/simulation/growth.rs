@@ -395,7 +395,7 @@ impl Game {
                 && !body.follower
                 && body.adult.is_none()
                 // There is one elder; it does not found a dynasty.
-                && !matches!(self.civ_lineages.get(&body.species), Some((_, CivRole::Elder)))
+                && !matches!(self.civs.lineages.get(&body.species), Some((_, CivRole::Elder)))
                 && !body.provisioned
                 && body.genome.forages()
                 && body.genome.social != Social::Brood

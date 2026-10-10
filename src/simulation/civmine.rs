@@ -124,26 +124,27 @@ impl Game {
         ORE_BUDGET
             + ORE_PER_STRENGTH
                 * self
-                    .civ_territories
+                    .civs
+                    .territories
                     .get(&territory)
                     .map_or(1.0, |t| t.strength)
     }
 
     /// The stash a territory has built up.
     pub fn civ_stock(&self, territory: u64) -> f32 {
-        self.civ_mining.get(&territory).map_or(0.0, Mining::total)
+        self.civs.mining.get(&territory).map_or(0.0, Mining::total)
     }
 
     /// Whether mining is on for a territory (its capital base takes no passive trickle).
     pub fn civ_mining_active(&self, territory: u64) -> bool {
-        self.civ_mining.get(&territory).is_some_and(|m| m.active)
+        self.civs.mining.get(&territory).is_some_and(|m| m.active)
     }
 
     /// Beams of working miners: where they start, where they end, the territory's tint.
     pub fn miner_beams(&self) -> Vec<(Vec2, Vec2, [f32; 3])> {
         let mut out = Vec::new();
-        for (tid, mining) in &self.civ_mining {
-            let tint = self.civ_colors.get(tid).copied().unwrap_or([1.0; 3]);
+        for (tid, mining) in &self.civs.mining {
+            let tint = self.civs.colors.get(tid).copied().unwrap_or([1.0; 3]);
             for miner in mining.miners.iter().filter(|m| m.working) {
                 if let Some(body) = self.body(miner.body) {
                     out.push((body.position, miner.end, tint));
@@ -158,11 +159,11 @@ impl Game {
         let mut out = Vec::new();
         for body in self.bodies.iter().filter(|b| b.base.is_some()) {
             let Some((tid, CivRole::Capital)) =
-                body.origin.and_then(|o| self.civ_bases.get(&o)).copied()
+                body.origin.and_then(|o| self.civs.bases.get(&o)).copied()
             else {
                 continue;
             };
-            let Some(mining) = self.civ_mining.get(&tid) else {
+            let Some(mining) = self.civs.mining.get(&tid) else {
                 continue;
             };
             let total = mining.total();
@@ -173,7 +174,7 @@ impl Game {
             out.push(Cache {
                 at: body.position + Vec2::new(body.radius * 1.5, -body.radius * 1.5),
                 fill: (total / STOCK_CAP).clamp(0.0, 1.0),
-                tint: self.civ_colors.get(&tid).copied().unwrap_or([1.0; 3]),
+                tint: self.civs.colors.get(&tid).copied().unwrap_or([1.0; 3]),
                 mix,
             });
         }
@@ -182,7 +183,7 @@ impl Game {
 
     /// The capital fell: half the stash spills as pickups and the rest is lost.
     pub(super) fn spill_cache(&mut self, territory: u64, at: Vec2) {
-        let Some(mining) = self.civ_mining.get_mut(&territory) else {
+        let Some(mining) = self.civs.mining.get_mut(&territory) else {
             return;
         };
         let stock = std::mem::take(&mut mining.stock);
@@ -208,7 +209,7 @@ impl Game {
     pub(super) fn update_civ_mining(&mut self, dt: f32) {
         let ship = self.player().map(|p| p.position);
         // Territories with a loaded rank-and-file member, or work already under way.
-        let mut tids: BTreeSet<u64> = self.civ_mining.keys().copied().collect();
+        let mut tids: BTreeSet<u64> = self.civs.mining.keys().copied().collect();
         for body in self.bodies.iter().filter(|b| b.active && !b.follower) {
             if let Some((tid, CivRole::Member)) = self.civ_of(body) {
                 tids.insert(tid);
@@ -222,12 +223,12 @@ impl Game {
     fn mine_for(&mut self, tid: u64, ship: Option<Vec2>, dt: f32) {
         let fallen = self.civ_standing(tid) == Standing::Fallen;
         let budget = self.ore_budget(tid);
-        let mut mining = self.civ_mining.remove(&tid).unwrap_or_default();
+        let mut mining = self.civs.mining.remove(&tid).unwrap_or_default();
         mining.retry = (mining.retry - dt).max(0.0);
         if fallen {
             mining.miners.clear();
             mining.active = false;
-            self.civ_mining.insert(tid, mining);
+            self.civs.mining.insert(tid, mining);
             return;
         }
         let seed = self.seed;
@@ -362,7 +363,7 @@ impl Game {
             mining.miners.remove(slot);
         }
         mining.active = !mining.miners.is_empty() || mining.total() > 1e-3;
-        self.civ_mining.insert(tid, mining);
+        self.civs.mining.insert(tid, mining);
     }
 
     /// Picks the lowest-index free member and one of the three lowest-index rocks in reach.
@@ -377,7 +378,8 @@ impl Game {
         let busy: Vec<u64> = mining.miners.iter().map(|m| m.body).collect();
         // Rocks any civilization is working, and the one the ship's beam holds.
         let taken: Vec<u64> = self
-            .civ_mining
+            .civs
+            .mining
             .values()
             .flat_map(|m| m.miners.iter().map(|x| x.rock))
             .chain(mining.miners.iter().map(|m| m.rock))
@@ -440,7 +442,7 @@ impl Game {
                 continue;
             }
             rocks.sort_unstable();
-            let pick = self.civ_rng.int(0, rocks.len().min(3) as u32 - 1) as usize;
+            let pick = self.civs.rng.int(0, rocks.len().min(3) as u32 - 1) as usize;
             mining.miners.push(Miner {
                 body: member,
                 rock: rocks[pick].3,
@@ -506,7 +508,7 @@ mod tests {
         let mut seen_miners = 0;
         for _ in 0..24 {
             hold(&mut game, spot, 10.0);
-            let m = game.civ_mining.get(&t.id).expect("a horde mines");
+            let m = game.civs.mining.get(&t.id).expect("a horde mines");
             seen_miners = seen_miners.max(m.miners.len());
             assert!(m.miners.len() <= MAX_MINERS);
             assert!(m.total() <= STOCK_CAP + 1e-3, "stash {}", m.total());
@@ -526,7 +528,7 @@ mod tests {
             }
         }
         assert!(seen_miners > 0, "miners were assigned");
-        let m = &game.civ_mining[&t.id];
+        let m = &game.civs.mining[&t.id];
         assert!(m.spent > 1.0, "ore was worked: {}", m.spent);
         assert!(
             !game.mined.is_empty() || game.fallen.values().any(|f| !f.is_empty()),
@@ -549,7 +551,7 @@ mod tests {
         let (mut game, spot) = quiet_visit(&t);
         // Budget spent: nobody is sent.
         let budget = game.ore_budget(t.id);
-        game.civ_mining.insert(
+        game.civs.mining.insert(
             t.id,
             Mining {
                 spent: budget,
@@ -557,9 +559,9 @@ mod tests {
             },
         );
         hold(&mut game, spot, 20.0);
-        assert!(game.civ_mining[&t.id].miners.is_empty());
+        assert!(game.civs.mining[&t.id].miners.is_empty());
         // Stash full: nobody is sent either.
-        game.civ_mining.insert(
+        game.civs.mining.insert(
             t.id,
             Mining {
                 stock: [150.0, 0.0, 0.0],
@@ -569,20 +571,20 @@ mod tests {
         // (The capital would draw the stash down whenever it can build a guardian, so the
         // fixture keeps it full.)
         for _ in 0..400 {
-            game.civ_mining.get_mut(&t.id).unwrap().stock = [150.0, 0.0, 0.0];
+            game.civs.mining.get_mut(&t.id).unwrap().stock = [150.0, 0.0, 0.0];
             set_player(&mut game, spot, Vec2::ZERO);
             game.step(0.05, Input::default());
         }
-        assert!(game.civ_mining[&t.id].miners.is_empty());
-        assert!(game.civ_mining[&t.id].total() <= STOCK_CAP + 1e-3);
+        assert!(game.civs.mining[&t.id].miners.is_empty());
+        assert!(game.civs.mining[&t.id].total() <= STOCK_CAP + 1e-3);
         // A ship on top of the capital sends unescorted miners running, and nobody starts.
-        game.civ_mining.insert(t.id, Mining::default());
+        game.civs.mining.insert(t.id, Mining::default());
         let heart = t.capital.center();
         game.teleport(heart);
         for _ in 0..200 {
             set_player(&mut game, heart, Vec2::ZERO);
             game.step(0.05, Input::default());
-            let m = &game.civ_mining[&t.id];
+            let m = &game.civs.mining[&t.id];
             for miner in m.miners.iter().filter(|x| x.working) {
                 let at = game.body(miner.body).unwrap().position;
                 assert!(at.distance(heart) >= FLEE_RANGE || game.civ_strength(t.id) > 0);
@@ -603,7 +605,8 @@ mod tests {
             .iter()
             .find(|b| {
                 b.origin.is_some_and(|o| {
-                    game.civ_bases
+                    game.civs
+                        .bases
                         .get(&o)
                         .is_some_and(|c| c.1 == CivRole::Capital)
                 })
@@ -612,7 +615,7 @@ mod tests {
             .unwrap();
         let stock = |g: &Game| g.body(base).unwrap().base.as_ref().unwrap().stock;
         // Mining on with an empty stash and no guardian slot trouble: no trickle at all.
-        game.civ_mining.insert(
+        game.civs.mining.insert(
             t.id,
             Mining {
                 active: true,
@@ -621,13 +624,13 @@ mod tests {
             },
         );
         // Keep the miners out of it so the stash is the only income.
-        game.civ_mining.get_mut(&t.id).unwrap().spent = game.ore_budget(t.id);
+        game.civs.mining.get_mut(&t.id).unwrap().spent = game.ore_budget(t.id);
         let before = stock(&game);
         for _ in 0..40 {
             set_player(&mut game, spot, Vec2::ZERO);
             game.step(0.05, Input::default());
         }
-        let after_stock = game.civ_mining[&t.id].stock[0];
+        let after_stock = game.civs.mining[&t.id].stock[0];
         assert!(after_stock < 60.0, "the capital drew on the stash");
         assert!(stock(&game) > before || after_stock < 55.0);
     }
@@ -639,7 +642,7 @@ mod tests {
         game.player_invulnerability = 1e9;
         game.teleport(t.capital.center());
         game.step(DT, Input::default());
-        game.civ_mining.insert(
+        game.civs.mining.insert(
             t.id,
             Mining {
                 stock: [60.0, 20.0, 0.0],
@@ -656,7 +659,8 @@ mod tests {
             .iter()
             .find(|b| {
                 b.origin.is_some_and(|o| {
-                    game.civ_bases
+                    game.civs
+                        .bases
                         .get(&o)
                         .is_some_and(|c| c.1 == CivRole::Capital)
                 })
@@ -748,7 +752,7 @@ mod tests {
             game.register_territory(t);
             game.set_regard(t.id, -80.0);
             assert!(game.set_civilization_war(t.id, true));
-            game.civ_lineages.insert(t.id, (t.id, CivRole::Member));
+            game.civs.lineages.insert(t.id, (t.id, CivRole::Member));
             let shooter = spawn(&mut game, &species, Vec2::new(0.0, 500.0));
             if wall {
                 let id = add(&mut game, BodyKind::Asteroid, Vec2::new(0.0, 250.0));

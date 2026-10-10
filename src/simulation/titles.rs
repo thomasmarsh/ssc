@@ -93,14 +93,15 @@ impl Game {
             .max_by(|a, b| a.1.1.total_cmp(&b.1.1).then(b.0.cmp(a.0)))
             .map(|(_, (name, _))| title_case(name));
         let friend = self
-            .civ_regard
+            .civs
+            .regard
             .iter()
             .filter(|(id, reg)| {
                 reg.tier == Tier::Friendly
                     && self.civ_standing(**id) != crate::territory::Standing::Fallen
             })
             .max_by(|a, b| a.1.value.total_cmp(&b.1.value).then(b.0.cmp(a.0)))
-            .and_then(|(id, _)| self.civ_territories.get(id))
+            .and_then(|(id, _)| self.civs.territories.get(id))
             .map(|t| title_case(&t.name(self.seed)));
         TitleFacts {
             kills: r.kills,
@@ -293,7 +294,7 @@ mod tests {
         assert_eq!(facts.friend.as_deref(), Some(name.as_str()));
         assert_eq!(game.run_title(), format!("Friend of the {name}"));
         // A fallen civilization is no friend.
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             a.id,
             crate::territory::Fall {
                 capital: true,

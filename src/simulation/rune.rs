@@ -344,7 +344,7 @@ impl Game {
             if credited && body.kind == BodyKind::Creature {
                 self.run.damage_dealt += taken;
                 if diplomacy::civil_target(body) {
-                    self.civ_hits.push((body.id, taken));
+                    self.civs.hits.push((body.id, taken));
                 }
                 notes.push((body.id, taken, body.max_health + body.max_shield));
             }
@@ -807,7 +807,7 @@ mod tests {
         let (left, right) = g.bodies.split_at_mut(bi);
         impact::strike(&mut left[ai], &mut right[0], raw, 0.0, 1.0, &DEFAULT_TUNING);
         assert!(body(&g, victim).health <= 0.0);
-        assert!(g.civ_hits.is_empty());
+        assert!(g.civs.hits.is_empty());
         g.remove_destroyed();
         assert_eq!(g.score, 0);
         assert_eq!(g.run.kills, 0);

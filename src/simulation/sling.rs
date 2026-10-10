@@ -799,7 +799,7 @@ mod tests {
             }
             let mut rng = game.rng.clone();
             let mut loot = game.loot.clone();
-            let mut civ = game.civ_rng.clone();
+            let mut civ = game.civs.rng.clone();
             let mut trace = Vec::new();
             let mut throws = 0;
             for tick in 0..3600 {
@@ -839,7 +839,7 @@ mod tests {
             assert!(throws >= 2);
             assert_eq!(game.rng.f32(), rng.f32());
             assert_eq!(game.loot.f32(), loot.f32());
-            assert_eq!(game.civ_rng.f32(), civ.f32());
+            assert_eq!(game.civs.rng.f32(), civ.f32());
             trace
         };
         assert_eq!(run(), run());

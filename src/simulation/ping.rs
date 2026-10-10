@@ -968,7 +968,7 @@ mod tests {
     fn a_fallen_civilization_is_not_the_nearest_any_more() {
         let mut game = empty_game();
         let outpost = crate::territory::outpost(game.seed);
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             outpost.id,
             crate::territory::Fall {
                 capital: true,

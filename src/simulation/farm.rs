@@ -2007,7 +2007,7 @@ mod tests {
         assert_eq!(game.farm.stored(t.id), GRANARY_CAP);
         // A fallen civilization tends nothing.
         let (mut game, at) = tended_rig(&t, 1.0);
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             t.id,
             crate::territory::Fall {
                 capital: true,
@@ -2039,7 +2039,7 @@ mod tests {
         }
         assert!(pruned, "thriving tenders prune it");
         let (mut game, at) = tended_rig(&t, 1.0);
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             t.id,
             crate::territory::Fall {
                 capital: true,
@@ -2128,7 +2128,7 @@ mod tests {
                 b.kind == BodyKind::Base
                     && b.fort.is_none()
                     && b.origin
-                        .and_then(|k| game.civ_bases.get(&k))
+                        .and_then(|k| game.civs.bases.get(&k))
                         .is_some_and(|(_, role)| {
                             matches!(
                                 role,

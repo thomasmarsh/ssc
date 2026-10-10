@@ -117,10 +117,10 @@ impl Game {
     }
 
     pub fn civilization_engagement(&self, actor: u64) -> EngagementRule {
-        let Some(record) = self.societies.actors.get(&actor) else {
+        let Some(record) = self.civs.societies.actors.get(&actor) else {
             return EngagementRule::Peace;
         };
-        let territory = self.civ_territories.get(&actor).copied().or_else(|| {
+        let territory = self.civs.territories.get(&actor).copied().or_else(|| {
             world::territory(self.seed, record.origin.anchor).filter(|t| t.id == actor)
         });
         let Some(territory) = territory else {
@@ -149,18 +149,18 @@ impl Game {
     /// Explicit headless scenario control; opinion changes never declare or end a war.
     /// Autonomous declarations need modeled operations/capacity before becoming a consumer.
     pub fn set_civilization_war(&mut self, actor: u64, war: bool) -> bool {
-        if !self.civ_territories.contains_key(&actor)
+        if !self.civs.territories.contains_key(&actor)
             || self.civ_peaceful(actor)
             || self.civ_standing(actor) == crate::territory::Standing::Fallen
         {
             return false;
         }
-        let Some(record) = self.societies.actors.get_mut(&actor) else {
+        let Some(record) = self.civs.societies.actors.get_mut(&actor) else {
             return false;
         };
         if record.engagement.war != war {
             record.engagement.war = war;
-            let name = self.civ_territories[&actor].name(self.seed);
+            let name = self.civs.territories[&actor].name(self.seed);
             self.notify(
                 format!(
                     "{name}  - {}",
@@ -173,36 +173,36 @@ impl Game {
     }
 
     pub(super) fn civil_player_harm(&mut self, actor: u64) {
-        if let Some(record) = self.societies.actors.get_mut(&actor) {
+        if let Some(record) = self.civs.societies.actors.get_mut(&actor) {
             record.engagement.defense = DEFENSE_SECONDS;
         }
     }
 
     pub fn culture_clock(&self) -> &Clock {
-        &self.societies.clock
+        &self.civs.societies.clock
     }
 
     pub fn culture_modified(&self) -> bool {
-        self.societies.clock != Clock::default()
+        self.civs.societies.clock != Clock::default()
     }
 
     /// Direct headless playtest controls. Callers see effective clamped values in the clock.
     /// Saves retain these controls; the desktop adapter never applies environment overrides.
     pub fn configure_culture_drift(&mut self, temperature: f64, timescale: f64) -> bool {
-        self.societies.clock.configure(temperature, timescale)
+        self.civs.societies.clock.configure(temperature, timescale)
     }
 
     pub fn civilization_profile(&self, actor: u64) -> Option<Profile> {
-        let origin = self.societies.actors.get(&actor)?.origin;
+        let origin = self.civs.societies.actors.get(&actor)?.origin;
         Some(culture::profile(
             self.seed,
             origin,
-            self.societies.clock.phase(),
+            self.civs.societies.clock.phase(),
         ))
     }
 
     pub fn culture_reading(&self, actor: u64) -> Option<CultureReading> {
-        let record = self.societies.actors.get(&actor)?;
+        let record = self.civs.societies.actors.get(&actor)?;
         let e = record.estimate?;
         Some(CultureReading {
             tendency: culture::VALUES[e.emphasis],
@@ -230,10 +230,10 @@ impl Game {
             .enumerate()
             .max_by(|(ia, a), (ib, b)| a.total_cmp(b).then_with(|| ib.cmp(ia)))
             .map_or(0, |(i, _)| i);
-        if let Some(record) = self.societies.actors.get_mut(&actor) {
+        if let Some(record) = self.civs.societies.actors.get_mut(&actor) {
             record.estimate = Some(Estimate {
                 emphasis,
-                phase: self.societies.clock.phase(),
+                phase: self.civs.societies.clock.phase(),
             });
         }
     }
@@ -244,7 +244,7 @@ impl Game {
         candidates: &[culture::Candidate],
     ) -> Option<culture::Decision> {
         let profile = self.civilization_profile(actor)?;
-        let record = self.societies.actors.get_mut(&actor)?;
+        let record = self.civs.societies.actors.get_mut(&actor)?;
         let decision = culture::choose(self.seed, actor, record.epoch, profile, candidates)?;
         record.epoch = record.epoch.saturating_add(1);
         record.reason = Some(decision.reason.into());
@@ -257,6 +257,7 @@ impl Game {
         };
         let mut text = format!("Tends toward {} (contact estimate).", reading.tendency);
         if let Some(reason) = self
+            .civs
             .societies
             .actors
             .get(&actor)
@@ -268,7 +269,7 @@ impl Game {
     }
 
     pub(super) fn society_legacy_response(&mut self, actor: u64) {
-        if let Some(record) = self.societies.actors.get_mut(&actor) {
+        if let Some(record) = self.civs.societies.actors.get_mut(&actor) {
             record.epoch = record.epoch.saturating_add(1);
             record.reason = Some("legacy barter".into());
         }
@@ -317,7 +318,8 @@ mod tests {
         }
         // Wounded and enraged bodies do not infer player guilt from their health.
         let lineage = game
-            .civ_lineages
+            .civs
+            .lineages
             .iter()
             .find(|(_, (id, _))| *id == t.id)
             .map(|(lineage, _)| *lineage)
@@ -362,7 +364,8 @@ mod tests {
         game.bullets.push(shot);
         game.move_bullets(0.01);
         assert!(
-            game.civ_hits
+            game.civs
+                .hits
                 .iter()
                 .any(|(id, damage)| *id == body && *damage > 0.0)
         );
@@ -370,23 +373,23 @@ mod tests {
         assert!(game.civilization_may_attack(t.id, CivilTarget::Ship));
         assert!(!game.civilization_may_attack(t.id, CivilTarget::Pad));
         assert!(!game.civilization_may_attack(t.id, CivilTarget::Fleet));
-        game.societies.advance(10.0);
+        game.civs.societies.advance(10.0);
         let (state, generator) = save::SaveState::from_text(&game.save_state().to_text()).unwrap();
         let (mut loaded, _) = Game::from_save(state, generator);
         assert_eq!(
             loaded.civilization_engagement(t.id),
             EngagementRule::SelfDefense
         );
-        game.societies.advance(19.0);
+        game.civs.societies.advance(19.0);
         for _ in 0..76 {
-            loaded.societies.advance(0.25);
+            loaded.civs.societies.advance(0.25);
         }
         assert_eq!(
             loaded.civilization_engagement(t.id),
             game.civilization_engagement(t.id)
         );
-        game.societies.advance(1.0);
-        loaded.societies.advance(1.0);
+        game.civs.societies.advance(1.0);
+        loaded.civs.societies.advance(1.0);
         assert_eq!(loaded.civilization_engagement(t.id), EngagementRule::Peace);
         assert_eq!(
             loaded.civilization_engagement(t.id),
@@ -412,7 +415,7 @@ mod tests {
         let (state, generator) = save::SaveState::from_text(&game.save_state().to_text()).unwrap();
         let (mut loaded, _) = Game::from_save(state, generator);
         // The saved origin resolves an unloaded actor without reopening its sector.
-        loaded.civ_territories.remove(&t.id);
+        loaded.civs.territories.remove(&t.id);
         assert_eq!(
             loaded.civilization_engagement(t.id),
             EngagementRule::TotalWar
@@ -424,14 +427,14 @@ mod tests {
         );
         loaded.register_territory(t);
         assert!(loaded.set_civilization_war(t.id, false));
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             t.id,
             crate::territory::Fall {
                 capital: true,
                 elder: true,
             },
         );
-        game.civ_territories.remove(&t.id);
+        game.civs.territories.remove(&t.id);
         assert_eq!(game.civilization_engagement(t.id), EngagementRule::Peace);
         let o = outpost(game.seed);
         game.register_territory(o);
@@ -450,12 +453,12 @@ mod tests {
         assert!(game.culture_reading(t.id).is_none());
         game.assess_culture(t.id);
         let reading = game.culture_reading(t.id);
-        game.societies.advance(1e8);
+        game.civs.societies.advance(1e8);
         game.shift_regard(t.id, -90.0);
         assert_eq!(game.civilization_profile(t.id), Some(original));
         assert_eq!(game.civ_tier(t.id), Tier::Hostile);
         game.configure_culture_drift(0.5, 1000.0);
-        game.societies.advance(100.0);
+        game.civs.societies.advance(100.0);
         let warm = game.civilization_profile(t.id).unwrap();
         assert_ne!(original, warm);
         assert_eq!(game.culture_reading(t.id), reading);
@@ -468,12 +471,12 @@ mod tests {
         assert_eq!(loaded.culture_clock(), game.culture_clock());
         assert_eq!(loaded.civilization_profile(t.id), Some(warm));
         assert_eq!(loaded.culture_reading(t.id), reading);
-        loaded.societies.advance(1e8);
+        loaded.civs.societies.advance(1e8);
         assert_eq!(loaded.civilization_profile(t.id), Some(warm));
         loaded.configure_culture_drift(0.5, 2000.0);
-        loaded.societies.advance(100.0);
+        loaded.civs.societies.advance(100.0);
         let mut discovered_late = Game::new(42);
-        discovered_late.societies.clock = loaded.societies.clock.clone();
+        discovered_late.civs.societies.clock = loaded.civs.societies.clock.clone();
         discovered_late.register_territory(t);
         assert_eq!(
             loaded.civilization_profile(t.id),

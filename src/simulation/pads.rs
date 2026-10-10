@@ -2147,7 +2147,8 @@ mod tests {
             cruise: 0.0,
             ..Genome::default()
         });
-        game.civ_lineages
+        game.civs
+            .lineages
             .insert(member.lineage, (t.id, crate::territory::CivRole::Member));
         let c = spawn(&mut game, &member, at + Vec2::new(-700.0, 0.0));
         run(&mut game, 1.0);
@@ -2987,7 +2988,8 @@ mod tests {
         game.set_regard(t.id, -80.0);
         assert!(game.set_civilization_war(t.id, true));
         let species = t.member(seed);
-        game.civ_lineages
+        game.civs
+            .lineages
             .insert(species.lineage, (t.id, CivRole::Member));
         (game, t)
     }
@@ -3030,7 +3032,8 @@ mod tests {
         game.player_invulnerability = 1e9;
         game.register_territory(t);
         let member = t.member(seed);
-        game.civ_lineages
+        game.civs
+            .lineages
             .insert(member.lineage, (t.id, CivRole::Member));
         world(&mut game, 7);
         let key = deployed(&mut game);

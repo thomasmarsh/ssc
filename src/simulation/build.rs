@@ -269,7 +269,8 @@ impl Game {
                 .any(|w| w.civ == Some(tid) && !w.done)
                 || starts.iter().any(|s| s.0 == tid);
             let digging = self
-                .civ_mining
+                .civs
+                .mining
                 .get(&tid)
                 .is_some_and(|m| m.miners.iter().any(|m| m.body == body.id));
             let has_work = self.builds.works.iter().any(|w| w.builder == body.id);
@@ -351,7 +352,7 @@ impl Game {
         let StructureKey::Civ(tid, _) = key else {
             return None;
         };
-        self.civ_colors.get(&tid).copied()
+        self.civs.colors.get(&tid).copied()
     }
 
     /// A block of `material` at `at`: a pinned rock, tough and heavy as the material makes it.
@@ -918,7 +919,7 @@ mod tests {
         let spot = t.capital.center() + Vec2::new(0.0, 2800.0);
         let mut game = Game::new(crate::config::MASTER_SEED);
         game.player_invulnerability = 1e9;
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             t.id,
             crate::territory::Fall {
                 capital: true,

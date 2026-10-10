@@ -240,7 +240,7 @@ impl Game {
             .find(|b| {
                 b.kind == BodyKind::Base
                     && b.origin.is_some_and(|o| {
-                        self.civ_bases.get(&o).is_some_and(|(id, _)| *id == civ.id)
+                        self.civs.bases.get(&o).is_some_and(|(id, _)| *id == civ.id)
                     })
             })
             .map(|b| (b.position, b.radius));
@@ -337,7 +337,7 @@ mod tests {
             .find(|b| {
                 b.kind == BodyKind::Base
                     && b.origin.is_some_and(|o| {
-                        game.civ_bases.get(&o) == Some(&(civ.id, CivRole::Capital))
+                        game.civs.bases.get(&o) == Some(&(civ.id, CivRole::Capital))
                     })
             })
             .unwrap()
@@ -383,7 +383,7 @@ mod tests {
         conquest.player_invulnerability = 1e9;
         foundation(&mut conquest);
         let (target, seat) = frontier(&mut conquest);
-        conquest.civ_struck.insert(seat, conquest.time);
+        conquest.civs.struck.insert(seat, conquest.time);
         conquest
             .bodies
             .iter_mut()

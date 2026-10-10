@@ -220,7 +220,7 @@ impl Game {
         relics.sort();
         SaveState {
             seed: self.seed,
-            societies: self.societies.clone(),
+            societies: self.civs.societies.clone(),
             time: self.time,
             score: self.score,
             lives: self.lives,
@@ -233,8 +233,8 @@ impl Game {
             chart: self.chart.clone(),
             run: self.run.clone(),
             legacy: self.legacy.clone(),
-            regard: self.civ_regard.iter().map(|(k, v)| (*k, *v)).collect(),
-            falls: sorted(&self.civ_fall),
+            regard: self.civs.regard.iter().map(|(k, v)| (*k, *v)).collect(),
+            falls: sorted(&self.civs.fall),
             fallen,
             mined: sorted(&self.mined),
             mined_contents: sorted(&self.mined_contents),
@@ -256,7 +256,7 @@ impl Game {
                 growth: self.growth.clone(),
                 breeding: self.breeding.clone(),
                 parry: self.parry_rng.clone(),
-                civ: self.civ_rng.clone(),
+                civ: self.civs.rng.clone(),
                 apex: self.apex_rng.clone(),
             },
         }
@@ -270,7 +270,7 @@ impl Game {
         // Before anything is generated, so `Regen` entries shape the world that loads. An entry
         // a newer build dropped or a value now out of range is skipped, never fatal.
         tunables::set_many(&mut game.tune, state.tuning);
-        game.societies = state.societies.restore(keep);
+        game.civs.societies = state.societies.restore(keep);
         game.time = state.time;
         game.score = state.score;
         game.lives = state.lives.max(1);
@@ -284,8 +284,8 @@ impl Game {
         game.chart = state.chart;
         game.run = state.run;
         game.legacy = state.legacy;
-        game.civ_regard = state.regard.into_iter().collect();
-        game.civ_fall = state.falls.into_iter().collect();
+        game.civs.regard = state.regard.into_iter().collect();
+        game.civs.fall = state.falls.into_iter().collect();
         if keep {
             game.pad = state.pad;
             game.fallen = state
@@ -330,7 +330,7 @@ impl Game {
         game.growth = state.streams.growth;
         game.breeding = state.streams.breeding;
         game.parry_rng = state.streams.parry;
-        game.civ_rng = state.streams.civ;
+        game.civs.rng = state.streams.civ;
         game.apex_rng = state.streams.apex;
         game.player_invulnerability = 2.5;
         (

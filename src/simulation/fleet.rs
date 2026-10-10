@@ -1744,7 +1744,8 @@ mod tests {
         civ.shape = crate::territory::CivShape::Horde;
         let territory = civ.id;
         game.register_territory(civ);
-        game.civ_lineages
+        game.civs
+            .lineages
             .insert(lineage, (territory, CivRole::Member));
         let old = DroneView {
             position: view.position - Vec2::X * 200.0,
@@ -1841,7 +1842,8 @@ mod tests {
         let at = game.mining_drone_views()[0].position;
         let body = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
         body.position = at;
-        game.civ_lineages
+        game.civs
+            .lineages
             .insert(body.species, (territory, CivRole::Member));
         game.set_regard(territory, 80.0);
         game.damage_drone_contacts(0.65);

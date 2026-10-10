@@ -324,7 +324,7 @@ impl Game {
                         self.run.damage_dealt += dealt;
                     }
                     if dealt > 0.0 && diplomacy::civil_target(body) {
-                        self.civ_hits.push((body.id, dealt));
+                        self.civs.hits.push((body.id, dealt));
                     }
                 }
             } else {

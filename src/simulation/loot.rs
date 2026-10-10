@@ -106,7 +106,7 @@ impl Game {
         match body.kind {
             BodyKind::Base => body
                 .origin
-                .and_then(|key| self.civ_bases.get(&key))
+                .and_then(|key| self.civs.bases.get(&key))
                 .copied(),
             _ => self.civ_of(body),
         }
@@ -116,7 +116,7 @@ impl Game {
     /// civilization is. Zero for anything not civil.
     fn civ_tier_of(&self, body: &Body) -> u8 {
         self.civ_membership(body)
-            .and_then(|(tid, _)| self.civ_territories.get(&tid))
+            .and_then(|(tid, _)| self.civs.territories.get(&tid))
             .map_or(0, |t| t.fort_tier())
     }
 

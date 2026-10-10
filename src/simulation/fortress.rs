@@ -71,7 +71,7 @@ impl Game {
             let (position, genes, radius) = (body.position, body.genes, body.radius);
             let live = body
                 .origin
-                .and_then(|o| self.civ_works.get(&o))
+                .and_then(|o| self.civs.works.get(&o))
                 .is_none_or(|(tid, _)| {
                     self.civ_standing(*tid) != Standing::Fallen
                         && self.civilization_may_attack(*tid, CivilTarget::Ship)
@@ -112,7 +112,7 @@ impl Game {
                     let muzzle = Muzzle {
                         civilization: self.bodies[index]
                             .origin
-                            .and_then(|o| self.civ_works.get(&o))
+                            .and_then(|o| self.civs.works.get(&o))
                             .map(|(id, _)| *id),
                         origin,
                         aim: direction,
@@ -564,7 +564,7 @@ mod tests {
         assert_eq!(game.run.bases, bases, "a turret is not a station");
         assert!(!game.civ_fall(t.id).capital);
         // Ruin the civilization: the other turrets stop shooting.
-        game.civ_fall.insert(
+        game.civs.fall.insert(
             t.id,
             crate::territory::Fall {
                 capital: true,

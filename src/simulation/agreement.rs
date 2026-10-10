@@ -304,7 +304,7 @@ mod tests {
             .find(|b| {
                 b.kind == BodyKind::Base
                     && b.origin.is_some_and(|o| {
-                        game.civ_bases.get(&o).is_some_and(|(id, _)| *id == civ.id)
+                        game.civs.bases.get(&o).is_some_and(|(id, _)| *id == civ.id)
                     })
             })
             .unwrap();
@@ -428,7 +428,7 @@ mod tests {
                     game.pad.pads.remove(&dock);
                 }
                 Some(End::SupplierLost) => {
-                    game.civ_fall.entry(id).or_default().capital = true;
+                    game.civs.fall.entry(id).or_default().capital = true;
                 }
                 Some(End::WorldChanged) => {
                     game =

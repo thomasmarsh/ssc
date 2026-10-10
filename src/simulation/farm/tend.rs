@@ -95,7 +95,7 @@ impl Game {
         if let Some(known) = self.farm.tills.get(&tid) {
             return *known;
         }
-        let Some(t) = self.civ_territories.get(&tid).copied() else {
+        let Some(t) = self.civs.territories.get(&tid).copied() else {
             return false;
         };
         let farms = t.farms(self.seed);
@@ -110,14 +110,14 @@ impl Game {
             .filter(|b| b.kind == BodyKind::Base && b.active && b.fort.is_none())
             .filter_map(|b| {
                 let key = b.origin?;
-                let (tid, role) = *self.civ_bases.get(&key)?;
+                let (tid, role) = *self.civs.bases.get(&key)?;
                 (matches!(role, CivRole::Capital | CivRole::Outpost)
                     && self.farm.tills.get(&tid) == Some(&true))
                 .then_some(Greenhouse {
                     key,
                     center: b.position,
                     territory: tid,
-                    tint: self.civ_colors.get(&tid).copied().unwrap_or([1.0; 3]),
+                    tint: self.civs.colors.get(&tid).copied().unwrap_or([1.0; 3]),
                 })
             })
             .collect()
@@ -125,7 +125,7 @@ impl Game {
 
     /// The tint of the civilization that tends a plant, for its marker.
     pub fn tender_tint(&self, tid: u64) -> Option<[f32; 3]> {
-        self.civ_colors.get(&tid).copied()
+        self.civs.colors.get(&tid).copied()
     }
 
     /// The greenhouse whose glass holds `at`, if any.
@@ -188,7 +188,7 @@ impl Game {
             .filter(|b| b.kind == BodyKind::Base && b.active && b.fort.is_none())
             .filter_map(|b| {
                 let key = b.origin?;
-                let (tid, role) = *self.civ_bases.get(&key)?;
+                let (tid, role) = *self.civs.bases.get(&key)?;
                 matches!(role, CivRole::Capital | CivRole::Outpost)
                     .then_some((key, b.position, tid))
             })
@@ -198,7 +198,7 @@ impl Game {
                 continue;
             }
             self.farm.stocked.insert(key);
-            let Some(t) = self.civ_territories.get(&tid).copied() else {
+            let Some(t) = self.civs.territories.get(&tid).copied() else {
                 continue;
             };
             if self.civ_standing(tid) == Standing::Fallen {
@@ -429,7 +429,8 @@ impl Game {
 
     /// Whether the civilization farms and so has a granary to trade from.
     pub fn civ_trades_biomass(&self, tid: u64) -> bool {
-        self.civ_territories
+        self.civs
+            .territories
             .get(&tid)
             .is_some_and(|t| t.farms(self.seed))
     }

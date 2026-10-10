@@ -1013,7 +1013,7 @@ mod tests {
             g.remove_destroyed();
             assert_eq!(g.run.kills, u32::from(claimed));
             assert_eq!(g.score > 0, claimed);
-            assert!(g.civ_hits.is_empty());
+            assert!(g.civs.hits.is_empty());
         }
     }
     #[test]
