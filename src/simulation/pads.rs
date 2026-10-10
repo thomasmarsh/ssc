@@ -59,6 +59,7 @@ pub const LOSE_AFTER: f32 = 4.0;
 pub const COVER_BREAK: f32 = 10.0;
 /// Base capacity per material before dedicated site storage.
 pub const STASH_CAP: f32 = 100.0;
+pub const WAREHOUSE_CAP: f32 = 300.0;
 pub const WATER_TANK_CAP: f32 = 300.0;
 /// How much one bench press moves in or out of the stash.
 pub const STASH_STEP: f32 = 25.0;
@@ -100,6 +101,8 @@ pub struct Pad {
     #[serde(default)]
     pub water_tank: bool,
     #[serde(default)]
+    pub warehouse: bool,
+    #[serde(default)]
     pub water_extractor: bool,
     /// Deployment order: the oldest is dismantled first.
     pub order: u64,
@@ -113,6 +116,8 @@ impl Pad {
     pub fn stash_cap(&self, material: Material) -> f32 {
         if material == Material::Water && self.water_tank {
             WATER_TANK_CAP
+        } else if material != Material::Water && self.warehouse {
+            WAREHOUSE_CAP
         } else {
             STASH_CAP
         }
@@ -355,6 +360,7 @@ impl Game {
                 refinery: None,
                 water_tank: false,
                 water_extractor: false,
+                warehouse: false,
             },
         );
         self.pad.next_order = 1;
@@ -746,6 +752,7 @@ impl Game {
                 refinery: None,
                 water_tank: false,
                 water_extractor: false,
+                warehouse: false,
             },
         );
         let spot = center + Vec2::from_angle(angle + anchor) * radius;
@@ -1817,6 +1824,7 @@ mod tests {
                     refinery: None,
                     water_tank: false,
                     water_extractor: false,
+                    warehouse: false,
                 },
             );
         }
@@ -2553,6 +2561,7 @@ mod tests {
                 refinery: None,
                 water_tank: false,
                 water_extractor: false,
+                warehouse: false,
             },
         );
     }
@@ -3181,6 +3190,7 @@ mod tests {
                     refinery: None,
                     water_tank: false,
                     water_extractor: false,
+                    warehouse: false,
                 },
             );
         }

@@ -37,6 +37,7 @@ pub enum BenchAction {
     RawInput,
     Refinery,
     WaterTank,
+    Warehouse,
     WaterExtractor,
     Research(research::Tech),
     Grade,
@@ -123,6 +124,7 @@ impl Game {
                     [
                         BenchAction::Refinery,
                         BenchAction::WaterTank,
+                        BenchAction::Warehouse,
                         BenchAction::WaterExtractor,
                     ]
                 }))
@@ -193,6 +195,7 @@ impl Game {
             Some(BenchAction::Repair) => self.bench_repair(),
             Some(BenchAction::RawInput) => self.buy_raw_input(),
             Some(BenchAction::Refinery) => self.buy_refinery(),
+            Some(BenchAction::Warehouse) => self.buy_warehouse(),
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
@@ -570,7 +573,10 @@ impl Game {
                 if let Some(refinery) = self.landed_pad().and_then(|p| p.refinery.as_ref()) {
                     row.text = "FUEL REFINERY".into();
                     row.ok = false;
-                    row.state = refinery.status(&self.landed_pad().unwrap().stash);
+                    row.state = refinery.status(
+                        &self.landed_pad().unwrap().stash,
+                        self.landed_pad().unwrap().stash_cap(Material::Fuel),
+                    );
                 } else {
                     row.costs = production::REFINERY_PRICE.to_vec();
                     if let Some(why) = self.refinery_block() {
@@ -598,6 +604,24 @@ impl Game {
                         row.ok = false;
                         row.state = why.into();
                     }
+                }
+            }
+            BenchAction::Warehouse => {
+                row.group = "PAD PRODUCTION";
+                row.text = "BUILD WAREHOUSE".into();
+                row.detail = format!(
+                    "Raises this pad's M/V/C/B/F storage from {:.0} to {:.0} each. Water uses a separate tank. No research or power needed; store with Enter and take with Q / X.",
+                    pads::STASH_CAP,
+                    pads::WAREHOUSE_CAP
+                );
+                if self.landed_pad().is_some_and(|p| p.warehouse) {
+                    row.text = "WAREHOUSE".into();
+                } else {
+                    row.costs = production::WAREHOUSE_PRICE.to_vec();
+                }
+                if let Some(why) = self.warehouse_block() {
+                    row.ok = false;
+                    row.state = why.into();
                 }
             }
             BenchAction::WaterTank => {

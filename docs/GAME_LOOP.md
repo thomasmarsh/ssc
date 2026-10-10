@@ -200,7 +200,9 @@ Build pad modules with connected local storage and power: extractor, refinery, f
 
 **Built bought-input route:** HOME PARTS sells 20 volatiles for 10 metal per lot, from a finite 200V stock per run. Full holds, insufficient metal and purchases away from HOME refuse without payment or stock loss. Store purchased volatiles at any pad refinery, then retrieve its fuel. Settled orders persist independently of pad/generator resets; unloading and reloading never restock. NEW GAME restores stock. This starter barter grants no experience or knowledge; friendly-seat raw offers and replenishment remain deferred.
 
-TODO: remaining D: separate local power/storage modules and more machine jobs. Refinery balance and its integral-power default need playtesting.
+**Built local warehouse:** PARTS builds one warehouse per landed pad for 30 metal, without research or power. Metal, volatiles, crystal, biomass, and fuel caps rise from 100 to 300 each; water still uses the separate tank. Stash previews/transfers and refinery output respect the expanded local caps. Installation and stocks persist; pad removal loses the module under existing salvage rules. Ship caps, generation, and save version remain unchanged (defaulted pad field).
+
+TODO: remaining D: separate local power modules and more machine jobs. Refinery balance and its integral-power default need playtesting.
 
 ### Mining drones and escorts
 

@@ -45,7 +45,7 @@ Decide per slice, and say which in one line.
 The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D refinery, water and bought-input routes are built; remaining local production and the later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, working home: remaining D local power/storage modules (paid saved refinery, water tank, aquifer extractor and finite HOME bought-input route built); then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
+1. [L] NEXT, working home: remaining D local power module (paid saved refinery, warehouse, water tank, aquifer extractor and finite HOME bought-input route built); then narrow E delivery/survey jobs, research access, boons, map leads, and a simple agreement. Stock-backed barter first; no complete galactic market required.
 2. [L] Remote industry: F constructible mining drones, upgrades/templates, persisted depletion, losses/wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk water delivery, fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 3. [L] H visiting civilization trade ships and sensors/turrets/escorts with bounded saved remote incidents; I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 4. Alongside: DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
@@ -57,6 +57,8 @@ Other backlog: density/feeling view-model and measurements, weaver rock care, hy
 Decided: plant-supporting planets sustain crops in a closed cycle without explicit maintenance or irrigation; raw wildlife rewards with organs as biological specials; civilizations alone learn; peaceful essential progression; continued equipment grades with bounded patterns/movement; bulk water via local tanks/tankers; tanker construction at established planetoid pads; a useful solo homestead before citizens. Open defaults: corpse harvesting deferred, barter first, rank/perk effects deferred, capture cap proposed not tuned; see GAME_LOOP section 14.
 
 ## Recently done
+
+- Narrow local warehouse: 30M builds saved 300-unit M/V/C/B/F site storage; stash previews/transfers and refinery output share caps. Water remains tank-backed; local power is next.
 
 - Narrow bought-input route: HOME barters ten saved lots of 20V for 10M each; atomic hold/payment gates, visible remaining stock, stash-to-refinery fuel loop, no restock.
 
@@ -71,5 +73,3 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 - Narrow frontier progression (generator 33): five saved research dependencies, independently salted supplier specialties, capped one-time captures and one-use archive grade claims, continuing source-bound offense/durability grades with preserved handling/pattern bounds and normalized repair costs. Peaceful and conquest paths share the tested frontier ceiling.
 
 - Frontier procurement: HOME/friendly-seat peaceful basic equipment, support prerequisites and profile purchases; wild bodies/apex biological/raw rewards only, finite geological lodes without technological charges. CONTACT reuses bench/controller navigation.
-
-- Shared resources: six Cargo balances and fixed HUD counters; atomic exchanges/transfers, manufactured fuel services, small water reserve, shared farming biomass, fuel-powered systems and biomass organ upkeep. Save format 3; generation unchanged.

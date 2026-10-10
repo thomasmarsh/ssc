@@ -2087,6 +2087,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
             game.cargo.volatiles = 0.0;
             game.bench_select(BenchAction::RawInput);
         }
+        "warehouse" => game.bench_select(BenchAction::Warehouse),
         "water-tank" => game.bench_select(BenchAction::WaterTank),
         "refinery" => {
             game.loadout
