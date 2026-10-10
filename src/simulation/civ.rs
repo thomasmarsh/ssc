@@ -354,7 +354,7 @@ impl Game {
         if body.brain.is_some()
             && let Some(table) = self.civs.brains.get(&tag.territory)
         {
-            body.brain = Some(Box::new(table.learned_copy()));
+            body.brain = Some(Box::new(table.learned_copy(&self.tune)));
         }
     }
 
@@ -509,7 +509,7 @@ impl Game {
             if body.brain.is_some()
                 && let Some(table) = self.civs.brains.get(&t.id)
             {
-                body.brain = Some(Box::new(table.learned_copy()));
+                body.brain = Some(Box::new(table.learned_copy(&self.tune)));
             }
             self.add_body(body);
             self.effect(at, 24.0, 0.5, EffectKind::Respawn);
@@ -545,7 +545,7 @@ impl Game {
                     continue;
                 };
                 if self.civs.lineages.get(&body.species).map(|c| c.0) != Some(tid)
-                    || !brain.is_trained()
+                    || !brain.is_trained(&self.tune)
                 {
                     continue;
                 }
@@ -554,7 +554,7 @@ impl Game {
                         table.blend_toward(brain, pull);
                         table.steps = table.steps.max(brain.steps);
                     }
-                    None => table = Some(Box::new(brain.learned_copy())),
+                    None => table = Some(Box::new(brain.learned_copy(&self.tune))),
                 }
             }
             if let Some(table) = table {
@@ -1031,9 +1031,9 @@ mod tests {
             let w = 400.0 / 300.0;
             let ship = Vec2::new((w * time).cos(), (w * time).sin()) * 300.0;
             let velocity = Vec2::new(-(w * time).sin(), (w * time).cos()) * 400.0;
-            brain.observe(DT, true, ship, velocity, ship, 0.3);
+            brain.observe(DT, true, ship, velocity, ship, 0.3, &DEFAULT_TUNING);
         }
-        assert!(brain.is_trained());
+        assert!(brain.is_trained(&DEFAULT_TUNING));
         let a_weights = brain.weights();
         let distance = |x: &[f32], y: &[f32]| -> f32 {
             x.iter()
@@ -1053,7 +1053,7 @@ mod tests {
             "B moved toward what A learned"
         );
         let table = game.civ_doctrine(t.id).expect("a table formed").clone();
-        assert!(table.is_trained());
+        assert!(table.is_trained(&DEFAULT_TUNING));
         // A newcomer is born with the table's weights.
         let mut fresh = game.make_creature(&species, Vec2::new(0.0, 3200.0));
         let tag = CivTag {

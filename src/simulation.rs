@@ -127,13 +127,13 @@ pub use powers::{BlinkTell, JamKind, JamTell, OozeView, PowerView};
 pub use realms::RealmState;
 pub use regions::RegionState;
 pub use rift::{Rift, RiftTrace};
-pub use root::{Root, STAND as ROOT_STAND};
+pub use root::Root;
 pub use rune::{Payload, RuneField, Sigil};
 pub use sling::SlingTell;
 pub use society::CultureReading;
 pub use society::{CivilTarget, EngagementRule};
 pub use song::SongRing;
-pub use tether::{Cord, STRONG_CORD, Tether, TetherKind};
+pub use tether::{Cord, Tether, TetherKind};
 pub use titles::{TitleFacts, title, title_case};
 #[allow(unused_imports)]
 pub(crate) use tuning::DEFAULT as DEFAULT_TUNING;
@@ -1035,7 +1035,7 @@ impl Game {
             let head = self.add_body(body);
             made.insert(spawn.index, head);
             if let Some(&partner) = spawn.link.and_then(|i| made.get(&i)) {
-                self.tethers.push(Tether::link(partner, head));
+                self.tethers.push(Tether::link(partner, head, &self.tune));
             }
         }
         self.restore_structures(id);
@@ -1684,7 +1684,7 @@ impl Game {
                         if tether::segment_distance(previous, bullet.position, from, to)
                             < bullet.radius + 3.0
                         {
-                            self.tethers[index].health -= tether::CORD_BULLET_DAMAGE;
+                            self.tethers[index].health -= self.tune.tether_cord_bullet_damage;
                             bullet.remaining = 0.0;
                             impacts.push(bullet.position);
                             break;
@@ -3768,7 +3768,7 @@ mod tests {
                 },
             );
             assert!(game.bodies.len() <= MAX_BODIES);
-            assert!(game.tethers.len() <= tether::MAX_TETHERS);
+            assert!(game.tethers.len() <= DEFAULT_TUNING.tether_max_tethers);
             assert!(game.bullets.len() <= MAX_BULLETS);
             assert!(
                 game.bodies

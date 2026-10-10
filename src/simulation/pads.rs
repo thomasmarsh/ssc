@@ -872,7 +872,11 @@ impl Game {
         let Some(host) = self.pad_host(key) else {
             return;
         };
-        let (host_id, spot, velocity) = (host.id, root::place(host, anchor, 14.0), host.velocity);
+        let (host_id, spot, velocity) = (
+            host.id,
+            root::place(host, anchor, 14.0, &self.tune),
+            host.velocity,
+        );
         let outward = host.angle + anchor;
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
             ship.root = Some(Root {

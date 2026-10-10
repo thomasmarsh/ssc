@@ -9,19 +9,6 @@ use crate::bodyplan;
 use crate::grammar::PartKind;
 use std::f32::consts::FRAC_PI_2;
 
-/// Joints never stretch past this multiple of the rest distance.
-const MAX_STRETCH: f32 = 1.6;
-const JOINT_DAMPING: f32 = 8.0;
-/// Sideways acceleration of the travelling wave at unit amplitude.
-const SLITHER_ACCEL: f32 = 260.0;
-/// The head weaves only a little so it can still steer; the body carries the wave.
-const HEAD_WAVE_SHARE: f32 = 0.3;
-/// How quickly each part matches its parent's velocity; this is what lets a head tow a
-/// long body at speed while the travelling wave still ripples through it.
-const TRACTION: f32 = 3.0;
-/// Limb parts are this much smaller than the head.
-const LIMB_SCALE: f32 = 0.55;
-
 /// One body of a jointed creature.
 #[derive(Clone, Copy, Debug)]
 pub struct Part {
@@ -175,7 +162,9 @@ impl Game {
             let (mut spot, mut radius) = spine_spots[attach];
             let mut parent = parts[attach].id;
             for depth in 0..usize::from(genome.limb_len) {
-                let next = (genome.radius * LIMB_SCALE * (1.0 - 0.1 * depth as f32)).max(3.5);
+                let next =
+                    (genome.radius * self.tune.chain_limb_scale * (1.0 - 0.1 * depth as f32))
+                        .max(3.5);
                 spot += outward * (radius + next) * 0.9;
                 radius = next;
                 let id = self.next_id;
@@ -441,7 +430,7 @@ impl Game {
                 let direction = offset / distance;
                 let closing = (b.velocity - a.velocity).dot(direction);
                 let force = genome.stiffness * (distance - rest_length(a, b, chain.parts[n].rest))
-                    + JOINT_DAMPING * closing;
+                    + self.tune.chain_joint_damping * closing;
                 let push = direction * force * dt * 0.5;
                 a.velocity += push;
                 b.velocity -= push;
@@ -471,11 +460,21 @@ impl Game {
                 let normal = Vec2::new(-tangent.y, tangent.x);
                 let wave = (chain.phase - part.rank * genome.lag + part.side * FRAC_PI_2).sin();
                 let body = &mut self.bodies[slot];
-                let share = if n == 0 { HEAD_WAVE_SHARE } else { 1.0 };
-                body.velocity +=
-                    normal * wave * genome.wave * part.drive * SLITHER_ACCEL * share * dt;
+                let share = if n == 0 {
+                    self.tune.chain_head_wave_share
+                } else {
+                    1.0
+                };
+                body.velocity += normal
+                    * wave
+                    * genome.wave
+                    * part.drive
+                    * self.tune.chain_slither_accel
+                    * share
+                    * dt;
                 if let Some(parent) = parent_slot[n] {
-                    body.velocity += (speeds[parent] - body.velocity) * (dt * TRACTION).min(1.0);
+                    body.velocity +=
+                        (speeds[parent] - body.velocity) * (dt * self.tune.chain_traction).min(1.0);
                     // Only a trace of absolute drag: joint damping already burns off relative
                     // motion, and heavy drag would make long chains impossible to tow.
                     body.velocity *= (-0.15 * dt).exp();
@@ -512,7 +511,7 @@ impl Game {
                 }
                 let offset = b.position - a.position;
                 let distance = offset.length();
-                let limit = rest_length(a, b, part.rest) * MAX_STRETCH;
+                let limit = rest_length(a, b, part.rest) * self.tune.chain_max_stretch;
                 if distance > limit {
                     let direction = offset / distance;
                     b.position = a.position + direction * limit;
@@ -653,7 +652,8 @@ mod tests {
                     let (a, b) = (body(&game, parent), body(&game, part.id));
                     assert!(
                         a.position.distance(b.position)
-                            <= rest_length(a, b, part.rest) * MAX_STRETCH + 0.5,
+                            <= rest_length(a, b, part.rest) * DEFAULT_TUNING.chain_max_stretch
+                                + 0.5,
                         "stiffness {stiffness} tick {tick}: stretched to {}",
                         a.position.distance(b.position)
                     );
@@ -895,7 +895,7 @@ mod tests {
                 let Some(parent) = part.parent else { continue };
                 let (a, b) = (body(&game, parent), body(&game, part.id));
                 assert!(b.position.is_finite() && b.velocity.is_finite(), "{name}");
-                let limit = rest_length(a, b, part.rest) * MAX_STRETCH + 0.5;
+                let limit = rest_length(a, b, part.rest) * DEFAULT_TUNING.chain_max_stretch + 0.5;
                 assert!(
                     a.position.distance(b.position) <= limit,
                     "{name} tick {tick}"

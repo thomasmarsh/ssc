@@ -35,8 +35,6 @@ use crate::power::{self, Power};
 pub const SKIN: usize = 16;
 /// Rocks shown inside at once.
 pub const INSIDE: usize = 4;
-/// Seconds a swallowed ship is drawn in before the hold relaxes to the capped pull.
-const CLOSE: f32 = 0.35;
 
 const REST: f32 = 60.0;
 const NEIGHBOUR: f32 = 40.0;
@@ -528,7 +526,7 @@ impl Game {
             return 0.0;
         };
         let age = held.age + dt;
-        if age < CLOSE {
+        if age < self.tune.ooze_close {
             // The lobe closes: the ship is drawn in whatever it does.
             let target = centre + (ship.position - centre).clamp_length_max(radius * 0.55);
             ship.position += (target - ship.position) * (dt * 8.0).min(1.0);

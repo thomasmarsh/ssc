@@ -16,26 +16,10 @@ use super::*;
 pub const INPUTS: usize = 6;
 pub const HIDDEN: usize = 6;
 pub const OUTPUTS: usize = 2;
-/// Seconds between snapshots, and how far ahead each is judged.
-pub const INTERVAL: f32 = 0.25;
-pub const HORIZON: f32 = 0.5;
-/// Largest correction the net can add to the aim, in world units (per axis, before the
-/// clamp on its length).
-pub const RANGE: f32 = 240.0;
-/// Longest total lead a shot or intercept may take from a learner.
-pub const MAX_LEAD: f32 = 420.0;
 /// Input scales: distance, ship speed, ship acceleration.
 const POSITION_SCALE: f32 = 1000.0;
 const SPEED_SCALE: f32 = 460.0;
 const ACCEL_SCALE: f32 = 1000.0;
-/// A displacement larger than this is a teleport (a respawn or sector hop), not movement.
-const TELEPORT: f32 = 3000.0;
-/// Weight noise a child receives, and the spread of a founder's output layer.
-const INHERIT_NOISE: f32 = 0.01;
-/// Smoothing of the running error estimates.
-const EMA: f32 = 0.1;
-/// Training steps before the running accuracy is trusted for display.
-const WARMUP: u32 = 8;
 /// Separates brain initialization from every other stream.
 pub const BRAIN_SALT: u64 = 0xB4A1_0000_5EED_0051;
 
@@ -106,7 +90,13 @@ impl Brain {
 
     /// A child's brain: each weight a random blend of its parents' (or a copy of the only
     /// parent's), plus a hair of noise. Learned skill is inherited; running statistics are not.
-    pub fn inherit(a: Option<&Brain>, b: Option<&Brain>, id: u64, rng: &mut Rng) -> Self {
+    pub fn inherit(
+        a: Option<&Brain>,
+        b: Option<&Brain>,
+        id: u64,
+        rng: &mut Rng,
+        tune: &Tunables,
+    ) -> Self {
         let (first, second) = match (a, b) {
             (Some(x), Some(y)) => (x, Some(y)),
             (Some(x), None) | (None, Some(x)) => (x, None),
@@ -118,7 +108,7 @@ impl Brain {
                 Some(y) => x + (y - x) * rng.f32(),
                 None => x,
             };
-            base + gauss_free(rng, INHERIT_NOISE)
+            base + gauss_free(rng, tune.brain_inherit_noise)
         };
         for i in 0..HIDDEN {
             for j in 0..INPUTS {
@@ -156,18 +146,18 @@ impl Brain {
 
     /// A fresh brain with these weights and none of the running state, for a newcomer that
     /// joins a civilization.
-    pub fn learned_copy(&self) -> Self {
+    pub fn learned_copy(&self, tune: &Tunables) -> Self {
         let mut copy = Self::blank();
         copy.blend_toward(self, 1.0);
-        copy.steps = self.steps.min(WARMUP);
+        copy.steps = self.steps.min(tune.brain_warmup);
         copy.error = self.error;
         copy.baseline = self.baseline;
         copy
     }
 
     /// True once it has trained enough for its accuracy to mean something.
-    pub fn is_trained(&self) -> bool {
-        self.steps >= WARMUP
+    pub fn is_trained(&self, tune: &Tunables) -> bool {
+        self.steps >= tune.brain_warmup
     }
 
     /// Every weight, in a fixed order (for tests and diagnostics).
@@ -199,7 +189,7 @@ impl Brain {
     }
 
     /// One SGD step on the squared error between prediction and `target` (both normalized).
-    fn train(&mut self, x: &[f32; INPUTS], target: [f32; OUTPUTS], rate: f32) {
+    fn train(&mut self, x: &[f32; INPUTS], target: [f32; OUTPUTS], rate: f32, tune: &Tunables) {
         let (hidden, out) = self.forward(x);
         let mut dz = [0.0; OUTPUTS];
         let (mut miss, mut size) = (0.0, 0.0);
@@ -212,8 +202,8 @@ impl Brain {
         if self.steps == 0 {
             (self.error, self.baseline) = (miss, size);
         } else {
-            self.error += EMA * (miss - self.error);
-            self.baseline += EMA * (size - self.baseline);
+            self.error += tune.brain_ema * (miss - self.error);
+            self.baseline += tune.brain_ema * (size - self.baseline);
         }
         let mut dh = [0.0; HIDDEN];
         for ((row, bias), d) in self.w2.iter_mut().zip(&mut self.b2).zip(dz) {
@@ -237,6 +227,7 @@ impl Brain {
     /// creature, `engaged` whether the creature is currently hunting it, and `rate` the
     /// SGD step size. A disengaged creature forgets its half-finished snapshots (what it
     /// has already learned stays).
+    #[allow(clippy::too_many_arguments)]
     pub fn observe(
         &mut self,
         dt: f32,
@@ -245,6 +236,7 @@ impl Brain {
         velocity: Vec2,
         relative: Vec2,
         rate: f32,
+        tune: &Tunables,
     ) {
         if !engaged {
             self.pending = [None; 3];
@@ -256,20 +248,21 @@ impl Brain {
         for (slot, done) in self.pending.iter_mut().zip(&mut matured) {
             if let Some(sample) = slot {
                 sample.age += dt;
-                if sample.age >= HORIZON {
+                if sample.age >= tune.brain_horizon {
                     *done = slot.take();
                 }
             }
         }
         for sample in matured.into_iter().flatten() {
             let moved = ship - sample.origin;
-            if moved.length() < TELEPORT {
-                let miss = ((moved - sample.velocity * HORIZON) / RANGE).clamp_length_max(1.0);
-                self.train(&sample.inputs, [miss.x, miss.y], rate);
+            if moved.length() < tune.brain_teleport {
+                let miss = ((moved - sample.velocity * tune.brain_horizon) / tune.brain_range)
+                    .clamp_length_max(1.0);
+                self.train(&sample.inputs, [miss.x, miss.y], rate, tune);
             }
         }
         self.clock += dt;
-        if self.clock < INTERVAL {
+        if self.clock < tune.brain_interval {
             return;
         }
         let elapsed = self.clock;
@@ -288,7 +281,7 @@ impl Brain {
         ]
         .map(|v: f32| v.clamp(-2.0, 2.0));
         let (_, out) = self.forward(&inputs);
-        self.residual = Vec2::new(out[0], out[1]) * RANGE;
+        self.residual = Vec2::new(out[0], out[1]) * tune.brain_range;
         if let Some(slot) = self.pending.iter_mut().find(|s| s.is_none()) {
             *slot = Some(Sample {
                 inputs,
@@ -307,24 +300,25 @@ impl Brain {
     /// Where an intercepting creature aims relative to the ship: the straight-line lead
     /// (`lead` seconds, from the creature's own gene) blended toward the `HORIZON` guess by
     /// `learner`, plus the learned correction scaled by `learner`. Always bounded.
-    pub fn aim_offset(&self, velocity: Vec2, lead: f32, learner: f32) -> Vec2 {
-        let seconds = lead + (HORIZON - lead) * learner;
-        (velocity * seconds + self.residual * learner).clamp_length_max(MAX_LEAD)
+    pub fn aim_offset(&self, velocity: Vec2, lead: f32, learner: f32, tune: &Tunables) -> Vec2 {
+        let seconds = lead + (tune.brain_horizon - lead) * learner;
+        (velocity * seconds + self.residual * learner).clamp_length_max(tune.brain_max_lead)
     }
 
     /// Where a shot of flight time `flight` should be aimed relative to the ship: the whole
     /// straight-line lead plus the correction rescaled to that horizon, blended in by
     /// `learner` (a creature that does not learn never leads its shots). Always bounded.
-    pub fn shot_offset(&self, velocity: Vec2, flight: f32, learner: f32) -> Vec2 {
+    pub fn shot_offset(&self, velocity: Vec2, flight: f32, learner: f32, tune: &Tunables) -> Vec2 {
         let flight = flight.clamp(0.0, 1.5);
-        let scale = flight / HORIZON;
-        ((velocity * flight + self.residual * scale * scale) * learner).clamp_length_max(MAX_LEAD)
+        let scale = flight / tune.brain_horizon;
+        ((velocity * flight + self.residual * scale * scale) * learner)
+            .clamp_length_max(tune.brain_max_lead)
     }
 
     /// How much better than a straight-line guess the net currently predicts, in [0, 1];
     /// zero until it has trained a little. Drives the visual cue.
-    pub fn skill(&self) -> f32 {
-        if self.steps < WARMUP {
+    pub fn skill(&self, tune: &Tunables) -> f32 {
+        if self.steps < tune.brain_warmup {
             return 0.0;
         }
         (1.0 - self.error / (self.baseline + 0.03)).clamp(0.0, 1.0)
@@ -338,8 +332,8 @@ pub fn step_size(learn_rate: f32) -> f32 {
 
 impl Body {
     /// A learner's current accuracy in [0, 1], or `None` for creatures that do not learn.
-    pub fn learner_skill(&self) -> Option<f32> {
-        self.brain.as_ref().map(|b| b.skill())
+    pub fn learner_skill(&self, tune: &Tunables) -> Option<f32> {
+        self.brain.as_ref().map(|b| b.skill(tune))
     }
 }
 
@@ -388,7 +382,7 @@ mod tests {
         let mut t = 0.0;
         while t < seconds {
             let (p, v) = path(kind, t);
-            brain.observe(DT, true, p, v, p - creature, rate);
+            brain.observe(DT, true, p, v, p - creature, rate, &DEFAULT_TUNING);
             t += DT;
         }
     }
@@ -406,10 +400,12 @@ mod tests {
         let mut t = start;
         while t < start + seconds {
             let (p, v) = path(kind, t);
-            brain.observe(DT, true, p, v, p - creature, 0.0);
-            let (future, _) = path(kind, t + HORIZON);
-            learned += (p + brain.aim_offset(v, HORIZON, learner)).distance(future);
-            plain += (p + v * HORIZON).distance(future);
+            brain.observe(DT, true, p, v, p - creature, 0.0, &DEFAULT_TUNING);
+            let (future, _) = path(kind, t + DEFAULT_TUNING.brain_horizon);
+            learned +=
+                (p + brain.aim_offset(v, DEFAULT_TUNING.brain_horizon, learner, &DEFAULT_TUNING))
+                    .distance(future);
+            plain += (p + v * DEFAULT_TUNING.brain_horizon).distance(future);
             n += 1.0;
             t += DT;
         }
@@ -445,7 +441,11 @@ mod tests {
         train(0, 60.0, rate, &mut brain);
         let late = aim_error(0, 60.0, 6.0, &mut brain, 1.0).0;
         assert!(late < early * 0.8, "{early:.1} -> {late:.1}");
-        assert!(brain.skill() > 0.1, "skill {}", brain.skill());
+        assert!(
+            brain.skill(&DEFAULT_TUNING) > 0.1,
+            "skill {}",
+            brain.skill(&DEFAULT_TUNING)
+        );
     }
 
     #[test]
@@ -464,13 +464,23 @@ mod tests {
             Vec2::new(900.0, 900.0),
             Vec2::new(900.0, 900.0),
             0.0,
+            &DEFAULT_TUNING,
         );
-        assert!(wild.residual().length() <= RANGE * 2.0_f32.sqrt() + 0.01);
+        assert!(wild.residual().length() <= DEFAULT_TUNING.brain_range * 2.0_f32.sqrt() + 0.01);
         let fast = Vec2::new(5000.0, -5000.0);
-        assert!(wild.aim_offset(fast, 1.2, 1.0).length() <= MAX_LEAD + 0.01);
-        assert!(wild.shot_offset(fast, 9.0, 1.0).length() <= MAX_LEAD + 0.01);
+        assert!(
+            wild.aim_offset(fast, 1.2, 1.0, &DEFAULT_TUNING).length()
+                <= DEFAULT_TUNING.brain_max_lead + 0.01
+        );
+        assert!(
+            wild.shot_offset(fast, 9.0, 1.0, &DEFAULT_TUNING).length()
+                <= DEFAULT_TUNING.brain_max_lead + 0.01
+        );
         // A creature that does not learn never leads its shots.
-        assert_eq!(wild.shot_offset(fast, 1.0, 0.0), Vec2::ZERO);
+        assert_eq!(
+            wild.shot_offset(fast, 1.0, 0.0, &DEFAULT_TUNING),
+            Vec2::ZERO
+        );
     }
 
     #[test]
@@ -482,7 +492,15 @@ mod tests {
         assert_ne!(Brain::new(9).weights(), Brain::new(10).weights());
         let before = a.weights();
         for _ in 0..600 {
-            a.observe(DT, false, Vec2::ZERO, Vec2::ZERO, Vec2::ZERO, 0.5);
+            a.observe(
+                DT,
+                false,
+                Vec2::ZERO,
+                Vec2::ZERO,
+                Vec2::ZERO,
+                0.5,
+                &DEFAULT_TUNING,
+            );
         }
         assert_eq!(before, a.weights());
     }
@@ -490,7 +508,15 @@ mod tests {
     #[test]
     fn teleports_are_not_learned() {
         let mut brain = Brain::new(2);
-        brain.observe(0.3, true, Vec2::ZERO, Vec2::ZERO, Vec2::ZERO, 0.5);
+        brain.observe(
+            0.3,
+            true,
+            Vec2::ZERO,
+            Vec2::ZERO,
+            Vec2::ZERO,
+            0.5,
+            &DEFAULT_TUNING,
+        );
         brain.observe(
             0.6,
             true,
@@ -498,6 +524,7 @@ mod tests {
             Vec2::ZERO,
             Vec2::ZERO,
             0.5,
+            &DEFAULT_TUNING,
         );
         assert_eq!(brain.steps, 0);
     }
@@ -506,25 +533,25 @@ mod tests {
     fn children_blend_their_parents_weights() {
         let mut rng = Rng::new(4);
         let (a, b) = (Brain::new(1), Brain::new(2));
-        let child = Brain::inherit(Some(&a), Some(&b), 3, &mut rng);
+        let child = Brain::inherit(Some(&a), Some(&b), 3, &mut rng, &DEFAULT_TUNING);
         let (wa, wb, wc) = (a.weights(), b.weights(), child.weights());
         for ((x, y), c) in wa.iter().zip(&wb).zip(&wc) {
             let (lo, hi) = (
-                x.min(*y) - INHERIT_NOISE - 1e-4,
-                x.max(*y) + INHERIT_NOISE + 1e-4,
+                x.min(*y) - DEFAULT_TUNING.brain_inherit_noise - 1e-4,
+                x.max(*y) + DEFAULT_TUNING.brain_inherit_noise + 1e-4,
             );
             assert!((lo..=hi).contains(c));
         }
         assert_ne!(wc, wa);
         assert_ne!(wc, wb);
         // A single parent is copied, give or take the noise.
-        let clone = Brain::inherit(Some(&a), None, 3, &mut rng);
+        let clone = Brain::inherit(Some(&a), None, 3, &mut rng, &DEFAULT_TUNING);
         for (x, c) in wa.iter().zip(clone.weights()) {
-            assert!((x - c).abs() <= INHERIT_NOISE + 1e-4);
+            assert!((x - c).abs() <= DEFAULT_TUNING.brain_inherit_noise + 1e-4);
         }
         // An orphan gets a fresh founder.
         assert_eq!(
-            Brain::inherit(None, None, 7, &mut rng).weights(),
+            Brain::inherit(None, None, 7, &mut rng, &DEFAULT_TUNING).weights(),
             Brain::new(7).weights()
         );
     }
@@ -534,7 +561,7 @@ mod tests {
         let mut parent = Brain::new(1);
         train(0, 90.0, step_size(0.6), &mut parent);
         let mut rng = Rng::new(8);
-        let mut child = Brain::inherit(Some(&parent), None, 2, &mut rng);
+        let mut child = Brain::inherit(Some(&parent), None, 2, &mut rng, &DEFAULT_TUNING);
         let mut stranger = Brain::new(2);
         let inherited = aim_error(0, 90.0, 6.0, &mut child, 1.0).0;
         let naive = aim_error(0, 90.0, 6.0, &mut stranger, 1.0).0;
@@ -552,7 +579,7 @@ mod tests {
             let t = step as f32 * DT;
             let (p, v) = path(0, t);
             for brain in &mut brains {
-                brain.observe(DT, true, p, v, p, 0.3);
+                brain.observe(DT, true, p, v, p, 0.3, &DEFAULT_TUNING);
             }
         }
         assert!(started.elapsed().as_secs_f32() < 5.0);
@@ -688,7 +715,7 @@ mod tests {
                 .weights();
             let mut between = 0;
             for ((x, y), c) in wa.iter().zip(&wb).zip(&weights) {
-                let slack = INHERIT_NOISE + 1e-4;
+                let slack = DEFAULT_TUNING.brain_inherit_noise + 1e-4;
                 if (x.min(*y) - slack..=x.max(*y) + slack).contains(c) {
                     between += 1;
                 }

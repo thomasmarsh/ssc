@@ -7,30 +7,6 @@ use super::wildlife::Mode;
 use super::*;
 use crate::genome::{Diet, Fear, Social, Trigger, Weapon};
 
-/// How far a creature notices same-species neighbors, how close it tolerates them, and how
-/// far it may stray from the crowd's center before drifting back.
-const PERCEPTION: f32 = 380.0;
-const PERSONAL_SPACE: f32 = 110.0;
-const LOOSE_RADIUS: f32 = 220.0;
-/// True schools (passive schoolers that wait to be provoked) hold together more: they pull
-/// stragglers back from nearer, keep a steadier common pace and fidget less, so a band
-/// stays a band instead of straggling into singletons.
-const SCHOOL_LOOSE_RADIUS: f32 = 170.0;
-const SCHOOL_PULL_SPAN: f32 = 160.0;
-/// How far a creature with a mass affinity notices rocks and gravity wells.
-const HEAVY_RANGE: f32 = 600.0;
-/// An enraged creature pursues the player this far, whatever its sight.
-const RAGE_PURSUIT_RANGE: f32 = 1500.0;
-/// Rage-capable creatures hunt cautiously until they frenzy.
-const CAUTIOUS_PACE: f32 = 0.85;
-const FRENZY_PACE: f32 = 1.35;
-/// Closest a cord launcher will fire.
-const TETHER_MIN_RANGE: f32 = 140.0;
-/// How far fearful and grazing creatures look for bullets, wells and rocks.
-const DODGE_RANGE: f32 = 300.0;
-const WELL_FEAR_RANGE: f32 = 700.0;
-const GRAZE_RANGE: f32 = 700.0;
-
 impl Game {
     /// A creature body built entirely from a species' genome.
     pub(super) fn make_creature(&mut self, species: &Species, position: Vec2) -> Body {
@@ -191,7 +167,7 @@ impl Game {
             let perception = if g.social == Social::Solitary {
                 0.0
             } else {
-                PERCEPTION * flock
+                self.tune.creature_perception * flock
             };
             // Aggression moves pace only a little; it mostly shows in rage and fire rate.
             let speed =
@@ -225,7 +201,7 @@ impl Game {
                 let range = body.radius + other.radius + 35.0;
                 if seeking
                     && other.rock
-                    && distance_squared < root::SEEK_RANGE * root::SEEK_RANGE
+                    && distance_squared < self.tune.root_seek_range * self.tune.root_seek_range
                     && perch.is_none_or(|(best, _)| distance_squared < best)
                 {
                     perch = Some((distance_squared, -offset));
@@ -242,19 +218,22 @@ impl Game {
                 }
                 if other.heavy
                     && !squeezes
-                    && distance_squared < HEAVY_RANGE * HEAVY_RANGE
+                    && distance_squared
+                        < self.tune.creature_heavy_range * self.tune.creature_heavy_range
                     && heavy.is_none_or(|(best, _)| distance_squared < best)
                 {
                     heavy = Some((distance_squared, -offset));
                 }
                 if other.well
-                    && distance_squared < WELL_FEAR_RANGE * WELL_FEAR_RANGE
+                    && distance_squared
+                        < self.tune.creature_well_fear_range * self.tune.creature_well_fear_range
                     && well.is_none_or(|(best, _)| distance_squared < best)
                 {
                     well = Some((distance_squared, -offset));
                 }
                 if other.grazable
-                    && distance_squared < GRAZE_RANGE * GRAZE_RANGE
+                    && distance_squared
+                        < self.tune.creature_graze_range * self.tune.creature_graze_range
                     && meal.is_none_or(|(best, _)| distance_squared < best)
                 {
                     meal = Some((distance_squared, -offset));
@@ -280,8 +259,9 @@ impl Game {
                     continue;
                 }
                 let distance = distance_squared.sqrt().max(0.1);
-                if distance < PERSONAL_SPACE {
-                    separation += offset / distance * (1.0 - distance / PERSONAL_SPACE);
+                if distance < self.tune.creature_personal_space {
+                    separation +=
+                        offset / distance * (1.0 - distance / self.tune.creature_personal_space);
                 }
                 heading += other.heading;
                 center += other.position;
@@ -322,7 +302,7 @@ impl Game {
                 || elder_hurt
                 || body.provoked > 0.0
                 || (body.enraged
-                    && player_distance < RAGE_PURSUIT_RANGE
+                    && player_distance < self.tune.creature_rage_pursuit_range
                     // A calm civilization's person hurt by wildlife is not enraged at the ship.
                     && (!posture.calm || self.civs.struck.contains_key(&body.id)));
             body.alert = by_distance || (warned && !posture.calm) || provoked || posture.rallied;
@@ -353,8 +333,8 @@ impl Game {
             }
             let enraged = body.enraged;
             let speed = match (g.rage > 0.0, enraged) {
-                (true, true) => speed * FRENZY_PACE,
-                (true, false) => speed * CAUTIOUS_PACE,
+                (true, true) => speed * self.tune.creature_frenzy_pace,
+                (true, false) => speed * self.tune.creature_cautious_pace,
                 _ => speed,
             };
             // A learner watches the ship while it hunts it and aims at where its brain
@@ -369,8 +349,9 @@ impl Game {
                         v,
                         p - body.position,
                         brain::step_size(g.learn_rate),
+                        &self.tune,
                     );
-                    Some(p + brain.aim_offset(v, lead, learner) - body.position)
+                    Some(p + brain.aim_offset(v, lead, learner, &self.tune) - body.position)
                 }
                 _ => player.map(|(p, v)| p + v * lead - body.position),
             };
@@ -437,9 +418,12 @@ impl Game {
                 let to_center = center / crowd - body.position;
                 let gap = to_center.length();
                 let (radius, span) = if schooling {
-                    (SCHOOL_LOOSE_RADIUS, SCHOOL_PULL_SPAN)
+                    (
+                        self.tune.creature_school_loose_radius,
+                        self.tune.creature_school_pull_span,
+                    )
                 } else {
-                    (LOOSE_RADIUS, 200.0)
+                    (self.tune.creature_loose_radius, 200.0)
                 };
                 if gap > radius {
                     desired += to_center / gap * cruise * ((gap - radius) / span).min(1.0) * flock;
@@ -468,7 +452,7 @@ impl Game {
                         .iter()
                         .filter(|(p, v)| {
                             let offset = body.position - *p;
-                            offset.length() < DODGE_RANGE && v.dot(offset) > 0.0
+                            offset.length() < self.tune.creature_dodge_range && v.dot(offset) > 0.0
                         })
                         .min_by(|a, b| {
                             a.0.distance_squared(body.position)
@@ -611,12 +595,12 @@ impl Game {
             let aim_at = match body.brain.as_ref() {
                 Some(brain) if g.learner > 0.0 => {
                     let speed = if g.weapon == Weapon::Tether {
-                        tether::TIP_SPEED
+                        self.tune.tether_tip_speed
                     } else {
                         g.shot_speed
                     };
                     let flight = distance / speed.max(1.0);
-                    target + brain.shot_offset(ship_velocity, flight, g.learner)
+                    target + brain.shot_offset(ship_velocity, flight, g.learner, &self.tune)
                 }
                 _ => target,
             };
@@ -625,7 +609,7 @@ impl Game {
             if let Some(root) = body.root
                 && let Some(host) = self.body(root.host)
                 && direction.dot((body.position - host.position).normalize_or_zero())
-                    < root::FIRE_ARC
+                    < self.tune.root_fire_arc
             {
                 continue;
             }
@@ -651,8 +635,8 @@ impl Game {
                         continue;
                     }
                     let id = body.id;
-                    if (TETHER_MIN_RANGE..g.weapon_range).contains(&distance)
-                        && self.tethers.len() < tether::MAX_TETHERS
+                    if (self.tune.creature_tether_min_range..g.weapon_range).contains(&distance)
+                        && self.tethers.len() < self.tune.tether_max_tethers
                         && !self
                             .tethers
                             .iter()
@@ -660,9 +644,9 @@ impl Game {
                     {
                         let from = body.position;
                         let rooted = body.root.is_some();
-                        let cord = Cord::from_genome(&g, body.genes.threat, rooted);
+                        let cord = Cord::from_genome(&g, body.genes.threat, rooted, &self.tune);
                         self.tethers.push(Tether::latch_with(
-                            id, from, direction, g.reel, cord, rooted,
+                            id, from, direction, g.reel, cord, rooted, &self.tune,
                         ));
                         self.bodies[index].fire_cooldown = g.fire_period;
                     }

@@ -149,6 +149,7 @@ impl Game {
             partner,
             id,
             &mut self.variation,
+            &self.tune,
         )))
     }
 
@@ -496,7 +497,7 @@ impl Game {
                 if let Some((host, angle)) = site
                     && let Some(rock) = self.body(host)
                 {
-                    spot = root::place(rock, angle, radius);
+                    spot = root::place(rock, angle, radius, &self.tune);
                 }
                 self.eggs.push(Egg {
                     host: site.map(|(host, _)| host),

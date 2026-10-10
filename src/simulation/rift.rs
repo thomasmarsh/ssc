@@ -762,7 +762,7 @@ mod tests {
                     socket: None,
                 });
             }
-            g.tethers.push(Tether::link(owner, id));
+            g.tethers.push(Tether::link(owner, id, &DEFAULT_TUNING));
             move_body(
                 &mut g,
                 id,

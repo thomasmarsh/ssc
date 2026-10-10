@@ -29,49 +29,6 @@ use super::*;
 use crate::genome::{Genome, Trigger};
 use crate::herd::HerdPlan;
 
-/// Most members in one flock, and over every loaded flock together.
-pub const MAX_FLOCK: usize = 320;
-pub const MAX_TOTAL: usize = 640;
-/// Distance from the ship (to the flock's nearest edge) inside which a flock steps in full,
-/// and inside which it steps at the reduced rate. Beyond it the flock is one centroid.
-pub const NEAR: f32 = 1800.0;
-pub const MID: f32 = 3400.0;
-/// A mid flock steps every this many ticks (with all the time it missed); a far flock flushes
-/// its drift into the members every `FAR_EVERY` ticks.
-pub const MID_EVERY: u32 = 4;
-pub const FAR_EVERY: u32 = 16;
-/// The longest time one flock step may integrate.
-const MAX_STEP: f32 = 0.25;
-/// How far a member sees its mates, per unit of the `flocking` gene.
-const PERCEPTION: f32 = 170.0;
-/// Members keep this many radii apart.
-const SPACING: f32 = 2.6;
-/// Steering weights. The result is only a direction; pace comes from the genome.
-const W_ALIGN: f32 = 1.0;
-const W_COHERE: f32 = 0.8;
-const W_SEPARATE: f32 = 2.6;
-const W_WANDER: f32 = 0.55;
-const W_CHASE: f32 = 1.6;
-const W_SHY: f32 = 2.0;
-/// How quickly a member turns to its desired velocity (per second).
-const TURN: f32 = 3.0;
-/// A calm flock gives the ship this much room (plus its radius); the ship slips through.
-const SHY_RANGE: f32 = 230.0;
-/// An alarmed flock pursues at this share of the species' top speed.
-const CHASE_PACE: f32 = 0.8;
-/// Seconds a flock stays alarmed after one of its own is hurt.
-pub const PROVOKED: f32 = 8.0;
-/// A member's hull is this share of the species' hull: a flock is many cheap bodies.
-pub const MEMBER_HULL: f32 = 0.4;
-/// Share of the species' bounty a slain member pays.
-pub const MEMBER_BOUNTY: f32 = 0.1;
-/// Stings per second each touching member lands, and how many may sting at once.
-const STING_RATE: f32 = 0.5;
-const STING_CAP: u32 = 5;
-/// Margin kept off an obstacle's rim by the avoidance steer.
-const OBSTACLE_MARGIN: f32 = 40.0;
-/// Most obstacles one flock looks at.
-const MAX_OBSTACLES: usize = 24;
 /// The fallen-spawn index that records a flock shot to nothing (sector spawns never reach it).
 pub const CLEARED: u32 = u32::MAX;
 /// Separates the stream that drifts a flock from every other.
@@ -87,10 +44,10 @@ pub enum Lod {
 
 impl Lod {
     /// The level for a flock whose nearest edge is `distance` from the ship.
-    pub fn at(distance: f32) -> Self {
-        if distance < NEAR {
+    pub fn at(distance: f32, tune: &Tunables) -> Self {
+        if distance < tune.flock_near {
             Lod::Near
-        } else if distance < MID {
+        } else if distance < tune.flock_mid {
             Lod::Mid
         } else {
             Lod::Far
@@ -162,16 +119,23 @@ fn unit_hash(a: u64, b: u64) -> f32 {
 
 impl Flock {
     /// A flock of `count` members (clamped to `MAX_FLOCK`) scattered round `centre`.
-    pub fn new(origin: SectorId, seed: u64, species: &Species, count: usize, centre: Vec2) -> Self {
+    pub fn new(
+        origin: SectorId,
+        seed: u64,
+        species: &Species,
+        count: usize,
+        centre: Vec2,
+        tune: &Tunables,
+    ) -> Self {
         let genome = species.genome;
-        let count = count.min(MAX_FLOCK);
+        let count = count.min(tune.flock_max_flock);
         let mut rng = Rng::new(
             world::hash2(seed ^ DRIFT_SALT, origin.x, origin.y) ^ species.lineage.rotate_left(17),
         );
         let heading = rng.f32() * TAU;
-        let hull = (genome.hull * MEMBER_HULL).max(1.0);
+        let hull = (genome.hull * tune.flock_member_hull).max(1.0);
         // A loose disc whose area gives each member room for several of its own width.
-        let spread = genome.radius * SPACING * (count as f32).sqrt() * 0.55;
+        let spread = genome.radius * tune.flock_spacing * (count as f32).sqrt() * 0.55;
         let mut members = Vec::with_capacity(count);
         for _ in 0..count {
             let offset = rng.direction() * spread * rng.f32().sqrt();
@@ -236,7 +200,7 @@ impl Flock {
 
     /// One tick. The flock chooses its own level of detail from the ship's distance and does
     /// as much work as that level allows.
-    pub fn tick(&mut self, dt: f32, around: &Surroundings) -> Touch {
+    pub fn tick(&mut self, dt: f32, around: &Surroundings, tune: &Tunables) -> Touch {
         self.work = 0;
         if self.members.is_empty() {
             return Touch::default();
@@ -244,44 +208,47 @@ impl Flock {
         self.provoked = (self.provoked - dt).max(0.0);
         self.ticks = self.ticks.wrapping_add(1);
         self.lod = match around.ship {
-            Some((at, _)) => Lod::at(at.distance(self.centroid) - self.radius),
+            Some((at, _)) => Lod::at(at.distance(self.centroid) - self.radius, tune),
             None => Lod::Far,
         };
         match self.lod {
             Lod::Near => {
                 let owed = std::mem::take(&mut self.owed);
-                self.step(dt + owed, around)
+                self.step(dt + owed, around, tune)
             }
             Lod::Mid => {
                 self.owed += dt;
-                if self.ticks.is_multiple_of(MID_EVERY) {
+                if self.ticks.is_multiple_of(tune.flock_mid_every) {
                     let owed = std::mem::take(&mut self.owed);
-                    self.step(owed, around)
+                    self.step(owed, around, tune)
                 } else {
                     Touch::default()
                 }
             }
             Lod::Far => {
-                self.coast(dt, around);
+                self.coast(dt, around, tune);
                 Touch::default()
             }
         }
     }
 
     /// The pace a calm flock holds and the pace it charges at.
-    fn paces(&self) -> (f32, f32) {
-        (self.genome.cruise, self.genome.speed * CHASE_PACE)
+    fn paces(&self, tune: &Tunables) -> (f32, f32) {
+        (
+            self.genome.cruise,
+            self.genome.speed * tune.flock_chase_pace,
+        )
     }
 
     /// Far flocks: the centroid wanders on; members catch up in one flush every few ticks.
-    fn coast(&mut self, dt: f32, around: &Surroundings) {
-        self.wander(dt, around);
-        let cruise = self.paces().0;
+    fn coast(&mut self, dt: f32, around: &Surroundings, tune: &Tunables) {
+        self.wander(dt, around, tune);
+        let cruise = self.paces(tune).0;
         let step = Vec2::from_angle(self.heading) * cruise * dt;
         self.centroid += step;
         self.drift += step;
         self.alarmed = false;
-        if self.ticks.is_multiple_of(FAR_EVERY) {
+        if self.ticks.is_multiple_of(tune.flock_far_every) {
             self.flush_drift();
         }
     }
@@ -295,8 +262,8 @@ impl Flock {
     }
 
     /// The calm heading turns slowly at random and away from the edge of the roaming area.
-    fn wander(&mut self, dt: f32, around: &Surroundings) {
-        self.heading += self.rng.range(-1.0, 1.0) * 0.7 * dt.min(MAX_STEP);
+    fn wander(&mut self, dt: f32, around: &Surroundings, tune: &Tunables) {
+        self.heading += self.rng.range(-1.0, 1.0) * 0.7 * dt.min(tune.flock_max_step);
         if let Some((low, high)) = around.bounds {
             let margin = 450.0;
             let c = self.centroid;
@@ -308,7 +275,7 @@ impl Flock {
                 let inward = (low + high) * 0.5 - c;
                 let want = inward.y.atan2(inward.x);
                 let delta = (want - self.heading + PI).rem_euclid(TAU) - PI;
-                self.heading += delta.clamp(-1.0, 1.0) * 1.5 * dt.min(MAX_STEP);
+                self.heading += delta.clamp(-1.0, 1.0) * 1.5 * dt.min(tune.flock_max_step);
             }
         }
     }
@@ -338,8 +305,8 @@ impl Flock {
     }
 
     /// The full step: boid steering for every member, then light collision.
-    fn step(&mut self, dt: f32, around: &Surroundings) -> Touch {
-        let dt = dt.min(MAX_STEP);
+    fn step(&mut self, dt: f32, around: &Surroundings, tune: &Tunables) -> Touch {
+        let dt = dt.min(tune.flock_max_step);
         if dt <= 0.0 {
             return Touch::default();
         }
@@ -347,17 +314,17 @@ impl Flock {
             self.flush_drift();
             self.measure();
         }
-        self.wander(dt, around);
+        self.wander(dt, around, tune);
         self.notice(around.ship);
         let g = self.genome;
         let n = self.members.len();
         let flocking = g.flocking.clamp(0.3, 2.0);
-        let perception = PERCEPTION * flocking;
+        let perception = tune.flock_perception * flocking;
         let perception_sq = perception * perception;
-        let spacing = g.radius * SPACING + 8.0;
+        let spacing = g.radius * tune.flock_spacing + 8.0;
         let spacing_sq = spacing * spacing;
-        let (cruise, chase) = self.paces();
-        let loose = g.radius * SPACING * (n as f32).sqrt() * 0.9;
+        let (cruise, chase) = self.paces(tune);
+        let loose = g.radius * tune.flock_spacing * (n as f32).sqrt() * 0.9;
         let heading = Vec2::from_angle(self.heading);
         let centroid = self.centroid;
         let ship = around.ship;
@@ -373,7 +340,7 @@ impl Flock {
             })
             .collect();
         near.sort_by(|a, b| a.0.total_cmp(&b.0));
-        near.truncate(MAX_OBSTACLES);
+        near.truncate(tune.flock_max_obstacles);
 
         self.scratch.clear();
         self.scratch.reserve(n);
@@ -400,12 +367,12 @@ impl Flock {
                     push += away / d * (1.0 - d / spacing);
                 }
             }
-            let mut steer = push * W_SEPARATE;
+            let mut steer = push * tune.flock_w_separate;
             if mates > 0 {
                 let m = mates as f32;
-                steer += align.normalize_or_zero() * W_ALIGN;
+                steer += align.normalize_or_zero() * tune.flock_w_align;
                 let toward = centre / m - me.position;
-                steer += toward.normalize_or_zero() * W_COHERE * flocking.min(1.5);
+                steer += toward.normalize_or_zero() * tune.flock_w_cohere * flocking.min(1.5);
             }
             // Stragglers are called back to the flock's own centre.
             let lag = me.position.distance(centroid);
@@ -415,7 +382,7 @@ impl Flock {
             let mut pace = cruise * (0.92 + 0.16 * unit_hash(self.lineage, i as u64));
             match ship {
                 Some((at, ship_radius)) if alarmed => {
-                    steer += (at - me.position).normalize_or_zero() * W_CHASE;
+                    steer += (at - me.position).normalize_or_zero() * tune.flock_w_chase;
                     pace = chase * (0.9 + 0.2 * unit_hash(self.lineage, i as u64));
                     // Do not pile into the ship's centre.
                     if me.position.distance(at) < ship_radius + g.radius + 4.0 {
@@ -424,23 +391,26 @@ impl Flock {
                 }
                 Some((at, ship_radius)) => {
                     let gap = me.position.distance(at);
-                    let room = SHY_RANGE + ship_radius;
+                    let room = tune.flock_shy_range + ship_radius;
                     if gap < room {
-                        steer += (me.position - at) / gap.max(1.0) * W_SHY * (1.0 - gap / room);
+                        steer += (me.position - at) / gap.max(1.0)
+                            * tune.flock_w_shy
+                            * (1.0 - gap / room);
                     }
-                    steer += heading * W_WANDER;
+                    steer += heading * tune.flock_w_wander;
                 }
-                None => steer += heading * W_WANDER,
+                None => steer += heading * tune.flock_w_wander,
             }
             for &(_, at, r) in &near {
                 let gap = me.position.distance(at) - r - g.radius;
-                if gap < OBSTACLE_MARGIN * 2.0 {
+                if gap < tune.flock_obstacle_margin * 2.0 {
                     let out = (me.position - at).normalize_or_zero();
-                    steer += out * 3.0 * (1.0 - (gap / (OBSTACLE_MARGIN * 2.0)).max(0.0));
+                    steer +=
+                        out * 3.0 * (1.0 - (gap / (tune.flock_obstacle_margin * 2.0)).max(0.0));
                 }
             }
             let desired = steer.normalize_or_zero() * pace;
-            let blend = 1.0 - (-TURN * dt).exp();
+            let blend = 1.0 - (-tune.flock_turn * dt).exp();
             self.scratch
                 .push(me.velocity + (desired - me.velocity) * blend);
         }
@@ -502,13 +472,22 @@ impl Flock {
     }
 
     /// Damage per second the ship takes from `touch`.
-    pub fn sting_rate(&self, touch: Touch) -> f32 {
-        self.genome.contact_damage * STING_RATE * touch.stings.min(STING_CAP) as f32
+    pub fn sting_rate(&self, touch: Touch, tune: &Tunables) -> f32 {
+        self.genome.contact_damage
+            * tune.flock_sting_rate
+            * touch.stings.min(tune.flock_sting_cap) as f32
     }
 
     /// A shot's path from `from` to `to` (a bolt of `radius`) strikes the first member in its
     /// way for `amount`. Returns where it struck. The flock is angry afterwards.
-    pub fn strike(&mut self, from: Vec2, to: Vec2, radius: f32, amount: f32) -> Option<Vec2> {
+    pub fn strike(
+        &mut self,
+        from: Vec2,
+        to: Vec2,
+        radius: f32,
+        amount: f32,
+        tune: &Tunables,
+    ) -> Option<Vec2> {
         if self.members.is_empty() {
             return None;
         }
@@ -541,12 +520,12 @@ impl Flock {
         let (_, i) = best?;
         let at = self.members[i].position;
         self.members[i].health -= amount;
-        self.provoked = PROVOKED;
+        self.provoked = tune.flock_provoked;
         Some(at)
     }
 
     /// An area burst at `at` hurts every member inside it. Returns whether any was hit.
-    pub fn blast(&mut self, at: Vec2, radius: f32, amount: f32) -> bool {
+    pub fn blast(&mut self, at: Vec2, radius: f32, amount: f32, tune: &Tunables) -> bool {
         if at.distance(self.centroid) > self.radius + radius + self.genome.radius {
             return false;
         }
@@ -559,7 +538,7 @@ impl Flock {
             }
         }
         if hit {
-            self.provoked = PROVOKED;
+            self.provoked = tune.flock_provoked;
         }
         hit
     }
@@ -612,12 +591,24 @@ impl Game {
 
     /// Places one herd, honouring the caps. Returns the members made.
     pub(super) fn place_herd(&mut self, id: SectorId, plan: &HerdPlan) -> usize {
-        let room = MAX_TOTAL.saturating_sub(total(&self.flocks));
-        let count = (plan.count as usize).min(MAX_FLOCK).min(room);
+        let room = self
+            .tune
+            .flock_max_total
+            .saturating_sub(total(&self.flocks));
+        let count = (plan.count as usize)
+            .min(self.tune.flock_max_flock)
+            .min(room);
         if count == 0 {
             return 0;
         }
-        let mut herd = Flock::new(id, self.seed, &plan.species, count, plan.position);
+        let mut herd = Flock::new(
+            id,
+            self.seed,
+            &plan.species,
+            count,
+            plan.position,
+            &self.tune,
+        );
         herd.heading = plan.heading;
         self.flocks.push(herd);
         count
@@ -665,8 +656,9 @@ impl Game {
                     obstacles: &rocks,
                     bounds,
                 },
+                &self.tune,
             );
-            sting += flock.sting_rate(touch) * dt;
+            sting += flock.sting_rate(touch, &self.tune) * dt;
         }
         if sting > 0.0 {
             let invulnerability = self.guard_time();
@@ -699,7 +691,9 @@ impl Game {
                 .filter(|f| f.active && f.lod == Lod::Near)
             {
                 let amount = bullet.damage * boost;
-                if let Some(at) = flock.strike(from, bullet.position, bullet.radius, amount) {
+                if let Some(at) =
+                    flock.strike(from, bullet.position, bullet.radius, amount, &self.tune)
+                {
                     dealt += amount;
                     struck.push(at);
                     if bullet.pierce > 0 {
@@ -729,7 +723,7 @@ impl Game {
         }
         let mut dealt = false;
         for flock in self.flocks.iter_mut().filter(|f| f.active) {
-            dealt |= flock.blast(at, radius, amount);
+            dealt |= flock.blast(at, radius, amount, &self.tune);
         }
         if dealt {
             self.reap_flocks();
@@ -747,7 +741,7 @@ impl Game {
             if before > 0 && flock.is_empty() {
                 cleared.push(flock.origin);
             }
-            earned += flock.genome.bounty * MEMBER_BOUNTY * fallen.len() as f32;
+            earned += flock.genome.bounty * self.tune.flock_member_bounty * fallen.len() as f32;
             falls.extend(fallen);
         }
         self.score = self.score.saturating_add(earned as u64);
@@ -771,7 +765,14 @@ mod tests {
     use crate::simulation::tests::{DT, empty_game, set_player};
 
     fn herd(count: usize, centre: Vec2) -> Flock {
-        Flock::new(SectorId::ORIGIN, 7, &Species::bogey(), count, centre)
+        Flock::new(
+            SectorId::ORIGIN,
+            7,
+            &Species::bogey(),
+            count,
+            centre,
+            &DEFAULT_TUNING,
+        )
     }
 
     fn calm_world(ship: Option<Vec2>) -> Surroundings<'static> {
@@ -793,7 +794,7 @@ mod tests {
 
     #[test]
     fn a_flock_never_exceeds_its_cap() {
-        assert_eq!(herd(9999, Vec2::ZERO).len(), MAX_FLOCK);
+        assert_eq!(herd(9999, Vec2::ZERO).len(), DEFAULT_TUNING.flock_max_flock);
     }
 
     #[test]
@@ -803,14 +804,21 @@ mod tests {
         for i in 0..12 {
             let id = SectorId { x: 5 + i, y: 5 };
             made += game.place_herd(id, &plan_at(id, 300, id.center()));
-            assert!(total(game.flocks()) <= MAX_TOTAL, "after herd {i}");
+            assert!(
+                total(game.flocks()) <= DEFAULT_TUNING.flock_max_total,
+                "after herd {i}"
+            );
         }
         assert_eq!(
-            made, MAX_TOTAL,
+            made, DEFAULT_TUNING.flock_max_total,
             "the cap is filled exactly and then refuses"
         );
-        assert_eq!(total(game.flocks()), MAX_TOTAL);
-        assert!(game.flocks().iter().all(|f| f.len() <= MAX_FLOCK));
+        assert_eq!(total(game.flocks()), DEFAULT_TUNING.flock_max_total);
+        assert!(
+            game.flocks()
+                .iter()
+                .all(|f| f.len() <= DEFAULT_TUNING.flock_max_flock)
+        );
     }
 
     /// A 300-member herd next to the ship, rocks about it, ten simulated seconds: the work per
@@ -837,7 +845,7 @@ mod tests {
             game.step(DT, Input::default());
             worst = worst.max(game.flocks()[0].work);
             assert_eq!(game.bodies.len(), bodies, "a flock adds no bodies");
-            assert!(total(game.flocks()) <= MAX_TOTAL);
+            assert!(total(game.flocks()) <= DEFAULT_TUNING.flock_max_total);
         }
         let per_tick = begin.elapsed().as_secs_f64() * 1000.0 / 600.0;
         println!("300-member herd: {per_tick:.3} ms per whole game tick (this build)");
@@ -872,28 +880,40 @@ mod tests {
 
     #[test]
     fn detail_falls_with_distance() {
-        assert_eq!(Lod::at(0.0), Lod::Near);
-        assert_eq!(Lod::at(NEAR - 1.0), Lod::Near);
-        assert_eq!(Lod::at(NEAR + 1.0), Lod::Mid);
-        assert_eq!(Lod::at(MID + 1.0), Lod::Far);
+        assert_eq!(Lod::at(0.0, &DEFAULT_TUNING), Lod::Near);
+        assert_eq!(
+            Lod::at(DEFAULT_TUNING.flock_near - 1.0, &DEFAULT_TUNING),
+            Lod::Near
+        );
+        assert_eq!(
+            Lod::at(DEFAULT_TUNING.flock_near + 1.0, &DEFAULT_TUNING),
+            Lod::Mid
+        );
+        assert_eq!(
+            Lod::at(DEFAULT_TUNING.flock_mid + 1.0, &DEFAULT_TUNING),
+            Lod::Far
+        );
 
         let cost = |ship_at: f32| {
             let mut flock = herd(300, Vec2::ZERO);
             let world = calm_world(Some(Vec2::new(ship_at, 0.0)));
             let spent: u64 = (0..64)
                 .map(|_| {
-                    flock.tick(DT, &world);
+                    flock.tick(DT, &world, &DEFAULT_TUNING);
                     u64::from(flock.work)
                 })
                 .sum();
             (flock.lod, spent)
         };
-        let (near, near_cost) = cost(NEAR - 400.0);
-        let (mid, mid_cost) = cost(NEAR + 600.0);
-        let (far, far_cost) = cost(MID + 3000.0);
+        let (near, near_cost) = cost(DEFAULT_TUNING.flock_near - 400.0);
+        let (mid, mid_cost) = cost(DEFAULT_TUNING.flock_near + 600.0);
+        let (far, far_cost) = cost(DEFAULT_TUNING.flock_mid + 3000.0);
         assert_eq!((near, mid, far), (Lod::Near, Lod::Mid, Lod::Far));
         assert_eq!(near_cost, 64 * 300 * 299);
-        assert_eq!(mid_cost, 64 / u64::from(MID_EVERY) * 300 * 299);
+        assert_eq!(
+            mid_cost,
+            64 / u64::from(DEFAULT_TUNING.flock_mid_every) * 300 * 299
+        );
         assert_eq!(far_cost, 0, "a far flock does no pair tests at all");
     }
 
@@ -904,10 +924,10 @@ mod tests {
         let before = flock.centroid;
         let facing = Vec2::from_angle(flock.heading);
         for _ in 0..600 {
-            flock.tick(DT, &world);
+            flock.tick(DT, &world, &DEFAULT_TUNING);
         }
         // Flushed on the cadence, so the members agree with the centroid after a full cycle.
-        flock.tick(DT, &world);
+        flock.tick(DT, &world, &DEFAULT_TUNING);
         let travelled = flock.centroid - before;
         assert!(travelled.length() > 400.0, "{travelled}");
         assert!(travelled.normalize().dot(facing) > 0.5);
@@ -963,7 +983,7 @@ mod tests {
         let mut flock = herd(200, Vec2::ZERO);
         let centre = flock.centroid;
         let before = flock.len();
-        assert!(flock.blast(centre, 200.0, 1000.0));
+        assert!(flock.blast(centre, 200.0, 1000.0, &DEFAULT_TUNING));
         let fallen = flock.reap();
         assert!(!fallen.is_empty() && flock.len() < before);
         assert!(
@@ -971,7 +991,12 @@ mod tests {
                 .iter()
                 .all(|p| p.distance(centre) < 200.0 + 15.0 + 1.0)
         );
-        assert!(!flock.blast(centre + Vec2::splat(50_000.0), 200.0, 1000.0));
+        assert!(!flock.blast(
+            centre + Vec2::splat(50_000.0),
+            200.0,
+            1000.0,
+            &DEFAULT_TUNING
+        ));
     }
 
     #[test]
@@ -982,21 +1007,21 @@ mod tests {
         // A ship well outside sight: calm, and never stings, for a long watch.
         let far = calm_world(Some(Vec2::new(sight * 3.0 + 600.0, 0.0)));
         for _ in 0..600 {
-            let touch = flock.tick(DT, &far);
+            let touch = flock.tick(DT, &far, &DEFAULT_TUNING);
             assert_eq!(touch.stings, 0);
         }
         assert!(!flock.alarmed);
         // Approached: it turns hostile.
         let at = flock.centroid;
         let close = calm_world(Some(at + Vec2::new(sight * 0.5, 0.0)));
-        flock.tick(DT, &close);
+        flock.tick(DT, &close, &DEFAULT_TUNING);
         assert!(flock.alarmed, "approached");
         // Left behind (beyond lose): it calms again.
         let gone = calm_world(Some(
             flock.centroid + Vec2::new(flock.genome.lose + 2000.0, 0.0),
         ));
         for _ in 0..30 {
-            flock.tick(DT, &gone);
+            flock.tick(DT, &gone, &DEFAULT_TUNING);
         }
         assert!(!flock.alarmed, "left alone");
         // Hurt from beyond its sight: it answers anyway, then forgives.
@@ -1005,12 +1030,13 @@ mod tests {
             flock.centroid + Vec2::new(40.0, 0.0),
             3.0,
             0.0,
+            &DEFAULT_TUNING,
         );
-        flock.provoked = PROVOKED;
-        flock.tick(DT, &gone);
+        flock.provoked = DEFAULT_TUNING.flock_provoked;
+        flock.tick(DT, &gone, &DEFAULT_TUNING);
         assert!(flock.alarmed, "hurt");
-        for _ in 0..(PROVOKED as u32 * 60 + 120) {
-            flock.tick(DT, &gone);
+        for _ in 0..(DEFAULT_TUNING.flock_provoked as u32 * 60 + 120) {
+            flock.tick(DT, &gone, &DEFAULT_TUNING);
         }
         assert!(!flock.alarmed, "forgiven");
     }
@@ -1059,7 +1085,7 @@ mod tests {
             bounds: None,
         };
         for _ in 0..900 {
-            flock.tick(DT, &world);
+            flock.tick(DT, &world, &DEFAULT_TUNING);
             // The pace is slow, so check every tick: no member inside the rock.
             for m in &flock.members {
                 assert!(

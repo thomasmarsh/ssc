@@ -11,7 +11,7 @@
 //! boost that stacks to a cap, and a small shield refund. Numbers live in `tuning`.
 
 use super::skills::Skill;
-use super::tether::SHEARS_INSTANT;
+
 use super::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -160,7 +160,9 @@ impl Game {
         }
         // Weak cords cannot hold a ship that has just left.
         for tether in self.tethers.iter_mut().filter(|c| {
-            c.kind == TetherKind::Latch && c.attached() && c.max_health <= SHEARS_INSTANT
+            c.kind == TetherKind::Latch
+                && c.attached()
+                && c.max_health <= self.tune.tether_shears_instant
         }) {
             tether.health = 0.0;
         }
@@ -438,13 +440,21 @@ mod tests {
     fn a_dash_snaps_a_weak_latched_cord_but_not_a_stout_one() {
         let mut game = ready(1);
         let owner = add(&mut game, BodyKind::Creature, Vec2::new(0.0, 600.0));
-        let mut weak = Tether::latch(owner, Vec2::ZERO, Vec2::Y, 1.0);
+        let mut weak = Tether::latch(owner, Vec2::ZERO, Vec2::Y, 1.0, &DEFAULT_TUNING);
         weak.tip = None;
         let stout_cord = Cord {
             hardness: 8.0,
             ..Cord::WEAK
         };
-        let mut stout = Tether::latch_with(owner, Vec2::ZERO, Vec2::Y, 1.0, stout_cord, false);
+        let mut stout = Tether::latch_with(
+            owner,
+            Vec2::ZERO,
+            Vec2::Y,
+            1.0,
+            stout_cord,
+            false,
+            &DEFAULT_TUNING,
+        );
         stout.tip = None;
         let health = stout.health;
         game.tethers.push(weak);

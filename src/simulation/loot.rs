@@ -793,8 +793,13 @@ mod tests {
         let mut game = empty_game();
         game.collect(boost(Effect::Trait(Trait::Shears, 1), Need::Cords));
         let leech = spawn(&mut game, &Species::leech(), Vec2::new(0.0, 400.0));
-        game.tethers
-            .push(Tether::latch(leech, Vec2::new(0.0, 400.0), -Vec2::Y, 55.0));
+        game.tethers.push(Tether::latch(
+            leech,
+            Vec2::new(0.0, 400.0),
+            -Vec2::Y,
+            55.0,
+            &DEFAULT_TUNING,
+        ));
         game.step(DT, Input::default());
         game.step(DT, Input::default());
         assert!(!game.tethered());

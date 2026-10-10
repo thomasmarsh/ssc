@@ -15,35 +15,6 @@ use super::attach::{self, Frame};
 use super::*;
 use crate::genome::Habit;
 
-/// Seconds a creature is dazed (scattering, not firing) after its host is lost.
-pub const DAZE: f32 = 2.5;
-/// Seconds after letting go before a creature may cling again, so it can get away.
-pub const REATTACH_DELAY: f32 = 5.0;
-/// How long a brood released by the loss of its host stays on the hunt, whatever it saw.
-pub const SWARM_RAGE: f32 = 30.0;
-/// Health per second one symbiote restores to its host, and one parasite takes from it.
-const TEND: f32 = 2.0;
-const DRAIN: f32 = 1.5;
-/// Parasites never drain a host below this fraction of its health.
-const DRAIN_FLOOR: f32 = 0.4;
-/// Fraction of its radius at which a rooted body's center stands off the surface (so it
-/// sits nearly on it, a little sunk in).
-pub const STAND: f32 = 0.9;
-/// How near a free creature must come to a rock's surface to take hold, and how far it
-/// looks for one.
-const REACH: f32 = 45.0;
-pub const SEEK_RANGE: f32 = 700.0;
-/// Fraction of a host's rim that rooters may fill.
-const RIM_FILL: f32 = 0.9;
-/// Energy per second a host yields to everyone on it: its plankton rate times this and a
-/// plankton's nutrition. One rooter takes at most `MAX_FEED` of its capacity per second.
-const HOST_YIELD: f32 = 12.0;
-const MAX_FEED: f32 = 0.01;
-/// How hard a freshly released creature is pushed away from its host.
-const KICK: f32 = 60.0;
-/// A defender fires only into this half-plane: the dot of aim and outward must exceed it.
-pub(super) const FIRE_ARC: f32 = -0.1;
-
 /// A creature's hold on a host: its id, and the angle around it in the host's own frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Root {
@@ -76,13 +47,13 @@ pub fn carries_residents(body: &Body) -> bool {
 }
 
 /// Where a creature of `radius` anchored at `angle` (host frame) sits on `host`.
-pub fn place(host: &Body, angle: f32, radius: f32) -> Vec2 {
-    Frame::of(host).seat(angle, radius, STAND)
+pub fn place(host: &Body, angle: f32, radius: f32, tune: &Tunables) -> Vec2 {
+    Frame::of(host).seat(angle, radius, tune.root_stand)
 }
 
 /// How many creatures of `radius` fit around a host's rim.
-pub fn capacity(host_radius: f32, radius: f32) -> usize {
-    attach::capacity(host_radius, radius, RIM_FILL)
+pub fn capacity(host_radius: f32, radius: f32, tune: &Tunables) -> usize {
+    attach::capacity(host_radius, radius, tune.root_rim_fill)
 }
 
 impl Body {
@@ -158,7 +129,7 @@ impl Game {
                         angle: b.angle,
                         radius: b.radius,
                         yield_rate: food::fertility(b, &self.tune).map_or(0.0, |(rate, _, _)| {
-                            rate * self.tune.food_nutrition * HOST_YIELD
+                            rate * self.tune.food_nutrition * self.tune.root_host_yield
                         }),
                     },
                 )
@@ -192,7 +163,10 @@ impl Game {
             let seated = root.socket.and_then(|s| poses.get(&(root.host, s)));
             let outward = seated.map_or(host.angle + root.angle, |p| p.1);
             body.position = seated.map_or_else(
-                || host.frame().seat(root.angle, body.radius, STAND),
+                || {
+                    host.frame()
+                        .seat(root.angle, body.radius, self.tune.root_stand)
+                },
                 |p| p.0,
             );
             body.velocity = seated.map_or(host.velocity, |p| p.2);
@@ -206,7 +180,9 @@ impl Game {
             let Some(id) = egg.host else { continue };
             match hosts.get(&id) {
                 Some(host) => {
-                    egg.position = host.frame().seat(egg.anchor, egg.radius, STAND);
+                    egg.position = host
+                        .frame()
+                        .seat(egg.anchor, egg.radius, self.tune.root_stand);
                     egg.velocity = host.velocity;
                 }
                 // The host is gone: the egg drifts free.
@@ -247,7 +223,8 @@ impl Game {
                     && !body.provisioned
                     && body.energy_fraction() < g.detach_hunger;
                 let grown = body.growth >= g.detach_size;
-                let crowded = n as f32 > g.detach_crowd * capacity(host.radius, body.radius) as f32;
+                let crowded = n as f32
+                    > g.detach_crowd * capacity(host.radius, body.radius, &self.tune) as f32;
                 if grown || hungry || crowded {
                     if let Some(count) = counts.get_mut(&root.host) {
                         *count = count.saturating_sub(1);
@@ -257,7 +234,8 @@ impl Game {
                 }
             }
             if g.forages() && !body.provisioned {
-                let share = (host.yield_rate / n as f32).min(body.max_energy * MAX_FEED);
+                let share =
+                    (host.yield_rate / n as f32).min(body.max_energy * self.tune.root_max_feed);
                 body.feed(share * dt);
             }
         }
@@ -292,10 +270,16 @@ impl Game {
         let mut near: Vec<(f32, u64)> = hosts
             .iter()
             .filter(|(_, h)| !h.carrier)
-            .map(|(&id, h)| (at.distance(h.position) - h.radius - radius * STAND, id))
+            .map(|(&id, h)| {
+                (
+                    at.distance(h.position) - h.radius - radius * self.tune.root_stand,
+                    id,
+                )
+            })
             .filter(|&(gap, id)| {
-                gap < REACH
-                    && counts.get(&id).copied().unwrap_or(0) < capacity(hosts[&id].radius, radius)
+                gap < self.tune.root_reach
+                    && counts.get(&id).copied().unwrap_or(0)
+                        < capacity(hosts[&id].radius, radius, &self.tune)
             })
             .collect();
         near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -303,7 +287,7 @@ impl Game {
             let host = hosts[&id];
             let wanted = (at - host.position).to_angle() - host.angle;
             if let Some(angle) = self.free_anchor(id, host.radius, wanted, radius, None) {
-                let place = host.frame().seat(angle, radius, STAND);
+                let place = host.frame().seat(angle, radius, self.tune.root_stand);
                 let body = &mut self.bodies[index];
                 body.root = Some(Root {
                     host: id,
@@ -397,9 +381,9 @@ impl Game {
                 continue;
             }
             if crate::hosted::is_symbiote(&body.genome) {
-                *change.entry(root.host).or_default() += TEND * dt;
+                *change.entry(root.host).or_default() += self.tune.root_tend * dt;
             } else if crate::hosted::is_parasite(&body.genome) {
-                *change.entry(root.host).or_default() -= DRAIN * dt;
+                *change.entry(root.host).or_default() -= self.tune.root_drain * dt;
                 fed.push(index);
             }
         }
@@ -411,7 +395,7 @@ impl Game {
             let Some(&delta) = change.get(&host.id) else {
                 continue;
             };
-            let floor = host.max_health * DRAIN_FLOOR;
+            let floor = host.max_health * self.tune.root_drain_floor;
             if delta > 0.0 {
                 host.health = (host.health + delta).min(host.max_health);
             } else if host.health > floor {
@@ -424,7 +408,7 @@ impl Game {
                 .root
                 .is_some_and(|r| drained.contains(&r.host))
             {
-                self.bodies[index].feed(DRAIN * dt);
+                self.bodies[index].feed(self.tune.root_drain * dt);
             }
         }
     }
@@ -444,11 +428,11 @@ impl Game {
     fn let_go(&mut self, index: usize, host: Option<(Vec2, f32, Vec2)>, dazed: bool) {
         let body = &mut self.bodies[index];
         let Some(root) = body.root.take() else { return };
-        body.unrooted = REATTACH_DELAY;
+        body.unrooted = self.tune.root_reattach_delay;
         let from = match host {
             Some((position, angle, velocity)) => {
                 let out = Vec2::from_angle(angle + root.angle);
-                body.velocity = velocity + out * KICK;
+                body.velocity = velocity + out * self.tune.root_kick;
                 body.wander = out.to_angle();
                 position
             }
@@ -456,9 +440,9 @@ impl Game {
         };
         if dazed && crate::hosted::is_brood(&body.genome) {
             // Orphaned young do not scatter, they swarm the one near.
-            body.provoked = SWARM_RAGE;
+            body.provoked = self.tune.root_swarm_rage;
         } else if dazed {
-            body.panic = DAZE;
+            body.panic = self.tune.root_daze;
             body.panic_from = from;
         }
     }
@@ -517,7 +501,7 @@ impl Game {
             angle,
             socket: None,
         });
-        body.position = place(rock, angle, body.radius);
+        body.position = place(rock, angle, body.radius, &self.tune);
         body.velocity = rock.velocity;
         body.angle = rock.angle + angle;
     }
@@ -622,7 +606,7 @@ mod tests {
         let id = rooted_on(&mut game, &rooter(0.9), host, 0.7);
         let gap = |game: &Game| {
             let (h, c) = (body(game, host), body(game, id));
-            h.position.distance(c.position) - h.radius - c.radius * STAND
+            h.position.distance(c.position) - h.radius - c.radius * DEFAULT_TUNING.root_stand
         };
         let start = body(&game, id).position;
         for _ in 0..180 {
@@ -1102,7 +1086,8 @@ mod tests {
         assert!(game.bodies.len() < MAX_BODIES);
         for b in game.bodies.iter().filter(|b| b.root.is_some()) {
             let h = game.body(b.root.unwrap().host).unwrap();
-            let gap = b.position.distance(h.position) - h.radius - b.radius * STAND;
+            let gap =
+                b.position.distance(h.position) - h.radius - b.radius * DEFAULT_TUNING.root_stand;
             assert!(gap.abs() < 0.5, "{gap}");
         }
         // The planetoid is still indestructible with tenants on it.
@@ -1239,7 +1224,8 @@ mod tests {
                 continue; // seated on a socket mark, covered by the socket tests
             }
             let (c, h) = (body(&game, r), body(&game, host));
-            let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
+            let gap =
+                c.position.distance(h.position) - h.radius - c.radius * DEFAULT_TUNING.root_stand;
             assert!(gap.abs() < 1.0, "seated on the rim: {gap}");
         }
         // Death: the next tick nothing dangles.
@@ -1311,7 +1297,7 @@ mod tests {
             game.step(DT, Input::default());
         }
         let (h, c) = (body(&game, host_id), body(&game, a));
-        let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
+        let gap = c.position.distance(h.position) - h.radius - c.radius * DEFAULT_TUNING.root_stand;
         assert!(gap.abs() < 0.5, "rides the surface: {gap}");
         assert!(
             c.root
@@ -1442,7 +1428,10 @@ mod tests {
             game.step(DT, Input::default());
         }
         let left = body(&game, leech_host).health;
-        assert!(left >= max * DRAIN_FLOOR - 0.01 && left > 0.0, "{left}");
+        assert!(
+            left >= max * DEFAULT_TUNING.root_drain_floor - 0.01 && left > 0.0,
+            "{left}"
+        );
         assert!(
             body(&game, friend_host).health <= max,
             "healing stops at full"
@@ -1626,7 +1615,8 @@ mod tests {
         // Residents beyond the socket count stay on the head's rim.
         for &id in ids.iter().skip(slots.len()) {
             let (c, h) = (body(&game, id), body(&game, head));
-            let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
+            let gap =
+                c.position.distance(h.position) - h.radius - c.radius * DEFAULT_TUNING.root_stand;
             assert!(gap.abs() < 0.5, "overflow rides the head: {gap}");
         }
         // Distinct sockets are distinct places.
@@ -1661,7 +1651,7 @@ mod tests {
             .socket = Some(250);
         game.step(DT, Input::default());
         let (c, h) = (body(&game, ids[0]), body(&game, head));
-        let gap = c.position.distance(h.position) - h.radius - c.radius * STAND;
+        let gap = c.position.distance(h.position) - h.radius - c.radius * DEFAULT_TUNING.root_stand;
         assert!(gap.abs() < 0.5, "fell back to the head: {gap}");
         // Losing the host lets every rider go.
         game.bodies.retain(|b| b.id != head);

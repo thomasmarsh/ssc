@@ -5,48 +5,6 @@
 
 use super::*;
 
-pub const MAX_TETHERS: usize = 64;
-/// Damage one friendly bullet does to a cord.
-pub const CORD_BULLET_DAMAGE: f32 = 16.0;
-/// Health of a cord per hit it takes to cut: the weak cord's 30 is two hits.
-const HEALTH_PER_HIT: f32 = CORD_BULLET_DAMAGE * 0.9375;
-const LINK_HEALTH: f32 = 48.0;
-pub(super) const TIP_SPEED: f32 = 650.0;
-/// A fired tip that has not found the ship by now is reeled back in.
-const TIP_LIFETIME: f32 = 1.3;
-/// Reeling shortens the cord (at the owner's reel gene) down to `MIN_REST`.
-const MIN_REST: f32 = 150.0;
-/// A cord's rest length stays this far beyond the two bodies' edges, so it never holds the
-/// ship against its owner.
-const FAIR_STANDOFF: f32 = 80.0;
-/// Pull per unit of stretch at strength 1, and the most a weak cord pulls with.
-const PULL_STIFFNESS: f32 = 2.0;
-const PULL_CAP: f32 = 900.0;
-/// Rate (per second at drag 1) at which a latched cord bleeds the ship's speed away from
-/// its owner.
-const DRAG_RATE: f32 = 4.0;
-/// Rate at which an anchored cord bleeds the ship's speed toward its anchor.
-const SETTLE_ANCHORED: f32 = 6.0;
-/// A cord with at most this much health is cut the moment shears touch it; a stouter one
-/// is worn through at `SHEARS_RATE` health per second.
-pub(super) const SHEARS_INSTANT: f32 = 45.0;
-pub(super) const SHEARS_RATE: f32 = 60.0;
-/// Fairness limits for a cord tied to something that cannot move: at most this tough and
-/// strong, so a rooted cord can always be shot through in a few hits.
-const ROOTED_MAX_HARDNESS: f32 = 4.0;
-const ROOTED_MAX_STRENGTH: f32 = 4.0;
-const ROOTED_MAX_DRAG: f32 = 0.5;
-/// How much of the owner's depth threat a cord's strength and toughness take on.
-const THREAT_STRENGTH: f32 = 0.15;
-const THREAT_HARDNESS: f32 = 0.1;
-/// Strength at or above which a cord is "strong" for cues and visuals.
-pub const STRONG_CORD: f32 = 3.0;
-const SIPHON_RATE: f32 = 10.0;
-/// Separation a linked pair settles at, and the pull when it is exceeded.
-const LINK_REST: f32 = 300.0;
-const LINK_STIFFNESS: f32 = 1.5;
-pub(super) const LINK_DAMAGE: f32 = 14.0;
-
 /// How a latched cord behaves, read from its owner's genome when it is fired.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cord {
@@ -71,35 +29,35 @@ impl Cord {
 
     /// The cord a creature's genome fires. Depth (`threat`, 1 at HOME) toughens it gently.
     /// A rooted owner's cord is kept fair: modest and always a few shots to cut.
-    pub fn from_genome(g: &Genome, threat: f32, rooted: bool) -> Self {
+    pub fn from_genome(g: &Genome, threat: f32, rooted: bool, tune: &Tunables) -> Self {
         let depth = (threat - 1.0).max(0.0);
         let mut cord = Self {
-            strength: (g.cord_strength * (1.0 + THREAT_STRENGTH * depth)).min(10.0),
+            strength: (g.cord_strength * (1.0 + tune.tether_threat_strength * depth)).min(10.0),
             slack: g.cord_slack,
-            hardness: (g.cord_hardness * (1.0 + THREAT_HARDNESS * depth)).min(12.0),
+            hardness: (g.cord_hardness * (1.0 + tune.tether_threat_hardness * depth)).min(12.0),
             drag: g.cord_drag,
         };
         if rooted {
-            cord.strength = cord.strength.min(ROOTED_MAX_STRENGTH);
-            cord.hardness = cord.hardness.min(ROOTED_MAX_HARDNESS);
-            cord.drag = cord.drag.min(ROOTED_MAX_DRAG);
+            cord.strength = cord.strength.min(tune.tether_rooted_max_strength);
+            cord.hardness = cord.hardness.min(tune.tether_rooted_max_hardness);
+            cord.drag = cord.drag.min(tune.tether_rooted_max_drag);
         }
         cord
     }
 
     /// Health the cord starts with.
-    pub fn health(&self) -> f32 {
-        self.hardness * HEALTH_PER_HIT
+    pub fn health(&self, tune: &Tunables) -> f32 {
+        self.hardness * tune.tether_health_per_hit
     }
 
     /// The most the cord pulls with, whatever the stretch.
-    pub fn pull_cap(&self) -> f32 {
-        PULL_CAP * 0.5 * (1.0 + self.strength)
+    pub fn pull_cap(&self, tune: &Tunables) -> f32 {
+        tune.tether_pull_cap * 0.5 * (1.0 + self.strength)
     }
 
     /// Pull on the ship at a stretch.
-    pub fn pull(&self, stretch: f32) -> f32 {
-        (PULL_STIFFNESS * self.strength * stretch.max(0.0)).min(self.pull_cap())
+    pub fn pull(&self, stretch: f32, tune: &Tunables) -> f32 {
+        (tune.tether_pull_stiffness * self.strength * stretch.max(0.0)).min(self.pull_cap(tune))
     }
 }
 
@@ -147,8 +105,8 @@ pub struct Tether {
 }
 
 impl Tether {
-    pub fn latch(owner: u64, from: Vec2, direction: Vec2, reel: f32) -> Self {
-        Self::latch_with(owner, from, direction, reel, Cord::WEAK, false)
+    pub fn latch(owner: u64, from: Vec2, direction: Vec2, reel: f32, tune: &Tunables) -> Self {
+        Self::latch_with(owner, from, direction, reel, Cord::WEAK, false, tune)
     }
 
     pub fn latch_with(
@@ -158,16 +116,17 @@ impl Tether {
         reel: f32,
         cord: Cord,
         anchored: bool,
+        tune: &Tunables,
     ) -> Self {
         Self {
             kind: TetherKind::Latch,
             owner,
             other: None,
             tip: Some(from),
-            tip_velocity: direction * TIP_SPEED,
+            tip_velocity: direction * tune.tether_tip_speed,
             rest: 0.0,
-            health: cord.health(),
-            max_health: cord.health(),
+            health: cord.health(tune),
+            max_health: cord.health(tune),
             cord,
             tension: 0.0,
             strain: 0.0,
@@ -180,16 +139,16 @@ impl Tether {
         }
     }
 
-    pub fn link(owner: u64, other: u64) -> Self {
+    pub fn link(owner: u64, other: u64, tune: &Tunables) -> Self {
         Self {
             kind: TetherKind::Link,
             owner,
             other: Some(other),
             tip: None,
             tip_velocity: Vec2::ZERO,
-            rest: LINK_REST,
-            health: LINK_HEALTH,
-            max_health: LINK_HEALTH,
+            rest: tune.tether_link_rest,
+            health: tune.tether_link_health,
+            max_health: tune.tether_link_health,
             cord: Cord::WEAK,
             tension: 0.0,
             strain: 0.0,
@@ -206,24 +165,24 @@ impl Tether {
         self.tip.is_none()
     }
 
-    pub(super) fn sling(owner: u64, other: u64, rest: f32, angle: f32) -> Self {
+    pub(super) fn sling(owner: u64, other: u64, rest: f32, angle: f32, tune: &Tunables) -> Self {
         Self {
             kind: TetherKind::Sling,
             rest,
             orbit_angle: angle,
-            ..Self::link(owner, other)
+            ..Self::link(owner, other, tune)
         }
     }
 
-    pub(super) fn web(owner: u64, other: u64, rest: f32, warning: f32) -> Self {
+    pub(super) fn web(owner: u64, other: u64, rest: f32, warning: f32, tune: &Tunables) -> Self {
         Self {
             kind: TetherKind::Web,
             rest,
-            health: 3.0 * CORD_BULLET_DAMAGE,
-            max_health: 3.0 * CORD_BULLET_DAMAGE,
+            health: 3.0 * tune.tether_cord_bullet_damage,
+            max_health: 3.0 * tune.tether_cord_bullet_damage,
             warning,
             remaining: crate::power::WEB_LIFE + warning,
-            ..Self::link(owner, other)
+            ..Self::link(owner, other, tune)
         }
     }
 }
@@ -313,15 +272,18 @@ impl Game {
                         let at = ship.position;
                         tether.tip = None;
                         // A cord never drags the ship into its own anchor.
-                        let floor =
-                            MIN_REST.max(self.bodies[owner].radius + ship.radius + FAIR_STANDOFF);
+                        let floor = self.tune.tether_min_rest.max(
+                            self.bodies[owner].radius
+                                + ship.radius
+                                + self.tune.tether_fair_standoff,
+                        );
                         tether.rest = self.bodies[owner]
                             .position
                             .distance(ship.position)
                             .max(floor);
                         let strength = tether.cord.strength;
                         self.cue(Cue::Latch { at, strength });
-                    } else if tether.age > TIP_LIFETIME {
+                    } else if tether.age > self.tune.tether_tip_lifetime {
                         return false;
                     }
                     return true;
@@ -331,7 +293,10 @@ impl Game {
                 let offset = leech.position - ship.position;
                 let distance = offset.length();
                 let direction = offset / distance.max(0.001);
-                let floor = MIN_REST.max(leech.radius + ship.radius + FAIR_STANDOFF);
+                let floor = self
+                    .tune
+                    .tether_min_rest
+                    .max(leech.radius + ship.radius + self.tune.tether_fair_standoff);
                 tether.rest = (tether.rest - tether.reel * dt).max(floor);
                 let stretch = distance - tether.rest;
                 tether.strain = (stretch / tether.cord.slack).clamp(0.0, 1.0);
@@ -341,17 +306,20 @@ impl Game {
                     return false;
                 }
                 if stretch > 0.0 {
-                    let pull = tether.cord.pull(stretch);
-                    tether.tension = (pull / PULL_CAP).min(1.0);
+                    let pull = tether.cord.pull(stretch, &self.tune);
+                    tether.tension = (pull / self.tune.tether_pull_cap).min(1.0);
                     ship.velocity += direction * pull * dt;
                     // The owner is yanked back no harder than a classic cord would.
-                    leech.velocity -=
-                        direction * pull.min(PULL_CAP) * dt * (ship.mass / leech.mass) * 0.3;
+                    leech.velocity -= direction
+                        * pull.min(self.tune.tether_pull_cap)
+                        * dt
+                        * (ship.mass / leech.mass)
+                        * 0.3;
                     // A strong or anchored cord settles the ship at its rest length instead of
                     // slinging it past into its owner: inbound speed is bled off.
                     let settle = 1.5 * (tether.cord.strength - 1.0)
                         + if tether.anchored {
-                            SETTLE_ANCHORED
+                            self.tune.tether_settle_anchored
                         } else {
                             0.0
                         };
@@ -363,7 +331,8 @@ impl Game {
                         // Speed away from the owner is bled off, never more than the drag's share.
                         let away = -ship.velocity.dot(direction);
                         if away > 0.0 {
-                            let kept = 1.0 - (-DRAG_RATE * tether.cord.drag * dt).exp();
+                            let kept =
+                                1.0 - (-self.tune.tether_drag_rate * tether.cord.drag * dt).exp();
                             ship.velocity += direction * away * kept;
                         }
                     }
@@ -371,7 +340,7 @@ impl Game {
                     tether.tension = 0.0;
                 }
                 if !invulnerable && leech.genome.diet == Diet::Siphon {
-                    let taken = (SIPHON_RATE * dt).min(ship.shield);
+                    let taken = (self.tune.tether_siphon_rate * dt).min(ship.shield);
                     if taken > 0.0 {
                         ship.shield -= taken;
                         ship.since_hit = 0.0;
@@ -396,7 +365,8 @@ impl Game {
                 let distance = offset.length();
                 let direction = offset / distance.max(0.001);
                 if distance > tether.rest {
-                    let pull = (LINK_STIFFNESS * (distance - tether.rest)).min(400.0);
+                    let pull =
+                        (self.tune.tether_link_stiffness * (distance - tether.rest)).min(400.0);
                     a.velocity += direction * pull * dt * 0.5;
                     b.velocity -= direction * pull * dt * 0.5;
                 }
@@ -407,7 +377,7 @@ impl Game {
                     let nearest = closest_on_segment(ship.position, from, to);
                     let gap = ship.position - nearest;
                     if gap.length() < ship.radius + 3.0 && ship.contact_cooldown <= 0.0 {
-                        damage(ship, LINK_DAMAGE, invulnerable, &self.tune);
+                        damage(ship, self.tune.tether_link_damage, invulnerable, &self.tune);
                         ship.contact_cooldown = 0.65;
                         let away = if gap.length_squared() > 0.01 {
                             gap.normalize()
@@ -470,7 +440,7 @@ mod tests {
 
     fn attach(game: &mut Game, owner: u64, rest: f32) {
         let from = body(game, owner).position;
-        let mut tether = Tether::latch(owner, from, Vec2::Y, 55.0);
+        let mut tether = Tether::latch(owner, from, Vec2::Y, 55.0, &DEFAULT_TUNING);
         tether.tip = None;
         tether.rest = rest;
         game.tethers.push(tether);
@@ -505,8 +475,13 @@ mod tests {
     fn a_missed_tip_is_reeled_in() {
         let mut game = empty_game();
         let id = leech(&mut game, Vec2::new(0.0, 400.0));
-        game.tethers
-            .push(Tether::latch(id, Vec2::new(0.0, 400.0), Vec2::X, 55.0));
+        game.tethers.push(Tether::latch(
+            id,
+            Vec2::new(0.0, 400.0),
+            Vec2::X,
+            55.0,
+            &DEFAULT_TUNING,
+        ));
         for _ in 0..120 {
             game.step(DT, Input::default());
         }
@@ -617,7 +592,7 @@ mod tests {
                 .unwrap()
                 .fire_cooldown = 1e6;
         }
-        game.tethers.push(Tether::link(a, b));
+        game.tethers.push(Tether::link(a, b, &DEFAULT_TUNING));
         (a, b)
     }
 
@@ -628,7 +603,10 @@ mod tests {
         set_player(&mut game, Vec2::new(150.0, 2000.0), Vec2::ZERO);
         let shield = game.player().unwrap().shield;
         game.step(DT, Input::default());
-        assert_eq!(game.player().unwrap().shield, shield - LINK_DAMAGE);
+        assert_eq!(
+            game.player().unwrap().shield,
+            shield - DEFAULT_TUNING.tether_link_damage
+        );
         assert!(game.player().unwrap().velocity.length() > 100.0, "no shove");
         // Pull the pair apart; the cord drags them back toward its rest length.
         let mut game = empty_game();
@@ -683,7 +661,7 @@ mod tests {
                     ..Default::default()
                 },
             );
-            assert!(game.tethers.len() <= MAX_TETHERS);
+            assert!(game.tethers.len() <= DEFAULT_TUNING.tether_max_tethers);
             assert!(
                 game.tethers
                     .iter()
@@ -706,7 +684,8 @@ mod tests {
 
     fn attach_cord(game: &mut Game, owner: u64, rest: f32, cord: Cord) {
         let from = body(game, owner).position;
-        let mut tether = Tether::latch_with(owner, from, Vec2::Y, 0.0, cord, false);
+        let mut tether =
+            Tether::latch_with(owner, from, Vec2::Y, 0.0, cord, false, &DEFAULT_TUNING);
         tether.tip = None;
         tether.rest = rest;
         game.tethers.push(tether);
@@ -809,10 +788,10 @@ mod tests {
                 strength: 4.0,
                 ..Cord::WEAK
             }
-            .pull(50.0)
-                > 3.0 * Cord::WEAK.pull(50.0)
+            .pull(50.0, &DEFAULT_TUNING)
+                > 3.0 * Cord::WEAK.pull(50.0, &DEFAULT_TUNING)
         );
-        assert!(GRIP.pull(1e6) <= GRIP.pull_cap());
+        assert!(GRIP.pull(1e6, &DEFAULT_TUNING) <= GRIP.pull_cap(&DEFAULT_TUNING));
         // Hardness: hits to cut follow the gene (weak is two).
         for (hardness, expected) in [(2.0, 2), (4.0, 4), (6.0, 6)] {
             let cord = Cord {
@@ -838,13 +817,16 @@ mod tests {
             cord_hardness: 3.0,
             ..Genome::leech()
         };
-        let shallow = Cord::from_genome(&g, 1.0, false);
-        let deep = Cord::from_genome(&g, 4.0, false);
+        let shallow = Cord::from_genome(&g, 1.0, false, &DEFAULT_TUNING);
+        let deep = Cord::from_genome(&g, 4.0, false, &DEFAULT_TUNING);
         assert_eq!(shallow.strength, 2.0);
         assert!(deep.strength > shallow.strength && deep.strength < 1.6 * shallow.strength);
         assert!(deep.hardness > shallow.hardness && deep.hardness < 1.5 * shallow.hardness);
         // HOME leeches fire exactly the classic cord.
-        assert_eq!(Cord::from_genome(&Genome::leech(), 1.0, false), Cord::WEAK);
+        assert_eq!(
+            Cord::from_genome(&Genome::leech(), 1.0, false, &DEFAULT_TUNING),
+            Cord::WEAK
+        );
     }
 
     #[test]
@@ -857,14 +839,21 @@ mod tests {
             ..Genome::leech()
         };
         for threat in [1.0, 5.0, 40.0] {
-            let cord = Cord::from_genome(&worst, threat, true);
-            assert!(cord.hardness <= ROOTED_MAX_HARDNESS);
-            assert!(cord.strength <= ROOTED_MAX_STRENGTH && cord.drag <= ROOTED_MAX_DRAG);
-            assert!(cord.health() <= ROOTED_MAX_HARDNESS * CORD_BULLET_DAMAGE);
+            let cord = Cord::from_genome(&worst, threat, true, &DEFAULT_TUNING);
+            assert!(cord.hardness <= DEFAULT_TUNING.tether_rooted_max_hardness);
+            assert!(
+                cord.strength <= DEFAULT_TUNING.tether_rooted_max_strength
+                    && cord.drag <= DEFAULT_TUNING.tether_rooted_max_drag
+            );
+            assert!(
+                cord.health(&DEFAULT_TUNING)
+                    <= DEFAULT_TUNING.tether_rooted_max_hardness
+                        * DEFAULT_TUNING.tether_cord_bullet_damage
+            );
         }
         // Held against a big anchor, the cord never drags the ship into it, and four
         // shots cut it.
-        let cord = Cord::from_genome(&worst, 40.0, true);
+        let cord = Cord::from_genome(&worst, 40.0, true, &DEFAULT_TUNING);
         let mut game = empty_game();
         game.player_invulnerability = 1e9;
         let id = leech(&mut game, Vec2::new(0.0, 400.0));
@@ -873,7 +862,7 @@ mod tests {
         owner.pinned = true;
         owner.radius = 70.0;
         let from = owner.position;
-        let mut tether = Tether::latch_with(id, from, Vec2::Y, 55.0, cord, true);
+        let mut tether = Tether::latch_with(id, from, Vec2::Y, 55.0, cord, true, &DEFAULT_TUNING);
         tether.tip = Some(from);
         tether.tip_velocity = -Vec2::Y * 4000.0;
         game.tethers.push(tether);

@@ -284,10 +284,10 @@ impl Game {
                 .iter_mut()
                 .filter(|t| t.kind == TetherKind::Latch)
             {
-                if tether.max_health <= tether::SHEARS_INSTANT {
+                if tether.max_health <= self.tune.tether_shears_instant {
                     tether.health = 0.0;
                 } else if tether.attached() {
-                    tether.health -= tether::SHEARS_RATE * dt;
+                    tether.health -= self.tune.tether_shears_rate * dt;
                 }
             }
         }

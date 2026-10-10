@@ -86,34 +86,6 @@ pub struct ApexState {
 
 // ---- tuning: phases and signature moves ------------------------------------------------
 
-/// How a phase change sharpens the elder: speed and fire rate multipliers, contact damage.
-const ENRAGE_SPEED: f32 = 1.25;
-const ENRAGE_FIRE: f32 = 0.65;
-const ENRAGE_STING: f32 = 1.2;
-/// Juggernaut: seconds between charges (calm, enraged), the telegraph, the charge, its
-/// speed, and the range a charge starts from.
-const CHARGE_EVERY: (f32, f32) = (6.5, 3.8);
-const CHARGE_WINDUP: f32 = 0.9;
-const CHARGE_TIME: f32 = 1.1;
-const CHARGE_SPEED: f32 = 800.0;
-const CHARGE_RANGE: (f32, f32) = (350.0, 1500.0);
-/// Queen: seconds between escorts (calm, enraged) and the most alive at once.
-const ESCORT_EVERY: (f32, f32) = (5.5, 3.0);
-const ESCORT_CAP: (usize, usize) = (4, 7);
-/// Phantom: a phase change shortens its blink period by this factor (3.4 s to 1.9 s). The
-/// blink itself is the `blink` gene (see `powers`); the apex only sets its values.
-const ENRAGE_BLINK: f32 = 1.9 / 3.4;
-/// Maelstrom: seconds between pulls (calm, enraged), a pull's length, its acceleration on the
-/// ship and the range it reaches.
-const PULL_EVERY: (f32, f32) = (8.0, 5.0);
-const PULL_TIME: f32 = 1.3;
-const PULL_ACCEL: f32 = 850.0;
-const PULL_RANGE: f32 = 1600.0;
-/// Bulwark: half-angle of the armoured front (as a cosine) and the share of damage that gets
-/// through it.
-const GUARD_COS: f32 = 0.26;
-const GUARD_LEAK: f32 = 0.12;
-
 /// Whether an archetype lacks a closer of its own and so lunges when sniped.
 fn lunges(archetype: Archetype) -> bool {
     matches!(
@@ -133,6 +105,7 @@ pub(super) fn guard(
     states: &HashMap<u64, ApexState>,
     body: &Body,
     velocity: Vec2,
+    tune: &Tunables,
 ) -> f32 {
     let Some(info) = body.origin.and_then(|key| apexes.get(&key)) else {
         return 1.0;
@@ -141,8 +114,8 @@ pub(super) fn guard(
         return 1.0;
     }
     let from_shot = -velocity.normalize_or_zero();
-    if Vec2::from_angle(body.angle).dot(from_shot) > GUARD_COS {
-        GUARD_LEAK
+    if Vec2::from_angle(body.angle).dot(from_shot) > tune.elder_guard_cos {
+        tune.elder_guard_leak
     } else {
         1.0
     }
@@ -168,7 +141,7 @@ pub(super) fn shield_factor(
     bullet: &Bullet,
     tune: &Tunables,
 ) -> (f32, bool) {
-    let arc = guard(apexes, states, body, bullet.velocity);
+    let arc = guard(apexes, states, body, bullet.velocity, tune);
     let Some(info) = body.origin.and_then(|key| apexes.get(&key)) else {
         return (arc, false);
     };
@@ -497,12 +470,12 @@ impl Game {
             .map(|info| info.name.clone())
             .unwrap_or_default();
         let g = &mut self.bodies[index].genome;
-        g.speed *= ENRAGE_SPEED;
-        g.cruise *= ENRAGE_SPEED;
-        g.fire_period *= ENRAGE_FIRE;
-        g.contact_damage *= ENRAGE_STING;
+        g.speed *= self.tune.elder_enrage_speed;
+        g.cruise *= self.tune.elder_enrage_speed;
+        g.fire_period *= self.tune.elder_enrage_fire;
+        g.contact_damage *= self.tune.elder_enrage_sting;
         if crate::power::Power::Blink.active(g) {
-            g.power_params_mut(crate::power::Power::Blink).period *= ENRAGE_BLINK;
+            g.power_params_mut(crate::power::Power::Blink).period *= self.tune.elder_enrage_blink;
         }
         self.effect(at, radius * 3.0, 0.8, EffectKind::Explosion);
         self.notify(format!("APEX: {name} enrages"), Rarity::Epic);
@@ -522,12 +495,18 @@ impl Game {
             Move::Idle
                 if alert
                     && state.clock <= 0.0
-                    && (CHARGE_RANGE.0..CHARGE_RANGE.1).contains(&distance) =>
+                    && (self.tune.elder_charge_range_min..self.tune.elder_charge_range_max)
+                        .contains(&distance) =>
             {
                 let at = self.bodies[index].position;
                 let radius = self.bodies[index].radius;
-                self.effect(at, radius * 2.6, CHARGE_WINDUP, EffectKind::Respawn);
-                Move::Windup(CHARGE_WINDUP, to_ship.normalize_or_zero())
+                self.effect(
+                    at,
+                    radius * 2.6,
+                    self.tune.elder_charge_windup,
+                    EffectKind::Respawn,
+                );
+                Move::Windup(self.tune.elder_charge_windup, to_ship.normalize_or_zero())
             }
             Move::Windup(left, _) if left > dt => {
                 // Planted and squaring up on the ship.
@@ -537,16 +516,22 @@ impl Game {
                 body.angle = aim.y.atan2(aim.x);
                 Move::Windup(left - dt, aim)
             }
-            Move::Windup(_, aim) => Move::Charge(CHARGE_TIME, aim),
+            Move::Windup(_, aim) => Move::Charge(self.tune.elder_charge_time, aim),
             Move::Charge(left, aim) if left > dt => {
                 let body = &mut self.bodies[index];
-                body.velocity = aim * CHARGE_SPEED;
+                body.velocity = aim * self.tune.elder_charge_speed;
                 body.angle = aim.y.atan2(aim.x);
                 Move::Charge(left - dt, aim)
             }
             Move::Charge(..) => {
                 self.bodies[index].velocity *= 0.3;
-                state.clock = pick(CHARGE_EVERY, enraged);
+                state.clock = pick(
+                    (
+                        self.tune.elder_charge_every_calm,
+                        self.tune.elder_charge_every_enraged,
+                    ),
+                    enraged,
+                );
                 Move::Idle
             }
             other => other,
@@ -557,11 +542,25 @@ impl Game {
         if !alert || state.clock > 0.0 {
             return;
         }
-        state.clock = pick(ESCORT_EVERY, enraged);
+        state.clock = pick(
+            (
+                self.tune.elder_escort_every_calm,
+                self.tune.elder_escort_every_enraged,
+            ),
+            enraged,
+        );
         state
             .escorts
             .retain(|id| self.bodies.iter().any(|b| b.id == *id && b.health > 0.0));
-        if state.escorts.len() >= pick(ESCORT_CAP, enraged) {
+        if state.escorts.len()
+            >= pick(
+                (
+                    self.tune.elder_escort_cap_calm,
+                    self.tune.elder_escort_cap_enraged,
+                ),
+                enraged,
+            )
+        {
             return;
         }
         let queen = self.bodies[index].clone();
@@ -605,25 +604,36 @@ impl Game {
         enraged: bool,
     ) {
         state.mv = match state.mv {
-            Move::Idle if alert && state.clock <= 0.0 && distance < PULL_RANGE => {
+            Move::Idle if alert && state.clock <= 0.0 && distance < self.tune.elder_pull_range => {
                 let at = self.bodies[index].position;
                 let radius = self.bodies[index].radius;
-                self.effect(at, PULL_RANGE * 0.5, PULL_TIME, EffectKind::Pair);
+                self.effect(
+                    at,
+                    self.tune.elder_pull_range * 0.5,
+                    self.tune.elder_pull_time,
+                    EffectKind::Pair,
+                );
                 self.effect(at, radius * 3.0, 0.6, EffectKind::Respawn);
-                Move::Pull(PULL_TIME)
+                Move::Pull(self.tune.elder_pull_time)
             }
             Move::Pull(left) if left > dt => {
                 let at = self.bodies[index].position;
                 if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {
                     let toward = (at - ship.position).normalize_or_zero();
-                    if ship.position.distance(at) < PULL_RANGE * 1.2 {
-                        ship.velocity += toward * PULL_ACCEL * dt;
+                    if ship.position.distance(at) < self.tune.elder_pull_range * 1.2 {
+                        ship.velocity += toward * self.tune.elder_pull_accel * dt;
                     }
                 }
                 Move::Pull(left - dt)
             }
             Move::Pull(_) => {
-                state.clock = pick(PULL_EVERY, enraged);
+                state.clock = pick(
+                    (
+                        self.tune.elder_pull_every_calm,
+                        self.tune.elder_pull_every_enraged,
+                    ),
+                    enraged,
+                );
                 Move::Idle
             }
             other => other,
@@ -1384,7 +1394,10 @@ mod tests {
             fastest = fastest.max(apex_body(&game, id).velocity.length());
         }
         assert!(wound, "no telegraph");
-        assert!(fastest >= CHARGE_SPEED * 0.9, "fastest {fastest}");
+        assert!(
+            fastest >= DEFAULT_TUNING.elder_charge_speed * 0.9,
+            "fastest {fastest}"
+        );
     }
 
     #[test]
@@ -1401,11 +1414,14 @@ mod tests {
                 .iter()
                 .filter(|e| game.bodies.iter().any(|b| b.id == **e))
                 .count();
-            assert!(alive <= ESCORT_CAP.1, "{alive} escorts");
+            assert!(
+                alive <= DEFAULT_TUNING.elder_escort_cap_enraged,
+                "{alive} escorts"
+            );
             assert!(game.bodies.len() + game.food.len() + game.eggs.len() < MAX_BODIES);
         }
         assert!(most >= 2, "the queen raised only {most}");
-        assert!(most <= ESCORT_CAP.1);
+        assert!(most <= DEFAULT_TUNING.elder_escort_cap_enraged);
         // They are the queen's own colours and fight.
         let queen = apex_body(&game, id).genome;
         let state = &game.apexes.state[&id];
@@ -1474,8 +1490,20 @@ mod tests {
         let facing = Vec2::from_angle(body.angle);
         let shot_at_front = -facing * 600.0;
         let shot_at_back = facing * 600.0;
-        let front = guard(&game.apexes.info, &game.apexes.state, &body, shot_at_front);
-        let back = guard(&game.apexes.info, &game.apexes.state, &body, shot_at_back);
+        let front = guard(
+            &game.apexes.info,
+            &game.apexes.state,
+            &body,
+            shot_at_front,
+            &DEFAULT_TUNING,
+        );
+        let back = guard(
+            &game.apexes.info,
+            &game.apexes.state,
+            &body,
+            shot_at_back,
+            &DEFAULT_TUNING,
+        );
         assert!(front < 0.2 && back == 1.0, "front {front}, back {back}");
         // Past its phase change the plates are gone.
         let hull = apex_body(&game, id).max_health;
@@ -1485,7 +1513,13 @@ mod tests {
         let body = apex_body(&game, id).clone();
         let shot = -Vec2::from_angle(body.angle) * 600.0;
         assert_eq!(
-            guard(&game.apexes.info, &game.apexes.state, &body, shot),
+            guard(
+                &game.apexes.info,
+                &game.apexes.state,
+                &body,
+                shot,
+                &DEFAULT_TUNING
+            ),
             1.0
         );
         // Nobody else is armoured.
@@ -1495,7 +1529,13 @@ mod tests {
             .find(|b| b.kind == BodyKind::Player)
             .unwrap();
         assert_eq!(
-            guard(&game.apexes.info, &game.apexes.state, plain, shot),
+            guard(
+                &game.apexes.info,
+                &game.apexes.state,
+                plain,
+                shot,
+                &DEFAULT_TUNING
+            ),
             1.0
         );
     }

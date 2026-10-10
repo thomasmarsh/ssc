@@ -12,8 +12,7 @@ use ssc::simulation::skills::{Skill, SkillTab};
 use ssc::simulation::upgrades::{Item, Rarity, Slot};
 use ssc::simulation::{
     Beam, Body, BodyKind, Cache, EchoKind, EffectKind, Game, GuideKind, LAND_RANGE, MAX_PADS,
-    Material, Pad, PadHint, Pickup, STRONG_CORD, Shape, TetherKind, Tunables, fertility,
-    price_text,
+    Material, Pad, PadHint, Pickup, Shape, TetherKind, Tunables, fertility, price_text,
 };
 use ssc::world::{BaseKind, RockKind, SECTOR_SIZE, SectorId, hash2};
 
@@ -1341,13 +1340,13 @@ fn situation_text(session: &Session) -> String {
     if let Some(cord) = game.latched_cord() {
         let meter = (cord.tension * 8.0).round() as usize;
         let gauge = format!("[{}{}]", "#".repeat(meter), ".".repeat(8 - meter.min(8)));
-        text.push_str(
-            &if cord.cord.strength >= STRONG_CORD || cord.cord.slack > 450.0 {
-                format!("\n\nGRIPPED {gauge}\nshoot the cord, you cannot break away")
-            } else {
-                format!("\n\nTETHERED {gauge}\nshoot the cord or break away")
-            },
-        );
+        text.push_str(&if cord.cord.strength >= game.tune.tether_strong_cord
+            || cord.cord.slack > 450.0
+        {
+            format!("\n\nGRIPPED {gauge}\nshoot the cord, you cannot break away")
+        } else {
+            format!("\n\nTETHERED {gauge}\nshoot the cord or break away")
+        });
     }
     if session.slow {
         text.push_str("\n\nSLOW MOTION");
@@ -2512,13 +2511,19 @@ pub fn draw(
                         );
                     }
                 } else {
-                    draw_creature(&mut gizmos, game.time, body, shown);
+                    draw_creature(&mut gizmos, game.time, body, shown, &game.tune);
                 }
                 if let Some(back) = crate::powerview::afterimage(body) {
                     // A phased body trails a ghost of itself.
                     let mut ghost = body.clone();
                     ghost.position += back;
-                    draw_creature(&mut gizmos, game.time, &ghost, color.with_alpha(0.1));
+                    draw_creature(
+                        &mut gizmos,
+                        game.time,
+                        &ghost,
+                        color.with_alpha(0.1),
+                        &game.tune,
+                    );
                 }
                 crate::powerview::draw(&mut gizmos, game, body);
                 if !body.follower
@@ -2920,7 +2925,9 @@ pub fn draw(
         let tremble = 3.5 * tether.tension;
         let strands = if tether.cord.strength >= 6.0 && tether.kind == TetherKind::Latch {
             3
-        } else if tether.cord.strength >= STRONG_CORD && tether.kind == TetherKind::Latch {
+        } else if tether.cord.strength >= game.tune.tether_strong_cord
+            && tether.kind == TetherKind::Latch
+        {
             2
         } else {
             1
@@ -4375,7 +4382,7 @@ fn body_color(body: &Body) -> Color {
 /// Draws a creature from its body plan alone: an outline of `sides` corners stretched by
 /// `aspect`, fins for speed, an antenna for foresight, a barrel or barbed proboscis where
 /// a hardpoint sits, a halo for fling, and joints (drawn separately) between parts.
-fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
+fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color, tune: &Tunables) {
     let g = &body.genome;
     let (p, r) = (body.position, body.radius);
     let direction = Vec2::from_angle(body.angle);
@@ -4494,7 +4501,7 @@ fn draw_creature(gizmos: &mut Gizmos, time: f32, body: &Body, color: Color) {
             .circle_2d(p, r * 0.62, Color::srgba(0.85, 0.65, 0.35, 0.4))
             .resolution(16);
     }
-    if let (true, Some(skill)) = (head, body.learner_skill()) {
+    if let (true, Some(skill)) = (head, body.learner_skill(tune)) {
         // A learner sweeps a faint scanning arc around itself. A fresh brain barely shows
         // one; as it studies the ship the arc lengthens, brightens and gains a glint at
         // its leading end.

@@ -891,6 +891,50 @@ fn validate(t: &Tunables) -> Result<(), String> {
         t.max_assault_peaceful,
         t.max_assault
     );
+    rule!(
+        t.food_hunt_hunger <= t.food_graze_hunger && t.food_graze_hunger <= t.food_full,
+        "hunger lines must stay ordered: hunt {} <= graze {} <= full {}",
+        t.food_hunt_hunger,
+        t.food_graze_hunger,
+        t.food_full
+    );
+    rule!(
+        t.growth_grow_stalled < t.growth_grow_full,
+        "growth_grow_stalled {} must stay under growth_grow_full {}",
+        t.growth_grow_stalled,
+        t.growth_grow_full
+    );
+    rule!(
+        t.growth_lineage_cap <= t.growth_lineage_world_cap,
+        "growth_lineage_cap {} cannot exceed growth_lineage_world_cap {}",
+        t.growth_lineage_cap,
+        t.growth_lineage_world_cap
+    );
+    rule!(
+        t.flock_near < t.flock_mid,
+        "flock_near {} must stay under flock_mid {}",
+        t.flock_near,
+        t.flock_mid
+    );
+    rule!(
+        t.creature_school_loose_radius <= t.creature_loose_radius,
+        "a true school ({}) holds no looser than a crowd ({})",
+        t.creature_school_loose_radius,
+        t.creature_loose_radius
+    );
+    rule!(
+        t.elder_charge_range_min <= t.elder_charge_range_max,
+        "elder_charge_range_min {} cannot exceed elder_charge_range_max {}",
+        t.elder_charge_range_min,
+        t.elder_charge_range_max
+    );
+    rule!(
+        t.elder_charge_every_enraged <= t.elder_charge_every_calm
+            && t.elder_escort_every_enraged <= t.elder_escort_every_calm
+            && t.elder_pull_every_enraged <= t.elder_pull_every_calm
+            && t.elder_escort_cap_calm <= t.elder_escort_cap_enraged,
+        "an enraged elder acts at least as often as a calm one"
+    );
     Ok(())
 }
 

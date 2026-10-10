@@ -156,6 +156,256 @@ macro_rules! groups {
             /// Reach of a depot's nova pulse.
             ecology_depot_nova_range: f32 = 1000.0, 0.0, 10_000.0, Distance;
         }
+
+        group "flock" {
+            /// Most members in one flock.
+            flock_max_flock: usize = 320, 1, 5000, Count;
+            /// Most flock members over every loaded flock together.
+            flock_max_total: usize = 640, 1, 10000, Count;
+            /// Distance from the ship (to the flock's nearest edge) inside which a flock steps in full.
+            flock_near: f32 = 1800.0, 0.0, 20_000.0, Distance;
+            /// Distance inside which a flock steps at the reduced rate; beyond it the flock is one centroid.
+            flock_mid: f32 = 3400.0, 0.0, 50_000.0, Distance;
+            /// A mid flock steps every this many ticks (with all the time it missed).
+            flock_mid_every: u32 = 4, 1, 600, Count;
+            /// A far flock flushes its drift into the members every this many ticks.
+            flock_far_every: u32 = 16, 1, 600, Count;
+            /// The longest time one flock step may integrate.
+            flock_max_step: f32 = 0.25, 0.01, 5.0, Seconds;
+            /// How far a member sees its mates, per unit of the `flocking` gene.
+            flock_perception: f32 = 170.0, 0.0, 2000.0, Distance;
+            /// Members keep this many radii apart.
+            flock_spacing: f32 = 2.6, 0.0, 50.0, Multiplier;
+            /// Steering weight of matching a mate's heading (the result is only a direction; pace comes from the genome).
+            flock_w_align: f32 = 1.0, 0.0, 10.0, Multiplier;
+            /// Steering weight of staying with the group.
+            flock_w_cohere: f32 = 0.8, 0.0, 10.0, Multiplier;
+            /// Steering weight of keeping spacing.
+            flock_w_separate: f32 = 2.6, 0.0, 50.0, Multiplier;
+            /// Steering weight of the lazy wander.
+            flock_w_wander: f32 = 0.55, 0.0, 10.0, Multiplier;
+            /// Steering weight of pursuing an alarmed target.
+            flock_w_chase: f32 = 1.6, 0.0, 20.0, Multiplier;
+            /// Steering weight of giving the ship room.
+            flock_w_shy: f32 = 2.0, 0.0, 20.0, Multiplier;
+            /// How quickly a member turns to its desired velocity (per second).
+            flock_turn: f32 = 3.0, 0.0, 50.0, Rate;
+            /// A calm flock gives the ship this much room (plus its radius); the ship slips through.
+            flock_shy_range: f32 = 230.0, 0.0, 5000.0, Distance;
+            /// An alarmed flock pursues at this share of the species' top speed.
+            flock_chase_pace: f32 = 0.8, 0.0, 1.0, Ratio;
+            /// Seconds a flock stays alarmed after one of its own is hurt.
+            flock_provoked: f32 = 8.0, 0.0, 100.0, Seconds;
+            /// A member's hull is this share of the species' hull: a flock is many cheap bodies.
+            flock_member_hull: f32 = 0.4, 0.01, 1.0, Ratio;
+            /// Share of the species' bounty a slain member pays.
+            flock_member_bounty: f32 = 0.1, 0.0, 1.0, Ratio;
+            /// Stings per second each touching member lands.
+            flock_sting_rate: f32 = 0.5, 0.0, 5.0, Rate;
+            /// Most members that may sting at once.
+            flock_sting_cap: u32 = 5, 0, 50, Count;
+            /// Margin kept off an obstacle's rim by the avoidance steer.
+            flock_obstacle_margin: f32 = 40.0, 2.0, 500.0, Distance;
+            /// Most obstacles one flock looks at.
+            flock_max_obstacles: usize = 24, 0, 500, Count;
+        }
+
+        group "creature" {
+            /// How far a creature notices same-species neighbors.
+            creature_perception: f32 = 380.0, 0.0, 5000.0, Distance;
+            /// How close a creature tolerates same-species neighbors.
+            creature_personal_space: f32 = 110.0, 5.5, 2000.0, Distance;
+            /// How far a creature may stray from the crowd's center before drifting back.
+            creature_loose_radius: f32 = 220.0, 0.0, 5000.0, Distance;
+            /// The same stray radius for true schools, which hold together more.
+            creature_school_loose_radius: f32 = 170.0, 0.0, 2000.0, Distance;
+            /// Distance over which a school pulls its stragglers back.
+            creature_school_pull_span: f32 = 160.0, 0.0, 2000.0, Distance;
+            /// How far a creature with a mass affinity notices rocks and gravity wells.
+            creature_heavy_range: f32 = 600.0, 0.0, 10_000.0, Distance;
+            /// An enraged creature pursues the player this far, whatever its sight.
+            creature_rage_pursuit_range: f32 = 1500.0, 0.0, 20_000.0, Distance;
+            /// Pace multiplier of rage-capable creatures hunting cautiously before they frenzy.
+            creature_cautious_pace: f32 = 0.85, 0.0, 10.0, Multiplier;
+            /// Pace multiplier of a frenzied creature.
+            creature_frenzy_pace: f32 = 1.35, 0.0, 20.0, Multiplier;
+            /// Closest a cord launcher will fire.
+            creature_tether_min_range: f32 = 140.0, 0.0, 2000.0, Distance;
+            /// How far fearful and grazing creatures look for bullets, wells and rocks.
+            creature_dodge_range: f32 = 300.0, 0.0, 5000.0, Distance;
+            /// How far a fearful creature keeps from a gravity well.
+            creature_well_fear_range: f32 = 700.0, 0.0, 10_000.0, Distance;
+            /// How far a grazing creature looks for a rock.
+            creature_graze_range: f32 = 700.0, 0.0, 10_000.0, Distance;
+        }
+
+        group "rooting" {
+            /// Seconds a creature is dazed (scattering, not firing) after its host is lost.
+            root_daze: f32 = 2.5, 0.0, 50.0, Seconds;
+            /// Seconds after letting go before a creature may cling again, so it can get away.
+            root_reattach_delay: f32 = 5.0, 0.0, 50.0, Seconds;
+            /// How long a brood released by the loss of its host stays on the hunt, whatever it saw.
+            root_swarm_rage: f32 = 30.0, 0.0, 500.0, Seconds;
+            /// Health per second one symbiote restores to its host.
+            root_tend: f32 = 2.0, 0.0, 20.0, Amount;
+            /// Health per second one parasite takes from its host.
+            root_drain: f32 = 1.5, 0.0, 20.0, Amount;
+            /// Parasites never drain a host below this fraction of its health.
+            root_drain_floor: f32 = 0.4, 0.0, 1.0, Ratio;
+            /// Fraction of its radius at which a rooted body's center stands off the surface (it sits nearly on it, a little sunk in).
+            root_stand: f32 = 0.9, 0.0, 1.0, Ratio;
+            /// How near a free creature must come to a rock's surface to take hold.
+            root_reach: f32 = 45.0, 0.0, 500.0, Distance;
+            /// How far a free creature looks for a rock to take hold of.
+            root_seek_range: f32 = 700.0, 0.0, 10_000.0, Distance;
+            /// Fraction of a host's rim that rooters may fill.
+            root_rim_fill: f32 = 0.9, 0.05, 1.0, Ratio;
+            /// Energy per second a host yields to everyone on it: its plankton rate times this and a plankton's nutrition.
+            root_host_yield: f32 = 12.0, 0.0, 200.0, Multiplier;
+            /// Most of its capacity one rooter takes per second.
+            root_max_feed: f32 = 0.01, 0.0, 1.0, Ratio;
+            /// How hard a freshly released creature is pushed away from its host.
+            root_kick: f32 = 60.0, 0.0, 1000.0, Speed;
+            /// A defender fires only into this half-plane: the dot of aim and outward must exceed it.
+            root_fire_arc: f32 = -0.1, -1.0, 1.0, Multiplier;
+        }
+
+        group "ooze" {
+            /// Seconds a swallowed ship is drawn in before the hold relaxes to the capped pull.
+            ooze_close: f32 = 0.35, 0.0, 5.0, Seconds;
+        }
+
+        group "elders" {
+            /// Speed multiplier a phase change gives an elder.
+            elder_enrage_speed: f32 = 1.25, 0.0, 20.0, Multiplier;
+            /// Fire period multiplier a phase change gives an elder (smaller fires faster).
+            elder_enrage_fire: f32 = 0.65, 0.1, 1.0, Multiplier;
+            /// Contact damage multiplier a phase change gives an elder.
+            elder_enrage_sting: f32 = 1.2, 0.0, 20.0, Multiplier;
+            /// Juggernaut: seconds between charges while calm.
+            elder_charge_every_calm: f32 = 6.5, 0.5, 100.0, Seconds;
+            /// Juggernaut: seconds between charges while enraged.
+            elder_charge_every_enraged: f32 = 3.8, 0.5, 50.0, Seconds;
+            /// Juggernaut: seconds of telegraph before a charge.
+            elder_charge_windup: f32 = 0.9, 0.0, 10.0, Seconds;
+            /// Juggernaut: seconds a charge lasts.
+            elder_charge_time: f32 = 1.1, 0.1, 20.0, Seconds;
+            /// Juggernaut: speed of a charge.
+            elder_charge_speed: f32 = 800.0, 0.0, 10_000.0, Speed;
+            /// Juggernaut: nearest range a charge starts from.
+            elder_charge_range_min: f32 = 350.0, 0.0, 5000.0, Distance;
+            /// Juggernaut: farthest range a charge starts from.
+            elder_charge_range_max: f32 = 1500.0, 0.0, 20_000.0, Distance;
+            /// Queen: seconds between escorts while calm.
+            elder_escort_every_calm: f32 = 5.5, 0.5, 100.0, Seconds;
+            /// Queen: seconds between escorts while enraged.
+            elder_escort_every_enraged: f32 = 3.0, 0.5, 50.0, Seconds;
+            /// Queen: most escorts alive at once while calm.
+            elder_escort_cap_calm: usize = 4, 0, 50, Count;
+            /// Queen: most escorts alive at once while enraged.
+            elder_escort_cap_enraged: usize = 7, 0, 100, Count;
+            /// Phantom: a phase change shortens its blink period by this factor (3.4 s to 1.9 s).
+            elder_enrage_blink: f32 = 1.9 / 3.4, 0.1, 1.0, Multiplier;
+            /// Maelstrom: seconds between pulls while calm.
+            elder_pull_every_calm: f32 = 8.0, 0.5, 100.0, Seconds;
+            /// Maelstrom: seconds between pulls while enraged.
+            elder_pull_every_enraged: f32 = 5.0, 0.5, 50.0, Seconds;
+            /// Maelstrom: a pull's length.
+            elder_pull_time: f32 = 1.3, 0.0, 20.0, Seconds;
+            /// Maelstrom: a pull's acceleration on the ship.
+            elder_pull_accel: f32 = 850.0, 0.0, 10_000.0, Speed;
+            /// Maelstrom: the range a pull reaches.
+            elder_pull_range: f32 = 1600.0, 0.0, 20_000.0, Distance;
+            /// Bulwark: half-angle of the armoured front, as a cosine.
+            elder_guard_cos: f32 = 0.26, 0.0, 1.0, Ratio;
+            /// Bulwark: share of damage that gets through the armoured front.
+            elder_guard_leak: f32 = 0.12, 0.0, 1.0, Ratio;
+        }
+
+        group "brain" {
+            /// Seconds between a learner's snapshots.
+            brain_interval: f32 = 0.25, 0.02, 5.0, Seconds;
+            /// How far ahead each snapshot is judged.
+            brain_horizon: f32 = 0.5, 0.02, 5.0, Seconds;
+            /// Largest correction the net can add to the aim, per axis, before the clamp on its length.
+            brain_range: f32 = 240.0, 12.0, 5000.0, Distance;
+            /// Longest total lead a shot or intercept may take from a learner.
+            brain_max_lead: f32 = 420.0, 0.0, 5000.0, Distance;
+            /// A displacement larger than this is a teleport (a respawn or sector hop), not movement.
+            brain_teleport: f32 = 3000.0, 0.0, 50_000.0, Distance;
+            /// Weight noise a child receives, and the spread of a founder's output layer.
+            brain_inherit_noise: f32 = 0.01, 0.0, 1.0, Ratio;
+            /// Smoothing of the running error estimates.
+            brain_ema: f32 = 0.1, 0.001, 1.0, Ratio;
+            /// Training steps before the running accuracy is trusted for display.
+            brain_warmup: u32 = 8, 0, 100, Count;
+        }
+
+        group "chain" {
+            /// Joints never stretch past this multiple of the rest distance.
+            chain_max_stretch: f32 = 1.6, 1.0, 20.0, Multiplier;
+            /// Damping rate of a joint.
+            chain_joint_damping: f32 = 8.0, 0.0, 100.0, Rate;
+            /// Sideways acceleration of the travelling wave at unit amplitude.
+            chain_slither_accel: f32 = 260.0, 0.0, 5000.0, Speed;
+            /// The head weaves only this share of the wave, so it can still steer; the body carries the wave.
+            chain_head_wave_share: f32 = 0.3, 0.0, 1.0, Ratio;
+            /// How quickly each part matches its parent's velocity (lets a head tow a long body at speed).
+            chain_traction: f32 = 3.0, 0.0, 50.0, Rate;
+            /// Limb parts are this much smaller than the head.
+            chain_limb_scale: f32 = 0.55, 0.05, 1.0, Ratio;
+        }
+
+        group "tether" {
+            /// Most cords in the loaded world at once.
+            tether_max_tethers: usize = 64, 0, 1000, Count;
+            /// Damage one friendly bullet does to a cord.
+            tether_cord_bullet_damage: f32 = 16.0, 0.0, 200.0, Amount;
+            /// Health of a cord per hit it takes to cut (the weak cord's 30 is two hits).
+            tether_health_per_hit: f32 = 15.0, 0.0, 200.0, Amount;
+            /// Health of a link between two bodies.
+            tether_link_health: f32 = 48.0, 0.0, 500.0, Amount;
+            /// Speed of a fired cord tip.
+            tether_tip_speed: f32 = 650.0, 0.0, 10_000.0, Speed;
+            /// A fired tip that has not found the ship by now is reeled back in.
+            tether_tip_lifetime: f32 = 1.3, 0.0, 20.0, Seconds;
+            /// Reeling shortens the cord (at the owner's reel gene) down to this length.
+            tether_min_rest: f32 = 150.0, 0.0, 2000.0, Distance;
+            /// A cord's rest length stays this far beyond the two bodies' edges, so it never holds the ship against its owner.
+            tether_fair_standoff: f32 = 80.0, 0.0, 1000.0, Distance;
+            /// Pull per unit of stretch at strength 1.
+            tether_pull_stiffness: f32 = 2.0, 0.0, 20.0, Multiplier;
+            /// The most a weak cord pulls with.
+            tether_pull_cap: f32 = 900.0, 45.0, 10_000.0, Amount;
+            /// Rate (per second at drag 1) at which a latched cord bleeds the ship's speed away from its owner.
+            tether_drag_rate: f32 = 4.0, 0.0, 50.0, Rate;
+            /// Rate at which an anchored cord bleeds the ship's speed toward its anchor.
+            tether_settle_anchored: f32 = 6.0, 0.0, 100.0, Rate;
+            /// A cord with at most this much health is cut the moment shears touch it.
+            tether_shears_instant: f32 = 45.0, 0.0, 500.0, Amount;
+            /// Health per second shears wear through a stouter cord.
+            tether_shears_rate: f32 = 60.0, 0.0, 1000.0, Amount;
+            /// Fairness limit: a cord tied to something that cannot move is at most this tough.
+            tether_rooted_max_hardness: f32 = 4.0, 0.0, 50.0, Multiplier;
+            /// Fairness limit: a rooted cord is at most this strong.
+            tether_rooted_max_strength: f32 = 4.0, 0.0, 50.0, Multiplier;
+            /// Fairness limit: a rooted cord drags at most this much.
+            tether_rooted_max_drag: f32 = 0.5, 0.0, 5.0, Multiplier;
+            /// How much of the owner's depth threat a cord's strength takes on.
+            tether_threat_strength: f32 = 0.15, 0.0, 2.0, Multiplier;
+            /// How much of the owner's depth threat a cord's toughness takes on.
+            tether_threat_hardness: f32 = 0.1, 0.0, 1.0, Multiplier;
+            /// Strength at or above which a cord is "strong" for cues and visuals.
+            tether_strong_cord: f32 = 3.0, 0.0, 50.0, Multiplier;
+            /// Rate at which a siphon cord drains.
+            tether_siphon_rate: f32 = 10.0, 0.0, 100.0, Rate;
+            /// Separation a linked pair settles at.
+            tether_link_rest: f32 = 300.0, 0.0, 5000.0, Distance;
+            /// Pull when a linked pair's separation is exceeded.
+            tether_link_stiffness: f32 = 1.5, 0.0, 20.0, Multiplier;
+            /// Damage a link does.
+            tether_link_damage: f32 = 14.0, 0.0, 200.0, Amount;
+        }
         }
     };
 }

@@ -2,7 +2,7 @@
 //! a dashed warning is harmless, and a solid cord lives for one minute at most.
 
 use super::powers::PowerState;
-use super::tether::{MAX_TETHERS, closest_on_segment};
+use super::tether::closest_on_segment;
 use super::*;
 use crate::power::{self, Power};
 use std::collections::BTreeSet;
@@ -45,7 +45,7 @@ impl Game {
             .filter_map(|t| self.tether_ends(t).map(|(_, to)| to - at))
             .collect();
         let cap = (2.0 + 4.0 * Power::Weave.strength(&g)).floor() as usize;
-        if spokes.len() >= cap || self.tethers.len() >= MAX_TETHERS {
+        if spokes.len() >= cap || self.tethers.len() >= self.tune.tether_max_tethers {
             return;
         }
         let sector = SectorId::containing(at);
@@ -112,6 +112,7 @@ impl Game {
                 rock.id,
                 at.distance(rock.position),
                 warning,
+                &self.tune,
             ));
             cues.push(Cue::Weave { at });
         }
@@ -179,7 +180,7 @@ impl Game {
                     && !ship.phased
                     && ship.contact_cooldown <= 0.0
                 {
-                    damage(ship, super::tether::LINK_DAMAGE, 0.0, &self.tune);
+                    damage(ship, self.tune.tether_link_damage, 0.0, &self.tune);
                     ship.contact_cooldown = 0.65;
                     let away = if gap.length_squared() > 0.01 {
                         gap.normalize()
@@ -244,7 +245,10 @@ mod tests {
         }
         game.update_tethers(0.2);
         game.update_tethers(0.1);
-        assert_eq!(game.player().unwrap().shield, shield - tether::LINK_DAMAGE);
+        assert_eq!(
+            game.player().unwrap().shield,
+            shield - DEFAULT_TUNING.tether_link_damage
+        );
         assert!(game.player().unwrap().velocity.length() >= 260.0);
         assert!(body(&game, rock).velocity.x < 0.0);
         assert_eq!(
@@ -255,7 +259,7 @@ mod tests {
         game.update_tethers(0.1);
         assert_eq!(
             game.player().unwrap().shield,
-            shield - tether::LINK_DAMAGE,
+            shield - DEFAULT_TUNING.tether_link_damage,
             "contact cooldown"
         );
     }
@@ -483,11 +487,12 @@ mod tests {
             game.tethers.len()
         );
         game.tethers.clear();
-        for _ in 0..MAX_TETHERS {
-            game.tethers.push(Tether::link(999_999, 999_998));
+        for _ in 0..DEFAULT_TUNING.tether_max_tethers {
+            game.tethers
+                .push(Tether::link(999_999, 999_998, &DEFAULT_TUNING));
         }
         game.update_powers(10.0);
-        assert_eq!(game.tethers.len(), MAX_TETHERS);
+        assert_eq!(game.tethers.len(), DEFAULT_TUNING.tether_max_tethers);
         assert!(game.tethers.iter().all(|t| t.kind != TetherKind::Web));
     }
 

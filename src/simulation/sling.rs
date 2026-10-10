@@ -1,7 +1,7 @@
 //! Small free stones on harmless orbit cords, with a fixed-aim warning before release.
 
 use super::powers::PowerState;
-use super::tether::{MAX_TETHERS, closest_on_segment};
+use super::tether::closest_on_segment;
 use super::weave::web_rock;
 use super::*;
 use crate::power::{self, Power};
@@ -258,7 +258,7 @@ impl Game {
             .collect();
         if held.len() >= (2.0 + 2.0 * Power::Sling.strength(&g)).floor() as usize
             || orbits.len() >= power::SLING_WORLD_CAP
-            || self.tethers.len() >= MAX_TETHERS
+            || self.tethers.len() >= self.tune.tether_max_tethers
             || (!builders.contains(&id) && builders.len() >= power::SLING_SECTOR_CAP)
         {
             return;
@@ -306,8 +306,13 @@ impl Game {
             let offset = rock.position - at;
             let rest =
                 (90.0 + 40.0 * Power::Sling.strength(&g)).max(owner.radius + rock.radius + 35.0);
-            self.tethers
-                .push(Tether::sling(id, rock.id, rest, offset.to_angle()));
+            self.tethers.push(Tether::sling(
+                id,
+                rock.id,
+                rest,
+                offset.to_angle(),
+                &self.tune,
+            ));
         }
     }
 }
@@ -629,11 +634,11 @@ mod tests {
             game.tethers.len()
         );
         game.tethers.clear();
-        for _ in 0..MAX_TETHERS {
-            game.tethers.push(Tether::link(9999, 9998));
+        for _ in 0..DEFAULT_TUNING.tether_max_tethers {
+            game.tethers.push(Tether::link(9999, 9998, &DEFAULT_TUNING));
         }
         game.gather_sling(index);
-        assert_eq!(game.tethers.len(), MAX_TETHERS);
+        assert_eq!(game.tethers.len(), DEFAULT_TUNING.tether_max_tethers);
         game.tethers.clear();
         for k in 0..power::SLING_WORLD_CAP {
             let at = Vec2::new(SECTOR_SIZE * (k + 1) as f32, 0.0);
@@ -646,7 +651,8 @@ mod tests {
                 at,
             );
             let r = rock(&mut game, at + Vec2::X * 110.0);
-            game.tethers.push(Tether::sling(id, r, 110.0, 0.0));
+            game.tethers
+                .push(Tether::sling(id, r, 110.0, 0.0, &DEFAULT_TUNING));
         }
         game.gather_sling(index);
         assert_eq!(game.tethers.len(), power::SLING_WORLD_CAP);
