@@ -197,7 +197,7 @@ impl Game {
         let ship_before = self.player().map(|p| (p.shield, p.health));
         let sources = self.incoming_sources();
         self.time += dt;
-        self.civs.societies.advance(dt);
+        self.civs.societies.advance(dt, &self.tune);
         self.player_invulnerability = (self.player_invulnerability - dt).max(0.0);
         self.streak.tick(dt);
         self.feel.tick(dt);

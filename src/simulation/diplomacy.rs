@@ -304,7 +304,7 @@ impl Game {
             };
             if let Some((tid, per_point)) = owner {
                 if dealt > 0.0 {
-                    self.civil_player_harm(tid);
+                    self.civil_player_harm(tid, dealt);
                 }
                 self.civs.struck.insert(id, self.time);
                 self.shift_regard(tid, -per_point * dealt);
@@ -405,6 +405,7 @@ impl Game {
             } else {
                 1.0
             };
+        self.civil_claim_mined(civ.id, amount);
         self.shift_regard(civ.id, -cost);
         let name = civ.name(self.seed);
         let tier = self.civ_tier(civ.id);
@@ -1089,6 +1090,7 @@ mod tests {
         hold(&mut game, ship, DEFAULT_TUNING.tithe_cooldown + 0.2);
         assert_eq!(game.tithe(), Ok(()));
         assert_eq!(game.run.tithes, 2);
+        assert_eq!(game.civilization_relationship(o.id).unwrap().trust, 0.0);
         // Out of reach it is refused again.
         hold(&mut game, ship + Vec2::new(0.0, 3000.0), 0.3);
         assert_eq!(game.tithe(), Err(TitheError::NoSeat));

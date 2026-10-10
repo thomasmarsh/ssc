@@ -214,6 +214,8 @@ Built loaded fleet recovery: hostile shots, blasts, sustained hostile creature c
 
 ## Independent diplomacy and trade (proposed E2/H checks, unbuilt)
 
+Built player history: settle a finite fuel/survey/pest job and check +5 trust in CONTACT/chart (maximum +10 per 300 simulation seconds); repeated settlement and save/continue must add nothing. Gifts, visits and bought agreement lots do not earn trust. Claim mining creates a stop-mining grievance; player harm loses lasting trust and creates a slower-decaying cease-attacks grievance. Are the cause/remedy and distinction from opinion/engagement clear? Knobs: `society_*` registry entries.
+
 Built narrow E2a: check that hostile opinion from claim mining holds PEACE, actual player harm opens SHIP DEFENSE for 30 simulation seconds, and wounded-by-wildlife members stay calm. Ship defense must leave pads and mining workers alone; tithe goodwill must not end an explicitly staged war. Territory details and encountered chart entries show engagement beside opinion. These checks have headless coverage; human feel remains unverified.
 
 Do not judge the remaining cases until broader GAME_LOOP section 9.1 lands. Verify hostile defensive trade, a trusted but tense border, opportunistic convoy skirmishes, and asymmetric dependence as distinct situations.
