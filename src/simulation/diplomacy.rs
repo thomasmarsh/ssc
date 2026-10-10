@@ -205,11 +205,13 @@ impl Game {
     }
 
     /// Re-reads the tier after a change in value, with the banner and effects of crossing a line.
-    fn settle_tier(&mut self, territory: u64) {
+    pub(super) fn settle_tier(&mut self, territory: u64) {
         let Some(&Regard { value, tier, .. }) = self.civs.regard.get(&territory) else {
             return;
         };
-        let now = tier.settle(value, &self.tune);
+        // The opinion summary: sentiment plus modeled trust and friction, with hysteresis.
+        let score = self.opinion_score(territory, value);
+        let now = tier.settle(score, &self.tune);
         if now == tier {
             return;
         }
@@ -341,6 +343,7 @@ impl Game {
             }
             self.settle_tier(tid);
         }
+        self.update_society();
     }
 
     /// A civil body was destroyed: the ship pays for it if it was the ship's doing.
@@ -875,7 +878,10 @@ mod tests {
         game.civ_mined(40.0 / DEFAULT_TUNING.mine_cost);
         assert_eq!(game.civ_tier(id), Tier::Hostile);
         assert!(said(&game, "HOSTILE"));
+        // The claim dispute keeps opinion down while it lasts: friction fades first, then
         // Hostile -> Wary -> Ignores by being left alone inside the claim.
+        assert!(game.civilization_relationship(id).unwrap().friction > 50.0);
+        game.civs.societies.advance(1000.0, &game.tune);
         game.notices.clear();
         let wary_at = DEFAULT_TUNING.hostile_at + DEFAULT_TUNING.tier_hysteresis;
         let need = (wary_at - game.civ_regard(id)).max(0.0) / DEFAULT_TUNING.rest_rate;

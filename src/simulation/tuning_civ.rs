@@ -347,6 +347,36 @@ macro_rules! groups {
             society_claim_decay: f32 = 0.1, 0.0, 10.0, Rate;
             /// Attack grievance points forgotten per simulation second.
             society_attack_decay: f32 = 0.01, 0.0, 10.0, Rate;
+            /// Opinion points per point of earned trust, added to remembered sentiment before the tier settles.
+            society_opinion_trust: f32 = 0.2, 0.0, 5.0, Multiplier;
+            /// Opinion points lost per point of friction (decays with the grievance).
+            society_opinion_friction: f32 = 0.1, 0.0, 5.0, Multiplier;
+            /// Trust at which a disputed relationship reads TENSE instead of its tier.
+            society_tense_trust: f32 = 20.0, 0.0, 100.0, Regard;
+            /// Friction at which a trusted relationship reads TENSE.
+            society_tense_friction: f32 = 20.0, 0.0, 100.0, Regard;
+            /// Simulation seconds between a society's decision epochs (posture, declaration, operation).
+            society_epoch_seconds: f32 = 30.0, 1.0, 3600.0, Seconds;
+            /// Minimum seconds a posture is held before another may replace it.
+            society_posture_hold: f32 = 300.0, 0.0, 86_400.0, Seconds;
+            /// Score margin another posture must beat the held one by (the entry/exit gap).
+            society_posture_margin: f32 = 0.05, 0.0, 1.0, Ratio;
+            /// Friction at which an aggressive, hostile society may consider declaring war.
+            society_declare_friction: f32 = 60.0, 0.0, 1000.0, Regard;
+            /// Consecutive epochs the grievance must hold before a declaration is weighed.
+            society_declare_epochs: u8 = 3, 1, 100, Count;
+            /// Friction below which an autonomous war ends.
+            society_war_end_friction: f32 = 15.0, 0.0, 100.0, Regard;
+            /// Longest an autonomous war lasts without the grievance sustaining it.
+            society_war_max_seconds: f32 = 1800.0, 1.0, 86_400.0, Seconds;
+            /// Seconds after an autonomous war before the same society may declare again.
+            society_war_cooldown: f32 = 1200.0, 0.0, 86_400.0, Seconds;
+            /// Simulation seconds a convoy skirmish may last (its time budget).
+            society_op_seconds: f32 = 90.0, 1.0, 3600.0, Seconds;
+            /// Seconds after a skirmish before the same society may open another.
+            society_op_cooldown: f32 = 600.0, 0.0, 86_400.0, Seconds;
+            /// Reliability coordinate below which a sponsor sends unmarked ships.
+            society_unmarked_below: f32 = 0.3, 0.0, 1.0, Ratio;
         }
         }
     };

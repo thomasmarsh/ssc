@@ -218,6 +218,8 @@ Built player history: settle a finite fuel/survey/pest job and check +5 trust in
 
 Built narrow E2a: check that hostile opinion from claim mining holds PEACE, actual player harm opens SHIP DEFENSE for 30 simulation seconds, and wounded-by-wildlife members stay calm. Ship defense must leave pads and mining workers alone; tithe goodwill must not end an explicitly staged war. Territory details and encountered chart entries show engagement beside opinion. These checks have headless coverage; human feel remains unverified.
 
+E2a opinion, posture and operations (built, feel unverified): after mining a living claim heavily the contact detail should read TENSE or a worse tier with the cause, and a trusted friend keeps its tier while a fresh dispute lasts. Most societies read DEFENSIVE; a hostile defensive neighbor must not attack first. Park a mining worker inside an opportunistic society's claim: a CONVOY SKIRMISH can open for about 90 seconds against drones only (never the ship or pads), then cool down. Unmarked raiders stay PEACE in the readouts until you fight them. Heavy attacks on an aggressive society can end in DECLARED WAR with its reason, which ends when the grievance fades. Numbers (`society_*` entries) are first guesses; flag any war that feels unearned.
+
 Do not judge the remaining cases until broader GAME_LOOP section 9.1 lands. Verify hostile defensive trade, a trusted but tense border, opportunistic convoy skirmishes, and asymmetric dependence as distinct situations.
 
 - Can the contact/chart readout explain why a neighbor dislikes you, whether it will initiate force, what it may target, and which goods it will trade?

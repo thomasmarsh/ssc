@@ -25,16 +25,72 @@ pub struct RelationshipReading {
     pub cause: Option<&'static str>,
     pub remedy: Option<&'static str>,
     pub trust_cause: Option<&'static str>,
+    /// Opinion summary (a tier, or TENSE): never a targeting or purchase predicate.
+    pub opinion: Option<&'static str>,
+    /// Posture and its leading reason as of the last contact.
+    pub posture: Option<&'static str>,
+    pub posture_reason: Option<&'static str>,
+    /// A skirmish the player can attribute, and the last resolved operation or war.
+    pub operation: Option<&'static str>,
+    pub outcome: Option<&'static str>,
 }
 
 impl RelationshipReading {
-    /// Player-visible first-hand facts, never cultural affinity or unmodeled dependency.
-    pub fn text(self) -> String {
+    fn trust_text(self) -> String {
         let mut text = format!("Trust {:+.0} / friction {:.0}", self.trust, self.friction);
         if let Some(cause) = self.cause {
             text.push_str(&format!(" - {cause}; {}", self.remedy.unwrap_or("")));
         } else if let Some(cause) = self.trust_cause {
             text.push_str(&format!(" - {cause}"));
+        }
+        text
+    }
+
+    /// Opinion summary, then the posture known from the last contact with its leading reason.
+    fn standing_text(self) -> Option<String> {
+        let mut text = format!("Opinion {}", self.opinion?);
+        match (self.posture, self.posture_reason) {
+            (Some(posture), Some(reason)) => {
+                text.push_str(&format!(" / {posture} ({reason}, at last contact)"));
+            }
+            (Some(posture), None) => text.push_str(&format!(" / {posture} (at last contact)")),
+            _ => text.push_str(" / posture unknown"),
+        }
+        Some(text)
+    }
+
+    /// Anything the player can attribute: a live skirmish, else the last resolution.
+    fn operation_text(self) -> Option<String> {
+        match (self.operation, self.outcome) {
+            (Some(operation), _) => Some(format!("{operation} against your drones")),
+            (None, Some(outcome)) => Some(format!("Last: {outcome}")),
+            _ => None,
+        }
+    }
+
+    /// Player-visible first-hand facts, never cultural affinity or unmodeled dependency.
+    pub fn text(self) -> String {
+        let mut text = self.trust_text();
+        for extra in [self.standing_text(), self.operation_text()]
+            .into_iter()
+            .flatten()
+        {
+            text.push('\n');
+            text.push_str(&extra);
+        }
+        text
+    }
+
+    /// The compact CONTACT form: the friendly seat already implies a friendly, peaceful
+    /// summary, so the standing clause appears only when something noteworthy changes it.
+    pub fn contact_text(self) -> String {
+        let mut text = self.trust_text();
+        let notable = self.opinion == Some("TENSE")
+            || self.posture.is_some_and(|posture| posture != "DEFENSIVE");
+        let standing = self.standing_text().filter(|_| notable);
+        for extra in [standing, self.operation_text()].into_iter().flatten() {
+            text.push('\n');
+            text.push_str(&extra);
         }
         text
     }
@@ -95,6 +151,11 @@ impl Relationship {
                 TrustCause::FulfilledJob => "fulfilled job",
                 TrustCause::PlayerHarm => "player harm",
             }),
+            opinion: None,
+            posture: None,
+            posture_reason: None,
+            operation: None,
+            outcome: None,
         }
     }
 

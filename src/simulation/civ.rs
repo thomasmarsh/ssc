@@ -281,7 +281,7 @@ impl Game {
             standing,
             tier: self.civ_tier(t.id),
             regard: self.civ_regard(t.id),
-            engagement: self.civilization_engagement(t.id),
+            engagement: self.civilization_engagement_known(t.id),
             threat: self.threat() * menace,
             stage,
             next_in,

@@ -488,7 +488,7 @@ impl Game {
                 .and_then(|_| self.civilization_relationship(territory)),
             engagement: self
                 .civ_met(territory)
-                .map(|_| self.civilization_engagement(territory)),
+                .map(|_| self.civilization_engagement_known(territory)),
         })
     }
 
