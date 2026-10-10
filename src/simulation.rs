@@ -556,18 +556,14 @@ pub struct Game {
     civs: civstate::Civs,
     /// Wildlife stances toward civilizations; see `wildlife`.
     fauna: wildlife::Fauna,
-    /// Apex elders generated in the sectors met, and which have been announced; see `apexes`.
-    apexes: BTreeMap<(SectorId, u32), ApexInfo>,
-    apex_seen: HashSet<(SectorId, u32)>,
-    apex_state: HashMap<u64, apexes::ApexState>,
-    power_state: HashMap<u64, powers::PowerState>,
+    /// Apex elders, their state, powers and adaptive resistance; see `apexes`.
+    apexes: apexes::Apexes,
     /// Jams, confusion and the screen glitch on the ship; see `jam`.
     jam: jam::JamState,
     /// The pieces of dead splitters waiting to fly apart; see `split`.
     splits: Vec<split::Pending>,
     /// Dirge rings in flight; see `song`.
     song_rings: Vec<song::SongRing>,
-    apex_rng: Rng,
     seed: u64,
     rng: Rng,
     /// Loot has its own stream, so drops never disturb the gameplay one.
@@ -610,8 +606,6 @@ pub struct Game {
     region: regions::RegionState,
     /// The realm the ship is in, announced with hysteresis (see `realms`).
     realms: realms::RealmState,
-    /// Adaptive resistance of tough creatures and elders, by body id (see `adapt`).
-    adapt: BTreeMap<u64, adapt::Resist>,
     /// The score chain; see `feel`.
     streak: feel::Streak,
     /// Hit stops, direction marks and the events the screen reacts to; see `feel`.
@@ -696,18 +690,13 @@ impl Game {
             territory_sector: None,
             civs: civstate::Civs::new(seed),
             fauna: wildlife::Fauna::default(),
-            apexes: BTreeMap::new(),
-            apex_seen: HashSet::new(),
-            apex_state: HashMap::new(),
-            power_state: HashMap::new(),
+            apexes: apexes::Apexes::new(seed),
             jam: jam::JamState::default(),
             splits: Vec::new(),
             song_rings: Vec::new(),
-            apex_rng: Rng::new(seed ^ crate::apex::APEX_SALT),
             sanctuary: true,
             region: regions::RegionState::default(),
             realms: realms::RealmState::default(),
-            adapt: BTreeMap::new(),
             streak: feel::Streak::default(),
             feel: feel::FeelState::default(),
             lure: lure::LureState::default(),
@@ -1571,7 +1560,7 @@ impl Game {
                         body.kind != BodyKind::Player
                             && !body.phased
                             && body.adrift <= 0.0
-                            && !apexes::is_part(&self.apexes, body)
+                            && !apexes::is_part(&self.apexes.info, body)
                     } else {
                         matches!(
                             body.kind,
@@ -1706,8 +1695,8 @@ impl Game {
                     let at = previous.lerp(bullet.position, fraction);
                     let (guarded, bubble_close) = if bullet.friendly {
                         apexes::shield_factor(
-                            &self.apexes,
-                            &self.apex_state,
+                            &self.apexes.info,
+                            &self.apexes.state,
                             &self.bodies[index],
                             bullet,
                             &self.tune,
@@ -1722,11 +1711,12 @@ impl Game {
                             (
                                 profile.reach().at(bullet.origin.distance(at), &self.tune)
                                     * self
+                                        .apexes
                                         .adapt
                                         .get(&target.id)
                                         .map_or(1.0, |r| r.scale(family, &self.tune)),
                                 Some(family),
-                                adapt::adaptive(target, &self.apexes, &self.tune),
+                                adapt::adaptive(target, &self.apexes.info, &self.tune),
                             )
                         }
                         _ => (1.0, None, false),
@@ -1919,7 +1909,7 @@ impl Game {
                 self.damage_drone_blast(at, radius, amount);
             }
             for body in self.bodies.iter_mut().filter(|b| {
-                b.active && b.id != direct && !(friendly && apexes::is_part(&self.apexes, b))
+                b.active && b.id != direct && !(friendly && apexes::is_part(&self.apexes.info, b))
             }) {
                 if body.position.distance(at) >= radius + body.radius {
                     continue;
@@ -1927,10 +1917,11 @@ impl Game {
                 if friendly && body.kind != BodyKind::Player && !body.phased {
                     // Area damage is one family: a creature that has hardened against it takes less.
                     let resist = self
+                        .apexes
                         .adapt
                         .get(&body.id)
                         .map_or(1.0, |r| r.scale(arsenal::Family::Explosive, &self.tune));
-                    let adaptive = adapt::adaptive(body, &self.apexes, &self.tune);
+                    let adaptive = adapt::adaptive(body, &self.apexes.info, &self.tune);
                     let dealt = damage(
                         body,
                         armored(body, amount * boost * resist, true, &self.tune),
@@ -2002,7 +1993,7 @@ impl Game {
             let (kind, position, radius) = (body.kind, body.position, body.radius);
             self.split_dead(body);
             if body.kind == BodyKind::Creature
-                && let Some(pocket) = self.power_state.get(&body.id).map(|s| s.pocket)
+                && let Some(pocket) = self.apexes.power.get(&body.id).map(|s| s.pocket)
             {
                 self.release_pocket(position, pocket);
             }

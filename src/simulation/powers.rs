@@ -169,7 +169,7 @@ pub struct OozeView {
 impl Game {
     /// What `body`'s power is doing right now.
     pub fn power_view(&self, body: &Body) -> PowerView {
-        let state = self.power_state.get(&body.id);
+        let state = self.apexes.power.get(&body.id);
         PowerView {
             blink: state.and_then(|s| s.blink),
             sling: state.and_then(|s| s.sling),
@@ -257,7 +257,7 @@ impl Game {
             }
             let (id, at) = (body.id, body.position);
             live.push(id);
-            let mut state = self.power_state.remove(&id).unwrap_or_else(|| PowerState {
+            let mut state = self.apexes.power.remove(&id).unwrap_or_else(|| PowerState {
                 // The first use waits a moment, so a creature does not act the instant it loads.
                 clock: 0.6 + 0.4 * (id % 5) as f32,
                 jam_clock: [1.0 + 0.4 * (id % 5) as f32; 3],
@@ -321,9 +321,9 @@ impl Game {
             if fielder {
                 eaten.extend(self.step_fields(index, &mut state, dt, &warp_owner, &mut cues));
             }
-            self.power_state.insert(id, state);
+            self.apexes.power.insert(id, state);
         }
-        self.power_state.retain(|id, _| live.contains(id));
+        self.apexes.power.retain(|id, _| live.contains(id));
         // Rocks swallowed this step go together, after the loop (they shift body indices).
         eaten.sort_unstable();
         eaten.dedup();
@@ -513,7 +513,8 @@ impl Game {
             return;
         }
         let busy = self
-            .power_state
+            .apexes
+            .power
             .values()
             .any(|s| s.jam.iter().any(Option::is_some) || s.glare.is_some());
         if busy {
@@ -1199,7 +1200,7 @@ mod tests {
             }
         });
         assert!(moved < 100.0, "no teleport: {moved}");
-        assert!(game.power_state.is_empty());
+        assert!(game.apexes.power.is_empty());
     }
 
     #[test]

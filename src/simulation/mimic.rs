@@ -24,7 +24,8 @@ impl Game {
             return None;
         }
         let revealed = self
-            .power_state
+            .apexes
+            .power
             .get(&body.id)
             .is_some_and(|s| s.revealed || s.reveal.is_some());
         if revealed {
@@ -39,7 +40,8 @@ impl Game {
 
     /// A cracking mimic: 0 to 1 over the tell (zero when not revealing).
     pub fn reveal_progress(&self, body: &Body) -> f32 {
-        self.power_state
+        self.apexes
+            .power
             .get(&body.id)
             .and_then(|s| s.reveal)
             .map_or(0.0, |left| (1.0 - left / power::MIMIC_TELL).clamp(0.0, 1.0))

@@ -37,6 +37,32 @@ enum Move {
     BarrageWind(f32, Vec2),
 }
 
+/// Apex elders and the per-body state that rides with them: the elders generated in the sectors
+/// met, which have been announced, their live state, the powers in play, their random stream
+/// and the adaptive resistance of tough creatures (see `adapt`). `Game::apexes` owns it.
+pub(super) struct Apexes {
+    pub(super) info: BTreeMap<(SectorId, u32), ApexInfo>,
+    pub(super) seen: HashSet<(SectorId, u32)>,
+    pub(super) state: HashMap<u64, ApexState>,
+    pub(super) power: HashMap<u64, powers::PowerState>,
+    pub(super) rng: Rng,
+    /// Adaptive resistance of tough creatures and elders, by body id.
+    pub(super) adapt: BTreeMap<u64, adapt::Resist>,
+}
+
+impl Apexes {
+    pub(super) fn new(seed: u64) -> Self {
+        Self {
+            info: BTreeMap::new(),
+            seen: HashSet::new(),
+            state: HashMap::new(),
+            power: HashMap::new(),
+            rng: Rng::new(seed ^ crate::apex::APEX_SALT),
+            adapt: BTreeMap::new(),
+        }
+    }
+}
+
 /// The live state of one apex body, kept apart from `Body` (only apexes pay for it).
 #[derive(Clone, Debug, Default)]
 pub struct ApexState {
@@ -189,7 +215,7 @@ impl Game {
         body.health = body.max_health;
         body.max_shield = apex::shield(rank, ring);
         body.shield = body.max_shield;
-        self.apexes.insert(
+        self.apexes.info.insert(
             (id, index),
             ApexInfo {
                 name,
@@ -207,7 +233,7 @@ impl Game {
 
     /// Whether an apex body has gone through its phase change.
     pub fn apex_enraged(&self, body: &Body) -> bool {
-        self.apex_state.get(&body.id).is_some_and(|s| s.enraged)
+        self.apexes.state.get(&body.id).is_some_and(|s| s.enraged)
     }
 
     /// The apex a body is, if it is one. Only the head of an elder's animal body is the apex
@@ -216,20 +242,20 @@ impl Game {
         if body.kind != BodyKind::Creature || body.follower {
             return None;
         }
-        self.apexes.get(&body.origin?)
+        self.apexes.info.get(&body.origin?)
     }
 
     /// Whether a body is a trailing part of an elder's animal body: plain armour with no weak
     /// point (open design question), never a kill, a bounty or a drop of its own.
     pub fn is_apex_part(&self, body: &Body) -> bool {
-        is_part(&self.apexes, body)
+        is_part(&self.apexes.info, body)
     }
 
     /// The apexes' signature moves and phase change, run each step after steering and before
     /// bodies move, so a charge or a blink overrides what steering decided.
     pub(super) fn update_apexes(&mut self, dt: f32) {
-        if self.apexes.is_empty() {
-            self.apex_state.clear();
+        if self.apexes.info.is_empty() {
+            self.apexes.state.clear();
             return;
         }
         let Some(ship) = self.player().map(|p| (p.position, p.velocity)) else {
@@ -241,13 +267,14 @@ impl Game {
             .filter(|b| b.active && !b.consumed && !b.follower)
             .filter_map(|b| self.apex_of(b).map(|info| (b.id, info.archetype)))
             .collect();
-        self.apex_state
+        self.apexes
+            .state
             .retain(|id, _| live.iter().any(|(live, _)| live == id));
         for (id, archetype) in live {
             let Some(index) = self.bodies.iter().position(|b| b.id == id) else {
                 continue;
             };
-            let mut state = self.apex_state.remove(&id).unwrap_or_else(|| ApexState {
+            let mut state = self.apexes.state.remove(&id).unwrap_or_else(|| ApexState {
                 // The first signature move waits a little, so a stirring apex is not instant.
                 clock: 2.0 + (id % 5) as f32,
                 ..ApexState::default()
@@ -280,7 +307,7 @@ impl Game {
                 | Archetype::Hunter
                 | Archetype::Warden => {}
             }
-            self.apex_state.insert(id, state);
+            self.apexes.state.insert(id, state);
         }
     }
 
@@ -308,7 +335,7 @@ impl Game {
         let pool = (body.max_health + body.max_shield).max(1.0);
         let at = body.position;
         let radius = body.radius;
-        let state = self.apex_state.entry(id).or_default();
+        let state = self.apexes.state.entry(id).or_default();
         if state.bubble_down > 0.0 {
             return;
         }
@@ -327,7 +354,7 @@ impl Game {
         if !info.bubbled {
             return None;
         }
-        let state = self.apex_state.get(&body.id);
+        let state = self.apexes.state.get(&body.id);
         Some(if state.is_some_and(|s| s.bubble_down > 0.0) {
             0.0
         } else {
@@ -555,7 +582,7 @@ impl Game {
             generation: 0,
             genome: apex::escort(&queen.genome).individual(&mut self.variation),
         };
-        let direction = self.apex_rng.direction();
+        let direction = self.apexes.rng.direction();
         let spot = queen.position + direction * (queen.radius + 40.0);
         let mut body = self.make_creature(&species, spot);
         body.velocity = queen.velocity + direction * 120.0;
@@ -605,7 +632,7 @@ impl Game {
 
     /// Posts the banner the first time an apex comes into range.
     pub(super) fn update_apex(&mut self) {
-        if self.apexes.is_empty() {
+        if self.apexes.info.is_empty() {
             return;
         }
         let Some(ship) = self.player().map(|p| p.position) else {
@@ -614,16 +641,16 @@ impl Game {
         let mut stirred: Vec<((SectorId, u32), String)> = Vec::new();
         for body in self.bodies.iter().filter(|b| b.active && !b.consumed) {
             if let Some(key) = body.origin
-                && !self.apex_seen.contains(&key)
+                && !self.apexes.seen.contains(&key)
                 && !stirred.iter().any(|(seen, _)| *seen == key)
                 && body.position.distance(ship) < self.tune.apex_notice_range
-                && let Some(info) = self.apexes.get(&key)
+                && let Some(info) = self.apexes.info.get(&key)
             {
                 stirred.push((key, info.name.clone()));
             }
         }
         for (key, name) in stirred {
-            self.apex_seen.insert(key);
+            self.apexes.seen.insert(key);
             self.notify(format!("APEX: {name} stirs"), Rarity::Epic);
             self.cue(Cue::Extirpated);
         }
@@ -1351,7 +1378,7 @@ mod tests {
         for _ in 0..(40.0 / 0.05) as usize {
             set_player(&mut game, spot, Vec2::ZERO);
             game.step(0.05, Input::default());
-            if let Some(state) = game.apex_state.get(&id) {
+            if let Some(state) = game.apexes.state.get(&id) {
                 wound |= matches!(state.mv, Move::Windup(..));
             }
             fastest = fastest.max(apex_body(&game, id).velocity.length());
@@ -1367,7 +1394,7 @@ mod tests {
         for _ in 0..(120.0 / 0.05) as usize {
             set_player(&mut game, spot, Vec2::ZERO);
             game.step(0.05, Input::default());
-            let state = game.apex_state.get(&id).expect("a queen has a state");
+            let state = game.apexes.state.get(&id).expect("a queen has a state");
             most = most.max(state.escorts.len());
             let alive = state
                 .escorts
@@ -1381,7 +1408,7 @@ mod tests {
         assert!(most <= ESCORT_CAP.1);
         // They are the queen's own colours and fight.
         let queen = apex_body(&game, id).genome;
-        let state = &game.apex_state[&id];
+        let state = &game.apexes.state[&id];
         let escort = game
             .bodies
             .iter()
@@ -1425,7 +1452,8 @@ mod tests {
             let ship = game.player().unwrap();
             let toward = (apex - ship.position).normalize_or_zero();
             if game
-                .apex_state
+                .apexes
+                .state
                 .get(&id)
                 .is_some_and(|s| matches!(s.mv, Move::Pull(_)))
             {
@@ -1446,24 +1474,30 @@ mod tests {
         let facing = Vec2::from_angle(body.angle);
         let shot_at_front = -facing * 600.0;
         let shot_at_back = facing * 600.0;
-        let front = guard(&game.apexes, &game.apex_state, &body, shot_at_front);
-        let back = guard(&game.apexes, &game.apex_state, &body, shot_at_back);
+        let front = guard(&game.apexes.info, &game.apexes.state, &body, shot_at_front);
+        let back = guard(&game.apexes.info, &game.apexes.state, &body, shot_at_back);
         assert!(front < 0.2 && back == 1.0, "front {front}, back {back}");
         // Past its phase change the plates are gone.
         let hull = apex_body(&game, id).max_health;
         game.bodies.iter_mut().find(|b| b.id == id).unwrap().health = hull * 0.2;
         game.step(DT, Input::default());
-        assert!(game.apex_state[&id].enraged);
+        assert!(game.apexes.state[&id].enraged);
         let body = apex_body(&game, id).clone();
         let shot = -Vec2::from_angle(body.angle) * 600.0;
-        assert_eq!(guard(&game.apexes, &game.apex_state, &body, shot), 1.0);
+        assert_eq!(
+            guard(&game.apexes.info, &game.apexes.state, &body, shot),
+            1.0
+        );
         // Nobody else is armoured.
         let plain = game
             .bodies
             .iter()
             .find(|b| b.kind == BodyKind::Player)
             .unwrap();
-        assert_eq!(guard(&game.apexes, &game.apex_state, plain, shot), 1.0);
+        assert_eq!(
+            guard(&game.apexes.info, &game.apexes.state, plain, shot),
+            1.0
+        );
     }
 
     #[test]
@@ -1510,7 +1544,7 @@ mod tests {
                 set_player(&mut game, spot, Vec2::ZERO);
                 game.step(DT, Input::default());
             }
-            assert!(game.apex_state[&id].enraged, "{archetype:?}");
+            assert!(game.apexes.state[&id].enraged, "{archetype:?}");
             let after = apex_body(&game, id).genome;
             assert!(after.speed > before.speed, "{archetype:?}");
             assert!(after.fire_period < before.fire_period, "{archetype:?}");
@@ -1611,7 +1645,7 @@ mod tests {
                     ..Input::default()
                 },
             );
-            if let Some(state) = game.apex_state.get(&id) {
+            if let Some(state) = game.apexes.state.get(&id) {
                 d.lunged |= matches!(state.mv, Move::LungeWind(..) | Move::Lunge(..));
                 d.barraged |= matches!(state.mv, Move::BarrageWind(..));
             }
@@ -1757,22 +1791,22 @@ mod tests {
         let far = body.position + Vec2::new(0.0, 1500.0);
         let near = body.position + Vec2::new(0.0, 300.0);
         let (f_far, close_far) = shield_factor(
-            &game.apexes,
-            &game.apex_state,
+            &game.apexes.info,
+            &game.apexes.state,
             &body,
             &shot(far, 0),
             &DEFAULT_TUNING,
         );
         let (f_near, close_near) = shield_factor(
-            &game.apexes,
-            &game.apex_state,
+            &game.apexes.info,
+            &game.apexes.state,
             &body,
             &shot(near, 0),
             &DEFAULT_TUNING,
         );
         let (f_lance, close_lance) = shield_factor(
-            &game.apexes,
-            &game.apex_state,
+            &game.apexes.info,
+            &game.apexes.state,
             &body,
             &shot(far, 1),
             &DEFAULT_TUNING,
@@ -1796,8 +1830,8 @@ mod tests {
         assert_eq!(game.apex_bubble(apex_body(&game, id)), Some(0.0));
         let body = apex_body(&game, id).clone();
         let (f_down, _) = shield_factor(
-            &game.apexes,
-            &game.apex_state,
+            &game.apexes.info,
+            &game.apexes.state,
             &body,
             &shot(far, 0),
             &DEFAULT_TUNING,
@@ -1842,7 +1876,7 @@ mod tests {
             set_player(&mut game, spot, Vec2::ZERO);
             game.step(0.05, Input::default());
             let now = k as f32 * 0.05;
-            let state = game.apex_state.get(&id);
+            let state = game.apexes.state.get(&id);
             if warned.is_none() && state.is_some_and(|s| matches!(s.mv, Move::BarrageWind(..))) {
                 warned = Some(now);
             }
@@ -1910,7 +1944,7 @@ mod tests {
                     ..Input::default()
                 },
             );
-            let state = game.apex_state.get(&id);
+            let state = game.apexes.state.get(&id);
             wound |= state.is_some_and(|s| matches!(s.mv, Move::LungeWind(..)));
             if state.is_some_and(|s| matches!(s.mv, Move::Lunge(..))) {
                 fastest = fastest.max(apex_body(&game, id).velocity.length());

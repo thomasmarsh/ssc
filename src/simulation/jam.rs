@@ -494,7 +494,7 @@ mod tests {
             }
         });
         assert!(both_warned && both_hit);
-        let state = game.power_state.get(&id).unwrap();
+        let state = game.apexes.power.get(&id).unwrap();
         assert!(state.jam_clock[1] > state.jam_clock[0] + 3.0);
     }
 
@@ -518,7 +518,7 @@ mod tests {
             confusion |= g.jam.confuse > 0.0;
         });
         assert!(glare && confuse && glitch && confusion);
-        assert_eq!(game.power_state.get(&id).unwrap().jams, [0, 1, 1]);
+        assert_eq!(game.apexes.power.get(&id).unwrap().jams, [0, 1, 1]);
     }
 
     #[test]

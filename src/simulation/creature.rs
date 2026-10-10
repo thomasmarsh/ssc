@@ -317,7 +317,7 @@ impl Game {
             let elder_hurt = is_hurt(body)
                 && body
                     .origin
-                    .is_some_and(|key| self.apexes.contains_key(&key));
+                    .is_some_and(|key| self.apexes.info.contains_key(&key));
             let provoked = (g.trigger != Trigger::Sight && is_hurt(body))
                 || elder_hurt
                 || body.provoked > 0.0

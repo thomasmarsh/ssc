@@ -306,9 +306,9 @@ impl Game {
                 // A phased body is out of reach of a nova and a mine.
                 if body.kind != BodyKind::Player
                     && !body.phased
-                    && !super::apexes::is_part(&self.apexes, body)
+                    && !super::apexes::is_part(&self.apexes.info, body)
                 {
-                    let resist = self.adapt.get(&body.id).map_or(1.0, |r| {
+                    let resist = self.apexes.adapt.get(&body.id).map_or(1.0, |r| {
                         r.scale(super::arsenal::Family::Explosive, &self.tune)
                     });
                     let dealt = damage(
@@ -317,7 +317,7 @@ impl Game {
                         0.0,
                         &self.tune,
                     );
-                    if super::adapt::adaptive(body, &self.apexes, &self.tune) {
+                    if super::adapt::adaptive(body, &self.apexes.info, &self.tune) {
                         blast_hits.push((body.id, dealt, body.max_health + body.max_shield));
                     }
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {

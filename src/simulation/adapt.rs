@@ -72,7 +72,8 @@ impl Game {
     /// Records that `family` dealt `dealt` to the adaptive body `id` with the given pool.
     pub(super) fn note_family_hit(&mut self, id: u64, family: Family, dealt: f32, pool: f32) {
         if dealt > 0.0 {
-            self.adapt
+            self.apexes
+                .adapt
                 .entry(id)
                 .or_default()
                 .hit(family, dealt, pool, &self.tune);
@@ -81,22 +82,25 @@ impl Game {
 
     /// Per step: meters bleed, and a creature that is gone takes its meters with it.
     pub(super) fn update_adapt(&mut self, dt: f32) {
-        if self.adapt.is_empty() {
+        if self.apexes.adapt.is_empty() {
             return;
         }
         let bodies = &self.bodies;
-        self.adapt
+        self.apexes
+            .adapt
             .retain(|id, _| bodies.iter().any(|b| b.id == *id && b.health > 0.0));
-        for resist in self.adapt.values_mut() {
+        for resist in self.apexes.adapt.values_mut() {
             resist.tick(dt, &self.tune);
         }
-        self.adapt
+        self.apexes
+            .adapt
             .retain(|_, r| r.shown(&self.tune) || r.meter.iter().any(|m| *m > 0.0));
     }
 
     /// The resistance meters of a creature the HUD may draw (None when nothing is worth a pip).
     pub fn resistance_of(&self, id: u64) -> Option<[f32; 4]> {
-        self.adapt
+        self.apexes
+            .adapt
             .get(&id)
             .filter(|r| r.shown(&self.tune))
             .map(|r| r.meters())
@@ -223,9 +227,9 @@ mod tests {
         game.note_family_hit(tough, Family::Kinetic, 400.0, 900.0);
         assert!(game.resistance_of(tough).unwrap()[0] > 0.9);
         assert_eq!(game.resistance_of(small), None);
-        assert!(game.adapt[&tough].scale(Family::Kinetic, &DEFAULT_TUNING) < 0.5);
+        assert!(game.apexes.adapt[&tough].scale(Family::Kinetic, &DEFAULT_TUNING) < 0.5);
         assert_eq!(
-            game.adapt[&tough].scale(Family::Lance, &DEFAULT_TUNING),
+            game.apexes.adapt[&tough].scale(Family::Lance, &DEFAULT_TUNING),
             1.0
         );
         // Meters are dropped with the body and with time.

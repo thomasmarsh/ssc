@@ -261,15 +261,11 @@ impl Game {
             raid,
             territory_sector,
             civs,
+            apexes: apex_group,
             fauna,
-            apexes,
-            apex_seen,
-            apex_state,
-            power_state,
             jam,
             splits,
             song_rings,
-            apex_rng,
             seed,
             rng,
             loot,
@@ -295,7 +291,6 @@ impl Game {
             sanctuary,
             region,
             realms,
-            adapt,
             streak,
             feel,
             lure,
@@ -317,6 +312,15 @@ impl Game {
             clock: civ_clock,
             rng: civ_rng,
         } = civs;
+
+        let apexes::Apexes {
+            info: apexes,
+            seen: apex_seen,
+            state: apex_state,
+            power: power_state,
+            rng: apex_rng,
+            adapt,
+        } = apex_group;
 
         let mut h = Hasher::new("clock");
         h.put(seed);

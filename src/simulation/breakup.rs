@@ -84,7 +84,7 @@ impl Game {
         // Elders and the ship's own kind keep their rules; deep bodies are plain sums.
         let elder = head
             .origin
-            .is_some_and(|key| self.apexes.contains_key(&key));
+            .is_some_and(|key| self.apexes.info.contains_key(&key));
         let pooled = share(head.genes.threat, &self.tune);
         if elder
             || head.kind != BodyKind::Creature

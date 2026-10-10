@@ -77,7 +77,7 @@ impl Game {
         }
         self.tethers
             .retain(|t| t.kind != TetherKind::Sling || !invalid.contains(&t.other));
-        for state in self.power_state.values_mut() {
+        for state in self.apexes.power.values_mut() {
             if state.sling.is_some_and(|tell| {
                 !self.tethers.iter().any(|t| {
                     t.kind == TetherKind::Sling && t.other == Some(tell.rock) && t.health > 0.0
@@ -122,7 +122,8 @@ impl Game {
             return false;
         }
         let warning = self
-            .power_state
+            .apexes
+            .power
             .get(&tether.owner)
             .and_then(|s| s.sling)
             .is_some_and(|t| Some(t.rock) == tether.other);
@@ -351,7 +352,7 @@ mod tests {
     }
 
     fn warn(game: &mut Game, owner: u64) -> SlingTell {
-        game.power_state.get_mut(&owner).unwrap().sling_clock = 0.0;
+        game.apexes.power.get_mut(&owner).unwrap().sling_clock = 0.0;
         game.update_powers(DT);
         game.power_view(body(game, owner)).sling.expect("warning")
     }
@@ -421,7 +422,7 @@ mod tests {
                         .contact_cooldown = 1.0
                 }
             }
-            game.power_state.get_mut(&owner).unwrap().sling_clock = 0.0;
+            game.apexes.power.get_mut(&owner).unwrap().sling_clock = 0.0;
             game.update_powers(DT);
             assert!(
                 game.power_view(body(&game, owner)).sling.is_none(),
@@ -536,7 +537,7 @@ mod tests {
             }
             game.prune_slings();
             assert!(game.tethers.is_empty(), "case {case}");
-            assert!(game.power_state.get(&owner).unwrap().sling.is_none());
+            assert!(game.apexes.power.get(&owner).unwrap().sling.is_none());
         }
         let (mut game, owner, _) = arena();
         warn(&mut game, owner);
@@ -784,7 +785,7 @@ mod tests {
                 warned && thrown,
                 "head {:?}, state {:?}, cords {:?}",
                 body(&game, owner),
-                game.power_state.get(&owner),
+                game.apexes.power.get(&owner),
                 game.tethers
             );
         }

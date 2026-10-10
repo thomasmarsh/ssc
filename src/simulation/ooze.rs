@@ -208,14 +208,14 @@ impl Game {
         };
         if let Some(fed) = fed {
             let body = &self.bodies[index];
-            let mut state = self.power_state.remove(&id).unwrap_or_default();
+            let mut state = self.apexes.power.remove(&id).unwrap_or_default();
             state.base = Some((body.radius, body.mass, body.max_health));
             state.fed = fed.clamp(0.0, 1.0);
             let s = Power::Engulf.strength(&body.genome);
             let bulk = 1.0 + (bulk_cap(s) - 1.0) * state.fed;
             state.ooze_bulk = bulk;
             self.apply_power_growth(index, &state);
-            self.power_state.insert(id, state);
+            self.apexes.power.insert(id, state);
         }
         let (Some(gap), Some(ship)) = (gate, self.player().map(|p| p.position)) else {
             return;
@@ -713,7 +713,7 @@ mod tests {
         );
         run(&mut game, 1.5);
         assert!(game.body(rock).is_none_or(|r| r.consumed));
-        assert!(game.power_state.get(&id).unwrap().fed > 0.0);
+        assert!(game.apexes.power.get(&id).unwrap().fed > 0.0);
     }
 
     #[test]
@@ -785,7 +785,7 @@ mod tests {
         // Keep it full: it grows steadily, never past the cap, and the hit box follows.
         let mut last = r0;
         for k in 0..(60.0 / DT) as usize {
-            if let Some(st) = game.power_state.get_mut(&id) {
+            if let Some(st) = game.apexes.power.get_mut(&id) {
                 st.fed = 1.0;
             }
             game.step(DT, Input::default());
@@ -801,7 +801,7 @@ mod tests {
             "size, hull and mass scale together"
         );
         // Starve it: size falls back, slowly, never below the size it was made.
-        game.power_state.get_mut(&id).unwrap().fed = 0.0;
+        game.apexes.power.get_mut(&id).unwrap().fed = 0.0;
         let big = game.body(id).unwrap().radius;
         run(&mut game, 5.0);
         let after = game.body(id).unwrap().radius;
@@ -827,7 +827,7 @@ mod tests {
                 .radius = 12.0;
         }
         run(&mut game, 0.5);
-        let bitten = game.power_state.get(&id).unwrap().fed;
+        let bitten = game.apexes.power.get(&id).unwrap().fed;
         assert!(bitten > 0.05, "{bitten}");
         assert!(
             game.power_view(game.body(id).unwrap())
@@ -835,7 +835,7 @@ mod tests {
                 .is_some_and(|o| o.inside[0].1 > 0.0)
         );
         run(&mut game, 10.0);
-        let digesting = game.power_state.get(&id).unwrap().fed;
+        let digesting = game.apexes.power.get(&id).unwrap().fed;
         assert!(
             digesting > bitten,
             "digestion keeps feeding it: {bitten} to {digesting}"
@@ -848,9 +848,9 @@ mod tests {
         let (mut game, id) = oozer_game(Vec2::new(90.0, 0.0));
         run(&mut game, 2.0);
         assert!(game.engulfed().is_some());
-        let before = game.power_state.get(&id).unwrap().fed;
+        let before = game.apexes.power.get(&id).unwrap().fed;
         run(&mut game, 6.0);
-        let after = game.power_state.get(&id).unwrap().fed;
+        let after = game.apexes.power.get(&id).unwrap().fed;
         assert!(after > before + 0.015, "{before} to {after}");
     }
 
@@ -947,7 +947,7 @@ mod tests {
         let (mut game, id) = oozer_game(Vec2::new(400.0, 0.0));
         game.player_invulnerability = 1e9;
         for _ in 0..(50.0 / DT) as usize {
-            if let Some(st) = game.power_state.get_mut(&id) {
+            if let Some(st) = game.apexes.power.get_mut(&id) {
                 st.fed = 1.0;
             }
             game.step(DT, Input::default());

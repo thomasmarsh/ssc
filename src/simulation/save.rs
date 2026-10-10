@@ -257,7 +257,7 @@ impl Game {
                 breeding: self.breeding.clone(),
                 parry: self.parry_rng.clone(),
                 civ: self.civs.rng.clone(),
-                apex: self.apex_rng.clone(),
+                apex: self.apexes.rng.clone(),
             },
         }
     }
@@ -331,7 +331,7 @@ impl Game {
         game.breeding = state.streams.breeding;
         game.parry_rng = state.streams.parry;
         game.civs.rng = state.streams.civ;
-        game.apex_rng = state.streams.apex;
+        game.apexes.rng = state.streams.apex;
         game.player_invulnerability = 2.5;
         (
             game,

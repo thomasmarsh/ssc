@@ -751,7 +751,7 @@ mod tests {
             .and_then(|b| b.well.as_ref().map(|w| w.eaten))
             .unwrap_or(1.0);
         assert!(eaten > 0.2, "the well is being eaten: {eaten}");
-        let pocket = game.power_state.get(&gorger).unwrap().pocket;
+        let pocket = game.apexes.power.get(&gorger).unwrap().pocket;
         assert!(pocket > 0.1 && pocket <= power::POCKET_MAX);
         run(&mut game, &[gorger, hole], 15.0, |_| {});
         assert!(

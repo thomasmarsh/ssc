@@ -319,7 +319,8 @@ impl Game {
                 continue;
             }
             let resist = if credited {
-                self.adapt
+                self.apexes
+                    .adapt
                     .get(&body.id)
                     .map_or(1.0, |r| r.scale(arsenal::Family::Explosive, &self.tune))
             } else {

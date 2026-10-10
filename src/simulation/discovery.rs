@@ -134,7 +134,7 @@ impl Game {
                 }
                 if body.kind == BodyKind::Creature
                     && crate::power::Power::Devour.active(&body.genome)
-                    && self.power_state.get(&id).is_some_and(|s| s.pocket > 0.0)
+                    && self.apexes.power.get(&id).is_some_and(|s| s.pocket > 0.0)
                     && !body.follower
                 {
                     return Some((
@@ -988,7 +988,7 @@ mod tests {
     fn carried_and_released_wells_are_live_but_never_persistent_destinations() {
         let mut g = empty_game();
         let carrier = g.place_creature(&Species::of(Genome::tidegorger()), Vec2::new(1600.0, 0.0));
-        g.power_state.entry(carrier).or_default().pocket = 0.2;
+        g.apexes.power.entry(carrier).or_default().pocket = 0.2;
         g.ping();
         g.time = 0.4;
         g.update_ping(0.4);
