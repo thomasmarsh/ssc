@@ -10,13 +10,12 @@
 //! through `Game::tune_set` (the console, a panel or an overrides file) within the range and the
 //! cross-field rules of `validate`. The defaults are the shipped values.
 
-use super::tunables::tunables;
+use super::tuning_life;
 
-tunables! {
-    /// Every tunable gameplay number, resolved. `Game::tune` holds one; the defaults are the
-    /// shipped values (`Tunables::DEFAULT`, also usable in const contexts and tests).
-    pub struct Tunables, table TUNABLES, validate validate;
-
+// The core groups are listed here; the groups of the creature, civilization and play modules
+// (`tuning_life`, `tuning_civ`, `tuning_play`) follow through a chain of macros that ends in the
+// one `tunables!` invocation, so there is one struct, one table and one `validate`.
+tuning_life::groups! {
     // ---- per-tick body physics and timers (see `phases`) ----------------------------------------
     group "physics" {
         /// Seconds a body must go unhit before its shield starts to recharge.
