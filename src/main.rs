@@ -1655,7 +1655,11 @@ fn smoke_run(
         && let Ok(view) = std::env::var("SSC_CONTACT_JOB")
     {
         session.game.pose_frontier_contact();
-        session.game.pose_contact_job(view == "survey");
+        if view == "partnership" {
+            session.game.pose_contact_partnership();
+        } else {
+            session.game.pose_contact_job(view == "survey");
+        }
     }
     // SSC_OUTPOST=1: start at the early outpost's capital (standing meter, tithe seat).
     if run.frames == 0 && std::env::var_os("SSC_OUTPOST").is_some() {

@@ -112,6 +112,9 @@ impl Game {
             .friendly_supplier()
             .is_some_and(|c| self.supplier_profile(&c).contains(&tech))
         {
+            if tech == Tech::Frontier && !self.partnership_service() {
+                return Some("NEGOTIATE RESEARCH PARTNERSHIP IN SKILLS".into());
+            }
             return None;
         }
         Some("VISIT A FRIENDLY FRONTIER SUPPLIER".into())
@@ -186,10 +189,14 @@ impl Game {
     pub(super) fn grade_price(&self) -> Vec<(Material, f32)> {
         let grade = self.next_grade().map_or(self.equipment_grade(), |(g, _)| g);
         let k = grade.sqrt().clamp(1.0, 4.0);
+        let discount = self
+            .friendly_supplier()
+            .filter(|_| self.partnership_service())
+            .map_or(1.0, |_| 0.75);
         vec![
-            (Material::Metal, 30.0 * k),
-            (Material::Crystal, 10.0 * k),
-            (Material::Fuel, 10.0),
+            (Material::Metal, 30.0 * k * discount),
+            (Material::Crystal, 10.0 * k * discount),
+            (Material::Fuel, 10.0 * discount),
         ]
     }
     pub(super) fn buy_grade(&mut self) {
@@ -323,6 +330,12 @@ mod tests {
         }
         assert_eq!(peaceful.interact(), Some(interact::Verb::Contact));
         fund(&mut peaceful);
+        for _ in 0..2 {
+            peaceful.bench_select(BenchAction::Job(civ.id, jobs::JobKind::Fuel));
+            peaceful.bench_confirm();
+        }
+        peaceful.bench_select(BenchAction::Partnership);
+        peaceful.bench_confirm();
         peaceful.bench_select(BenchAction::Research(Tech::Frontier));
         peaceful.bench_confirm();
         let before = peaceful.stats;

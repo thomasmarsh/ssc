@@ -42,6 +42,7 @@ pub enum BenchAction {
     WaterExtractor,
     Research(research::Tech),
     Grade,
+    Partnership,
     Outfit(Slot),
     Tithe,
     Job(u64, jobs::JobKind),
@@ -172,6 +173,7 @@ impl Game {
             .map(BenchAction::Skill)
             .chain(Organ::ALL.map(BenchAction::Organ))
             .chain(research::Tech::ALL.map(BenchAction::Research))
+            .chain(self.pad.contact.map(|_| BenchAction::Partnership))
             .chain(std::iter::once(BenchAction::Grade))
             .collect(),
         }
@@ -183,6 +185,7 @@ impl Game {
             BenchAction::Skill(_)
             | BenchAction::Organ(_)
             | BenchAction::Research(_)
+            | BenchAction::Partnership
             | BenchAction::Grade => BenchTab::Skills,
             _ => BenchTab::Parts,
         };
@@ -216,6 +219,7 @@ impl Game {
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
             Some(BenchAction::Research(tech)) => self.buy_research(tech),
+            Some(BenchAction::Partnership) => self.buy_partnership(),
             Some(BenchAction::Grade) => self.buy_grade(),
             Some(BenchAction::Job(id, kind)) => self.act_job(id, kind),
             Some(BenchAction::CancelJob(id, kind)) => self.cancel_job(id, kind),
@@ -368,10 +372,23 @@ impl Game {
                             .unwrap_or(0.0)
                 );
             }
+            BenchAction::Partnership => {
+                row.group = "RESEARCH";
+                row.text = "NEGOTIATE RESEARCH PARTNERSHIP".into();
+                row.detail = "Settle a job here + 10M 10B: buy Frontier, grades here 25% off. No expiry/upkeep/alliance. Hostility/dock loss stops service. World change ends access; tech kept.".into();
+                row.costs = Self::partnership_price();
+                if let Some(why) = self.partnership_block() {
+                    row.ok = false;
+                    row.state = why.into();
+                }
+            }
             BenchAction::Grade => {
                 row.group = "RESEARCH";
                 row.text = format!("EQUIPMENT GRADE {:.2}", self.equipment_grade());
                 row.detail = "Raises damage/hull/shield/recharge; handling, cadence and patterns stay bounded.".into();
+                if self.partnership_service() {
+                    row.detail += " Partnership: 25% off all grade costs.";
+                }
                 if let Some((grade, archive)) = self.next_grade() {
                     row.costs = self.grade_price();
                     let ceiling = if archive.is_some() {

@@ -179,3 +179,5 @@ Built asteroid/electrolysis check: ordinary outlines with sparse material flecks
 Built warehouse check: build the 30M warehouse in PARTS without research, store M/V/C/B/F past 100, and save/continue. Stash previews should show a 300 site cap; water and ship caps stay separate. Does the refinery visibly pause at 300F?
 
 Built local power check: commission a machine before power and check NEEDS LOCAL POWER with no stock consumption/output. Build power after Fabrication, fly away, and save/continue; both machines should advance only on simulation time. Do the extra construction cost and shared supply make a useful first home? Knobs: `production::POWER_PRICE`, `WATER_PER_SECOND`, refinery batch constants.
+
+Built partnership check: settle either peaceful CONTACT job, negotiate in SKILLS for 10M 10B, then buy Frontier research and a discounted grade. Save/continue and confirm no repeat payment. Are the separate access/research payments and local 25% grade discount clear? Hostility or capital dock loss blocks service while learned technology stays. No alliance, expiry, or upkeep.

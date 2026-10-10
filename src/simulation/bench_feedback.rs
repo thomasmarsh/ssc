@@ -136,6 +136,7 @@ impl Snapshot {
             | BenchAction::WaterTank
             | BenchAction::Power
             | BenchAction::Refinery
+            | BenchAction::Partnership
             | BenchAction::Grade => receipt.text.clone(),
         };
         let spent = Material::ALL

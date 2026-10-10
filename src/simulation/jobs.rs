@@ -3,6 +3,7 @@ use super::research::Tech;
 use super::upgrades::Rarity;
 use super::*;
 use crate::territory::Standing;
+use std::collections::BTreeSet;
 
 const ACTIVE_CAP: usize = 4;
 const RECORD_CAP: usize = 128;
@@ -46,8 +47,18 @@ struct Contract {
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Jobs {
     records: BTreeMap<(u64, JobKind), Contract>,
+    #[serde(default)]
+    partnerships: BTreeSet<u64>,
 }
 impl Jobs {
+    pub(super) fn partnered(&self, id: u64) -> bool {
+        self.partnerships.contains(&id)
+    }
+    fn worked_for(&self, id: u64) -> bool {
+        self.records
+            .iter()
+            .any(|(&(supplier, _), job)| supplier == id && job.status == Status::Settled)
+    }
     pub(super) fn active(&self) -> Vec<(u64, JobKind)> {
         self.records
             .iter()
@@ -55,6 +66,7 @@ impl Jobs {
             .collect()
     }
     pub(super) fn invalidate_world(&mut self) {
+        self.partnerships.clear();
         for job in self
             .records
             .values_mut()
@@ -66,6 +78,51 @@ impl Jobs {
 }
 
 impl Game {
+    pub(super) fn partnership_service(&self) -> bool {
+        self.friendly_supplier()
+            .is_some_and(|c| self.jobs.partnered(c.id) && !self.civ_fall(c.id).capital)
+    }
+    pub(super) fn partnership_block(&self) -> Option<&'static str> {
+        let Some(civ) = self.friendly_supplier() else {
+            return Some("VISIT A FRIENDLY SUPPLIER");
+        };
+        if self.jobs.partnered(civ.id) {
+            return Some("PARTNERSHIP AGREED");
+        }
+        if !self.jobs.worked_for(civ.id) {
+            return Some("SETTLE ONE JOB FOR THIS SUPPLIER");
+        }
+        if self.civ_fall(civ.id).capital {
+            return Some("SUPPLIER DOCK LOST");
+        }
+        None
+    }
+
+    pub(super) fn buy_partnership(&mut self) {
+        if let Some(why) = self.partnership_block() {
+            self.bench_failed(why.into());
+            return;
+        }
+        if !self.cargo.spend(&Self::partnership_price()) {
+            self.bench_failed("PARTNERSHIP NEEDS SHIP MATERIALS".into());
+            return;
+        }
+        let id = self.friendly_supplier().unwrap().id;
+        self.jobs.partnerships.insert(id);
+        self.bench_done(
+            "PARTNERSHIP AGREED - FRONTIER ACCESS; 25% GRADE SERVICE DISCOUNT".into(),
+            Rarity::Rare,
+        );
+    }
+
+    pub(super) fn partnership_price() -> Vec<(Material, f32)> {
+        vec![(Material::Metal, 10.0), (Material::Biomass, 10.0)]
+    }
+
+    pub fn pose_contact_partnership(&mut self) {
+        self.bench_select(BenchAction::Partnership);
+    }
+
     /// Bounded smoke selection; the adapter stages a friendly seat first.
     pub fn pose_contact_job(&mut self, survey: bool) {
         if let Some(id) = self.pad.contact {
@@ -328,6 +385,74 @@ mod tests {
     fn act(game: &mut Game, id: u64, kind: JobKind) {
         game.bench_select(BenchAction::Job(id, kind));
         game.bench_confirm();
+    }
+
+    #[test]
+    fn partnership_requires_work_pays_once_and_keeps_knowledge_when_access_closes() {
+        let mut game = Game::new(42);
+        game.player_invulnerability = 1e9;
+        let civ = contact(&mut game);
+        game.loadout
+            .research
+            .known
+            .extend([Tech::Fabrication, Tech::Protection]);
+        game.cargo.metal = 100.0;
+        game.cargo.biomass = 50.0;
+        game.cargo.crystal = 50.0;
+        let before = game.cargo;
+        game.bench_select(BenchAction::Partnership);
+        game.bench_confirm();
+        assert_eq!(game.cargo, before);
+        assert!(
+            game.research_block(Tech::Frontier)
+                .unwrap()
+                .contains("PARTNERSHIP")
+        );
+        act(&mut game, civ.id, JobKind::Fuel);
+        game.cargo.fuel = 100.0;
+        act(&mut game, civ.id, JobKind::Fuel);
+        game.cargo.biomass = 0.0;
+        let before = game.cargo;
+        game.bench_select(BenchAction::Partnership);
+        game.bench_confirm();
+        assert_eq!(game.cargo, before);
+        assert!(!game.jobs.partnered(civ.id));
+        game.cargo.biomass = 50.0;
+        let before = game.cargo;
+        game.bench_confirm();
+        assert!(game.jobs.partnered(civ.id));
+        assert_eq!(game.cargo.metal, before.metal - 10.0);
+        assert_eq!(game.cargo.biomass, before.biomass - 10.0);
+        let paid = game.cargo;
+        game.bench_confirm();
+        assert_eq!(game.cargo, paid);
+        game = reload(&game);
+        contact(&mut game);
+        assert!(game.jobs.partnered(civ.id));
+        assert!(game.research_block(Tech::Frontier).is_none());
+        let discounted = game.grade_price();
+        game.jobs.partnerships.clear();
+        for ((_, discount), (_, full)) in discounted.iter().zip(game.grade_price()) {
+            assert!((discount - full * 0.75).abs() < 0.001);
+        }
+        game.jobs.partnerships.insert(civ.id);
+        game.bench_select(BenchAction::Research(Tech::Frontier));
+        game.bench_confirm();
+        assert!(game.loadout.research.active(Tech::Frontier));
+        game.set_regard(civ.id, -50.0);
+        assert!(game.friendly_supplier().is_none());
+        assert!(game.partnership_block().is_some());
+        assert_eq!(game.grade_price()[2].1, 10.0);
+        game.set_regard(civ.id, 65.0);
+        game.civ_fall.entry(civ.id).or_default().capital = true;
+        assert!(!game.partnership_service());
+        assert_eq!(game.grade_price()[2].1, 10.0);
+        assert!(game.loadout.research.active(Tech::Frontier));
+        let (state, version) = save::SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (changed, _) = Game::from_save(state, version + 1);
+        assert!(!changed.jobs.partnered(civ.id));
+        assert!(changed.loadout.research.active(Tech::Frontier));
+        assert_eq!(changed.run.kills, 0);
     }
 
     #[test]

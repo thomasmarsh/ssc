@@ -4900,6 +4900,30 @@ mod bench_layout_tests {
         }
     }
     #[test]
+    fn partnership_terms_fit_compact_contact() {
+        let mut game = game();
+        game.pose_frontier_contact();
+        game.pose_contact_partnership();
+        let text = bench_lines(&game, 600.0, 278.0)
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect::<String>();
+        assert!(text.lines().count() as f32 * 18.0 + 24.0 <= 278.0, "{text}");
+        assert!(!text.contains("details shortened"), "{text}");
+        let terms = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for required in [
+            "Settle a job",
+            "10M 10B",
+            "25%",
+            "No expiry/upkeep/alliance",
+            "Hostility/dock loss",
+            "tech kept",
+        ] {
+            assert!(terms.contains(required), "{required}: {text}");
+        }
+    }
+
+    #[test]
     fn contact_job_terms_remain_reviewable_in_the_compact_panel() {
         for survey in [false, true] {
             let mut game = game();
