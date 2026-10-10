@@ -45,6 +45,30 @@ Heaviest: `long_busy` (most bodies, longest) then `civ_city` p99. Max-tick outli
 
 On the same machine, same build profile, best of 3: mean worse than 10 percent or p99 worse than 25 percent on any non-trivial scenario (`ring3_busy`, `civ_city`, `long_busy`). Ignore `home_idle` (noise dominates) and treat max-tick changes under 5 ms as noise. A digest `MISMATCH` is a behavior change, not a perf result.
 
+## Per-phase timing
+
+`Game::step` is split into 14 named phases (`docs/MIGRATION.md`, "Tick phases"). Build with the `profile` cargo feature to accumulate wall time per phase (default off: no field, no clock reads, nothing compiled in; `Game::phase_timings()` exists only with it). Run:
+
+`cargo run --release --no-default-features --features profile --bin simperf`
+
+which appends a mean ms per tick table, one column per scenario. The profile build's scenario totals were within noise of the default build (two clock reads per phase), but quote absolute numbers only from a default build.
+
+Profile (2026-10-10, same machine, mean ms per tick), busiest scenario `long_busy` and the other two busy ones:
+
+| phase | ring3_busy | civ_city | long_busy |
+| --- | --- | --- | --- |
+| creatures | 0.0568 | 0.0769 | 0.0759 |
+| resolve | 0.0282 | 0.0206 | 0.0570 |
+| ecology | 0.0186 | 0.0114 | 0.0176 |
+| apex_powers | 0.0128 | 0.0069 | 0.0143 |
+| settle | 0.0087 | 0.0013 | 0.0059 |
+| projectiles | 0.0051 | 0.0080 | 0.0049 |
+| ship | 0.0015 | 0.0021 | 0.0029 |
+| world | 0.0090 | 0.0054 | 0.0029 |
+| total | 0.1460 | 0.1392 | 0.1871 |
+
+`creatures` (wildlife, steering, flocks, bases, turrets) is 40 to 55 percent of the tick and `resolve` (contacts) the next biggest, growing fastest with body count (0.057 ms in `long_busy`, 546 bodies). Those two are where scaling work should look first. `world` dominates `home_idle` only because the first tick streams and populates sectors.
+
 ## Not built
 
-Per-phase timing inside `Game::step` (needs the phases named first; slice 2 of the refactor series should add an opt-in, zero-cost-when-off hook). No allocation counters.
+No allocation counters. Timing is wall time per phase, not per system inside a phase.

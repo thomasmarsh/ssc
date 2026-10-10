@@ -41,6 +41,27 @@ GAME_LOOP section 9.4 owns the built E2p foundation (`culture.rs`, `simulation/s
 
 Cultural drift controls are headless authoritative run configuration: temperature clamped 0..1, default exactly 0, positive long-period timescale, and saved accumulated phase. At zero there is no cultural change from elapsed time or trauma, while trust/grievances/needs/technology and policy transitions continue. Advance phase only over explicitly enabled simulation time; never multiply total age by the current temperature or catch up on reload. Frozen/unloaded/newly encountered actors share the same epoch and cultural-origin continuity. Mostly logical choices and bounded imperfect decisions remain separate from drift and from stock/ROE/force capacity. Dev registry/overlay integration is optional infrastructure; E2p must supply direct configuration if B/C have not landed. The clock, origins, bounded evaluator, decision epochs, and saved contact estimates are built. Current contact integrates finite granary/repair outcomes; generic report interpretation and future policy/permission consumers remain TODO. Legacy fallback barter still lacks modeled supplier inputs.
 
+## Tick phases
+
+`Game::step` (`src/simulation/phases.rs`) is a short orchestration of named phases, in this order; the order is behavior (RNG draw order, which system sees which position), so the pinned goldens fail if it moves.
+
+1. `begin`: dev sync, parry hit stop, input shaping (beam over fire, confusion, weapon jam), clocks, effect decay.
+2. `world`: jam, lure, legacy, chart, sector streaming, civilizations, region, realm.
+3. `loadout`: loadout, organs, builders.
+4. `body_timers`: per-body cooldowns, shield recharge, dust healing (`tick_body_timers`).
+5. `ship`: farm, pads, ship control, mining, electrolysis, grip, regrowth, arms, shears.
+6. `creatures`: wildlife, steering, civ mining, roots, flocks, bases, turrets (enemy movement skipped by the dev freeze).
+7. `ecology`: brooding, grazing, food, metabolism, blight, tending, hunting, growth, reproduction, eggs.
+8. `apex_powers`: tethers, chains, apexes, adaptation, rifts, engulfing, powers, parasites, splits, song rings.
+9. `weapons`: weapon fire, shot cues, gravity wells.
+10. `physics`: gravity, integration of free bodies (`integrate_bodies`).
+11. `resolve`: drone impacts, roots, rift transit, containment, contacts, latches, chain limits.
+12. `projectiles`: parry, dash, bullets, flock shots, mines, rune fields, husks, pickups, dev apply.
+13. `settle`: step accounting, diplomacy, apex tally, breakups, removal of the dead, pruning.
+14. `upkeep`: ping, jobs, agreements, damage and heartbeat cues.
+
+Rule: a new per-tick system is added to the phase whose description fits it (as a call inside that `phase_*` method), never directly in `step`, and gameplay literals it needs go in `tuning.rs`. Values shared across phases live in the private `Tick` struct. Per-phase timing is the `profile` cargo feature (see `docs/PERF.md`).
+
 ## Validation
 
 Headless scenario tests (1,261 tests, plus 34 desktop tests) cover sector math, pure generation, loading and unloading while flying, frozen bodies, chasing across a border, loose emergent crowds, nearby bands merging while distant ones stay independent, alarm spread, combat rules, persistence across unload and reload, rock materials and crystal explosions, nests, inhabited husks, all four destructible station types, mine countdowns, missile interception, dense rail bursts, tethers, chain stability, gene pool smoothness and recurrence, gene extremes and determinism over long flights. Clippy with warnings denied and a native Metal screenshot run also pass. Builder construction scenarios keep the observation ship invulnerable so pad recovery cannot move it away and unload the ecosystem being tested. This is not a frame-rate benchmark or a full interactive playtest. CI covers Ubuntu headless tests and a macOS desktop compilation check.
