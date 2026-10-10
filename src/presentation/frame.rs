@@ -1,6 +1,18 @@
 //! Per-frame gizmo draw system.
 use super::*;
 
+/// Everything the layer functions read from the frame setup.
+#[derive(Clone, Copy)]
+struct Frame<'a> {
+    game: &'a Game,
+    session: &'a Session,
+    camera: Vec2,
+    half: Vec2,
+    jam: &'a ssc::simulation::JamView,
+    screen: &'a crate::hud::Screen,
+    window: Vec2,
+}
+
 pub fn draw(
     session: Res<Session>,
     view: Single<(&Transform, &Projection, &Camera), With<Camera2d>>,
@@ -36,6 +48,40 @@ pub fn draw(
     };
     let jam = game.jam_view();
     draw_backdrop(&mut gizmos, camera, half, &sky, dark);
+    let f = Frame {
+        game,
+        session: &session,
+        camera,
+        half,
+        jam: &jam,
+        screen: &screen,
+        window,
+    };
+    draw_bodies(&mut gizmos, &f, &mut ship_view, &dim);
+    draw_works(&mut gizmos, &f);
+    draw_ground(&mut gizmos, &f, &mut plant_cache);
+    draw_loot_and_rocks(&mut gizmos, &f);
+    draw_tethers(&mut gizmos, &f);
+    draw_shots_and_effects(&mut gizmos, &f);
+    draw_ship_effects(&mut gizmos, &f);
+    draw_screen_layer(&mut gizmos, &f);
+}
+
+/// Every body in view: the ship and its rig, creatures, rocks, drones.
+fn draw_bodies(
+    gizmos: &mut Gizmos,
+    f: &Frame,
+    ship_view: &mut crate::shipview::ShipView,
+    dim: &[(Vec2, f32, f32)],
+) {
+    let Frame {
+        game,
+        session,
+        camera,
+        half,
+        jam,
+        ..
+    } = *f;
     let pests = game.pest_targets();
     for body in game.bodies.iter().filter(|b| {
         // Cull on the body's full extent, not its center: a planetoid is hundreds of units
@@ -90,9 +136,9 @@ pub fn draw(
                     && !game.game_over;
                 let jets = ship_view.thrusters(session.input, body, game.stats.thrust, active);
                 gizmos.linestrip_2d(crate::shipview::outline(p, r, ship_view.angle), color);
-                draw_rig(&mut gizmos, game, body, ship_view.angle, jets.main);
+                draw_rig(gizmos, game, body, ship_view.angle, jets.main);
                 crate::shipview::draw_thrusters(
-                    &mut gizmos,
+                    gizmos,
                     body,
                     ship_view.angle,
                     &jets,
@@ -100,9 +146,9 @@ pub fn draw(
                     session.reduce_effects,
                 );
                 if !session.reduce_effects {
-                    crate::glitchview::ship_fringe(&mut gizmos, &jam, body, ship_view.angle);
+                    crate::glitchview::ship_fringe(gizmos, &jam, body, ship_view.angle);
                 }
-                crate::glitchview::confusion(&mut gizmos, &jam, body, game.time);
+                crate::glitchview::confusion(gizmos, &jam, body, game.time);
             }
             BodyKind::Creature if game.disguise(body).is_some() => {
                 // A mimic: a plain rock, or a bright pickup hanging on a thin stalk. A crack
@@ -118,12 +164,12 @@ pub fn draw(
                             age: game.time,
                             remaining: 99.0,
                         };
-                        draw_pickup(&mut gizmos, &lure);
+                        draw_pickup(gizmos, &lure);
                         let stalk = Color::srgb(0.6, 0.7, 0.8).with_alpha(0.07 + 0.8 * crack);
                         gizmos.line_2d(p, p + direction * (r * 2.4 + 8.0), stalk);
                     }
                     _ => draw_rock(
-                        &mut gizmos,
+                        gizmos,
                         game.time,
                         body,
                         Color::srgb(0.62, 0.5, 0.38),
@@ -169,7 +215,7 @@ pub fn draw(
                         .resolution(14);
                 } else if body.genome.appearance.surface == ssc::development::Surface::Soft {
                     if game.power_view(body).ooze.is_some() {
-                        crate::powerview::draw_ooze(&mut gizmos, game, body, shown);
+                        crate::powerview::draw_ooze(gizmos, game, body, shown);
                     } else {
                         gizmos.lineloop_2d(
                             (0..48).map(|k| {
@@ -182,21 +228,15 @@ pub fn draw(
                         );
                     }
                 } else {
-                    draw_creature(&mut gizmos, game.time, body, shown, &game.tune);
+                    draw_creature(gizmos, game.time, body, shown, &game.tune);
                 }
                 if let Some(back) = crate::powerview::afterimage(body) {
                     // A phased body trails a ghost of itself.
                     let mut ghost = body.clone();
                     ghost.position += back;
-                    draw_creature(
-                        &mut gizmos,
-                        game.time,
-                        &ghost,
-                        color.with_alpha(0.1),
-                        &game.tune,
-                    );
+                    draw_creature(gizmos, game.time, &ghost, color.with_alpha(0.1), &game.tune);
                 }
-                crate::powerview::draw(&mut gizmos, game, body);
+                crate::powerview::draw(gizmos, game, body);
                 if !body.follower
                     && let Some([cr, cg, cb]) = game.civ_tint(body)
                 {
@@ -249,17 +289,17 @@ pub fn draw(
                 if let Some(root) = body.root
                     && let Some(host) = game.body(root.host)
                 {
-                    draw_roots(&mut gizmos, game.time, body, host, color);
+                    draw_roots(gizmos, game.time, body, host, color);
                 }
             }
             BodyKind::Base if body.fort.is_some() => {
-                draw_turret(&mut gizmos, game.time, body, lifted(game.civ_tint(body)));
+                draw_turret(gizmos, game.time, body, lifted(game.civ_tint(body)));
             }
-            BodyKind::Base => draw_station(&mut gizmos, game.time, body, color, &game.tune),
+            BodyKind::Base => draw_station(gizmos, game.time, body, color, &game.tune),
             // Fortress walls are drawn together after the loop, with their joins.
             BodyKind::Asteroid if body.rock == RockKind::Wall => {}
-            BodyKind::Asteroid => draw_rock(&mut gizmos, game.time, body, color, &game.tune),
-            BodyKind::BlackHole => crate::wellview::draw(&mut gizmos, game, body),
+            BodyKind::Asteroid => draw_rock(gizmos, game.time, body, color, &game.tune),
+            BodyKind::BlackHole => crate::wellview::draw(gizmos, game, body),
         }
         // A hungry forager shows a faint amber ring that warms as its energy runs out.
         if body.kind == BodyKind::Creature && !body.follower && body.vigor(&game.tune) < 1.0 {
@@ -288,18 +328,25 @@ pub fn draw(
                 .resolution(24);
         }
         if body.kind == BodyKind::Creature && !body.follower {
-            draw_resistance(&mut gizmos, game, body);
+            draw_resistance(gizmos, game, body);
         }
     }
-    draw_walls(&mut gizmos, game, camera, half);
-    crate::flockview::draw(&mut gizmos, game, camera, half);
+}
+
+/// Walls, flocks, caches, miner beams, wrecks and mining drones.
+fn draw_works(gizmos: &mut Gizmos, f: &Frame) {
+    let Frame {
+        game, camera, half, ..
+    } = *f;
+    draw_walls(gizmos, game, camera, half);
+    crate::flockview::draw(gizmos, game, camera, half);
     for cache in game.caches() {
         if (cache.at - camera)
             .abs()
             .cmplt(half + Vec2::splat(120.0))
             .all()
         {
-            draw_cache(&mut gizmos, game.time, &cache);
+            draw_cache(gizmos, game.time, &cache);
         }
     }
     for (from, to, tint) in game.miner_beams() {
@@ -389,10 +436,17 @@ pub fn draw(
             }
         }
     }
+}
+
+/// Pads, landing, plankton, eggs, the mining beam, plants and symbiosis.
+fn draw_ground(gizmos: &mut Gizmos, f: &Frame, plant_cache: &mut PlantCache) {
+    let Frame {
+        game, camera, half, ..
+    } = *f;
     for pad in game.pads() {
         let at = game.pad_position(pad);
         if (at - camera).abs().cmplt(half + Vec2::splat(200.0)).all() {
-            draw_pad(&mut gizmos, game, pad, at);
+            draw_pad(gizmos, game, pad, at);
         }
     }
     if game.is_landed()
@@ -463,7 +517,7 @@ pub fn draw(
         && let Some(rock) = game.body(beam.target)
     {
         draw_beam(
-            &mut gizmos,
+            gizmos,
             game.time,
             ship,
             rock,
@@ -471,15 +525,22 @@ pub fn draw(
             game.gripped() == Some(beam.target),
         );
     }
-    draw_plants(&mut gizmos, game, &mut plant_cache);
-    draw_symbiosis(&mut gizmos, game);
+    draw_plants(gizmos, game, plant_cache);
+    draw_symbiosis(gizmos, game);
+}
+
+/// Pickups, chains and their decoration, and loose rocks.
+fn draw_loot_and_rocks(gizmos: &mut Gizmos, f: &Frame) {
+    let Frame {
+        game, camera, half, ..
+    } = *f;
     for pickup in game.pickups.iter().filter(|p| {
         (p.position - camera)
             .abs()
             .cmplt(half + Vec2::splat(40.0))
             .all()
     }) {
-        draw_pickup(&mut gizmos, pickup);
+        draw_pickup(gizmos, pickup);
     }
     for chain in game.chains.values() {
         for part in &chain.parts {
@@ -501,7 +562,7 @@ pub fn draw(
             continue;
         };
         crate::bestiaryview::draw_mark(
-            &mut gizmos,
+            gizmos,
             deco.kind,
             deco.position,
             deco.angle,
@@ -526,6 +587,11 @@ pub fn draw(
             .circle_2d(rock.position, rock.radius + 4.0, color.with_alpha(0.8))
             .resolution(24);
     }
+}
+
+/// Tethers between bodies.
+fn draw_tethers(gizmos: &mut Gizmos, f: &Frame) {
+    let Frame { game, .. } = *f;
     for tether in &game.tethers {
         if tether.health <= 0.0 {
             continue;
@@ -631,6 +697,13 @@ pub fn draw(
             }
         }
     }
+}
+
+/// Bullets, casters, mines, rune fields and timed effects.
+fn draw_shots_and_effects(gizmos: &mut Gizmos, f: &Frame) {
+    let Frame {
+        game, camera, half, ..
+    } = *f;
     for bullet in &game.bullets {
         // Fitted shots wear their modification: bursting, piercing or seeking.
         let color = if bullet.friendly {
@@ -714,7 +787,7 @@ pub fn draw(
     }) {
         if let Some(sigil) = mine.sigil {
             draw_sigil(
-                &mut gizmos,
+                gizmos,
                 mine.position,
                 mine.blast,
                 sigil.payload,
@@ -746,14 +819,7 @@ pub fn draw(
     }
     for field in &game.rune_fields {
         let alpha = (field.left / 0.45).min(1.0);
-        draw_sigil(
-            &mut gizmos,
-            field.position,
-            90.0,
-            field.payload,
-            None,
-            alpha,
-        );
+        draw_sigil(gizmos, field.position, 90.0, field.payload, None, alpha);
         let rgb = field.payload.color();
         let tint = Color::srgb(rgb[0], rgb[1], rgb[2]);
         let pulse = (1.0 - field.age / 0.45).max(0.0);
@@ -807,16 +873,28 @@ pub fn draw(
             );
         }
     }
-    crate::powerview::draw_rifts(&mut gizmos, game, camera, half);
-    crate::powerview::draw_song_rings(&mut gizmos, game);
-    draw_parry(&mut gizmos, game);
-    draw_dash(&mut gizmos, game);
-    draw_boost(&mut gizmos, game);
-    draw_echoes(&mut gizmos, game, camera, half);
-    draw_beacons(&mut gizmos, game, camera, half);
-    draw_wrecks(&mut gizmos, game, camera, half);
+}
+
+/// Ship-centered effects, markers and guide arrows over the world.
+fn draw_ship_effects(gizmos: &mut Gizmos, f: &Frame) {
+    let Frame {
+        game,
+        session,
+        camera,
+        half,
+        jam,
+        ..
+    } = *f;
+    crate::powerview::draw_rifts(gizmos, game, camera, half);
+    crate::powerview::draw_song_rings(gizmos, game);
+    draw_parry(gizmos, game);
+    draw_dash(gizmos, game);
+    draw_boost(gizmos, game);
+    draw_echoes(gizmos, game, camera, half);
+    draw_beacons(gizmos, game, camera, half);
+    draw_wrecks(gizmos, game, camera, half);
     draw_guides(
-        &mut gizmos,
+        gizmos,
         game,
         camera,
         half,
@@ -824,19 +902,32 @@ pub fn draw(
         &jam,
         session.reduce_effects,
     );
+}
+
+/// The HUD rings and corners, screen glitch and the radar.
+fn draw_screen_layer(gizmos: &mut Gizmos, f: &Frame) {
+    let Frame {
+        game,
+        session,
+        camera,
+        half,
+        jam,
+        screen,
+        window,
+    } = *f;
     if !game.game_over {
         let hud = game.hud();
         if jam.hud > 0.0 {
             // The display is jammed: static where the rings and corners were.
             let cluster = screen.v(screen.cluster());
             crate::glitchview::static_box(
-                &mut gizmos,
+                gizmos,
                 (cluster, Vec2::new(screen.px(150.0), screen.px(50.0))),
                 (40, 7, 0.5),
                 (game.time, session.reduce_effects),
             );
             crate::glitchview::static_box(
-                &mut gizmos,
+                gizmos,
                 (
                     screen.at(window.x / 2.0, 40.0),
                     Vec2::new(screen.px(window.x * 0.45), screen.px(30.0)),
@@ -846,30 +937,28 @@ pub fn draw(
             );
         } else {
             if let Some(ship) = game.player() {
-                crate::hud::draw_ship_rings(&mut gizmos, &hud, ship, &screen, game.time);
+                crate::hud::draw_ship_rings(gizmos, &hud, ship, &screen, game.time);
             }
-            crate::hud::draw_hud(&mut gizmos, game, &hud, &screen, game.time);
+            crate::hud::draw_hud(gizmos, game, &hud, &screen, game.time);
         }
         if !session.reduce_effects {
-            crate::hud::draw_juice(&mut gizmos, &session.juice, &screen);
-            crate::hud::draw_vignette(&mut gizmos, &hud, &screen, game.time);
+            crate::hud::draw_juice(gizmos, &session.juice, &screen);
+            crate::hud::draw_vignette(gizmos, &hud, &screen, game.time);
         }
     }
     if !session.reduce_effects {
-        crate::glitchview::screen(&mut gizmos, &jam, camera, half, game.time);
+        crate::glitchview::screen(gizmos, &jam, camera, half, game.time);
     }
     // The radar: always on if the setting says so, else while the details are open and there
     // is room beside them. Mid-right, clear of the corners and the bottom cluster.
     if session.radar || (session.details_open() && window.x >= 1180.0) {
-        let radius = RADAR_RADIUS * screen.scale;
         draw_radar(
-            &mut gizmos,
+            gizmos,
             game,
             screen.at(window.x - 24.0 - RADAR_RADIUS, window.y / 2.0),
             screen.scale,
             &jam,
             session.reduce_effects,
         );
-        let _ = radius;
     }
 }
