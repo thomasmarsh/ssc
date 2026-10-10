@@ -17,6 +17,7 @@ pub enum Verb {
     Tithe,
     Contact,
     Plant,
+    Salvage,
 }
 
 /// An interaction in reach: what the key does, a short label and, if a press would be
@@ -41,6 +42,19 @@ impl Game {
         };
         if self.bench_open() {
             return Some(prompt(Verb::CloseBench, "CLOSE BENCH", None));
+        }
+        if let Some(index) = self.nearby_drone_wreck() {
+            let full = Material::ALL.iter().all(|&m| {
+                self.pad.drone_wrecks[index].cargo.amount(m) <= 0.0 || self.cargo.room(m) <= 0.0
+            });
+            let blocked = if self.player().is_some_and(|p| p.velocity.length() >= 80.0) {
+                Some("SLOW DOWN")
+            } else if full {
+                Some("HOLD FULL")
+            } else {
+                None
+            };
+            return Some(prompt(Verb::Salvage, "SALVAGE DRONE WRECK", blocked));
         }
         let pad = self.pad_hint();
         let contact = self
@@ -130,6 +144,11 @@ impl Game {
             Verb::Land | Verb::Deploy | Verb::Build => self.pad_action(),
             Verb::Tithe => {
                 let _ = self.tithe();
+            }
+            Verb::Salvage => {
+                if prompt.blocked.is_none() {
+                    self.salvage_drone_wreck();
+                }
             }
             Verb::Plant => {
                 if prompt.blocked.is_none() {

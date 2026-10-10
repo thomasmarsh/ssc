@@ -1570,6 +1570,9 @@ fn smoke_run(
         if !designated && seconds >= 15.0 {
             game.step(1.0 / 60.0, Input::default());
         }
+        if std::env::var("SSC_FLEET_LOSS").as_deref() == Ok("1") {
+            game.stage_drone_loss_smoke();
+        }
         run.hold = true;
     }
     // SSC_JAM=emp|confuse|glitch|hud: just before the screenshot, jam the ship (with the dash
@@ -1779,6 +1782,9 @@ fn smoke_run(
                     session.game.bench_select(action);
                 }
             }
+            "mining-fleet-repair" => session
+                .game
+                .bench_select(ssc::simulation::BenchAction::RepairDrone(1)),
             "mining-fleet-pause" => session
                 .game
                 .bench_select(ssc::simulation::BenchAction::PauseDroneFleet),
@@ -2218,6 +2224,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
         "mining-drone"
         | "mining-fleet"
         | "mining-fleet-pause"
+        | "mining-fleet-repair"
         | "mining-fleet-status"
         | "mining-fleet-retrofit"
         | "mining-fleet-template"
@@ -2250,6 +2257,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 if matches!(
                     mode,
                     "mining-fleet-pause"
+                        | "mining-fleet-repair"
                         | "mining-fleet-status"
                         | "mining-fleet-retrofit"
                         | "mining-fleet-template"
@@ -2276,6 +2284,9 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                         ));
                     }
                     game.bench_feedback = None;
+                    if mode == "mining-fleet-repair" {
+                        game.stage_drone_repair_smoke();
+                    }
                     if mode == "mining-fleet-pause" {
                         game.bench_select(BenchAction::PauseDroneFleet);
                     }

@@ -1652,6 +1652,12 @@ impl Game {
     }
 
     fn move_bullets(&mut self, dt: f32) {
+        let drones = if self.bullets.iter().any(|b| !b.friendly) {
+            self.mining_drone_views()
+        } else {
+            Vec::new()
+        };
+        let mut drone_losses = Vec::new();
         let guard = self.guard_time();
         if self.rifts.is_empty() {
             self.shoot_eggs(dt);
@@ -1796,6 +1802,33 @@ impl Game {
                     ) && hit.is_none_or(|(_, best)| fraction < best)
                     {
                         hit = Some((index, fraction));
+                    }
+                }
+                if !bullet.friendly {
+                    let drone_hit = drones
+                        .iter()
+                        .filter(|d| {
+                            self.pad
+                                .pads
+                                .get(&d.home)
+                                .and_then(|p| p.drones.get(d.slot))
+                                .is_some_and(|unit| unit.health > 0.0)
+                        })
+                        .filter_map(|&d| {
+                            segment_circle(previous, next, d.position, 12.0 + bullet.radius)
+                                .map(|t| (d, t))
+                        })
+                        .min_by(|a, b| a.1.total_cmp(&b.1));
+                    if let Some((drone, fraction)) = drone_hit
+                        && hit.is_none_or(|(_, best)| fraction < best)
+                    {
+                        if fleet::damage_drone(&mut self.pad, drone, bullet.damage) {
+                            drone_losses.push(drone);
+                        }
+                        bullet.position = previous.lerp(next, fraction);
+                        bullet.remaining = 0.0;
+                        impacts.push(bullet.position);
+                        break;
                     }
                 }
                 if !self.rifts.is_empty() && bullet.friendly {
@@ -1992,6 +2025,18 @@ impl Game {
             }
             bullet.remaining -= dt;
             shot_paths[shot_index] = paths;
+        }
+        for drone in drone_losses {
+            self.effect(drone.position, 28.0, 0.5, EffectKind::Impact);
+            self.notify(
+                format!(
+                    "DRONE #{} LOST - WRECK AT {:.0},{:.0}; REBUILD AT HOME DOCK",
+                    drone.slot + 1,
+                    drone.position.x,
+                    drone.position.y
+                ),
+                upgrades::Rarity::Common,
+            );
         }
         for egg in egg_losses {
             self.effect(egg.position, 12.0, 0.2, EffectKind::Impact);

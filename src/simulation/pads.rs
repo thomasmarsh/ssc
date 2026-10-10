@@ -157,6 +157,10 @@ pub enum PadHint {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PadState {
     pub pads: BTreeMap<PadKey, Pad>,
+    #[serde(default)]
+    pub drone_wrecks: Vec<super::fleet::DroneWreck>,
+    #[serde(default)]
+    pub next_drone_wreck: u64,
     /// Crafted kits waiting to be deployed.
     pub kits: u32,
     /// Last pad actually landed on; survives save/load. A lost pad falls back to HOME.
@@ -212,6 +216,8 @@ impl Default for PadState {
     fn default() -> Self {
         Self {
             pads: BTreeMap::new(),
+            drone_wrecks: Vec::new(),
+            next_drone_wreck: 0,
             kits: 0,
             last_visited: None,
             drone_blueprint: None,

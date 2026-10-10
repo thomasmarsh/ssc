@@ -7,6 +7,75 @@ const CARGO_CAP: f32 = 10.0;
 const WORK_SECONDS: f32 = 10.0;
 const RETURN_SECONDS: f32 = 5.0;
 const DRONE_SPEED: f32 = 300.0;
+pub const DRONE_HEALTH: f32 = 80.0;
+const MAX_WRECKS: usize = 64;
+
+fn drone_health() -> f32 {
+    DRONE_HEALTH
+}
+
+/// One authoritative finite salvage store, independent of the home pad and replacement.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DroneWreck {
+    pub id: u64,
+    pub position: Vec2,
+    pub home: PadKey,
+    pub slot: usize,
+    pub cargo: Cargo,
+}
+
+/// Damage mutates the saved unit immediately, so later shots cannot kill it again.
+pub(super) fn damage_drone(state: &mut pads::PadState, view: DroneView, damage: f32) -> bool {
+    let Some(drone) = state
+        .pads
+        .get_mut(&view.home)
+        .and_then(|p| p.drones.get_mut(view.slot))
+    else {
+        return false;
+    };
+    if drone.health <= 0.0 {
+        return false;
+    }
+    drone.health = (drone.health - damage.max(0.0)).max(0.0);
+    if drone.health > 0.0 {
+        return false;
+    }
+    let mut cargo = Cargo {
+        metal: DRONE_PRICE[0].1 * 0.5,
+        crystal: DRONE_PRICE[1].1 * 0.5,
+        ..Default::default()
+    };
+    for upgrade in DroneUpgrade::ALL {
+        if drone.fitted.has(upgrade) {
+            for (material, amount) in upgrade.price() {
+                let cap = cargo.cap(material);
+                cargo.add_capped(material, amount * 0.5, cap);
+            }
+        }
+    }
+    if let Some(material) = drone.material {
+        let cap = cargo.cap(material);
+        cargo.add_capped(material, drone.cargo * 0.5, cap);
+    }
+    drone.cargo = 0.0;
+    drone.remaining = 0.0;
+    // Unfitted paid hardware is lost, too. Replacement uses the current dock template.
+    drone.ordered = DroneModules::default();
+    drone.fitted = DroneModules::default();
+    if state.drone_wrecks.len() >= MAX_WRECKS {
+        state.drone_wrecks.remove(0);
+    }
+    let id = state.next_drone_wreck;
+    state.next_drone_wreck += 1;
+    state.drone_wrecks.push(DroneWreck {
+        id,
+        position: view.position,
+        home: view.home,
+        slot: view.slot,
+        cargo,
+    });
+    true
+}
 
 /// Generated working anchor; dropped with its owning pad on generator changes.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -197,11 +266,14 @@ pub struct DroneView {
     pub cargo: f32,
     pub cargo_pod: bool,
     pub mining_head: bool,
+    pub health: f32,
 }
 
 /// A saved deposit trip. Stable identity is (pad key, append-only fleet slot).
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MiningDrone {
+    #[serde(default = "drone_health")]
+    pub(super) health: f32,
     cargo: f32,
     remaining: f32,
     #[serde(default)]
@@ -213,6 +285,21 @@ pub struct MiningDrone {
     ordered: DroneModules,
     #[serde(default)]
     fitted: DroneModules,
+}
+
+impl Default for MiningDrone {
+    fn default() -> Self {
+        Self {
+            health: DRONE_HEALTH,
+            cargo: 0.0,
+            remaining: 0.0,
+            deposit: None,
+            material: None,
+            exhausted: false,
+            ordered: DroneModules::default(),
+            fitted: DroneModules::default(),
+        }
+    }
 }
 
 impl MiningDrone {
@@ -228,7 +315,7 @@ impl MiningDrone {
 
     pub(super) fn trip_detail(&self) -> String {
         format!(
-            "Deposit trip: {:.0} local F, up to {:.0} ore, {:.0}s work + 5s return. Cargo waits for stash room. Visible local flight; no combat yet.",
+            "Trip: {:.0} local F, up to {:.0} ore; {:.0}s work + 5s return. Full stores retain cargo. Hostile shots can destroy units.",
             self.fitted.fuel(),
             self.fitted.capacity(),
             self.fitted.work()
@@ -238,7 +325,9 @@ impl MiningDrone {
     pub(super) fn status(&self, pad: &Pad, material: Material) -> String {
         let travel = self.deposit.map_or(0.0, |d| d.travel(pad.center));
         let returning = RETURN_SECONDS + travel;
-        if !pad.power {
+        if self.health <= 0.0 {
+            "DESTROYED - BUILD REPLACEMENT".into()
+        } else if !pad.power {
             "NEEDS LOCAL POWER".into()
         } else if self.remaining > self.fitted.work() + RETURN_SECONDS + travel - 2.0 {
             format!("LAUNCHING - {:.1} CARGO", self.cargo)
@@ -342,7 +431,7 @@ impl Game {
         };
         let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
         pad.drone_deposit = deposit;
-        for drone in &mut pad.drones {
+        for drone in pad.drones.iter_mut().filter(|d| d.health > 0.0) {
             if drone.remaining <= 0.0 && drone.cargo <= 0.0 {
                 drone.deposit = deposit;
                 drone.exhausted = false;
@@ -401,7 +490,8 @@ impl Game {
         (
             material,
             format!(
-                "{} Current: {}. Travel +{:.1}s each way. Next: {}. Status only.",
+                "Hull {:.0}/80. {} Current: {}. Travel +{:.1}s each way. Next: {}.",
+                drone.health,
                 drone.trip_detail(),
                 self.drone_deposit_detail(drone.deposit, pad.key),
                 travel,
@@ -577,11 +667,14 @@ impl Game {
             let Some(host) = self
                 .bodies
                 .iter()
-                .find(|b| b.origin == Some(pad.key) && b.rock == RockKind::Planetoid)
+                .find(|b| b.active && b.origin == Some(pad.key) && b.rock == RockKind::Planetoid)
             else {
                 continue;
             };
             for (slot, drone) in pad.drones.iter().enumerate() {
+                if drone.health <= 0.0 {
+                    continue;
+                }
                 let work = drone.fitted.work();
                 let travel = drone.deposit.map_or(0.0, |d| d.travel(pad.center));
                 let returning = RETURN_SECONDS + travel;
@@ -649,10 +742,119 @@ impl Game {
                     cargo: drone.cargo,
                     cargo_pod: drone.fitted.cargo,
                     mining_head: drone.fitted.mining,
+                    health: drone.health,
                 });
             }
         }
         views
+    }
+
+    pub fn stage_drone_loss_smoke(&mut self) {
+        self.update_mining_drones(5.0);
+        for (slot, damage) in [(0, 100.0), (1, 50.0)] {
+            if let Some(view) = self
+                .mining_drone_views()
+                .into_iter()
+                .find(|v| v.slot == slot)
+            {
+                self.bullets
+                    .push(Bullet::hostile(view.position, Vec2::ZERO, 1.0, damage));
+                self.move_bullets(1.0 / 60.0);
+            }
+        }
+    }
+
+    pub fn stage_drone_repair_smoke(&mut self) {
+        self.stage_drone_loss_smoke();
+        if let Some(key) = self.pad.landed {
+            self.pad.pads.get_mut(&key).unwrap().drone_paused = true;
+        }
+        self.update_mining_drones(30.0);
+        self.cargo.metal = 10.0;
+        self.bench_select(BenchAction::RepairDrone(1));
+    }
+
+    pub fn drone_wrecks(&self) -> &[DroneWreck] {
+        &self.pad.drone_wrecks
+    }
+
+    pub(super) fn nearby_drone_wreck(&self) -> Option<usize> {
+        let ship = self.player()?;
+        if self.is_landed() {
+            return None;
+        }
+        self.pad
+            .drone_wrecks
+            .iter()
+            .position(|w| ship.position.distance(w.position) <= 80.0)
+    }
+
+    pub(super) fn salvage_drone_wreck(&mut self) {
+        let Some(index) = self.nearby_drone_wreck() else {
+            return;
+        };
+        if self.player().is_none_or(|p| p.velocity.length() >= 80.0) {
+            return;
+        }
+        let wreck = &mut self.pad.drone_wrecks[index];
+        for material in Material::ALL {
+            let cap = self.cargo.cap(material);
+            let taken = self
+                .cargo
+                .add_capped(material, wreck.cargo.amount(material), cap);
+            wreck.cargo.take(material, taken);
+        }
+        if Material::ALL.iter().all(|&m| wreck.cargo.amount(m) <= 1e-3) {
+            self.pad.drone_wrecks.remove(index);
+        }
+        self.notify(
+            "WRECK SALVAGED - REMAINDER STAYS IN SPACE".into(),
+            upgrades::Rarity::Common,
+        );
+    }
+
+    pub(super) fn drone_repair_block(&self, slot: usize) -> Option<&'static str> {
+        let Some(pad) = self.landed_pad() else {
+            return Some("LAND AT A PAD");
+        };
+        match pad.drones.get(slot) {
+            None => Some("UNIT LOST"),
+            Some(d) if d.health <= 0.0 => Some("BUILD REPLACEMENT"),
+            Some(d) if d.health >= DRONE_HEALTH => Some("HULL FULL"),
+            Some(d) if d.remaining > 0.0 => Some("WAIT FOR DOCK"),
+            Some(_) if !pad.power => Some("NEEDS LOCAL POWER"),
+            Some(_) => None,
+        }
+    }
+
+    pub(super) fn drone_repair_price(&self, slot: usize) -> Vec<(Material, f32)> {
+        let missing = self
+            .landed_pad()
+            .and_then(|p| p.drones.get(slot))
+            .map_or(0.0, |d| (DRONE_HEALTH - d.health).max(0.0));
+        vec![(Material::Metal, missing * 0.1)]
+    }
+
+    pub(super) fn repair_drone(&mut self, slot: usize) {
+        if self.landed_pad().is_none() {
+            self.bench_failed("LAND AT A PAD".into());
+            return;
+        }
+        if let Some(why) = self.drone_repair_block(slot) {
+            self.bench_failed(why.into());
+            return;
+        }
+        if !self.cargo.spend(&self.drone_repair_price(slot)) {
+            self.bench_failed("NEEDS REPAIR METAL".into());
+            return;
+        }
+        self.pad
+            .pads
+            .get_mut(&self.pad.landed.unwrap())
+            .unwrap()
+            .drones[slot]
+            .health = DRONE_HEALTH;
+        self.bench_done("DRONE REPAIRED".into(), upgrades::Rarity::Common);
     }
 
     pub(super) fn drone_pause_block(&self) -> Option<&'static str> {
@@ -681,7 +883,9 @@ impl Game {
     pub(super) fn mining_drone_block(&self) -> Option<&'static str> {
         match self.landed_pad() {
             None => Some("LAND AT A PAD"),
-            Some(p) if p.drones.len() >= MAX_DRONES => Some("FLEET FULL"),
+            Some(p) if p.drones.len() >= MAX_DRONES && p.drones.iter().all(|d| d.health > 0.0) => {
+                Some("FLEET FULL")
+            }
             Some(_) if !self.loadout.research.active(research::Tech::Fabrication) => {
                 Some("NEEDS FABRICATION RESEARCH")
             }
@@ -704,12 +908,18 @@ impl Game {
             return;
         }
         let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
-        pad.drones.push(MiningDrone {
+        let replacement = pad.drones.iter().position(|d| d.health <= 0.0);
+        let drone = MiningDrone {
             ordered: pad.drone_template,
             fitted: pad.drone_template,
             deposit: pad.drone_deposit,
             ..Default::default()
-        });
+        };
+        if let Some(slot) = replacement {
+            pad.drones[slot] = drone;
+        } else {
+            pad.drones.push(drone);
+        }
         self.bench_done("MINING DRONE BUILT".into(), upgrades::Rarity::Common);
     }
 
@@ -727,7 +937,9 @@ impl Game {
                 p.drone_deposit.map_or(0.0, |d| d.travel(p.center))
             )
         });
-        drone.trip_detail() + &target + " Build includes template modules and their price."
+        drone.trip_detail()
+            + &target
+            + " Build replaces the first destroyed slot, or adds a unit. Includes template modules and their price."
     }
 
     pub(super) fn mining_drone_price(&self) -> Vec<(Material, f32)> {
@@ -746,7 +958,10 @@ impl Game {
 
     pub(super) fn drone_template_price(&self, upgrade: DroneUpgrade) -> Vec<(Material, f32)> {
         let count = self.landed_pad().map_or(0, |p| {
-            p.drones.iter().filter(|d| !d.ordered.has(upgrade)).count()
+            p.drones
+                .iter()
+                .filter(|d| d.health > 0.0 && !d.ordered.has(upgrade))
+                .count()
         });
         upgrade
             .price()
@@ -911,7 +1126,7 @@ impl Game {
 
     fn queue_drone_module(pad: &mut Pad, upgrade: DroneUpgrade) {
         pad.drone_template.add(upgrade);
-        for drone in &mut pad.drones {
+        for drone in pad.drones.iter_mut().filter(|d| d.health > 0.0) {
             drone.ordered.add(upgrade);
             if drone.remaining <= 0.0 && drone.cargo <= 0.0 {
                 drone.fitted = drone.ordered;
@@ -956,7 +1171,7 @@ impl Game {
     ) -> Option<&'static str> {
         match self.landed_pad() {
             None => Some("LAND AT A PAD"),
-            Some(p) if p.drones.get(slot).is_none() => Some("UNIT LOST"),
+            Some(p) if p.drones.get(slot).is_none_or(|d| d.health <= 0.0) => Some("UNIT LOST"),
             Some(p) if p.drones[slot].ordered.has(upgrade) => {
                 Some(p.drones[slot].upgrade_state(upgrade))
             }
@@ -1042,7 +1257,7 @@ impl Game {
                 // Settle and dispatch every unit before advancing to the next shared event.
                 // Slot order breaks ties for scarce fuel, ore, or storage deterministically.
                 for drone in &mut drones {
-                    if drone.remaining > 0.0 {
+                    if drone.health <= 0.0 || drone.remaining > 0.0 {
                         continue;
                     }
                     let pad = self.pad.pads.get_mut(&key).unwrap();
@@ -1159,6 +1374,201 @@ mod tests {
         game.bench_select(BenchAction::MiningDrone);
         let material = mining::material_of(game.seed, RockKind::Planetoid, Some(key));
         (game, key, material)
+    }
+
+    fn shoot_drone(game: &mut Game, key: PadKey, damage: f32) -> DroneView {
+        let view = game
+            .mining_drone_views()
+            .into_iter()
+            .find(|v| v.home == key && v.slot == 0)
+            .unwrap();
+        game.bullets
+            .push(Bullet::hostile(view.position, Vec2::ZERO, 1.0, damage));
+        game.move_bullets(1.0 / 60.0);
+        view
+    }
+
+    #[test]
+    fn loaded_shots_destroy_once_and_saved_wreck_never_delivers_lost_cargo() {
+        let (mut game, key, material) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        game.pad.pads.get_mut(&key).unwrap().drone_paused = true;
+        let ore = game.mined[&key];
+        shoot_drone(&mut game, key, 30.0);
+        assert_eq!(game.pad.pads[&key].drones[0].health, 50.0);
+        assert!(game.drone_wrecks().is_empty());
+        let view = shoot_drone(&mut game, key, 60.0);
+        game.bullets
+            .push(Bullet::hostile(view.position, Vec2::ZERO, 1.0, 100.0));
+        game.move_bullets(1.0 / 60.0);
+        assert_eq!(game.drone_wrecks().len(), 1);
+        assert!(game.mining_drone_views().is_empty());
+        assert_eq!(game.pad.pads[&key].drones[0].cargo, 0.0);
+        assert_eq!(
+            game.drone_wrecks()[0].cargo.amount(material),
+            5.0 + if material == Material::Metal {
+                20.0
+            } else if material == Material::Crystal {
+                5.0
+            } else {
+                0.0
+            }
+        );
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        loaded.teleport(Vec2::new(120_000.0, 0.0));
+        loaded.update_mining_drones(100.0);
+        assert_eq!(loaded.pad.pads[&key].stash.amount(material), 0.0);
+        assert_eq!(loaded.mined[&key], ore);
+        assert_eq!(loaded.pad.pads[&key].drones[0].health, 0.0);
+        assert_eq!(loaded.drone_wrecks(), game.drone_wrecks());
+        loaded.pad.pads.remove(&key);
+        assert_eq!(loaded.drone_wrecks().len(), 1);
+        let (state, _) = SaveState::from_text(&loaded.save_state().to_text()).unwrap();
+        let (changed, _) = Game::from_save(state, crate::sectormap::GENERATOR_VERSION + 1);
+        assert!(changed.drone_wrecks().is_empty());
+    }
+
+    #[test]
+    fn wreck_partial_salvage_reload_and_replacement_conserve_goods() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        let view = shoot_drone(&mut game, key, 100.0);
+        let original = game.drone_wrecks()[0].cargo;
+        let wreck_id = game.drone_wrecks()[0].id;
+        game.pad.landed = None;
+        game.pad.bench = None;
+        let ship = game
+            .bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap();
+        ship.position = view.position;
+        ship.velocity = Vec2::X * 100.0;
+        assert_eq!(game.interact_prompt().unwrap().blocked, Some("SLOW DOWN"));
+        game.interact();
+        assert_eq!(game.drone_wrecks()[0].cargo, original);
+        game.bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap()
+            .velocity = Vec2::ZERO;
+        for material in Material::ALL {
+            let cap = game.cargo.cap(material);
+            game.cargo.add_capped(material, cap, cap);
+        }
+        assert_eq!(game.interact_prompt().unwrap().blocked, Some("HOLD FULL"));
+        game.cargo.metal -= 3.0;
+        assert_eq!(game.interact(), Some(interact::Verb::Salvage));
+        assert_eq!(game.drone_wrecks()[0].cargo.metal, original.metal - 3.0);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        loaded.cargo = Cargo::default();
+        let ship = loaded
+            .bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap();
+        ship.position = view.position;
+        ship.velocity = Vec2::ZERO;
+        loaded.pad.landed = None;
+        loaded.interact();
+        assert!(loaded.drone_wrecks().is_empty());
+        for material in Material::ALL {
+            assert_eq!(
+                loaded.cargo.amount(material)
+                    + if material == Material::Metal {
+                        3.0
+                    } else {
+                        0.0
+                    },
+                original.amount(material)
+            );
+        }
+        loaded.interact();
+        assert_eq!(loaded.cargo.crystal, original.crystal);
+        loaded.pad.landed = Some(key);
+        loaded.bench_toggle();
+        loaded.cargo.metal = 39.0;
+        loaded.cargo.crystal = 10.0;
+        loaded.bench_select(BenchAction::MiningDrone);
+        loaded.bench_confirm();
+        assert_eq!(loaded.pad.pads[&key].drones[0].health, 0.0);
+        assert_eq!(loaded.cargo.metal, 39.0);
+        loaded.cargo.metal = 40.0;
+        loaded.bench_confirm();
+        assert_eq!(loaded.pad.pads[&key].drones.len(), 1);
+        assert_eq!(loaded.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        assert_eq!(loaded.cargo.metal, 0.0);
+        assert_eq!(loaded.cargo.crystal, 0.0);
+        // Replacing and losing the same stable slot creates a different wreck identity.
+        // Move the observation ship off the old wreck so it does not intercept the shot.
+        let center = loaded.pad.pads[&key].center;
+        loaded
+            .bodies
+            .iter_mut()
+            .find(|b| b.kind == BodyKind::Player)
+            .unwrap()
+            .position = center;
+        loaded.update_mining_drones(5.0);
+        shoot_drone(&mut loaded, key, 100.0);
+        assert!(loaded.drone_wrecks()[0].id > wreck_id);
+    }
+
+    #[test]
+    fn hull_damage_survives_reload_and_dock_repair_is_paid_and_atomic() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        game.pad.pads.get_mut(&key).unwrap().drone_paused = true;
+        shoot_drone(&mut game, key, 35.0);
+        game.bench_select(BenchAction::RepairDrone(0));
+        game.bench_confirm();
+        assert_eq!(game.pad.pads[&key].drones[0].health, 45.0);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut loaded, _) = Game::from_save(state, generator);
+        assert_eq!(loaded.pad.pads[&key].drones[0].health, 45.0);
+        loaded.update_mining_drones(10.0);
+        loaded.pad.landed = Some(key);
+        loaded.bench_toggle();
+        loaded.bench_select(BenchAction::RepairDrone(0));
+        loaded.cargo.metal = 3.0;
+        loaded.bench_confirm();
+        assert_eq!(loaded.cargo.metal, 3.0);
+        assert_eq!(loaded.pad.pads[&key].drones[0].health, 45.0);
+        loaded.cargo.metal = 3.5;
+        loaded.bench_confirm();
+        assert_eq!(loaded.cargo.metal, 0.0);
+        assert_eq!(loaded.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        loaded.bench_confirm();
+        assert_eq!(loaded.cargo.metal, 0.0);
+    }
+
+    #[test]
+    fn friendly_shots_and_planetoid_occlusion_protect_drone_hull() {
+        let (mut game, key, _) = setup();
+        game.bench_confirm();
+        game.update_mining_drones(5.0);
+        let view = game.mining_drone_views()[0];
+        game.bullets
+            .push(Bullet::friendly(view.position, Vec2::ZERO, 1.0));
+        game.move_bullets(1.0 / 60.0);
+        assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        game.bullets.clear();
+        let host = game.bodies.iter().find(|b| b.origin == Some(key)).unwrap();
+        let direction = (view.position - host.position).normalize();
+        let from = host.position - direction * (host.radius + 100.0);
+        game.bullets.push(Bullet::hostile(
+            from,
+            (view.position - from) * 60.0,
+            1.0,
+            100.0,
+        ));
+        game.move_bullets(1.0 / 60.0);
+        assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
+        assert!(game.drone_wrecks().is_empty());
     }
 
     #[test]

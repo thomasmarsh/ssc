@@ -2740,6 +2740,32 @@ pub fn draw(
             .resolution(6);
         gizmos.circle_2d(to, 7.0, c.with_alpha(0.4)).resolution(8);
     }
+    for wreck in game.drone_wrecks() {
+        if !ssc::simulation::extent_in_view(wreck.position, 24.0, camera, half, 0.0) {
+            continue;
+        }
+        let p = wreck.position;
+        let color = Color::srgb(1.0, 0.72, 0.25);
+        gizmos.linestrip_2d(
+            [
+                p + Vec2::new(-12.0, 8.0),
+                p + Vec2::new(0.0, 12.0),
+                p + Vec2::new(7.0, 0.0),
+            ],
+            color,
+        );
+        gizmos.linestrip_2d(
+            [
+                p + Vec2::new(12.0, -8.0),
+                p + Vec2::new(0.0, -12.0),
+                p + Vec2::new(-7.0, 0.0),
+            ],
+            color,
+        );
+        gizmos
+            .circle_2d(p, 18.0, color.with_alpha(0.35))
+            .resolution(8);
+    }
     for drone in game.mining_drone_views() {
         if !ssc::simulation::extent_in_view(drone.position, 24.0, camera, half, 0.0) {
             continue;
@@ -2747,7 +2773,13 @@ pub fn draw(
         let p = drone.position;
         let forward = drone.heading;
         let side = forward.perp();
-        let color = if drone.powered { CYAN } else { MUTED };
+        let color = if drone.health < ssc::simulation::fleet::DRONE_HEALTH * 0.5 {
+            Color::srgb(1.0, 0.45, 0.15)
+        } else if drone.powered {
+            CYAN
+        } else {
+            MUTED
+        };
         gizmos.lineloop_2d(
             [
                 p + forward * 12.0,

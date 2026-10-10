@@ -43,6 +43,7 @@ pub enum BenchAction {
     MiningDrone,
     PauseDroneFleet,
     MiningDroneStatus(usize),
+    RepairDrone(usize),
     DroneDeposit(Option<(SectorId, i32, i32)>),
     DroneUpgrade(usize, fleet::DroneUpgrade),
     DroneTemplate(fleet::DroneUpgrade),
@@ -174,7 +175,12 @@ impl Game {
                 .chain(self.drone_deposit_actions())
                 .chain(
                     (0..self.landed_pad().map_or(0, |p| p.drones.len())).flat_map(|slot| {
-                        std::iter::once(BenchAction::MiningDroneStatus(slot)).chain(
+                        [
+                            BenchAction::MiningDroneStatus(slot),
+                            BenchAction::RepairDrone(slot),
+                        ]
+                        .into_iter()
+                        .chain(
                             fleet::DroneUpgrade::ALL
                                 .map(|upgrade| BenchAction::DroneUpgrade(slot, upgrade)),
                         )
@@ -264,6 +270,7 @@ impl Game {
             Some(BenchAction::Warehouse) => self.buy_warehouse(),
             Some(BenchAction::WaterTank) => self.buy_water_tank(),
             Some(BenchAction::WaterExtractor) => self.buy_water_extractor(),
+            Some(BenchAction::RepairDrone(slot)) => self.repair_drone(slot),
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
             Some(BenchAction::PauseDroneFleet) => self.pause_drone_fleet(),
             Some(BenchAction::DroneDeposit(mark)) => self.designate_drone_deposit(mark),
@@ -752,13 +759,13 @@ impl Game {
             BenchAction::MiningDrone => {
                 row.group = "PAD FLEET";
                 row.text = "BUILD MINING DRONE".into();
-                row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. Local flight; no combat yet.".into();
+
                 row.costs = self.mining_drone_price();
                 row.detail = self.mining_drone_detail();
                 if let Some(pad) = self.landed_pad() {
                     row.text = format!(
                         "BUILD MINING DRONE   {}/{}",
-                        pad.drones.len(),
+                        pad.drones.iter().filter(|d| d.health > 0.0).count(),
                         fleet::MAX_DRONES
                     );
                 }
@@ -782,12 +789,22 @@ impl Game {
                     row.state = why.into();
                 }
             }
+            BenchAction::RepairDrone(slot) => {
+                row.group = "PAD FLEET";
+                row.text = format!("REPAIR DRONE #{}", slot + 1);
+                row.detail = "At home dock with power: 1M per 10 missing hull. Destroyed units need paid construction; wrecks are salvaged in space.".into();
+                row.costs = self.drone_repair_price(slot);
+                if let Some(why) = self.drone_repair_block(slot) {
+                    row.ok = false;
+                    row.state = why.into();
+                }
+            }
             BenchAction::MiningDroneStatus(slot) => {
                 row.group = "PAD FLEET";
                 row.text = format!("MINING DRONE #{}", slot + 1);
                 row.ok = false;
                 row.state = "UNIT LOST".into();
-                row.detail = "Home planetoid: 1 local F for up to 10 real ore. Work 10s + return 5s; cargo waits for stash room. Local flight; no combat yet.".into();
+                row.detail = "Destroyed units require paid replacement. Salvage wreck components and cargo in space.".into();
                 if let Some(pad) = self.landed_pad()
                     && let Some(drone) = pad.drones.get(slot)
                 {
