@@ -1574,9 +1574,6 @@ fn chart_lines(session: &Session) -> Vec<(String, Color)> {
             if let Some(rule) = c.engagement {
                 detail.push((format!("Engagement: {}\n", rule.label()), light));
             }
-            if let Some(relation) = c.relationship {
-                detail.push((format!("{}\n", relation.text()), light));
-            }
             if let Some(culture) = c.culture {
                 detail.push((
                     format!("Tends toward {} (contact estimate)\n", culture.tendency),
@@ -4983,8 +4980,6 @@ mod bench_layout_tests {
             "Offer 20 goods",
             "contact estimate",
             "Last response: solidarity",
-            "Trust +5 / friction 0",
-            "fulfilled job",
             "TITHE SETTLED",
         ] {
             assert!(terms.contains(expected), "{expected}: {text}");

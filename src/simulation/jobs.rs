@@ -393,7 +393,6 @@ impl Game {
         } else {
             false
         };
-        self.civil_job_fulfilled(supplier);
         self.shift_regard(supplier, 10.0);
         let lead = SectorId {
             x: capital.x.saturating_add(2),
@@ -844,7 +843,6 @@ mod tests {
         let regard = game.civ_regard(civ.id);
         act(&mut game, civ.id, JobKind::Fuel);
         assert_eq!(game.cargo.fuel, 0.0);
-        assert_eq!(game.civilization_relationship(civ.id).unwrap().trust, 5.0);
         assert_eq!(game.civ_regard(civ.id), regard + 10.0);
         assert_eq!(game.loadout.research.fragments[&credit], 0.25);
         assert_eq!(
@@ -861,7 +859,6 @@ mod tests {
             game.civ_regard(civ.id),
         );
         act(&mut game, civ.id, JobKind::Fuel);
-        assert_eq!(game.civilization_relationship(civ.id).unwrap().trust, 5.0);
         assert_eq!(game.jobs, jobs);
         assert_eq!(game.cargo, cargo);
         assert_eq!(game.loadout.research, research);

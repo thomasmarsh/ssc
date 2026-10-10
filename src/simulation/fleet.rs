@@ -1928,7 +1928,7 @@ mod tests {
         let mut civ = crate::territory::outpost(game.seed);
         civ.shape = crate::territory::CivShape::Horde;
         game.register_territory(civ);
-        game.civil_player_harm(civ.id, 1.0);
+        game.civil_player_harm(civ.id);
         let at = game.mining_drone_views()[0].position;
         for burst in [false, true] {
             let mut shot = Bullet::hostile(at, Vec2::ZERO, if burst { 0.001 } else { 1.0 }, 10.0);

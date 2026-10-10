@@ -135,7 +135,6 @@ pub struct CivReading {
     pub regard: Option<super::Tier>,
     pub culture: Option<super::CultureReading>,
     pub engagement: Option<super::EngagementRule>,
-    pub relationship: Option<super::RelationshipReading>,
 }
 
 /// Everything known about one sector, for drawing and the detail panel.
@@ -483,9 +482,6 @@ impl Game {
             tint: t.color(self.seed),
             regard: self.civ_met(territory),
             culture: self.culture_reading(territory),
-            relationship: self
-                .civ_met(territory)
-                .and_then(|_| self.civilization_relationship(territory)),
             engagement: self
                 .civ_met(territory)
                 .map(|_| self.civilization_engagement(territory)),
