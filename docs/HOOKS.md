@@ -50,6 +50,7 @@ Notes: the first screenshot after a fresh build may come out black, so re-run. A
 - `SSC_PAD=kit|deploy|land|bench`: stage the pad states beside the nearest planetoid (a kit in hand, pad down, landed, landed with the bench open). `SSC_BENCH=0..2` picks the bench tab for `bench`.
 - `SSC_BENCH_VIEW=parts|upgrade|weapons|skills|gate|organs|stash|research|power|refinery|warehouse|water-tank|water-extractor|mining-drone|mining-fleet|mining-fleet-status|mining-fleet-retrofit|mining-fleet-template|mining-fleet-blueprint|mining-fleet-deposit|mining-fleet-rock|raw-input`: land at the HOME pad with existing progress staged, open the real bench on that pose and hold. Extra modes with `SSC_BENCH_RESULT`: `reforge-good|reforge-kept|unlock|repeated`.
 - `SSC_FLEET_FLIGHT=<seconds>`: stage four paid HOME mining units, stash 4F, close the bench and advance 0 to 15 simulation seconds, then hold for a flight capture (1 launch, 5 mining, 12 return, 15 dock). Add `SSC_FLEET_DEPOSIT=1` to designate a real nearby known planetoid first and allow up to 60s for travel captures. Only active during smoke runs.
+- `SSC_FLEET_RECALL=1`: with `SSC_FLEET_FLIGHT`, issue the real recall after advancing flight and hold the returning pose; optionally combine with `SSC_FLEET_DEPOSIT=1`. Smoke-only.
 - `SSC_FLEET_LOSS=1|blast`: with `SSC_FLEET_FLIGHT`, inject real hostile shots (`1`) or area bursts (`blast`) after staging work: destroy unit #1 and hurt unit #2. Capture saved wreck art and damaged flight; smoke-only.
 - `SSC_BENCH_VIEW=mining-fleet-repair`: powered fleet with one destroyed unit and unit #2 docked at 30/80 hull; select its 5M repair. `SSC_BENCH_RESULT=1` shows the repair receipt and full-hull refusal.
 - `SSC_BENCH_RESULT=1`: confirm the selected bench action 20 frames before capture (receipts). See [BENCH.md](BENCH.md).
@@ -113,3 +114,5 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 - `SSC_BENCH_VIEW=mining-fleet-name`: open the real role-name editor on DEEP MINER-1 with the caret on the hyphen; no research or payment required.
 
 - `SSC_BENCH_VIEW=mining-fleet-pause`: powered four-unit warehouse selecting PAUSE FLEET. `SSC_BENCH_RESULT=1` pauses and shows the RESUME FLEET preview with the receipt.
+
+- `SSC_BENCH_VIEW=mining-fleet-recall`: launched four-unit warehouse fleet selecting RECALL FLEET. `SSC_BENCH_RESULT=1` recalls and saves the dispatch hold.

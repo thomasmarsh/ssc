@@ -136,6 +136,7 @@ impl Snapshot {
             | BenchAction::Research(_)
             | BenchAction::MiningDrone
             | BenchAction::PauseDroneFleet
+            | BenchAction::RecallDroneFleet
             | BenchAction::MiningDroneStatus(_)
             | BenchAction::RepairDrone(_)
             | BenchAction::DroneDeposit(_)

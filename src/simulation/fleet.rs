@@ -304,6 +304,22 @@ impl Default for MiningDrone {
 }
 
 impl MiningDrone {
+    fn flight(&self, center: Vec2) -> (DronePhase, f32) {
+        let travel = self.deposit.map_or(0.0, |d| d.travel(center));
+        let returning = RETURN_SECONDS + travel;
+        let outbound = 2.0 + travel;
+        let elapsed = self.fitted.work() + RETURN_SECONDS + 2.0 * travel - self.remaining;
+        if self.remaining <= 0.0 {
+            (DronePhase::Docked, 0.0)
+        } else if self.remaining <= returning {
+            (DronePhase::Returning, self.remaining / returning)
+        } else if elapsed < outbound {
+            (DronePhase::Launching, elapsed / outbound)
+        } else {
+            (DronePhase::Mining, 1.0)
+        }
+    }
+
     pub(super) fn upgrade_state(&self, upgrade: DroneUpgrade) -> &'static str {
         if self.fitted.has(upgrade) {
             "FITTED"
@@ -676,20 +692,9 @@ impl Game {
                 if drone.health <= 0.0 {
                     continue;
                 }
-                let work = drone.fitted.work();
                 let travel = drone.deposit.map_or(0.0, |d| d.travel(pad.center));
-                let returning = RETURN_SECONDS + travel;
                 let outbound = 2.0 + travel;
-                let elapsed = work + RETURN_SECONDS + 2.0 * travel - drone.remaining;
-                let (phase, flight) = if drone.remaining <= 0.0 {
-                    (DronePhase::Docked, 0.0)
-                } else if drone.remaining <= returning {
-                    (DronePhase::Returning, drone.remaining / returning)
-                } else if elapsed < outbound {
-                    (DronePhase::Launching, elapsed / outbound)
-                } else {
-                    (DronePhase::Mining, 1.0)
-                };
+                let (phase, flight) = drone.flight(pad.center);
                 let dock_angle =
                     host.angle + pad.anchor - 0.22 - slot as f32 * 26.0 / (host.radius + 30.0);
                 let sweep = -(0.22 + slot as f32 * 0.13);
@@ -943,6 +948,28 @@ impl Game {
             "FLEET RESUMED"
         };
         self.bench_done(message.into(), upgrades::Rarity::Common);
+    }
+
+    pub(super) fn recall_drone_fleet(&mut self) {
+        if let Some(why) = self.drone_pause_block() {
+            self.bench_failed(why.into());
+            return;
+        }
+        let pad = self.pad.pads.get_mut(&self.pad.landed.unwrap()).unwrap();
+        // Reuse the return path at the current flight fraction. Cargo and ore were
+        // reserved at launch, so shortening work neither refunds nor reserves goods.
+        for drone in &mut pad.drones {
+            if drone.health > 0.0 {
+                let (_, flight) = drone.flight(pad.center);
+                let travel = drone.deposit.map_or(0.0, |d| d.travel(pad.center));
+                drone.remaining = flight * (RETURN_SECONDS + travel);
+            }
+        }
+        pad.drone_paused = true;
+        self.bench_done(
+            "FLEET RECALLED - DISPATCH PAUSED".into(),
+            upgrades::Rarity::Common,
+        );
     }
 
     pub(super) fn mining_drone_block(&self) -> Option<&'static str> {
@@ -1783,6 +1810,95 @@ mod tests {
         game.move_bullets(1.0 / 60.0);
         assert_eq!(game.pad.pads[&key].drones[0].health, DRONE_HEALTH);
         assert!(game.drone_wrecks().is_empty());
+    }
+
+    #[test]
+    fn recall_reverses_loaded_flight_without_teleporting_or_refunding() {
+        for elapsed in [0.1, 1.0, 3.0, 11.0, 14.0] {
+            for designated in [false, true] {
+                let (mut game, key, _) = setup();
+                build_fleet(&mut game);
+                if designated {
+                    designate_nearby(&mut game, key);
+                }
+                game.pad.pads.get_mut(&key).unwrap().stash.fuel = 20.0;
+                game.update_mining_drones(elapsed);
+                let before = game.mining_drone_views();
+                let mined = game.mined.clone();
+                let stash = game.pad.pads[&key].stash;
+                let cargo = game.cargo;
+                game.bench_select(BenchAction::RecallDroneFleet);
+                game.bench_confirm();
+                let after = game.mining_drone_views();
+                assert_eq!(before.len(), MAX_DRONES);
+                for (before, after) in before.iter().zip(&after) {
+                    assert!(before.position.distance(after.position) < 0.01);
+                    assert_eq!(after.phase, DronePhase::Returning);
+                    assert_eq!(before.cargo, after.cargo);
+                    assert_eq!(before.health, after.health);
+                }
+                assert!(game.pad.pads[&key].drone_paused);
+                assert_eq!(game.mined, mined);
+                assert_eq!(game.pad.pads[&key].stash, stash);
+                assert_eq!(game.cargo, cargo);
+                let remaining = game.pad.pads[&key].drones[0].remaining;
+                game.bench_confirm();
+                assert!((game.pad.pads[&key].drones[0].remaining - remaining).abs() < 1e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn recall_survives_remote_reload_power_loss_and_full_dock() {
+        let (mut game, key, material) = setup();
+        build_fleet(&mut game);
+        game.pad.pads.get_mut(&key).unwrap().stash.fuel = 20.0;
+        game.update_mining_drones(1.0);
+        retrofit(&mut game, 0, DroneUpgrade::Cargo);
+        game.loadout.research.known.clear();
+        game.pad.pads.get_mut(&key).unwrap().power = false;
+        game.bench_select(BenchAction::RecallDroneFleet);
+        game.bench_confirm();
+        let mined = game.mined[&key];
+        let pad = game.pad.pads.get_mut(&key).unwrap();
+        pad.stash.add_capped(material, 300.0, 300.0);
+        let fuel = pad.stash.fuel;
+        let drones = pad.drones.clone();
+        game.update_mining_drones(100.0);
+        assert_eq!(game.pad.pads[&key].drones, drones);
+        let (state, generator) = SaveState::from_text(&game.save_state().to_text()).unwrap();
+        let (mut split, _) = Game::from_save(state, generator);
+        split.bodies.retain(|b| b.origin != Some(key));
+        for world in [&mut game, &mut split] {
+            world.pad.pads.get_mut(&key).unwrap().power = true;
+        }
+        game.update_mining_drones(100.0);
+        for _ in 0..100 {
+            split.update_mining_drones(1.0);
+        }
+        assert_eq!(game.pad.pads[&key].drones, split.pad.pads[&key].drones);
+        let pad = &game.pad.pads[&key];
+        assert!(
+            pad.drones
+                .iter()
+                .all(|d| d.remaining == 0.0 && d.cargo == 10.0)
+        );
+        assert!(!pad.drones[0].fitted.cargo);
+        assert_eq!(pad.stash.fuel, fuel);
+        assert_eq!(game.mined[&key], mined);
+        game.pad
+            .pads
+            .get_mut(&key)
+            .unwrap()
+            .stash
+            .take(material, 40.0);
+        game.update_mining_drones(100.0);
+        let pad = &game.pad.pads[&key];
+        assert_eq!(pad.stash.amount(material), 300.0);
+        assert!(pad.drones.iter().all(|d| d.cargo == 0.0));
+        assert!(pad.drones[0].fitted.cargo);
+        assert_eq!(pad.stash.fuel, fuel);
+        assert_eq!(game.mined[&key], mined);
     }
 
     #[test]

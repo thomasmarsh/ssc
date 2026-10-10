@@ -1585,6 +1585,12 @@ fn smoke_run(
         if !designated && seconds >= 15.0 {
             game.step(1.0 / 60.0, Input::default());
         }
+        if std::env::var("SSC_FLEET_RECALL").as_deref() == Ok("1") {
+            game.bench_toggle();
+            game.bench_select(ssc::simulation::BenchAction::RecallDroneFleet);
+            game.bench_confirm();
+            game.bench_toggle();
+        }
         match std::env::var("SSC_FLEET_LOSS").as_deref() {
             Ok("1") => game.stage_drone_loss_smoke(),
             Ok("blast") => game.stage_drone_blast_smoke(),
@@ -1775,6 +1781,10 @@ fn smoke_run(
             30.0,
         ));
     }
+    // Physical controller input can reopen the landed bench during held flight captures.
+    if std::env::var_os("SSC_FLEET_FLIGHT").is_some() && session.game.bench_open() {
+        session.game.bench_toggle();
+    }
     // A bounded receipt gallery confirms real actions near capture time.
     // Keep fleet galleries on their requested row despite physical input arriving during staging.
     if let Ok(mode) = std::env::var("SSC_BENCH_VIEW") {
@@ -1802,6 +1812,9 @@ fn smoke_run(
             "mining-fleet-repair" => session
                 .game
                 .bench_select(ssc::simulation::BenchAction::RepairDrone(1)),
+            "mining-fleet-recall" => session
+                .game
+                .bench_select(ssc::simulation::BenchAction::RecallDroneFleet),
             "mining-fleet-pause" => session
                 .game
                 .bench_select(ssc::simulation::BenchAction::PauseDroneFleet),
@@ -2264,6 +2277,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
         "mining-drone"
         | "mining-fleet"
         | "mining-fleet-pause"
+        | "mining-fleet-recall"
         | "mining-fleet-repair"
         | "mining-fleet-status"
         | "mining-fleet-retrofit"
@@ -2297,6 +2311,7 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                 if matches!(
                     mode,
                     "mining-fleet-pause"
+                        | "mining-fleet-recall"
                         | "mining-fleet-repair"
                         | "mining-fleet-status"
                         | "mining-fleet-retrofit"
@@ -2326,6 +2341,13 @@ fn smoke_bench(game: &mut Game, mode: &str) {
                     game.bench_feedback = None;
                     if mode == "mining-fleet-repair" {
                         game.stage_drone_repair_smoke();
+                    }
+                    if mode == "mining-fleet-recall" {
+                        game.cargo.fuel = 20.0;
+                        game.bench_select(BenchAction::Stash(Material::Fuel));
+                        game.bench_confirm();
+                        game.step(1.0, Input::default());
+                        game.bench_select(BenchAction::RecallDroneFleet);
                     }
                     if mode == "mining-fleet-pause" {
                         game.bench_select(BenchAction::PauseDroneFleet);

@@ -45,7 +45,7 @@ Decide per slice, and say which in one line.
 The user asked for a fuller plan and reconciled docs. First frontier A/B/narrow C and narrow D power, storage, refinery, water and bought-input routes are built; finite delivery/survey/pest jobs and a stock-backed player-haul agreement, Automation, and four-unit fleets with nearby known-planetoid/free-lode orders, cargo/mining dock retrofits and cross-pad blueprint reuse are built; further machine jobs, merchant transport and later slices remain TODO. [docs/GAME_LOOP.md](docs/GAME_LOOP.md) owns slices A to J, dependencies, acceptance gates, and working defaults. [docs/ROADMAP.md](docs/ROADMAP.md) summarizes milestones; WORKSTREAMS maps existing systems. Tags: [S] small in-session work, [M]/[L] implementation scope estimates. Do not infer delegation authorization from these tags.
 
 0. Human playtest at any time; [docs/PLAYTEST.md](docs/PLAYTEST.md) separates built checks from proposed milestone checks. Balance remains provisional.
-1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit fleet and nearby deposit orders - further modules, active targeting, kinetic impacts, scavengers and early recall beyond built loaded shot/blast/contact losses/repair/replacement/player wreck salvage; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
+1. [L] NEXT, remote industry: finish F beyond the built Automation-gated four-unit fleet and nearby deposit orders - further modules, active targeting, kinetic impacts, scavengers beyond built loaded shot/blast/contact losses/repair/replacement/player wreck salvage/early recall; G tankers constructed at planetoid pad shipyards, two established endpoints, bulk delivery of any material (water is one example), fuel/reserve/blockage policies. Save all authoritative state in the slice that creates it.
 2. [L] E2 independent diplomacy before H: directional trust/friction, posture/ROE and shared authorization, then explicit commerce/tariff terms; H visiting civilization trade ships, real supply dependency, attributed privateering and sensors/turrets/escorts with bounded saved remote incidents (GAME_LOOP section 9.1); I hubs/distribution and player-grown megastructure districts. J citizens deferred pending a separate design.
 3. Alongside: remaining D machine jobs, DEVTOOLS B/C, contextual/controller panel polish, docking assist, meaningful test/lint hygiene, and touched-doc TODO updates.
 
@@ -57,18 +57,18 @@ Decided: plant-supporting planets sustain crops in a closed cycle without explic
 
 ## Recently done
 
+- Fleet early recall: free saved return at the current flight fraction with launch-reserved cargo and dispatch hold; remote reload, power/full-store blockage, and queued fitting covered; compact receipt/flight captures checked. Targeting, kinetic impacts, and combat modules remain next.
+
 - Diplomacy target reconciled: independent trust/friction, posture/ROE, commercial terms and asymmetric real supply dependency; E2a/E2b/H1 gates documented, implementation remains TODO.
 
-- Loaded fleet hazards: hostile mines/missile/area bursts and dt-scaled hostile creature overlap share saved hull and finite wreck losses; friendly/calm/phased exclusions and conservation covered. Targeting, kinetic impacts, early recall and remote incidents remain next.
+- Loaded fleet hazards: hostile mines/missile/area bursts and dt-scaled hostile creature overlap share saved hull and finite wreck losses; friendly/calm/phased exclusions and conservation covered. Targeting, kinetic impacts, and remote incidents remain next.
 
 - Loaded fleet recovery: saved hull, swept hostile-shot losses, finite partial wreck salvage, paid dock repairs and stable-slot template-priced replacements; compact status/repair and loaded flight captures checked. Targeting/combat modules/scavengers/remote incidents remain next.
 
-- Fleet dispatch hold: free saved local pause/resume finishes paid trips, unloads and fits queued modules, then blocks new fuel/ore reservations; remote reload and compact bench verified. Early recall/combat remain next.
+- Fleet dispatch hold: free saved local pause/resume finishes paid trips, unloads and fits queued modules, then blocks new fuel/ore reservations; remote reload and compact bench verified. Combat remains next.
 
 - Named fleet roles: saved 12-character A/B/C labels with keyboard/controller editor, cancel/reset and transient drafts; source/world-loss retention and compact bench verified. Further modules/combat remain next.
 
 - Fleet role library: three independent saved module blueprints, bench selection, per-slot overwrite and atomic cross-pad merge; selection survives source/world loss. Further modules/combat remain next.
 
 - Free-lode fleet orders: saved mixed depletion and trip material, full-store skipping, remote exhaustion and target-loss policies; fixed generated flight anchors, combat/salvage still pending.
-
-- Planetoid designation: free saved fleet orders for known deposits within 6000 units, travel-aware flight and shared depletion; old cargo unloads before redirection. Roles/combat remain next.

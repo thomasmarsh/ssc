@@ -42,6 +42,7 @@ pub enum BenchAction {
     WaterExtractor,
     MiningDrone,
     PauseDroneFleet,
+    RecallDroneFleet,
     MiningDroneStatus(usize),
     RepairDrone(usize),
     DroneDeposit(Option<(SectorId, i32, i32)>),
@@ -164,6 +165,7 @@ impl Game {
                         BenchAction::WaterExtractor,
                         BenchAction::MiningDrone,
                         BenchAction::PauseDroneFleet,
+                        BenchAction::RecallDroneFleet,
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Cargo),
                         BenchAction::DroneTemplate(fleet::DroneUpgrade::Mining),
                         BenchAction::CycleDroneRole,
@@ -273,6 +275,7 @@ impl Game {
             Some(BenchAction::RepairDrone(slot)) => self.repair_drone(slot),
             Some(BenchAction::MiningDrone) => self.buy_mining_drone(),
             Some(BenchAction::PauseDroneFleet) => self.pause_drone_fleet(),
+            Some(BenchAction::RecallDroneFleet) => self.recall_drone_fleet(),
             Some(BenchAction::DroneDeposit(mark)) => self.designate_drone_deposit(mark),
             Some(BenchAction::DroneTemplate(upgrade)) => self.buy_drone_template(upgrade),
             Some(BenchAction::CycleDroneRole) => self.cycle_drone_role(),
@@ -770,6 +773,15 @@ impl Game {
                     );
                 }
                 if let Some(why) = self.mining_drone_block() {
+                    row.ok = false;
+                    row.state = why.into();
+                }
+            }
+            BenchAction::RecallDroneFleet => {
+                row.group = "PAD FLEET";
+                row.text = "RECALL FLEET".into();
+                row.detail = "Turn home now with reserved cargo; pause dispatch. No fuel refund. Needs power to return/unload. Free, saved order.".into();
+                if let Some(why) = self.drone_pause_block() {
                     row.ok = false;
                     row.state = why.into();
                 }
