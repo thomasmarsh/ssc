@@ -376,8 +376,8 @@ Enemies stress the same axes through stats and behaviour; a realm stresses them 
 | Mobility | Faster enemies, heavy gravity, more wells, packs, dash and parry that fizzle | `foe.speed`, `gravity`, `wells`, `fizzle` |
 | Mining | Rich or poor rock (yield multiplier) | `Effects.mining` (a rest and a rich realm today; no realm punishes the miner yet) |
 | Sensors | Sensor reach cut (ping range, the arrows), enemies that arrive before you see them | `Effects.sensor` |
-| Symbiosis | Jam time, jam carriers (what an organ cancels) | `Effects.jammers/jam_time` |
-| Utility | Jam carriers and elders, fizzling abilities | `Effects.jammers/fizzle/jam_time` |
+| Symbiosis | Jam time, jam carriers (what an organ cancels) | `Effects.affinity/jam_time` |
+| Utility | Jam carriers and elders, fizzling abilities | `Effects.affinity/fizzle/jam_time` |
 
 ### Which realms stress which axes
 

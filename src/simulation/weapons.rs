@@ -281,6 +281,7 @@ impl Game {
         }
         let invulnerability = self.player_invulnerability;
         let mut blast_hits: Vec<(u64, f32, f32)> = Vec::new();
+        let mut lured: Vec<u64> = Vec::new();
         for body in self.bodies.iter_mut().filter(|b| b.active) {
             let reaches = body.position.distance(at) < radius + body.radius;
             if !reaches {
@@ -307,6 +308,9 @@ impl Game {
                     if matches!(body.kind, BodyKind::Creature | BodyKind::Base) {
                         self.run.damage_dealt += dealt;
                     }
+                    if super::apexes::is_hunter(&self.apexes.info, body) {
+                        lured.push(body.id);
+                    }
                     if dealt > 0.0 && diplomacy::civil_target(body) {
                         self.civs.hits.push((body.id, dealt));
                     }
@@ -326,6 +330,9 @@ impl Game {
         }
         for (id, dealt, pool) in blast_hits {
             self.note_family_hit(id, super::arsenal::Family::Explosive, dealt, pool);
+        }
+        for id in lured {
+            self.apex_verb(id);
         }
         if friendly {
             self.flocks_blast(at, radius, amount);

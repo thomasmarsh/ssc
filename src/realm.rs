@@ -136,7 +136,9 @@ pub struct Effects {
     /// Niche weights: hunters and packs, schoolers and broods, jam carriers.
     pub predators: f32,
     pub swarms: f32,
-    pub jammers: f32,
+    /// How common each power's carriers are here (one is neutral): the realm's power affinity.
+    /// The keeper of a realm carries its signature power and pays the ward against it.
+    pub affinity: Affinity,
     /// Chance of an apex elder, and of gravity wells (count and odds).
     pub apex: f32,
     pub wells: f32,
@@ -153,6 +155,41 @@ pub struct Effects {
     pub jam_time: f32,
 }
 
+/// A weight per power (`Power::ALL` order): how much more or less common its carriers are.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Affinity(pub [f32; Power::ALL.len()]);
+
+impl Affinity {
+    pub const NEUTRAL: Self = Self([1.0; Power::ALL.len()]);
+
+    /// Neutral except the listed powers.
+    pub const fn of(weights: &[(Power, f32)]) -> Self {
+        let mut out = [1.0; Power::ALL.len()];
+        let mut k = 0;
+        while k < weights.len() {
+            out[weights[k].0 as usize] = weights[k].1;
+            k += 1;
+        }
+        Self(out)
+    }
+
+    pub fn weight(&self, power: Power) -> f32 {
+        self.0[power as usize]
+    }
+
+    /// The weight a genome's carried powers give it: the one furthest from neutral.
+    pub fn of_genome(&self, g: &Genome) -> f32 {
+        let mut best = 1.0_f32;
+        for p in Power::ALL {
+            let w = self.weight(p);
+            if w != 1.0 && p.active(g) && w.ln().abs() > best.ln().abs() {
+                best = w;
+            }
+        }
+        best
+    }
+}
+
 impl Effects {
     pub const NEUTRAL: Self = Self {
         foe: Foe::NEUTRAL,
@@ -160,7 +197,7 @@ impl Effects {
         life: 1.0,
         predators: 1.0,
         swarms: 1.0,
-        jammers: 1.0,
+        affinity: Affinity::NEUTRAL,
         apex: 1.0,
         wells: 1.0,
         weapon_range: 1.0,
@@ -172,7 +209,7 @@ impl Effects {
     };
 
     /// Each field, by name, as (label, value, neutral): for the lerp, the bounds and the details.
-    fn fields(&self) -> [(&'static str, f32, f32); 18] {
+    fn fields(&self) -> [(&'static str, f32, f32); 17] {
         [
             ("ENEMY HULL", self.foe.hull, 1.0),
             ("ENEMY SHIELD", self.foe.shield, 1.0),
@@ -183,7 +220,6 @@ impl Effects {
             ("CREATURES", self.life, 1.0),
             ("HUNTERS", self.predators, 1.0),
             ("SWARMS", self.swarms, 1.0),
-            ("JAMMERS", self.jammers, 1.0),
             ("ELDERS", self.apex, 1.0),
             ("WELLS", self.wells, 1.0),
             ("WEAPON RANGE", self.weapon_range, 1.0),
@@ -197,7 +233,7 @@ impl Effects {
 
     fn map(&self, mut f: impl FnMut(f32, f32) -> f32) -> Self {
         let mut out = *self;
-        let slots: [(&mut f32, f32); 18] = [
+        let slots: [(&mut f32, f32); 17] = [
             (&mut out.foe.hull, 1.0),
             (&mut out.foe.shield, 1.0),
             (&mut out.foe.speed, 1.0),
@@ -207,7 +243,6 @@ impl Effects {
             (&mut out.life, 1.0),
             (&mut out.predators, 1.0),
             (&mut out.swarms, 1.0),
-            (&mut out.jammers, 1.0),
             (&mut out.apex, 1.0),
             (&mut out.wells, 1.0),
             (&mut out.weapon_range, 1.0),
@@ -219,6 +254,9 @@ impl Effects {
         ];
         for (slot, neutral) in slots {
             *slot = f(*slot, neutral);
+        }
+        for w in &mut out.affinity.0 {
+            *w = f(*w, 1.0);
         }
         out
     }
@@ -276,6 +314,10 @@ pub struct Spec {
     pub biomes: &'static [(BiomeKind, f32)],
     /// Extra weight of an apex archetype in this realm.
     pub archetypes: &'static [(Archetype, f32)],
+    /// The keeper of this realm (docs/CAPABILITIES.md 4.2): the elder archetype and the power it
+    /// carries on the realm rim, which pays the organ that answers the realm's lock channel.
+    /// None where the realm has no gate worth a key.
+    pub keeper: Option<(Archetype, Power)>,
     /// Powers an elder of this realm is likely to carry (see `apex`): the realm's signature.
     pub stamps: &'static [Power],
     /// Every elder of this realm wears a regenerating bubble (see `apexes::shield_factor`).
@@ -305,6 +347,7 @@ pub const CATALOG: [Spec; 10] = [
         biomes: &[],
         archetypes: &[],
         stamps: &[],
+        keeper: None,
         bubbled: false,
     },
     Spec {
@@ -328,11 +371,13 @@ pub const CATALOG: [Spec; 10] = [
             },
             weapon_range: 0.65,
             sensor: 0.55,
+            affinity: Affinity::of(&[(Power::Glare, 3.0), (Power::Dim, 2.5), (Power::Blink, 2.0)]),
             ..Effects::NEUTRAL
         },
         biomes: &[(BiomeKind::Strange, 2.0), (BiomeKind::Keen, 1.5)],
         archetypes: &[(Archetype::Phantom, 3.0), (Archetype::Hunter, 2.0)],
         stamps: &[Power::Blink],
+        keeper: Some((Archetype::Warden, Power::Glare)),
         bubbled: false,
     },
     Spec {
@@ -349,7 +394,11 @@ pub const CATALOG: [Spec; 10] = [
         favours: &[Axis::Damage, Axis::Mining],
         blurb: "jam carriers and elders everywhere; dash and parry fizzle; kinetic guns and mining tools carry you",
         effects: Effects {
-            jammers: 4.0,
+            affinity: Affinity::of(&[
+                (Power::Emp, 4.0),
+                (Power::Glare, 4.0),
+                (Power::Confuse, 4.0),
+            ]),
             fizzle: 0.25,
             jam_time: 1.4,
             mining: 1.25,
@@ -362,6 +411,7 @@ pub const CATALOG: [Spec; 10] = [
             (Archetype::Phantom, 2.0),
         ],
         stamps: &[Power::Emp, Power::Glare, Power::Confuse],
+        keeper: Some((Archetype::Maelstrom, Power::Emp)),
         bubbled: false,
     },
     Spec {
@@ -384,11 +434,13 @@ pub const CATALOG: [Spec; 10] = [
                 speed: 0.95,
                 ..Foe::NEUTRAL
             },
+            affinity: Affinity::of(&[(Power::Repel, 3.0), (Power::Song, 2.0), (Power::Lens, 2.0)]),
             ..Effects::NEUTRAL
         },
         biomes: &[(BiomeKind::Brutish, 2.0)],
         archetypes: &[(Archetype::Maelstrom, 3.0), (Archetype::Juggernaut, 1.5)],
         stamps: &[Power::Lens],
+        keeper: Some((Archetype::Maelstrom, Power::Repel)),
         bubbled: false,
     },
     Spec {
@@ -413,11 +465,13 @@ pub const CATALOG: [Spec; 10] = [
                 damage: 0.9,
                 ..Foe::NEUTRAL
             },
+            affinity: Affinity::of(&[(Power::Split, 3.0)]),
             ..Effects::NEUTRAL
         },
         biomes: &[(BiomeKind::Plains, 3.0), (BiomeKind::Grazing, 2.0)],
         archetypes: &[(Archetype::Queen, 4.0), (Archetype::Lasher, 2.5)],
         stamps: &[Power::Split],
+        keeper: Some((Archetype::Queen, Power::Split)),
         bubbled: false,
     },
     Spec {
@@ -442,11 +496,13 @@ pub const CATALOG: [Spec; 10] = [
                 plating: 6.0,
             },
             mining: 1.3,
+            affinity: Affinity::of(&[(Power::Bypass, 3.0)]),
             ..Effects::NEUTRAL
         },
         biomes: &[(BiomeKind::Hardy, 3.0), (BiomeKind::Brutish, 2.0)],
         archetypes: &[(Archetype::Bulwark, 4.0), (Archetype::Juggernaut, 2.5)],
         stamps: &[Power::Bypass],
+        keeper: Some((Archetype::Bulwark, Power::Bypass)),
         bubbled: true,
     },
     Spec {
@@ -471,11 +527,13 @@ pub const CATALOG: [Spec; 10] = [
             },
             swarms: 1.8,
             life: 1.7,
+            affinity: Affinity::of(&[(Power::Phase, 3.0)]),
             ..Effects::NEUTRAL
         },
         biomes: &[(BiomeKind::Plains, 2.0), (BiomeKind::Open, 1.5)],
         archetypes: &[(Archetype::Queen, 2.0), (Archetype::Phantom, 2.0)],
         stamps: &[Power::Phase],
+        keeper: Some((Archetype::Phantom, Power::Phase)),
         bubbled: false,
     },
     Spec {
@@ -505,6 +563,7 @@ pub const CATALOG: [Spec; 10] = [
         biomes: &[(BiomeKind::Grazing, 2.0), (BiomeKind::Plains, 1.5)],
         archetypes: &[],
         stamps: &[],
+        keeper: None,
         bubbled: false,
     },
     Spec {
@@ -529,6 +588,11 @@ pub const CATALOG: [Spec; 10] = [
                 damage: 1.15,
                 ..Foe::NEUTRAL
             },
+            affinity: Affinity::of(&[
+                (Power::Weave, 3.0),
+                (Power::Latch, 2.0),
+                (Power::Blink, 2.0),
+            ]),
             ..Effects::NEUTRAL
         },
         biomes: &[(BiomeKind::Predator, 4.0), (BiomeKind::Brutish, 1.5)],
@@ -538,6 +602,7 @@ pub const CATALOG: [Spec; 10] = [
             (Archetype::Juggernaut, 1.5),
         ],
         stamps: &[Power::Blink],
+        keeper: Some((Archetype::Lasher, Power::Weave)),
         bubbled: false,
     },
     Spec {
@@ -561,6 +626,7 @@ pub const CATALOG: [Spec; 10] = [
                 hull: 1.15,
                 ..Foe::NEUTRAL
             },
+            affinity: Affinity::of(&[(Power::Dim, 3.0), (Power::Blink, 2.0), (Power::Lens, 2.0)]),
             ..Effects::NEUTRAL
         },
         biomes: &[(BiomeKind::Keen, 2.0), (BiomeKind::Hardy, 1.5)],
@@ -570,6 +636,7 @@ pub const CATALOG: [Spec; 10] = [
             (Archetype::Hunter, 1.5),
         ],
         stamps: &[Power::Blink, Power::Lens],
+        keeper: Some((Archetype::Hunter, Power::Dim)),
         bubbled: false,
     },
 ];
@@ -632,6 +699,8 @@ struct Core {
     key: u64,
     kind: RealmKind,
     intensity: f32,
+    /// The lottery cell whose point owns the realm (zero for the starter).
+    cell: (i32, i32),
 }
 
 thread_local! {
@@ -680,19 +749,30 @@ fn compute(seed: u64, id: SectorId) -> Core {
     // The starter realm is a point at HOME; it also holds the whole neighbourhood outright.
     let mut scores: Vec<(f32, u64)> = Vec::with_capacity(26);
     scores.push((at.length() - tg.gen_realm_starter_weight, STARTER_KEY));
+    let mut cells: Vec<(i32, i32)> = Vec::with_capacity(26);
+    cells.push((0, 0));
     for dx in -2..=2 {
         for dy in -2..=2 {
             let (point, weight, h) = cell_point(seed, cx + dx, cy + dy);
             scores.push((at.distance(point) - weight, h | 2));
+            cells.push((cx + dx, cy + dy));
         }
     }
-    scores.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    let (best, next) = (scores[0], scores[1]);
+    let mut order: Vec<usize> = (0..scores.len()).collect();
+    order.sort_by(|&a, &b| {
+        scores[a]
+            .0
+            .total_cmp(&scores[b].0)
+            .then(scores[a].1.cmp(&scores[b].1))
+    });
+    let (best, next) = (scores[order[0]], scores[order[1]]);
+    let best_cell = cells[order[0]];
     if best.1 == STARTER_KEY || ring <= tg.gen_realm_starter_rings {
         return Core {
             key: STARTER_KEY,
             kind: RealmKind::CRADLE,
             intensity: 0.0,
+            cell: (0, 0),
         };
     }
     let edge = smooth((next.0 - best.0) / tg.gen_realm_edge_ramp);
@@ -701,7 +781,95 @@ fn compute(seed: u64, id: SectorId) -> Core {
         key: best.1,
         kind: kind_of(best.1),
         intensity: edge * far,
+        cell: best_cell,
     }
+}
+
+// ---- keepers ------------------------------------------------------------------------------------
+
+const KEEPER_SALT: u64 = 0x5EA1_6B65_0000_0071;
+
+/// A keeper's rim band: the realm intensity at which it stands (inside the stamp threshold, below
+/// the lock core where the realm's effects are at full strength).
+const KEEPER_BAND: (f32, f32) = (STAMP_FROM, 0.8);
+
+/// The elder that carries a realm's signature power on its rim and pays the ward against it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Keeper {
+    pub sector: SectorId,
+    pub archetype: Archetype,
+    pub power: Power,
+}
+
+thread_local! {
+    static KEEPERS: RefCell<HashMap<(u64, u64, u64), Option<SectorId>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// The rim sector of the realm of `c` that holds its keeper: walking out from the realm's point
+/// along hashed headings, the first sector of the realm whose intensity has fallen into the rim
+/// band. Pure; None for a realm with no keeper row or none that reaches the band.
+fn keeper_site(seed: u64, c: Core) -> Option<SectorId> {
+    c.kind.spec().keeper?;
+    let memo = (seed, c.key, crate::simulation::tuning_gen::key());
+    if let Some(hit) = KEEPERS.with(|k| k.borrow().get(&memo).copied()) {
+        return hit;
+    }
+    let tg = active();
+    let (point, _, _) = cell_point(seed, c.cell.0, c.cell.1);
+    let step_limit = (tg.gen_realm_realm_cell + tg.gen_realm_realm_weight) as i32 + 8;
+    let mut found = None;
+    'headings: for attempt in 0..12 {
+        let h = hash2(c.key ^ KEEPER_SALT, attempt, 7);
+        let angle = (h & 0xFFFF) as f32 / 65_536.0 * std::f32::consts::TAU;
+        let dir = Vec2::from_angle(angle);
+        for r in 0..=step_limit {
+            let p = point + dir * r as f32;
+            let id = SectorId {
+                x: p.x.round() as i32,
+                y: p.y.round() as i32,
+            };
+            let here = core(seed, id);
+            if here.key != c.key {
+                continue;
+            }
+            if here.intensity <= KEEPER_BAND.1 {
+                if here.intensity >= KEEPER_BAND.0
+                    && crate::range::ring(id) >= active().gen_apex_apex_ring
+                {
+                    found = Some(id);
+                    break 'headings;
+                }
+                // The band was jumped or the far ramp keeps it low: try another heading.
+                continue 'headings;
+            }
+        }
+    }
+    KEEPERS.with(|k| {
+        let mut k = k.borrow_mut();
+        if k.len() > 4096 {
+            k.clear();
+        }
+        k.insert(memo, found);
+    });
+    found
+}
+
+/// The keeper of the realm that sector `id` lies in, wherever the keeper stands. None in the
+/// Cradle and in realms without one.
+pub fn keeper_of(seed: u64, id: SectorId) -> Option<Keeper> {
+    let c = core(seed, id);
+    let (archetype, power) = c.kind.spec().keeper?;
+    Some(Keeper {
+        sector: keeper_site(seed, c)?,
+        archetype,
+        power,
+    })
+}
+
+/// The keeper standing in sector `id` itself, if it is the realm's keeper site.
+pub fn keeper_at(seed: u64, id: SectorId) -> Option<Keeper> {
+    keeper_of(seed, id).filter(|k| k.sector == id)
 }
 
 /// A realm as the rest of the game sees it: the one view-model every system reads.
@@ -809,6 +977,16 @@ impl Realm {
                 Some((label, weight.abs(), text))
             })
             .collect();
+        for power in Power::ALL {
+            let delta = self.effects.affinity.weight(power) - 1.0;
+            if delta.abs() >= tg.gen_realm_shown_at {
+                out.push((
+                    power.carriers(),
+                    delta.abs(),
+                    format!("{:+.0}%", delta * 100.0),
+                ));
+            }
+        }
         out.sort_by(|a, b| b.1.total_cmp(&a.1));
         out.into_iter().map(|(l, _, t)| (l, t)).collect()
     }
@@ -827,9 +1005,7 @@ impl Realm {
         if matches!(g.social, Social::School | Social::Brood) {
             w *= e.swarms;
         }
-        if carries_jam(g) {
-            w *= e.jammers;
-        }
+        w *= e.affinity.of_genome(g);
         w
     }
 
@@ -1057,7 +1233,11 @@ mod tests {
         let veil = RealmKind::by_id("veil").unwrap().spec().effects;
         assert!(veil.weapon_range < 0.8 && veil.sensor < 0.8);
         let dead = RealmKind::by_id("dead_reach").unwrap().spec().effects;
-        assert!(dead.jammers > 2.0 && dead.fizzle > 0.0 && dead.fizzle <= MAX_FIZZLE);
+        assert!(
+            dead.affinity.weight(Power::Emp) > 2.0
+                && dead.fizzle > 0.0
+                && dead.fizzle <= MAX_FIZZLE
+        );
         let crush = RealmKind::by_id("crush").unwrap().spec().effects;
         assert!(crush.gravity > 1.3 && crush.wells > 1.5);
         let iron = RealmKind::by_id("iron_tide").unwrap().spec().effects;
@@ -1411,5 +1591,60 @@ mod tests {
                 "{axis:?} is never favoured"
             );
         }
+    }
+
+    /// A keeper stands on the rim of every realm that has a keeper row, below the lock core,
+    /// once per realm, and never in the Cradle (the HOME golden is untouched).
+    #[test]
+    fn a_keeper_stands_on_each_rim_outside_the_lock() {
+        let mut found: HashMap<u64, SectorId> = HashMap::new();
+        let mut kinds: HashSet<u8> = HashSet::new();
+        for id in sectors(520, 4) {
+            let Some(k) = keeper_of(SEED, id) else {
+                assert!(
+                    realm(SEED, id).kind == RealmKind::CRADLE
+                        || realm(SEED, id).spec().keeper.is_none()
+                        || keeper_site(SEED, core(SEED, id)).is_none()
+                );
+                continue;
+            };
+            let here = realm(SEED, id);
+            assert_ne!(here.kind, RealmKind::CRADLE);
+            assert_eq!(Some((k.archetype, k.power)), here.spec().keeper);
+            let site = realm(SEED, k.sector);
+            assert_eq!(site.key, here.key, "the keeper is in its own realm");
+            assert!(
+                (KEEPER_BAND.0..=KEEPER_BAND.1).contains(&site.intensity),
+                "{} {}",
+                site.name,
+                site.intensity
+            );
+            assert!(site.intensity < 0.85, "the key is outside the lock");
+            assert_eq!(keeper_at(SEED, k.sector), Some(k));
+            let prior = found.insert(here.key, k.sector);
+            assert!(prior.is_none_or(|p| p == k.sector), "one keeper per realm");
+            kinds.insert(here.kind.0);
+        }
+        assert!(kinds.len() >= 5, "{} realm kinds with keepers", kinds.len());
+        for id in sectors(14, 1) {
+            assert!(keeper_of(SEED, id).is_none());
+        }
+    }
+
+    /// Affinity makes the signature power common in its realm, and exactly neutral at HOME.
+    #[test]
+    fn realms_favour_their_signature_powers() {
+        for spec in &CATALOG {
+            if let Some((_, power)) = spec.keeper {
+                assert!(
+                    spec.effects.affinity.weight(power) > 1.0 || spec.stamps.contains(&power),
+                    "{} keeper power {power:?} is not common",
+                    spec.id
+                );
+            }
+        }
+        assert_eq!(CATALOG[0].effects.affinity, Affinity::NEUTRAL);
+        let veil = RealmKind::by_id("veil").unwrap().spec();
+        assert!(veil.effects.affinity.weight(Power::Glare) > 2.0);
     }
 }

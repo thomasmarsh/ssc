@@ -498,6 +498,34 @@ impl Power {
         }
     }
 
+    /// The realm detail line for how common this power's carriers are ("EMP CARRIERS").
+    pub fn carriers(self) -> &'static str {
+        match self {
+            Self::Phase => "PHASE CARRIERS",
+            Self::Repel => "REPEL CARRIERS",
+            Self::Warp => "WARP CARRIERS",
+            Self::Lens => "LENS CARRIERS",
+            Self::Blink => "BLINK CARRIERS",
+            Self::Bypass => "BYPASS CARRIERS",
+            Self::Emp => "EMP CARRIERS",
+            Self::Glare => "GLARE CARRIERS",
+            Self::Mimic => "MIMIC CARRIERS",
+            Self::Latch => "LATCH CARRIERS",
+            Self::Symbiote => "SYMBIOTE CARRIERS",
+            Self::Cloud => "CLOUD CARRIERS",
+            Self::Devour => "DEVOUR CARRIERS",
+            Self::Weave => "WEAVE CARRIERS",
+            Self::Song => "SONG CARRIERS",
+            Self::Dim => "DIM CARRIERS",
+            Self::Rift => "RIFT CARRIERS",
+            Self::Sling => "SLING CARRIERS",
+            Self::Rune => "RUNE CARRIERS",
+            Self::Split => "SPLIT CARRIERS",
+            Self::Confuse => "CONFUSE CARRIERS",
+            Self::Engulf => "ENGULF CARRIERS",
+        }
+    }
+
     /// The bestiary's name for a typical carrier.
     pub fn creature(self) -> &'static str {
         match self {

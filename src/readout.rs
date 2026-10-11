@@ -58,6 +58,9 @@ pub struct AreaProfile {
     pub gate_burst: [f32; CHANNELS],
     pub shooters: Vec<Shooter>,
     pub keepers: Vec<Keeper>,
+    /// The keeper of the realm this sector lies in, wherever it stands (docs 4.2): the one
+    /// elder whose slaying pays the realm's ward.
+    pub realm_keeper: Option<crate::realm::Keeper>,
 }
 
 type Memo = Mutex<HashMap<(u64, i32, i32), Arc<AreaProfile>>>;
@@ -140,6 +143,7 @@ impl AreaProfile {
             gate_burst: report.gate_burst,
             shooters,
             keepers,
+            realm_keeper: crate::realm::keeper_of(seed, sector),
         }
     }
 
@@ -652,9 +656,50 @@ fn need_line(
     }
 }
 
+/// The eight-way heading of a step (north is +y), by angle.
+fn heading(dx: i32, dy: i32) -> Bearing {
+    const ORDER: [Bearing; 8] = [
+        Bearing::East,
+        Bearing::NorthEast,
+        Bearing::North,
+        Bearing::NorthWest,
+        Bearing::West,
+        Bearing::SouthWest,
+        Bearing::South,
+        Bearing::SouthEast,
+    ];
+    let angle = (dy as f32).atan2(dx as f32);
+    let octant = (angle / std::f32::consts::FRAC_PI_4).round() as i32;
+    ORDER[octant.rem_euclid(8) as usize]
+}
+
 /// Where the ward of a missing channel is held, from the elders the area shows.
 fn keeper_hint(profile: &AreaProfile, needs: &[NeedLine]) -> Option<String> {
     for n in needs.iter().filter(|n| !n.met()) {
+        if let Some(k) = profile.realm_keeper {
+            let organ = organs::harvestable(k.power).find(|kind| {
+                organ_covers(kind.organ)
+                    .iter()
+                    .any(|c| c.channel == n.channel && c.max >= 2)
+            });
+            if let Some(kind) = organ {
+                let (dx, dy) = (k.sector.x - profile.sector.x, k.sector.y - profile.sector.y);
+                let place = match dx.abs().max(dy.abs()) {
+                    0 => "in this sector".to_string(),
+                    d => format!(
+                        "{d} sector{} {}",
+                        if d == 1 { "" } else { "s" },
+                        heading(dx, dy).label()
+                    ),
+                };
+                return Some(format!(
+                    "KEEPER: the {} carrying {} stands {place}; slain, it leaves a {} strain",
+                    k.archetype.label().to_uppercase(),
+                    format!("{:?}", k.power).to_uppercase(),
+                    kind.label
+                ));
+            }
+        }
         for k in &profile.keepers {
             let answers = organ_covers(k.organ)
                 .iter()
@@ -685,6 +730,7 @@ mod tests {
             gate_burst: burst,
             shooters: Vec::new(),
             keepers: Vec::new(),
+            realm_keeper: None,
         }
     }
 
@@ -781,5 +827,29 @@ mod tests {
         assert!(a.needs(&DEFAULT).iter().all(|&n| n == 0));
         let r = AreaReadout::read(&a, &Loadout::default(), 1.0, &DEFAULT, true);
         assert_eq!(r.verdict, Verdict::Open);
+    }
+
+    #[test]
+    fn the_key_names_the_realm_keeper_and_its_heading() {
+        let mut p = profile(shares(Channel::Jam, 0.5), [0.0; CHANNELS]);
+        p.realm_keeper = Some(crate::realm::Keeper {
+            sector: SectorId { x: 5, y: 17 },
+            archetype: crate::apex::Archetype::Maelstrom,
+            power: Power::Emp,
+        });
+        let line = NeedLine {
+            channel: Channel::Jam,
+            need: 3,
+            have: 0,
+            kind: Kind::Gate,
+            text: String::new(),
+            why: "",
+            answer: "",
+            synergy: None,
+        };
+        let hint = keeper_hint(&p, &[line]).expect("a keeper hint");
+        assert!(hint.contains("MAELSTROM") && hint.contains("EMP"), "{hint}");
+        assert!(hint.contains("12 sectors NORTH"), "{hint}");
+        assert!(hint.contains("FARADAY"), "{hint}");
     }
 }

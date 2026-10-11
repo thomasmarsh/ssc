@@ -111,6 +111,21 @@ impl Archetype {
         )
     }
 
+    /// The verb that opens this elder's phases (docs/CAPABILITIES.md 4.3): the one thing, beside
+    /// damage, that gets the fight past a gate. Plain words, said when the fight stalls.
+    pub fn verb(self) -> &'static str {
+        match self {
+            Self::Juggernaut => "BAIT ITS CHARGE INTO A ROCK",
+            Self::Queen => "BREAK THE BROOD: KILL ITS ESCORTS",
+            Self::Lasher => "CUT ITS CORDS: SHOOT, DASH OR SHEAR THEM",
+            Self::Phantom => "PARRY OR DASH WHEN ITS BLINK LANDS",
+            Self::Bulwark => "HIT ITS REAR ARC: FLANK IT",
+            Self::Hunter => "LURE IT INTO A MINE OR A BLAST",
+            Self::Maelstrom => "LURE IT INTO A GRAVITY WELL",
+            Self::Warden => "BREAK ITS BUBBLE WITH CLOSE SHOTS",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Juggernaut => "juggernaut",
@@ -322,6 +337,10 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 
 /// Whether a sector holds an apex, and of what rank. Pure.
 pub fn rank(seed: u64, id: SectorId) -> Option<Rank> {
+    // The keeper of a realm stands on its rim, always a major elder (docs/CAPABILITIES.md 4.2).
+    if crate::realm::keeper_at(seed, id).is_some() {
+        return Some(Rank::Major);
+    }
     let ring = crate::range::ring(id);
     let tg = active();
     let (rank, chance) = if ring >= tg.gen_apex_apex_ring {
@@ -339,6 +358,9 @@ pub fn rank(seed: u64, id: SectorId) -> Option<Rank> {
 /// The kind of fight the sector's apex would be, from the sector hash weighted by its biome.
 /// Pure (and defined for any sector, apex or not).
 pub fn archetype(seed: u64, id: SectorId) -> Archetype {
+    if let Some(keeper) = crate::realm::keeper_at(seed, id) {
+        return keeper.archetype;
+    }
     let country = biome(seed, id).kind;
     let realm = crate::realm::weighting(seed, id);
     let weight = |a: Archetype| a.weight(country) * realm.archetype_weight(a);
@@ -518,6 +540,27 @@ fn stamp_realm(g: &mut Genome, seed: u64, id: SectorId, rank: Rank, archetype: A
     }
 }
 
+/// The keeper's power, set on its genome without fail where the genome can wear it (the realm's
+/// signature, so the ward it pays is the answer to the realm). The power goes beside the
+/// archetype's own where it fits, else replaces them.
+fn stamp_keeper(g: &mut Genome, seed: u64, id: SectorId) {
+    let Some(keeper) = crate::realm::keeper_at(seed, id) else {
+        return;
+    };
+    let strength = active().gen_apex_realm_stamp_strength;
+    if keeper.power.active(g) {
+        return;
+    }
+    let before = *g;
+    if crate::power::stamp(g, keeper.power, strength) {
+        return;
+    }
+    g.clear_powers();
+    if !crate::power::stamp(g, keeper.power, strength) {
+        *g = before;
+    }
+}
+
 /// The elder's animal body: its source species' silhouette (plan seed and archetype come from
 /// the species lineage, so every elder grown from one species wears the same shape), made
 /// misshapen, with the genome's `radius` and `hull` scaled by `ELDER_SCALE`. The specimen's own
@@ -567,11 +610,18 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
     let Some(rank) = rank(seed, id) else {
         return;
     };
-    if pool.entries.is_empty() {
+    // A realm's keeper is never lost to an empty niche or a full sector: it grows from a bogey
+    // where nothing lives, and may stand over the body budget (one elder).
+    let keeper = crate::realm::keeper_at(seed, id).is_some();
+    if pool.entries.is_empty() && !keeper {
         return;
     }
     let mut rng = Rng::new(hash2(seed ^ APEX_SALT ^ 0xA5, id.x, id.y));
-    let source = pool.any(&mut rng);
+    let source = if pool.entries.is_empty() {
+        Species::bogey()
+    } else {
+        pool.any(&mut rng)
+    };
     let mut genome = elder(source.genome, &mut rng, rank, archetype(seed, id));
     // The realm's signature first, then the archetype's own jam stamps over it (the stronger
     // power wins where both land).
@@ -582,6 +632,7 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
         archetype(seed, id),
         crate::range::ring(id),
     );
+    stamp_keeper(&mut genome, seed, id);
     // The animal body (see `body`), scaled up. A sector too full for it keeps the old single
     // body, so which sectors hold an apex never changes with the body.
     let single = genome;
@@ -597,7 +648,7 @@ pub fn spawn(seed: u64, id: SectorId, pool: &GenePool, genes: &Phenotype, out: &
     }
     if SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + genome.parts() {
         genome = single;
-        if SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + genome.parts() {
+        if !keeper && SECTOR_BODY_BUDGET <= crate::world::bodies_used(out) + genome.parts() {
             return;
         }
     }

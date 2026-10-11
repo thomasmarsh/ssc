@@ -391,6 +391,9 @@ fn hud_lines(game: &Game) -> String {
             if apex.enraged { "   ENRAGED" } else { "" },
             if apex.alert { "   HUNTING YOU" } else { "" }
         ));
+        if let Some(verb) = apex.gate {
+            text.push_str(&format!("\n  HELD  DAMAGE ALONE STALLS: {verb}"));
+        }
         let hardened: Vec<String> = ssc::simulation::arsenal::Family::ALL
             .into_iter()
             .zip(apex.resist)

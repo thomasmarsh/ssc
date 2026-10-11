@@ -233,6 +233,12 @@ Eleven organs joined the table. The price of a ward is its cover (the model cuts
 
 `threat_baseline.txt` is unchanged at its rounding (no bless). Goldens: `home_idle`, `ring3_busy` and `civ_city` moved only in the `ship` sub-digest, because `Organs` grew (15 saved slots and a `motes` field in its `Debug` text) and the ship digest hashes it; behavior is identical. `long_busy` moved in every sub-digest from tick 600 for a deliberate reason: its maxed kit grants every organ (`dev_grant_organs`) and the three open slots now fit organs with real effects. All four were re-pinned with `simperf --goldens`.
 
+### 3.11 The K5 keepers and realm affinity (CAPABILITIES 4.7; GENERATOR_VERSION 37)
+
+Reasons for the bump: realm effects carry a weight per power (`Effects.affinity` replaces `jammers`), so the species mix of seven realms moves toward their signature powers (Dead Reach is unchanged at 4.0 for Emp, Glare and Confuse), and eight realms place a keeper elder on their rim. Everything else a sector holds is drawn as before, and the keeper is appended last (or becomes the sector's elder), so no earlier spawn index moves; HOME and the whole Cradle are exactly neutral and the HOME golden in `src/world.rs` did not change.
+
+Goldens: the four scenario goldens moved only in the `world` sub-digest in every row, because the realms state is hashed through `Debug` and `Effects` now prints the affinity array; behavior is identical (the near-HOME scenarios never leave the Cradle). The tuning window digest was re-pinned for the same reason. `threat_baseline.txt` did not move at its rounding (the baseline samples near rings and the pinned master seed; the realm table is outside it), so there was no bless. Elder verb gates are not priced in the threat model on purpose: they change what the fight needs, not how long a perfect player takes (CAPABILITIES 4.3).
+
 ## 4. Diagnosis: why it swings between trivial and lethal
 
 1. **Player power saturates, enemy burst does not.** `Stats::compute` clamps every stat (hull x8, shield x8, damage x8, armor 5x, recharge x6), so a maxed kit stops growing near ring 20 (3.1, `maxed d20 = maxed d40`). Enemy burst is `volley * shot * sharpness` with sharpness linear and volley up to 160 and no ceiling anywhere (apex growth is capped at 3x, creature volleys are not).

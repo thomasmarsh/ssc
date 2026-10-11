@@ -320,6 +320,21 @@ macro_rules! groups {
             elder_guard_cos: f32 = 0.26, 0.0, 1.0, Ratio;
             /// Bulwark: share of damage that gets through the armoured front.
             elder_guard_leak: f32 = 0.12, 0.0, 1.0, Ratio;
+            /// Elder verb gates: the share of its hull an elder cannot be worn below until the
+            /// first verb is done (the bulwark's rear arc, the queen's brood broken, ...).
+            elder_gate_first: f32 = 0.67, 0.0, 1.0, Ratio;
+            /// The share of its hull it cannot be worn below until the second verb is done.
+            elder_gate_second: f32 = 0.40, 0.0, 1.0, Ratio;
+            /// Seconds an elder stands stunned after its verb lands (a juggernaut into a rock).
+            elder_stun: f32 = 2.0, 0.0, 20.0, Seconds;
+            /// Bulwark: share of its pool that must come through the rear arc to count as the verb.
+            elder_rear_share: f32 = 0.05, 0.0, 1.0, Ratio;
+            /// Phantom: seconds after a blink lands in which a parry or a dash answers it.
+            elder_landing_window: f32 = 0.6, 0.0, 10.0, Seconds;
+            /// Maelstrom: how many core radii from a gravity well counts as lured into it.
+            elder_well_reach: f32 = 2.0, 0.0, 20.0, Multiplier;
+            /// Seconds before the same elder can count another verb.
+            elder_verb_rest: f32 = 1.5, 0.0, 30.0, Seconds;
         }
 
         group "brain" {

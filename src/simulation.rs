@@ -1421,6 +1421,7 @@ impl Game {
         let mut piths: Vec<Vec2> = Vec::new();
         let mut family_hits: Vec<(u64, arsenal::Family, f32, f32)> = Vec::new();
         let mut bubble_hits: Vec<(u64, f32)> = Vec::new();
+        let mut rear_hits: Vec<(u64, f32, f32)> = Vec::new();
         // Seekers home on hostile creatures and bases; gather them only if any are in flight.
         let targets: Vec<Vec2> = if self.bullets.iter().any(|b| b.friendly && b.homing > 0) {
             self.bodies
@@ -1740,6 +1741,13 @@ impl Game {
                         }
                         _ => (1.0, None, false),
                     };
+                    let rear = bullet.friendly
+                        && apexes::rear_hit(
+                            &self.apexes.info,
+                            &self.bodies[index],
+                            bullet.velocity,
+                            &self.tune,
+                        );
                     let body = &mut self.bodies[index];
                     if dashing && !bullet.friendly && body.kind == BodyKind::Player {
                         grazes.push(bullet.position);
@@ -1798,6 +1806,9 @@ impl Game {
                             dealt,
                             body.max_health + body.max_shield,
                         ));
+                    }
+                    if rear && dealt > 0.0 {
+                        rear_hits.push((body.id, dealt, body.max_health + body.max_shield));
                     }
                     if bubble_close {
                         bubble_hits.push((body.id, bullet.damage * boost * guarded * reach));
@@ -1873,6 +1884,9 @@ impl Game {
         }
         for (id, amount) in bubble_hits {
             self.bubble_hit(id, amount);
+        }
+        for (id, dealt, pool) in rear_hits {
+            self.apex_rear(id, dealt, pool);
         }
         if needles_snagged {
             self.notify_once(

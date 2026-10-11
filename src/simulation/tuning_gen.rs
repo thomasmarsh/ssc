@@ -1089,9 +1089,11 @@ mod tests {
         hash
     }
 
-    /// The window digest measured with the constants as plain consts, before the registry
-    /// (slice C3a). Defaults must reproduce it exactly: same draws, same order, no version bump.
-    const PRE_REGISTRY_WINDOW: u64 = 0x15c3_dd49_08b7_87d9;
+    /// The window digest of the default tuning. It was measured with the constants as plain
+    /// consts before the registry (slice C3a, 0x15c3_dd49_08b7_87d9) and re-pinned at
+    /// GENERATOR_VERSION 37 (CAPABILITIES K5: the realm effects hold per-power affinities, so
+    /// the realm's debug text in the window changed).
+    const PRE_REGISTRY_WINDOW: u64 = 0x8152_16d9_b3d4_56f3;
 
     #[test]
     fn default_tuning_generates_the_pre_registry_world() {

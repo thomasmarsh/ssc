@@ -82,6 +82,33 @@ pub struct ApexState {
     bubble_hurt: f32,
     bubble_down: f32,
     bubble_rest: f32,
+    /// Verbs done, at most two (one per gate, `tuning::elder_gate_first` and `_second`), and the
+    /// seconds before the next one can count.
+    pub verbs: u8,
+    verb_rest: f32,
+    /// Seconds it stands stunned (a juggernaut that rammed a rock).
+    stun: f32,
+    /// A queen has had a retinue alive (so an empty one is a broken brood).
+    brood: bool,
+    /// Cords it owned last step (a lasher's cuts are the drop).
+    cords: usize,
+    /// Damage that came through a bulwark's rear arc since the last verb.
+    rear: f32,
+    /// Whether the gate it is held at has been announced.
+    held: bool,
+}
+
+impl ApexState {
+    /// Counts one verb done if the rest has passed: true when it counted.
+    fn verb(&mut self, rest: f32) -> bool {
+        if self.verb_rest > 0.0 || self.verbs >= 2 {
+            return false;
+        }
+        self.verbs += 1;
+        self.verb_rest = rest;
+        self.held = false;
+        true
+    }
 }
 
 // ---- tuning: phases and signature moves ------------------------------------------------
@@ -116,6 +143,34 @@ pub(super) fn guard(
     } else {
         1.0
     }
+}
+
+/// Whether a friendly shot with `velocity` came through a bulwark's rear arc (the mirror of
+/// `guard`'s front): the verb that opens the bulwark's gates.
+pub(super) fn rear_hit(
+    apexes: &BTreeMap<(SectorId, u32), ApexInfo>,
+    body: &Body,
+    velocity: Vec2,
+    tune: &Tunables,
+) -> bool {
+    let Some(info) = body.origin.and_then(|key| apexes.get(&key)) else {
+        return false;
+    };
+    if info.archetype != Archetype::Bulwark || body.follower {
+        return false;
+    }
+    let from_shot = -velocity.normalize_or_zero();
+    Vec2::from_angle(body.angle).dot(from_shot) < -tune.elder_guard_cos
+}
+
+/// Whether `body` is the head of a hunter elder (what a mine or a blast lures).
+pub(super) fn is_hunter(apexes: &BTreeMap<(SectorId, u32), ApexInfo>, body: &Body) -> bool {
+    !body.follower
+        && body.kind == BodyKind::Creature
+        && body
+            .origin
+            .and_then(|key| apexes.get(&key))
+            .is_some_and(|i| i.archetype == Archetype::Hunter)
 }
 
 /// Whether `body` trails an elder's head (see `Game::is_apex_part`). Friendly fire, blasts
@@ -171,6 +226,8 @@ pub struct ApexReport {
     pub resist: [f32; 4],
     /// The bubble's integrity from 1 (whole) to 0 (broken), None for an elder without one.
     pub bubble: Option<f32>,
+    /// The verb the fight is stalled on, when damage alone has reached a gate (see `gate_of`).
+    pub gate: Option<&'static str>,
 }
 
 impl Game {
@@ -259,6 +316,18 @@ impl Game {
             }
             let enraged = state.enraged;
             state.clock -= dt;
+            state.verb_rest = (state.verb_rest - dt).max(0.0);
+            self.elder_verbs(index, id, archetype, &mut state, ship);
+            if state.stun > 0.0 {
+                // Stood stunned: no move, no drift, until it has shaken it off.
+                state.stun -= dt;
+                let body = &mut self.bodies[index];
+                body.velocity = Vec2::ZERO;
+                state.mv = Move::Idle;
+                self.hold_gate(index, &mut state);
+                self.apexes.state.insert(id, state);
+                continue;
+            }
             Self::mend_bubble(&mut state, dt, &self.tune);
             self.closers(index, &mut state, dt, ship, archetype, alert, enraged);
             match archetype {
@@ -277,7 +346,157 @@ impl Game {
                 | Archetype::Hunter
                 | Archetype::Warden => {}
             }
+            self.hold_gate(index, &mut state);
             self.apexes.state.insert(id, state);
+        }
+    }
+
+    /// The share of hull an elder with `verbs` done cannot be worn below, if a gate stands.
+    fn gate_floor(verbs: u8, tune: &Tunables) -> Option<f32> {
+        match verbs {
+            0 => Some(tune.elder_gate_first),
+            1 => Some(tune.elder_gate_second),
+            _ => None,
+        }
+    }
+
+    /// The verb gates: damage alone wears an elder down to a share of its hull and no further
+    /// until the verb of its archetype is done (`Archetype::verb`), so a bigger gun is never
+    /// the whole answer. The stall says what to do, once per gate.
+    fn hold_gate(&mut self, index: usize, state: &mut ApexState) {
+        let Some(share) = Self::gate_floor(state.verbs, &self.tune) else {
+            return;
+        };
+        let body = &mut self.bodies[index];
+        let floor = body.max_health * share;
+        if body.health > 0.0 && body.health < floor {
+            body.health = floor;
+            if !state.held {
+                state.held = true;
+                let verb = self
+                    .apex_of(&self.bodies[index])
+                    .map(|i| (i.name.clone(), i.archetype.verb()));
+                if let Some((name, verb)) = verb {
+                    self.notify(format!("{name} HOLDS  {verb}"), Rarity::Epic);
+                }
+            }
+        }
+    }
+
+    /// The verb an elder's fight is stalled on right now, if damage has met a gate.
+    fn apex_gate(&self, body: &Body) -> Option<&'static str> {
+        let info = self.apex_of(body)?;
+        let state = self.apexes.state.get(&body.id);
+        let verbs = state.map_or(0, |s| s.verbs);
+        let share = Self::gate_floor(verbs, &self.tune)?;
+        (body.health <= body.max_health * share + 1.0).then(|| info.archetype.verb())
+    }
+
+    /// The verbs that are read from the world each step: a juggernaut into a rock, a queen's
+    /// broken brood, a lasher's cut cords, a landing answered by parry or dash, a maelstrom
+    /// lured into a well. The bulwark, hunter and warden verbs come from their hits
+    /// (`apex_rear`, `apex_verb`, `bubble_hit`).
+    fn elder_verbs(
+        &mut self,
+        index: usize,
+        id: u64,
+        archetype: Archetype,
+        state: &mut ApexState,
+        ship: (Vec2, Vec2),
+    ) {
+        let (at, radius) = (self.bodies[index].position, self.bodies[index].radius);
+        let mut done = false;
+        match archetype {
+            Archetype::Juggernaut => {
+                if matches!(state.mv, Move::Charge(..)) {
+                    let hit = self.bodies.iter().any(|b| {
+                        b.active
+                            && b.kind == BodyKind::Asteroid
+                            && b.position.distance(at) < b.radius + radius + 12.0
+                    });
+                    if hit {
+                        state.mv = Move::Idle;
+                        state.stun = self.tune.elder_stun;
+                        state.clock = state.clock.max(self.tune.elder_stun);
+                        self.effect(at, radius * 2.5, 0.6, EffectKind::Explosion);
+                        done = true;
+                    }
+                }
+            }
+            Archetype::Queen => {
+                state
+                    .escorts
+                    .retain(|e| self.bodies.iter().any(|b| b.id == *e && b.health > 0.0));
+                if !state.escorts.is_empty() {
+                    state.brood = true;
+                } else if state.brood {
+                    state.brood = false;
+                    done = true;
+                }
+            }
+            Archetype::Lasher => {
+                let now = self.tethers.iter().filter(|t| t.owner == id).count();
+                if now < state.cords {
+                    done = true;
+                }
+                state.cords = now;
+            }
+            Archetype::Phantom => {
+                let landed = self
+                    .apexes
+                    .power
+                    .get(&id)
+                    .and_then(|p| p.trail)
+                    .is_some_and(|(_, _, age)| age < self.tune.elder_landing_window);
+                if landed
+                    && (self.dashing() || self.parry_active())
+                    && at.distance(ship.0) < radius + 600.0
+                {
+                    done = true;
+                }
+            }
+            Archetype::Maelstrom => {
+                let reach = self.tune.elder_well_reach;
+                let wells: Vec<WellView> = self.wells().collect();
+                done = wells.iter().any(|w| {
+                    w.pose.strength > 0.0
+                        && w.pose.position.distance(at) < w.pose.core * reach + radius
+                });
+            }
+            Archetype::Bulwark | Archetype::Hunter | Archetype::Warden => {}
+        }
+        if done && state.verb(self.tune.elder_verb_rest) {
+            self.say_verb(index);
+        }
+    }
+
+    fn say_verb(&mut self, index: usize) {
+        if let Some(info) = self.apex_of(&self.bodies[index]) {
+            let name = info.name.clone();
+            self.notify(format!("{name} OPENS  ITS GUARD IS DOWN"), Rarity::Epic);
+        }
+    }
+
+    /// An external event did the verb of apex `id` (a mine or a blast on a hunter).
+    pub(super) fn apex_verb(&mut self, id: u64) {
+        let rest = self.tune.elder_verb_rest;
+        let Some(index) = self.bodies.iter().position(|b| b.id == id) else {
+            return;
+        };
+        let state = self.apexes.state.entry(id).or_default();
+        if state.verb(rest) {
+            self.say_verb(index);
+        }
+    }
+
+    /// Damage `dealt` of an elder's `pool` came through a bulwark's rear arc.
+    pub(super) fn apex_rear(&mut self, id: u64, dealt: f32, pool: f32) {
+        let share = self.tune.elder_rear_share;
+        let state = self.apexes.state.entry(id).or_default();
+        state.rear += dealt;
+        if state.rear >= pool.max(1.0) * share {
+            state.rear = 0.0;
+            self.apex_verb(id);
         }
     }
 
@@ -305,6 +524,7 @@ impl Game {
         let pool = (body.max_health + body.max_shield).max(1.0);
         let at = body.position;
         let radius = body.radius;
+        let warden = self.apex_archetype(body) == Some(Archetype::Warden);
         let state = self.apexes.state.entry(id).or_default();
         if state.bubble_down > 0.0 {
             return;
@@ -315,6 +535,9 @@ impl Game {
             state.bubble_down = self.tune.bubble_down;
             self.effect(at, radius * 3.0, 0.7, EffectKind::Explosion);
             self.notify("BUBBLE BROKEN".to_string(), Rarity::Rare);
+            if warden {
+                self.apex_verb(id);
+            }
         }
     }
 
@@ -689,6 +912,7 @@ impl Game {
                 enraged: self.apex_enraged(b),
                 resist: self.resistance_of(b.id).unwrap_or([0.0; 4]),
                 bubble: self.apex_bubble(b),
+                gate: self.apex_gate(b),
             })
             .filter(|r| r.distance <= self.tune.apex_hud_range)
             .min_by(|a, b| a.distance.total_cmp(&b.distance))
@@ -2226,5 +2450,170 @@ mod tests {
                 assert_eq!(crate::apex::has_bubble(SEED, id, a), a == Archetype::Warden);
             }
         }
+    }
+
+    /// Gives the elder `id` its verbs and returns its state.
+    fn gates_done(game: &mut Game, id: u64, verbs: u8) {
+        game.apexes.state.entry(id).or_default().verbs = verbs;
+    }
+
+    #[test]
+    fn every_archetype_has_its_own_verb() {
+        let verbs: std::collections::HashSet<&str> =
+            Archetype::ALL.iter().map(|a| a.verb()).collect();
+        assert_eq!(verbs.len(), Archetype::ALL.len());
+    }
+
+    #[test]
+    fn damage_alone_stalls_at_a_gate_until_the_verb_is_done() {
+        let (mut game, spot, id) = arena(Archetype::Bulwark, 900.0);
+        let hull = apex_body(&game, id).max_health;
+        let (first, second) = (
+            hull * DEFAULT_TUNING.elder_gate_first,
+            hull * DEFAULT_TUNING.elder_gate_second,
+        );
+        game.notices.clear();
+        let wear = |game: &mut Game, to: f32| {
+            game.bodies.iter_mut().find(|b| b.id == id).unwrap().health = to;
+            set_player(game, spot, Vec2::ZERO);
+            game.step(DT, Input::default());
+            apex_body(game, id).health
+        };
+        let held = wear(&mut game, hull * 0.5);
+        assert!((held - first).abs() < 1.0, "held at {held}, floor {first}");
+        let report = game.apex_report().expect("the elder is in range");
+        assert_eq!(report.gate, Some(Archetype::Bulwark.verb()));
+        assert!(
+            game.notices.iter().any(|n| n.text.contains("HOLDS")),
+            "the stall says what to do"
+        );
+        // One verb lowers the gate to the second floor, a second opens the fight.
+        gates_done(&mut game, id, 1);
+        let held = wear(&mut game, hull * 0.38);
+        assert!(
+            (held - second).abs() < 1.0,
+            "held at {held}, floor {second}"
+        );
+        gates_done(&mut game, id, 2);
+        let free = wear(&mut game, hull * 0.38);
+        assert!(free < second, "no gate left: {free}");
+        assert!(game.apex_report().is_some_and(|r| r.gate.is_none()));
+    }
+
+    #[test]
+    fn a_bulwarks_rear_arc_is_its_verb() {
+        let (mut game, _, id) = arena(Archetype::Bulwark, 900.0);
+        let pool = {
+            let b = apex_body(&game, id);
+            b.max_health + b.max_shield
+        };
+        game.apex_rear(id, pool * 0.01, pool);
+        assert_eq!(game.apexes.state[&id].verbs, 0, "a scratch is not a flank");
+        game.apex_rear(id, pool * 0.05, pool);
+        assert_eq!(game.apexes.state[&id].verbs, 1);
+        let body = apex_body(&game, id);
+        let behind = -Vec2::from_angle(body.angle);
+        assert!(super::rear_hit(
+            &game.apexes.info,
+            body,
+            -behind,
+            &game.tune
+        ));
+        assert!(!super::rear_hit(
+            &game.apexes.info,
+            body,
+            behind,
+            &game.tune
+        ));
+    }
+
+    #[test]
+    fn a_hunter_is_lured_by_a_blast_and_a_warden_by_a_broken_bubble() {
+        let (mut game, _, id) = arena(Archetype::Hunter, 900.0);
+        let at = apex_body(&game, id).position;
+        game.explode(at, 200.0, 1.0, true);
+        assert_eq!(game.apexes.state[&id].verbs, 1);
+        let (mut game, _, id) = arena(Archetype::Warden, 900.0);
+        let pool = {
+            let b = apex_body(&game, id);
+            b.max_health + b.max_shield
+        };
+        game.bubble_hit(id, pool);
+        assert!(game.apexes.state[&id].bubble_down > 0.0);
+        assert_eq!(game.apexes.state[&id].verbs, 1);
+    }
+
+    #[test]
+    fn a_juggernaut_that_rams_a_rock_is_stunned_and_a_queen_breaks_her_brood() {
+        let (mut game, spot, id) = arena(Archetype::Juggernaut, 900.0);
+        let at = apex_body(&game, id).position;
+        crate::simulation::tests::add(&mut game, BodyKind::Asteroid, at + Vec2::new(60.0, 0.0));
+        game.apexes.state.entry(id).or_default().mv = Move::Charge(1.0, Vec2::X);
+        set_player(&mut game, spot, Vec2::ZERO);
+        game.step(DT, Input::default());
+        let state = &game.apexes.state[&id];
+        assert_eq!(state.verbs, 1);
+        assert!(state.stun > 0.0);
+        assert!(matches!(state.mv, Move::Idle), "the charge is over");
+
+        let (mut game, spot, id) = arena(Archetype::Queen, 900.0);
+        for _ in 0..(60.0 / 0.05) as usize {
+            set_player(&mut game, spot, Vec2::ZERO);
+            game.step(0.05, Input::default());
+            if !game.apexes.state[&id].escorts.is_empty() {
+                break;
+            }
+        }
+        set_player(&mut game, spot, Vec2::ZERO);
+        game.step(DT, Input::default());
+        let escorts = game.apexes.state[&id].escorts.clone();
+        assert!(!escorts.is_empty(), "a retinue was raised");
+        for body in game.bodies.iter_mut().filter(|b| escorts.contains(&b.id)) {
+            body.health = 0.0;
+        }
+        game.remove_destroyed();
+        set_player(&mut game, spot, Vec2::ZERO);
+        game.step(DT, Input::default());
+        assert_eq!(game.apexes.state[&id].verbs, 1, "the brood is broken");
+    }
+
+    /// The keeper of every realm that has one stands on its rim, carries the realm's signature
+    /// power, is a major elder of the keeper archetype, and pays the organ that answers it.
+    #[test]
+    fn keepers_carry_the_realm_power_and_pay_its_ward() {
+        let mut seen = std::collections::HashSet::new();
+        for seed in [SEED, 7] {
+            for x in (-600..=600).step_by(6) {
+                for y in (-600..=600).step_by(6) {
+                    let id = SectorId { x, y };
+                    let Some(k) = crate::realm::keeper_of(seed, id) else {
+                        continue;
+                    };
+                    if !seen.insert((seed, k.sector)) {
+                        continue;
+                    }
+                    assert_eq!(crate::apex::rank(seed, k.sector), Some(Rank::Major));
+                    assert_eq!(crate::apex::archetype(seed, k.sector), k.archetype);
+                    let spawns = world::generate(seed, k.sector);
+                    let elder = spawns
+                        .iter()
+                        .find(|s| s.apex.is_some() && s.rooted.is_none())
+                        .expect("the keeper elder is spawned");
+                    assert!(
+                        k.power.active(&elder.species.unwrap().genome),
+                        "{:?} keeper at {:?} lacks {:?}",
+                        k.archetype,
+                        k.sector,
+                        k.power
+                    );
+                    assert!(
+                        organs::harvestable(k.power).next().is_some(),
+                        "{:?} pays no organ",
+                        k.power
+                    );
+                }
+            }
+        }
+        assert!(seen.len() >= 8, "{} keepers found", seen.len());
     }
 }

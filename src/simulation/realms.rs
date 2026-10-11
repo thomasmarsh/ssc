@@ -352,12 +352,12 @@ mod tests {
         assert!(lines[0].starts_with("REALM  ") && lines[0].ends_with("SHROUD"));
         assert_eq!(lines[1], "THE VEIL");
         assert!(lines[2].contains("RANGE") && lines[2].contains("(DEFENSE)"));
+        let joined = lines.join("\n");
         assert!(
-            lines
-                .iter()
-                .any(|l| l.contains("WEAPON RANGE -35%") && l.contains("SENSORS -45%")),
+            joined.contains("WEAPON RANGE -35%") && joined.contains("SENSORS -45%"),
             "{lines:?}"
         );
+        assert!(joined.contains("GLARE CARRIERS +200%"), "{lines:?}");
     }
 
     #[test]
