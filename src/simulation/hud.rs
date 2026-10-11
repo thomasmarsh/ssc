@@ -203,19 +203,23 @@ pub enum OrganState {
 
 /// How many threat pips light: none with nothing around, else the verdict ladder (strong 1,
 /// even 2 to 3, underpowered 4, outclassed 5), one more when several hostiles are hunting.
-pub fn threat_pips(power: f32, threat: f32, near: usize, hunting: usize) -> u8 {
+pub fn threat_pips(
+    power: f32,
+    threat: f32,
+    near: usize,
+    hunting: usize,
+    tune: &crate::simulation::tuning::Tunables,
+) -> u8 {
     if near == 0 && hunting == 0 {
         return 0;
     }
     let ratio = power / threat.max(0.01).powf(0.8);
-    let base = if ratio < 0.6 {
-        5
-    } else if ratio < 0.85 {
-        4
-    } else if ratio < 1.3 {
-        if ratio < 1.05 { 3 } else { 2 }
-    } else {
-        1
+    let base = match Band::of(ratio, tune) {
+        Band::Outclassed => 5,
+        Band::Underpowered => 4,
+        Band::Even if ratio < 1.05 => 3,
+        Band::Even => 2,
+        Band::Strong | Band::Trivial => 1,
     };
     let crowd = u8::from(hunting >= 4);
     (base + crowd).min(THREAT_PIPS)
@@ -404,7 +408,13 @@ impl Game {
     /// The threat pips for the current surroundings.
     pub fn threat_pips(&self) -> u8 {
         let (near, hunting) = self.pressure();
-        threat_pips(self.power(), self.threat(), near, hunting)
+        threat_pips(self.power(), self.threat(), near, hunting, &self.tune)
+    }
+
+    /// How the ship's power rates against `threat`: the one ladder (`Band::of`), the words the
+    /// details panel shows in place of a ratio.
+    pub fn rate_against(&self, threat: f32) -> Band {
+        Band::of(self.power() / threat.max(0.01).powf(0.8), &self.tune)
     }
 
     /// The chain's multiplier and the share of its window left, while one runs.
@@ -651,6 +661,7 @@ mod tests {
     use super::*;
     use crate::simulation::Input;
     use crate::simulation::tests::{DT, empty_game};
+    use crate::simulation::tuning::DEFAULT as DEFAULT_TUNING;
     use bevy::prelude::Vec2;
 
     #[test]
@@ -699,16 +710,38 @@ mod tests {
 
     #[test]
     fn threat_pips_follow_the_verdict_ladder_and_vanish_in_a_quiet_place() {
-        assert_eq!(threat_pips(1.0, 1.0, 0, 0), 0);
+        assert_eq!(threat_pips(1.0, 1.0, 0, 0, &DEFAULT_TUNING), 0);
         // Verdict thresholds at threat 1: ratio is the power.
-        assert_eq!(threat_pips(0.5, 1.0, 3, 0), 5);
-        assert_eq!(threat_pips(0.7, 1.0, 3, 0), 4);
-        assert_eq!(threat_pips(1.0, 1.0, 3, 0), 3);
-        assert_eq!(threat_pips(1.2, 1.0, 3, 0), 2);
-        assert_eq!(threat_pips(2.0, 1.0, 3, 0), 1);
+        assert_eq!(threat_pips(0.5, 1.0, 3, 0, &DEFAULT_TUNING), 5);
+        assert_eq!(threat_pips(0.7, 1.0, 3, 0, &DEFAULT_TUNING), 4);
+        assert_eq!(threat_pips(1.0, 1.0, 3, 0, &DEFAULT_TUNING), 3);
+        assert_eq!(threat_pips(1.2, 1.0, 3, 0, &DEFAULT_TUNING), 2);
+        assert_eq!(threat_pips(2.0, 1.0, 3, 0, &DEFAULT_TUNING), 1);
         // A crowd hunting adds one, capped at five.
-        assert_eq!(threat_pips(2.0, 1.0, 0, 5), 2);
-        assert_eq!(threat_pips(0.5, 1.0, 0, 9), 5);
+        assert_eq!(threat_pips(2.0, 1.0, 0, 5, &DEFAULT_TUNING), 2);
+        assert_eq!(threat_pips(0.5, 1.0, 0, 9, &DEFAULT_TUNING), 5);
+    }
+
+    #[test]
+    fn band_of_is_the_only_ladder_and_entry_notices_carry_no_numbers() {
+        let civ = include_str!("civ.rs");
+        assert!(!civ.contains(concat!("pub fn ", "verdict(")));
+        assert!(!civ.contains(concat!("THREAT", " x{")));
+        assert!(include_str!("hud.rs").contains("Band::of(ratio, tune)"));
+        let regions = include_str!("regions.rs");
+        assert!(!regions.contains(concat!("\"AREA", "  ")));
+        assert!(!regions.contains("headline_short"));
+        // Walking into sectors posts no area notice at all.
+        let mut game = empty_game();
+        for x in 0..3 {
+            game.teleport(Vec2::new(x as f32 * 6000.0, 0.0));
+            game.step(DT, Input::default());
+        }
+        for n in &game.notices {
+            for bad in ["LEVEL", "THREAT x", "UNDERPOWERED", "OUTCLASSED", "AREA"] {
+                assert!(!n.text.contains(bad), "{}", n.text);
+            }
+        }
     }
 
     #[test]
@@ -747,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn an_area_that_asks_something_is_announced_once_and_tagged_plainly() {
+    fn an_area_that_asks_something_is_tagged_for_the_overlay_and_never_announced() {
         let mut game = empty_game();
         game.set_auto_ping(false);
         game.player_invulnerability = 1e9;
@@ -760,15 +793,11 @@ mod tests {
         let target = notable_sector(&game);
         game.teleport(target.center());
         game.step(DT, Input::default());
-        let areas = |g: &Game| {
-            g.notices
-                .iter()
-                .filter(|n| n.text.starts_with("AREA"))
-                .count()
-        };
-        assert_eq!(areas(&game), 1, "announced on entering");
         game.step(DT, Input::default());
-        assert_eq!(areas(&game), 1, "and only once");
+        assert!(
+            !game.notices.iter().any(|n| n.text.starts_with("AREA")),
+            "the area is never a notice"
+        );
         let tag = game.hud().area;
         assert!(tag.mood >= crate::readout::Mood::Warn);
         assert!(tag.head.contains("LEVEL"), "{}", tag.head);

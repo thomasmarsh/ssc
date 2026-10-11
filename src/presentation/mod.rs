@@ -36,11 +36,6 @@ pub(crate) fn rarity_color(rarity: Rarity) -> Color {
     Color::srgb(r, g, b)
 }
 
-/// How the ship's power compares with what the sector's fauna asks of it.
-pub(crate) fn standing(power: f32, threat: f32) -> &'static str {
-    ssc::simulation::verdict(power, threat)
-}
-
 /// The colour of everything apex: the world crown, the radar ring, the arrow and the HUD line.
 pub(crate) const APEX_GOLD: Color = Color::srgb(1.0, 0.82, 0.22);
 /// The crown of an apex that has passed its phase change.

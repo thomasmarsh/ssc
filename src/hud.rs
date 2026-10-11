@@ -339,6 +339,11 @@ pub fn draw_score(g: &mut Gizmos, hud: &HudModel, s: &Screen) {
     }
 }
 
+/// Top-centre rows of the standing meter and the (developer overlay) area detail lines; the
+/// detail sits well below the meter so a civilization's land never stacks them.
+const STANDING_Y: f32 = 82.0;
+const AREA_DETAIL_Y: f32 = 112.0;
+
 /// The standing meter near a civilization: a tier icon and a bar from hostile to friendly with
 /// ticks where the tiers change.
 pub fn draw_standing(g: &mut Gizmos, hud: &HudModel, s: &Screen, time: f32) {
@@ -346,7 +351,7 @@ pub fn draw_standing(g: &mut Gizmos, hud: &HudModel, s: &Screen, time: f32) {
         return;
     };
     let cx = s.size.x / 2.0;
-    let y = 82.0;
+    let y = STANDING_Y;
     if meter.fallen {
         let c = Vec2::new(cx, y);
         line(
@@ -1428,7 +1433,7 @@ fn describe(
         ),
         Tag::Area => {
             let area = &hud.area;
-            if area.head.is_empty() {
+            if !game.dev.area_overlay || area.head.is_empty() {
                 return None;
             }
             let calm = area.mood == ssc::readout::Mood::Calm;
@@ -1445,7 +1450,10 @@ fn describe(
         }
         Tag::AreaDetail => {
             let area = &hud.area;
-            if area.detail.is_empty() || area.mood < ssc::readout::Mood::Warn {
+            if !game.dev.area_overlay
+                || area.detail.is_empty()
+                || area.mood < ssc::readout::Mood::Warn
+            {
                 return None;
             }
             (
@@ -1456,7 +1464,7 @@ fn describe(
                     .collect::<Vec<_>>()
                     .join("\n"),
                 mood_color(area.mood).with_alpha(0.85),
-                Vec2::new(cx, 84.0),
+                Vec2::new(cx, AREA_DETAIL_Y),
                 Align::Center,
             )
         }
@@ -1794,6 +1802,17 @@ pub fn apply_ui_scale(camera: Single<&Camera, With<Camera2d>>, mut scale: ResMut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_area_detail_never_stacks_on_the_standing_meter() {
+        // The meter is about 20 px tall and the detail is up to three 11 px lines.
+        const { assert!(AREA_DETAIL_Y - STANDING_Y >= 24.0) };
+    }
+
+    #[test]
+    fn the_area_tags_are_a_developer_overlay_and_off_by_default() {
+        assert!(!ssc::simulation::dev::DevState::default().area_overlay);
+    }
 
     #[test]
     fn the_ui_scale_grows_in_steps_and_never_shrinks() {

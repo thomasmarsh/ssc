@@ -22,8 +22,6 @@ pub struct RegionState {
     since_banner: f32,
     /// Game time the current region was committed to (the HUD fades its tag from here).
     entered: f32,
-    /// The sector whose area readout was last announced (slice K3).
-    area_sector: Option<SectorId>,
 }
 
 /// The state digest hashes this, and the announcement memo is presentation only (it only
@@ -49,7 +47,6 @@ impl Game {
             self.region.here = Some((sector, r));
         }
         self.region.since_banner += dt;
-        self.announce_area(sector);
         if let Some(current) = self.region.current.as_ref() {
             self.run
                 .region_time
@@ -75,36 +72,6 @@ impl Game {
         self.region.candidate = Some((here.key, held));
         if held >= self.tune.region_hold && self.region.since_banner >= self.tune.region_cooldown {
             self.enter_region(here, true);
-        }
-    }
-
-    /// On entering a sector, posts what it asks of this build when that is worth saying: the
-    /// level and verdict, the first missing answer in plain words, and a burst warning
-    /// (`docs/CAPABILITIES.md` 3.4). An unremarkable area is not announced.
-    fn announce_area(&mut self, sector: SectorId) {
-        if self.region.area_sector == Some(sector) {
-            return;
-        }
-        self.region.area_sector = Some(sector);
-        let read = self.area_readout(sector);
-        if !read.notable() {
-            return;
-        }
-        let rarity = if read.mood() >= crate::readout::Mood::Danger {
-            upgrades::Rarity::Epic
-        } else {
-            upgrades::Rarity::Rare
-        };
-        self.notify(format!("AREA  {}", read.headline_short()), rarity);
-        // One more line, the most useful one; the rest lives on the HUD tag and the map.
-        let more = read
-            .missing()
-            .next()
-            .map(|n| n.text.clone())
-            .or_else(|| read.burst.as_ref().map(|b| b.text()))
-            .or_else(|| read.skirt_text());
-        if let Some(text) = more {
-            self.notify(text, rarity);
         }
     }
 

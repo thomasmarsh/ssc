@@ -85,20 +85,6 @@ pub struct TerritoryReport {
     pub fort: Option<(&'static str, u8)>,
 }
 
-/// How a ship of `power` stands against a `threat`.
-pub fn verdict(power: f32, threat: f32) -> &'static str {
-    let ratio = power / threat.powf(0.8);
-    if ratio < 0.6 {
-        "OUTCLASSED - turn back"
-    } else if ratio < 0.85 {
-        "UNDERPOWERED"
-    } else if ratio < 1.3 {
-        "EVEN"
-    } else {
-        "STRONG"
-    }
-}
-
 /// A snapshot used by creature steering: who is in which civilization, which territory is
 /// ruined, where the ship's territory and raid stand.
 pub(super) struct Snapshot {
@@ -368,13 +354,10 @@ impl Game {
                             format!("{}  - fallen, the territory is quiet", self.territory_name)
                         }
                         _ => {
-                            let threat = self.threat() * t.menace();
                             let stance = self.civ_stance(t.id);
                             format!(
-                                "ENTERING  {}  THREAT x{:.1}  {}  - {}{}",
+                                "ENTERING  {}  - {}{}",
                                 self.territory_name,
-                                threat,
-                                verdict(self.power(), threat),
                                 stance.label,
                                 stance.note.map_or_else(String::new, |n| format!(", {n}"))
                             )
@@ -733,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn entering_and_leaving_a_territory_is_announced_with_a_threat_verdict() {
+    fn entering_and_leaving_a_territory_is_announced() {
         let t = find(SEED, CivShape::Both);
         let mut game = visit(SEED, Vec2::ZERO);
         assert!(game.territory.is_none() && game.territory_report().is_none());

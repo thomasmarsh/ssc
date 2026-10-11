@@ -103,7 +103,7 @@ pub use chart::{
     Beacon, BeaconError, ChartEntry, ChartGeometry, ChartGeometryKind, CivReading, PinLabel,
     Threat, Travel, TravelError, TravelQuote,
 };
-pub use civ::{Raid, RaidStage, TerritoryReport, verdict};
+pub use civ::{Raid, RaidStage, TerritoryReport};
 pub use civmine::Cache;
 pub use cues::Cue;
 pub use diplomacy::{Regard, Stance, Tier, TitheError, TitheHint};

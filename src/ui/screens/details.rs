@@ -6,7 +6,7 @@ use super::title::{line, wrapped};
 use crate::Session;
 use crate::presentation::{
     AMBER, CYAN, DETAILS_BOTTOM, DETAILS_TOP, DRY_RED, MUTED, OWNED, PAD_GREEN, Scrollable, bar,
-    material_color, rarity_color, standing,
+    material_color, rarity_color,
 };
 use crate::ui::theme::{self, Tone};
 use bevy::prelude::*;
@@ -50,7 +50,7 @@ pub fn situation_blocks(session: &Session) -> Vec<Block> {
     let (health, shield) = game
         .player()
         .map_or((0.0, 0.0), |ship| (ship.health, ship.shield));
-    let (power, threat) = (game.power(), game.threat());
+    let threat = game.threat();
     let plain = |s: String| (s, TEXT);
     let mut out = Vec::new();
     let mut place = Vec::new();
@@ -91,8 +91,8 @@ pub fn situation_blocks(session: &Session) -> Vec<Block> {
     }
     out.push(block(
         "POWER",
-        format!("ship x{power:.1}   threat x{threat:.1}"),
-        vec![plain(standing(power, threat).to_string())],
+        String::new(),
+        vec![plain(game.rate_against(threat).label().to_string())],
     ));
     let meter = |label: &str, value: f32| {
         plain(format!(
@@ -105,7 +105,7 @@ pub fn situation_blocks(session: &Session) -> Vec<Block> {
         "CHARACTER",
         "",
         vec![
-            meter("DANGER", params.danger),
+            meter("HAZARD", params.danger),
             meter("AGGRESSION", params.aggression),
             meter("DENSITY", params.density),
             meter("DISTORTION", params.distortion),
@@ -472,10 +472,9 @@ fn territory_status(game: &Game) -> String {
     );
     if report.engagement != ssc::simulation::EngagementRule::TotalWar {
         return format!(
-            "\n{}   {regard}   THREAT x{:.1}   {}{weakened}",
+            "\n{}   {regard}   {}{weakened}",
             report.name,
-            report.threat,
-            standing(game.power(), report.threat)
+            game.rate_against(report.threat).label()
         );
     }
     let clock = match (report.stage, report.next_in) {
@@ -491,10 +490,9 @@ fn territory_status(game: &Game) -> String {
         .map(|(kind, tier)| format!("   {} FORT {tier}", kind.to_uppercase()))
         .unwrap_or_default();
     format!(
-        "\n{}   {regard}   THREAT x{:.1}   {}   {}{}{}",
+        "\n{}   {regard}   {}   {}{}{}",
         report.name,
-        report.threat,
-        standing(game.power(), report.threat),
+        game.rate_against(report.threat).label(),
         clock,
         weakened,
         fort
