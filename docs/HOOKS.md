@@ -103,6 +103,7 @@ SSC_BESTIARY=all SSC_OFFSCREEN=1 SSC_OFFSCREEN_SIZE=1800x1000 SSC_SMOKE_FRAMES=6
 ## Developer console (not smoke-gated)
 
 - `SSC_DEV=1`: enable the developer console (backquote or the guide button) and the dev toggles. See [DEVTOOLS.md](DEVTOOLS.md) Phase C and [UI.md](UI.md). Not smoke-gated, so `SSC_DEV=1 cargo run --bin ssc` works for play; the hooks below need `SSC_SMOKE_FRAMES` to capture.
+- `SSC_AREA_OVERLAY=1`: switch the AREA OVERLAY developer toggle on at start (the console TOGGLES row of the same name does it in play; off by default). Shows the old numeric area tags plus a bottom-left block with sector, ring, realm, band and the keeper's direction (`ui::screens::devarea`, `docs/LEGIBILITY.md` 7.1). Works outside smoke runs.
 - `SSC_DEV_CONSOLE=tuning|toggles`: in a smoke run, open the console on that tab. With `tuning`, `SSC_DEV_GROUP=<group>` picks a registry group (for example `culture`), `SSC_DEV_SEARCH=<text>` types a search, `SSC_DEV_MODIFIED=1` shows modified entries only, and `SSC_DEV_DIALOG=reset|regen|search` opens a dialog over it.
 - `SSC_DEV_PANEL=<row>`: the older hook; opens the toggles tab on that row (index into `DevRow::ALL`).
 - `SSC_DEV_ON=1`: with `SSC_DEV_CONSOLE` or `SSC_DEV_PANEL`, first switch on the first six toggles and double the time scale (checks the console and DEV tag).

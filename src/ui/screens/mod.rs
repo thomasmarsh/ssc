@@ -5,6 +5,7 @@ pub mod chart;
 pub mod console;
 pub mod console_ui;
 pub mod details;
+pub mod devarea;
 pub mod help;
 pub mod settings;
 pub mod summary;

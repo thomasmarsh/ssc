@@ -111,6 +111,8 @@ svg.lo2 .lod2{display:none}
  <label><input type="checkbox" data-layer="planets" checked>planetoids</label>
  <label><input type="checkbox" data-layer="wells" checked>wells</label>
  <label><input type="checkbox" data-layer="apex" checked>apexes</label>
+ <label><input type="checkbox" data-layer="keepers" checked><span class="sw" style="background:var(--gold)"></span>keepers</label>
+ <label><input type="checkbox" data-layer="areas"><span class="sw" style="background:linear-gradient(90deg,#e0b020,#30b8c8,#a060e0)"></span>areas</label>
  <label><input type="checkbox" data-layer="powers"><span class="sw" style="background:#e0409a"></span>powers</label>
  <label><input type="checkbox" data-layer="grid">grid</label>
  <form id="jump"><input type="text" id="jx" placeholder="x,y" aria-label="Jump to sector x,y" inputmode="text" autocomplete="off"><button type="submit">Go</button></form>
@@ -150,14 +152,14 @@ const pat=el("pattern",{id:"hatch",width:".22",height:".22",patternUnits:"userSp
 el("line",{x1:"0",y1:"0",x2:"0",y2:".22",class:"hatch"},pat);
 const world=el("g",{},svg);
 const G={};
-["fill","realm","bio","aff","div","rock","hatch","belt","tfill","regions","realmedge","rname","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","powers","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
+["fill","realm","areas","bio","aff","div","rock","hatch","belt","tfill","regions","realmedge","rname","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","keepers","powers","home","detail","hover","pin"].forEach(n=>{G[n]=el("g",{},world)});
 G.hatch.setAttribute("class","lod2");G.belt.setAttribute("class","lod");
-["wells","planets","civs","apex","powers","home"].forEach(n=>G[n].setAttribute("class","lod"));
+["wells","planets","civs","apex","keepers","powers","home"].forEach(n=>G[n].setAttribute("class","lod"));
 G.grid.setAttribute("class","lod2");G.regions.setAttribute("class","lod2");
 
-const layers={realms:true,ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,powers:false,grid:false,diversity:false,biomes:false,belts:true,affinity:false};
+const layers={realms:true,ranges:true,life:true,rock:true,regions:true,rings:true,civs:true,planets:true,wells:true,apex:true,keepers:true,areas:false,powers:false,grid:false,diversity:false,biomes:false,belts:true,affinity:false};
 let filter=-1; /* species index shown alone, or -1 */
-const showMap={realms:["realm","realmedge","rname"],affinity:["aff"],diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],powers:["powers"],grid:["grid"]};
+const showMap={realms:["realm","realmedge","rname"],affinity:["aff"],diversity:["div"],biomes:["bio","bedge"],belts:["belt"],rock:["rock","hatch"],regions:["regions"],rings:["rings"],civs:["tfill","tedge","civs"],planets:["planets"],wells:["wells"],apex:["apex"],keepers:["keepers"],areas:["areas"],powers:["powers"],grid:["grid"]};
 function applyLayers(){for(const l in showMap)for(const g of showMap[l])G[g].style.display=layers[l]?"":"none"}
 
 const dark=()=>matchMedia("(prefers-color-scheme: dark)").matches;
@@ -173,8 +175,8 @@ function filterWeight(row){for(const s of row[SP])if(s[0]===filter)return s[1];r
 const BIOHUE=[200,130,95,0,285,45,25,170];
 
 function build(){
- for(const n of ["fill","realm","bio","aff","div","rock","hatch","belt","tfill","regions","realmedge","rname","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","powers","home"])G[n].textContent="";
- const realmFill=new Map(),realmEdge=[],realmSum=new Map(),divs=[[],[],[],[],[],[],[]],bio=new Map(),bedge=[],belts=[],aff=[[],[],[]];
+ for(const n of ["fill","realm","areas","bio","aff","div","rock","hatch","belt","tfill","regions","realmedge","rname","bedge","conf","tedge","grid","rings","wells","planets","civs","apex","keepers","powers","home"])G[n].textContent="";
+ const areaFill=new Map(),realmFill=new Map(),realmEdge=[],realmSum=new Map(),divs=[[],[],[],[],[],[],[]],bio=new Map(),bedge=[],belts=[],aff=[[],[],[]];
  /* range hue by life level */
  const fills=new Map(),rocks=[[],[],[],[]],hatch=[],conf=[],tf=new Map(),tedge=new Map(),redge=[];
  const rect=(c,r)=>"M"+c+" "+r+"h1v1h-1z";
@@ -195,6 +197,8 @@ function build(){
   if(row[KIND]===2)conf.push("M"+(c+.07)+" "+(r+.07)+"h.86v.86h-.86z");
   {const ri=row[REALM];let a3=realmFill.get(ri);if(!a3){a3=[];realmFill.set(ri,a3)}a3.push(rect(c,r));
    let sm=realmSum.get(ri);if(!sm){sm=[0,0,0];realmSum.set(ri,sm)}sm[0]+=c+.5;sm[1]+=r+.5;sm[2]++}
+  {const ak=D.areaKinds[D.realms[row[REALM]][1]];
+   if(ak[0]!==""&&row[RINT]>0){const bi=Math.min(4,Math.floor(row[RINT]*5)),k=ak[1]+"|"+bi;let a4=areaFill.get(k);if(!a4){a4=[];areaFill.set(k,a4)}a4.push(rect(c,r))}}
   const t=row[TER];
   if(t>=0){let a2=tf.get(t);if(!a2){a2=[];tf.set(t,a2)}a2.push(rect(c,r))}
   const rt=cellAt(c+1,r),bt=cellAt(c,r+1);
@@ -214,6 +218,13 @@ function build(){
  if(hatch.length)el("path",{d:hatch.join(""),fill:"url(#hatch)",opacity:".7"},G.hatch);
  if(redge.length)el("path",{d:redge.join(""),class:"redge"},G.regions);
  for(const[ri,l]of realmFill)el("path",{d:l.join(""),fill:D.realms[ri][2],"fill-opacity":dark()?".42":".45"},G.realm);
+ for(const[k,l]of areaFill){const[col,bi]=k.split("|");el("path",{d:l.join(""),fill:col,"fill-opacity":(.12+.16*bi).toFixed(2)},G.areas)}
+ for(const k of D.keepers){
+  const c=k[0]-D.x0,r=D.y1-k[1];if(!cellAt(c,r))continue;
+  el("circle",{cx:c+.5,cy:r+.5,r:.36,fill:"none",stroke:"var(--gold)","stroke-width":2.4,class:"ico"},G.keepers);
+  const t=el("text",{x:c+.5,y:r+.66,"text-anchor":"middle","font-size":.45,"font-weight":700,fill:"var(--gold)"},G.keepers);
+  t.textContent=D.realmKinds[k[2]][0].replace(/^THE /,"").charAt(0);
+ }
  if(realmEdge.length)el("path",{d:realmEdge.join(""),class:"realmedge"},G.realmedge);
  realmLabels.length=0;
  for(const[ri,sm]of realmSum){if(sm[2]<24)continue;const rl=D.realms[ri],t=el("text",{"text-anchor":"middle",class:"rname",fill:rl[2]},G.rname);t.textContent=rl[0].toUpperCase();t.dataset.x=sm[0]/sm[2];t.dataset.y=sm[1]/sm[2];realmLabels.push(t)}
@@ -371,6 +382,7 @@ function describe(cr,full){
   const cv=D.territories[row[MCIV]],words=["","neutral","friendly","hostile","mixed"];
   h+='<h3>Wildlife toward '+esc(cv[0])+'</h3><div class="row"><b>'+words[row[MOOD]]+'</b> <span class="sub">'+Math.round(row[MHOS]*100)+'% hostile, '+Math.round(row[MFRI]*100)+'% friendly</span></div>';
  }
+ {const kp=D.keepers.find(k=>k[0]===x&&k[1]===y);if(kp)h+='<h3>Keeper</h3><div class="row gold"><b>KEEPER of '+esc(D.realmKinds[kp[2]][0])+': '+esc(kp[3])+' + '+esc(kp[4])+' -&gt; '+esc(kp[5]||"no ward")+(kp[6]?' ('+esc(kp[6])+(kp[7]?' '+kp[7]:'')+')':'')+'</b></div>'}
  if(row[APX]>=0){const a=D.apexes[row[APX]];h+='<h3>Apex</h3><div class="row gold"><b>&#9818; '+esc(a[0])+'</b> <span class="sub">'+esc(a[2])+', '+esc(a[1])+'</span></div>'}
  return h;
 }
@@ -395,6 +407,8 @@ const LEGEND='<details open><summary>Legend</summary><div class="leg">'
 +'<svg viewBox="0 0 30 20"><rect width="15" height="20" fill="hsl(200,60%,55%)" fill-opacity=".5"/><rect x="15" width="15" height="20" fill="hsl(25,60%,55%)" fill-opacity=".5"/><path d="M15 0V20" stroke="var(--accent)" stroke-width="2"/></svg><span>Biome layer: tint by kind of country, blue line at cell borders</span>'
 +'<svg viewBox="0 0 30 20"><path d="M0 0L30 20M0 20L30 0" stroke="var(--ink)" stroke-width="1.5" opacity=".6"/><circle cx="15" cy="10" r="4" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Belt: crossed lines (deep rock belt, life near zero); green ring: an oasis</span>'
 +'<svg viewBox="0 0 30 20"><path d="M5 17V6L10 11L15 3L20 11L25 6V17z" fill="var(--gold)" stroke="var(--ink)"/></svg><span>Apex elder (small and faint: a lesser one)</span>'
++'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="7" fill="none" stroke="var(--gold)" stroke-width="2.4"/></svg><span>Keeper layer: gold ring and the realm kind initial on the sector of each realm keeper (the elder that carries the realm signature power and pays its ward)</span>'
++'<svg viewBox="0 0 30 20"><rect width="10" height="20" fill="#e0b020" fill-opacity=".3"/><rect x="10" width="10" height="20" fill="#30b8c8" fill-opacity=".3"/><rect x="20" width="10" height="20" fill="#a060e0" fill-opacity=".3"/></svg><span>Areas layer: tint by the realm lock channel (JAM amber, INFO cyan, FIELD violet, ARMOR grey, PHASE blue, SWARM orange, BYPASS red, CORD green), stronger toward the realm core in five bands (whisper to core)</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="5" fill="var(--rock)" stroke="var(--ink)"/><circle cx="15" cy="10" r="8" fill="none" stroke="var(--ok)" stroke-width="2"/></svg><span>Planetoid (size by radius); green ring: renewable</span>'
 +'<svg viewBox="0 0 30 20"><circle cx="15" cy="10" r="6" fill="none" stroke="var(--well)" stroke-width="2"/><circle cx="15" cy="10" r="2" fill="var(--well)"/></svg><span>Gravity well: green static, orange maw (big), amber pulse (breathing ring), cyan drift (dotted orbit), violet hop (dashed reach), rose binary pair, white centre reverse</span>'
 +'<svg viewBox="0 0 30 20"><path d="M15 3L22 10L15 17L8 10z" fill="#e0409a" stroke="var(--ink)" stroke-width="1.5"/></svg><span>Powers layer: creatures carrying a rare power (a species trait or an awakened individual)</span>'

@@ -17,7 +17,9 @@ use crate::world::{RockKind, SECTOR_SIZE, SectorId, generate, hash2};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-/// Bumped whenever the page or the embedded data layout changes.
+/// Bumped whenever the generated world or the per-cell row layout changes. The page-only
+/// `keepers` and `areaKinds` tables (LEGIBILITY.md 7.2) are additive keys beside the rows and
+/// leave the rows and the world untouched, so they did not bump it.
 pub const GENERATOR_VERSION: u32 = 37;
 /// Longest side of a map, in sectors.
 pub const MAX_SIDE: u32 = 256;
@@ -72,6 +74,143 @@ impl MapOptions {
             x: self.center.x - (self.cols / 2) as i32,
             y: self.center.y - (self.rows / 2) as i32,
         }
+    }
+}
+
+/// One realm keeper as the page table and the `--nearest-keeper` tool print it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeeperHit {
+    pub sector: SectorId,
+    pub kind: crate::realm::RealmKind,
+    pub realm_name: String,
+    pub archetype: crate::apex::Archetype,
+    pub power: crate::power::Power,
+    /// The channel the keeper's power feeds, and the ward organ that answers it (with the
+    /// degree it reaches at its top level).
+    pub channel: Option<crate::capability::Channel>,
+    pub organ: Option<(&'static str, u8)>,
+}
+
+impl KeeperHit {
+    /// The keeper `k` of the realm that holds its sector.
+    pub fn of(seed: u64, k: crate::realm::Keeper) -> Self {
+        use crate::capability::{organ_covers, power::channel};
+        let realm = crate::realm::realm(seed, k.sector);
+        let channel = channel(k.power);
+        let organ = crate::simulation::organs::harvestable(k.power)
+            .filter_map(|kind| {
+                let degree = organ_covers(kind.organ)
+                    .iter()
+                    .filter(|c| Some(c.channel) == channel)
+                    .map(|c| c.max)
+                    .max()?;
+                Some((kind.label, degree))
+            })
+            .max_by_key(|(_, d)| *d)
+            .or_else(|| {
+                crate::simulation::organs::harvestable(k.power)
+                    .next()
+                    .map(|kind| (kind.label, 0))
+            });
+        Self {
+            sector: k.sector,
+            kind: realm.kind,
+            realm_name: realm.name,
+            archetype: k.archetype,
+            power: k.power,
+            channel,
+            organ,
+        }
+    }
+
+    /// Chebyshev distance in sectors from `from`.
+    pub fn distance(&self, from: SectorId) -> i32 {
+        (self.sector.x - from.x)
+            .abs()
+            .max((self.sector.y - from.y).abs())
+    }
+
+    /// One printed line of the tool, nearest first.
+    pub fn line(&self, from: SectorId) -> String {
+        let (dx, dy) = (self.sector.x - from.x, self.sector.y - from.y);
+        let bearing = if dx == 0 && dy == 0 {
+            "HERE"
+        } else {
+            bearing_of(dx, dy).label()
+        };
+        let ward = match self.organ {
+            Some((label, 0)) => label.to_string(),
+            Some((label, degree)) => format!(
+                "{label} ({} {degree})",
+                self.channel.map_or("", |c| c.label())
+            ),
+            None => "-".to_string(),
+        };
+        format!(
+            "{:<14} {:<22} {:<18} ward {:<26} ({},{}) {} sectors {}",
+            self.kind.spec().title,
+            self.realm_name,
+            format!("{}+{:?}", self.archetype.label().to_uppercase(), self.power),
+            ward,
+            self.sector.x,
+            self.sector.y,
+            self.distance(from),
+            bearing
+        )
+    }
+}
+
+/// The eight-way heading of a step (north is +y), by angle.
+pub fn bearing_of(dx: i32, dy: i32) -> crate::readout::Bearing {
+    use crate::readout::Bearing::*;
+    const ORDER: [crate::readout::Bearing; 8] = [
+        East, NorthEast, North, NorthWest, West, SouthWest, South, SouthEast,
+    ];
+    let octant = ((dy as f32).atan2(dx as f32) / std::f32::consts::FRAC_PI_4).round() as i32;
+    ORDER[octant.rem_euclid(8) as usize]
+}
+
+/// Sampling stride of the keeper search: realms are 40 to 120 sectors across, so a lattice of 8
+/// cannot miss one.
+const KEEPER_STRIDE: usize = 8;
+
+/// The keepers within `radius` sectors (Chebyshev) of `from`, nearest first (ties by sector).
+/// Samples the lattice over the square of the radius, widened by one stride so a realm whose
+/// rim keeper lies just inside the square is still met, and dedupes on the keeper sector.
+pub fn nearest_keepers(seed: u64, from: SectorId, radius: u32) -> Vec<KeeperHit> {
+    let reach = radius as i32 + KEEPER_STRIDE as i32;
+    let mut found: HashMap<SectorId, KeeperHit> = HashMap::new();
+    for x in (from.x - reach..=from.x + reach).step_by(KEEPER_STRIDE) {
+        for y in (from.y - reach..=from.y + reach).step_by(KEEPER_STRIDE) {
+            if let Some(k) = crate::realm::keeper_of(seed, SectorId { x, y })
+                && !found.contains_key(&k.sector)
+            {
+                found.insert(k.sector, KeeperHit::of(seed, k));
+            }
+        }
+    }
+    let mut hits: Vec<KeeperHit> = found
+        .into_values()
+        .filter(|h| h.distance(from) <= radius as i32)
+        .collect();
+    hits.sort_by_key(|h| (h.distance(from), h.sector.x, h.sector.y));
+    hits
+}
+
+/// The tint of a lock channel on the `areas` layer.
+fn channel_tint(channel: Option<crate::capability::Channel>) -> &'static str {
+    use crate::capability::Channel::*;
+    match channel {
+        Some(Jam) => "#e0b020",
+        Some(Field) => "#a060e0",
+        Some(Armor) => "#8a8f98",
+        Some(Info) => "#30b8c8",
+        Some(Phase) => "#4aa4f0",
+        Some(Swarm) => "#e07030",
+        Some(Bypass) => "#d03a3a",
+        Some(Cord) => "#40b060",
+        Some(_) => "#c070a0",
+        None => "#7a8090",
     }
 }
 
@@ -335,6 +474,7 @@ pub struct Map {
     territories: Vec<TerritoryRow>,
     territory_index: HashMap<u64, usize>,
     apexes: Vec<(String, &'static str, &'static str)>,
+    keepers: Vec<(KeeperHit, usize)>,
     apex_index: HashMap<SectorId, usize>,
 }
 
@@ -413,6 +553,7 @@ impl Map {
             territory_index: HashMap::new(),
             apexes: Vec::new(),
             apex_index: HashMap::new(),
+            keepers: Vec::new(),
         };
         for cell in &cells {
             map.intern(cell);
@@ -487,6 +628,10 @@ impl Map {
                 cell.realm.kind.0,
                 hex(cell.realm.tint()),
             ));
+            if let Some(k) = crate::realm::keeper_of(self.options.seed, cell.id) {
+                let at = self.realm_index[&cell.realm.key];
+                self.keepers.push((KeeperHit::of(self.options.seed, k), at));
+            }
         }
         if let Some(t) = &cell.territory {
             self.intern_territory(t);
@@ -742,6 +887,36 @@ impl Map {
             json_str(&mut j, rank);
             j.push(',');
             json_str(&mut j, archetype);
+            j.push(']');
+        }
+        j.push_str("],\"keepers\":[");
+        for (i, (k, realm)) in self.keepers.iter().enumerate() {
+            if i > 0 {
+                j.push(',');
+            }
+            let _ = write!(j, "[{},{},{},", k.sector.x, k.sector.y, k.kind.0);
+            json_str(&mut j, k.archetype.label());
+            j.push(',');
+            json_str(&mut j, &format!("{:?}", k.power));
+            j.push(',');
+            json_str(&mut j, k.organ.map_or("", |o| o.0));
+            j.push(',');
+            json_str(&mut j, k.channel.map_or("", |c| c.label()));
+            let _ = write!(j, ",{},{realm}]", k.organ.map_or(0, |o| o.1));
+        }
+        j.push_str("],\"areaKinds\":[");
+        for (i, kind) in crate::realm::RealmKind::all().enumerate() {
+            if i > 0 {
+                j.push(',');
+            }
+            let channel = kind
+                .spec()
+                .keeper
+                .and_then(|(_, power)| crate::capability::power::channel(power));
+            j.push('[');
+            json_str(&mut j, channel.map_or("", |c| c.label()));
+            j.push(',');
+            json_str(&mut j, channel_tint(channel));
             j.push(']');
         }
         j.push_str("],\"cells\":[\n");
@@ -1051,5 +1226,59 @@ mod tests {
         let mut s = String::new();
         json_str(&mut s, "</script><b>\"&\\");
         assert!(!s.contains('<') && !s.contains('>'));
+    }
+
+    /// The tool's list equals a brute-force sweep of `keeper_at` over a 200 by 200 window, is
+    /// deterministic, and the page table carries the same keepers.
+    #[test]
+    fn nearest_keepers_match_a_brute_force_sweep() {
+        let from = SectorId::ORIGIN;
+        let radius = 99;
+        let mut brute: Vec<SectorId> = Vec::new();
+        for x in -radius..=radius {
+            for y in -radius..=radius {
+                let id = SectorId { x, y };
+                if crate::realm::keeper_at(SEED, id).is_some() {
+                    brute.push(id);
+                }
+            }
+        }
+        let hits = nearest_keepers(SEED, from, radius as u32);
+        assert_eq!(hits, nearest_keepers(SEED, from, radius as u32));
+        let mut got: Vec<SectorId> = hits.iter().map(|h| h.sector).collect();
+        assert!(
+            hits.windows(2)
+                .all(|w| w[0].distance(from) <= w[1].distance(from))
+        );
+        got.sort_by_key(|s| (s.x, s.y));
+        brute.sort_by_key(|s| (s.x, s.y));
+        assert_eq!(got, brute);
+        assert!(!got.is_empty(), "the window should hold a keeper");
+        assert!(
+            hits.iter()
+                .all(|h| h.organ.is_some() && h.channel.is_some())
+        );
+    }
+
+    #[test]
+    fn the_page_lists_its_keepers_and_the_areas_tints() {
+        let map = Map::build(MapOptions {
+            cols: 121,
+            rows: 121,
+            ..small(121, 121)
+        })
+        .unwrap();
+        let data = map.data_json();
+        assert!(data.contains("\"keepers\":["));
+        assert!(data.contains("\"areaKinds\":["));
+        assert!(!map.keepers.is_empty());
+        for (k, realm) in &map.keepers {
+            assert!(*realm < map.realms.len());
+            assert_eq!(k.kind.0, map.realms[*realm].1);
+        }
+        let html = map.html();
+        for hook in ["data-layer=\"keepers\"", "data-layer=\"areas\""] {
+            assert!(html.contains(hook), "{hook}");
+        }
     }
 }

@@ -44,6 +44,7 @@ impl Plugin for UiPlugin {
                     screens::summary::setup,
                     screens::help::setup,
                     screens::toast::setup,
+                    screens::devarea::setup,
                     crate::chartview::setup,
                 ),
             )
@@ -72,6 +73,7 @@ impl Plugin for UiPlugin {
                     screens::summary::render,
                     screens::help::render,
                     screens::toast::update,
+                    screens::devarea::update,
                     crate::chartview::render,
                 ),
             );

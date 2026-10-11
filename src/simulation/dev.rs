@@ -194,6 +194,9 @@ pub struct DevState {
     pub target: (i32, i32),
     /// Parts granted so far (keys the private roll stream).
     grants: u32,
+    /// Draws the area readout tags (level, band, needs) on the HUD; off in normal play, since
+    /// the player is told difficulty by feel and by the threat pips (`docs/LEGIBILITY.md`).
+    pub area_overlay: bool,
 }
 
 impl Default for DevState {
@@ -210,6 +213,7 @@ impl Default for DevState {
             spawn: 0,
             target: (0, 0),
             grants: 0,
+            area_overlay: false,
         }
     }
 }
@@ -259,10 +263,11 @@ pub enum DevRow {
     TargetY,
     Teleport,
     Spawn,
+    AreaOverlay,
 }
 
 impl DevRow {
-    pub const ALL: [DevRow; 16] = [
+    pub const ALL: [DevRow; 17] = [
         Self::Invulnerable,
         Self::InfiniteAmmo,
         Self::FreePurchases,
@@ -279,6 +284,7 @@ impl DevRow {
         Self::TargetY,
         Self::Teleport,
         Self::Spawn,
+        Self::AreaOverlay,
     ];
 
     pub fn label(self) -> &'static str {
@@ -299,6 +305,7 @@ impl DevRow {
             Self::TargetY => "TARGET SECTOR Y",
             Self::Teleport => "TELEPORT",
             Self::Spawn => "SPAWN AT SHIP",
+            Self::AreaOverlay => "AREA OVERLAY",
         }
     }
 
@@ -320,6 +327,9 @@ impl DevRow {
             Self::TargetX | Self::TargetY => "left and right step one sector",
             Self::Teleport => "enter jumps to the middle of the target sector",
             Self::Spawn => "left and right choose, enter places three near the ship",
+            Self::AreaOverlay => {
+                "the old numeric area tags, sector and realm, and the way to the keeper"
+            }
         }
     }
 
@@ -355,6 +365,7 @@ impl Game {
             DevRow::NoCooldowns => on_off(dev.no_cooldowns),
             DevRow::UnlimitedLives => on_off(dev.unlimited_lives),
             DevRow::FreezeEnemies => on_off(dev.freeze_enemies),
+            DevRow::AreaOverlay => on_off(dev.area_overlay),
             DevRow::TimeScale => format!("{}x", dev.time_scale()),
             DevRow::GrantPart => dev.part_rarity().label().to_uppercase(),
             DevRow::TargetX => dev.target.0.to_string(),
@@ -379,6 +390,7 @@ impl Game {
             DevRow::NoCooldowns => dev.no_cooldowns = !dev.no_cooldowns,
             DevRow::UnlimitedLives => dev.unlimited_lives = !dev.unlimited_lives,
             DevRow::FreezeEnemies => dev.freeze_enemies = !dev.freeze_enemies,
+            DevRow::AreaOverlay => dev.area_overlay = !dev.area_overlay,
             DevRow::TimeScale if dir != 0 => {
                 dev.time_scale = (dev.time_scale as i32 + dir.signum())
                     .clamp(0, TIME_SCALES.len() as i32 - 1)

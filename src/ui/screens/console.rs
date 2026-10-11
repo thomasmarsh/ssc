@@ -136,7 +136,8 @@ fn dev_kind(row: DevRow) -> DevKind {
         | DevRow::FreePurchases
         | DevRow::NoCooldowns
         | DevRow::UnlimitedLives
-        | DevRow::FreezeEnemies => DevKind::Switch,
+        | DevRow::FreezeEnemies
+        | DevRow::AreaOverlay => DevKind::Switch,
         DevRow::FillHold
         | DevRow::GrantSkills
         | DevRow::GrantWeapons
