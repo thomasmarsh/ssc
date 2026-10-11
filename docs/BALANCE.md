@@ -227,6 +227,12 @@ Five powers gained a verb with a counter and the model prices each one. The extr
 
 Goldens: the four scenario goldens were re-pinned and only the `bodies` sub-digest moved in every row. The reason is `JamState` (hashed by `Debug` into `bodies`) gained two timers, `glare_sonar` and `glare_dim`; every other sub-digest (bullets, mines, pickups, rune fields, world) is identical, so the busy scenarios did not change behavior.
 
+### 3.10 The K6 organ catalog (CAPABILITIES 4.6)
+
+Eleven organs joined the table. The price of a ward is its cover (the model cuts a power's flair by `1 - cover / 3`), so each new row's `organ_covers` entry is its price; `typical+organs` (`Tier::grown`, every organ at level 2) is the new reference kit in `threat --only channels`. One model change: Engulf gained a drain flair term (`buff_extra_flair` of the Control role term on DRAIN) beside its damage source, so the Gizzard has something to cut. Every other new effect lives on the player side (shots, motes, fields, travel) and does not touch `assess_genome`.
+
+`threat_baseline.txt` is unchanged at its rounding (no bless). Goldens: `home_idle`, `ring3_busy` and `civ_city` moved only in the `ship` sub-digest, because `Organs` grew (15 saved slots and a `motes` field in its `Debug` text) and the ship digest hashes it; behavior is identical. `long_busy` moved in every sub-digest from tick 600 for a deliberate reason: its maxed kit grants every organ (`dev_grant_organs`) and the three open slots now fit organs with real effects. All four were re-pinned with `simperf --goldens`.
+
 ## 4. Diagnosis: why it swings between trivial and lethal
 
 1. **Player power saturates, enemy burst does not.** `Stats::compute` clamps every stat (hull x8, shield x8, damage x8, armor 5x, recharge x6), so a maxed kit stops growing near ring 20 (3.1, `maxed d20 = maxed d40`). Enemy burst is `volley * shot * sharpness` with sharpness linear and volley up to 160 and no ceiling anywhere (apex growth is capped at 3x, creature volleys are not).

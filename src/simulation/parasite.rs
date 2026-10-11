@@ -168,12 +168,13 @@ impl Game {
         }
         // Feeding.
         let mut drains: Vec<(Diet, f32)> = Vec::new();
+        let tonic = self.tonic_scale();
         for latch in &self.parasites.latches {
             if let Some(worm) = self.body(latch.worm) {
                 let s = Power::Latch.strength(&worm.genome);
                 drains.push((
                     worm.genome.diet,
-                    (power::LATCH_DRAIN.0 + power::LATCH_DRAIN.1 * s) * dt,
+                    (power::LATCH_DRAIN.0 + power::LATCH_DRAIN.1 * s) * dt * tonic,
                 ));
             }
         }

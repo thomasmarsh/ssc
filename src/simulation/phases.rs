@@ -283,19 +283,30 @@ impl Game {
         }
         self.update_arms(dt, input.fire);
         self.pad_noise(tick.shots.0, tick.shots.1);
-        if self.stats.shears {
+        let cutter = self.cutter_power();
+        if self.stats.shears || cutter.is_some() {
             // Shears cut a weak cord the moment it latches and wear a stout one through
-            // (every cord at once with the lunatic field resonating).
-            let field = self.resonance_verb(super::resonance::Verb::FieldCuts);
+            // (every cord at once with the lunatic field resonating). A Cord-cutter organ adds
+            // its own reach and wear to the shears, or stands in for them.
+            let field = self.stats.shears && self.resonance_verb(super::resonance::Verb::FieldCuts);
+            let (instant_extra, rate_extra) = cutter.unwrap_or((0.0, 0.0));
+            let (instant, rate) = if self.stats.shears {
+                (
+                    self.tune.tether_shears_instant + instant_extra,
+                    self.tune.tether_shears_rate + rate_extra,
+                )
+            } else {
+                (instant_extra, rate_extra)
+            };
             for tether in self
                 .tethers
                 .iter_mut()
                 .filter(|t| t.kind == TetherKind::Latch)
             {
-                if field || tether.max_health <= self.tune.tether_shears_instant {
+                if field || tether.max_health <= instant {
                     tether.health = 0.0;
                 } else if tether.attached() {
-                    tether.health -= self.tune.tether_shears_rate * dt;
+                    tether.health -= rate * dt;
                 }
             }
         }

@@ -135,6 +135,7 @@ impl Game {
             1.0
         };
         let cap = self.field_cap();
+        let anchor = self.anchor_scale();
         let mut shoved = false;
         for body in self.bodies.iter_mut().filter(|b| b.active && b.id != id) {
             if is_fixed(body) || (chain.is_some() && body.chain == chain) {
@@ -146,7 +147,7 @@ impl Game {
                 continue;
             }
             let away = offset / d;
-            let ballast = if body.rig.ballast { 0.2 } else { 1.0 };
+            let ballast = ballast_of(body, anchor);
             let light = if body.mass < 0.0 {
                 power::REPEL_LIGHT
             } else {
@@ -335,6 +336,7 @@ impl Game {
         let reach = g.power_params(Power::Lens).reach * power::LENS_REACH;
         let strength = power::LENS_PULL * s;
         let cap = self.field_cap();
+        let anchor = self.anchor_scale();
         for body in self.bodies.iter_mut().filter(|b| b.active && b.id != id) {
             if is_fixed(body)
                 || body.kind == BodyKind::BlackHole
@@ -347,7 +349,7 @@ impl Game {
             if d2 >= reach * reach {
                 continue;
             }
-            let ballast = if body.rig.ballast { 0.2 } else { 1.0 };
+            let ballast = ballast_of(body, anchor);
             let mut pull = offset * (crate::well::BASE_PULL * strength / (d2 + 2500.0).powf(1.5));
             pull = pull.clamp_length_max(if body.kind == BodyKind::Player {
                 cap
@@ -440,6 +442,7 @@ impl Game {
             let strength = state.pocket;
             let reach = power::POCKET_REACH;
             let cap = self.field_cap();
+            let anchor = self.anchor_scale();
             for other in self.bodies.iter_mut().filter(|b| b.active && b.id != id) {
                 if is_fixed(other) || other.kind == BodyKind::BlackHole {
                     continue;
@@ -449,7 +452,7 @@ impl Game {
                 if d2 >= reach * reach {
                     continue;
                 }
-                let ballast = if other.rig.ballast { 0.2 } else { 1.0 };
+                let ballast = ballast_of(other, anchor);
                 let pull = (offset * (crate::well::BASE_PULL * strength / (d2 + 2500.0).powf(1.5)))
                     .clamp_length_max(if other.kind == BodyKind::Player {
                         cap
@@ -507,6 +510,17 @@ impl Game {
         body.well = Some(run);
         body.active = true;
         self.bodies.push(body);
+    }
+}
+
+/// How much of a field's pull, push or shove `body` feels: ballast leaves a fifth, and the
+/// ship's Anchor organ (`anchor`, one without it) cuts what is left.
+fn ballast_of(body: &Body, anchor: f32) -> f32 {
+    let ballast = if body.rig.ballast { 0.2 } else { 1.0 };
+    if body.kind == BodyKind::Player {
+        ballast * anchor
+    } else {
+        ballast
     }
 }
 

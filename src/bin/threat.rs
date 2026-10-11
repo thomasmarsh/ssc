@@ -598,7 +598,7 @@ fn print_channels(o: &Options, by_ring: &BTreeMap<i32, Vec<(u64, SectorReport)>>
     println!();
     println!("### What cover and skills do to the danger\n");
     println!(
-        "Median sector danger and the worst window burst ratio (`burst_ratio_for`, parry and dash counted and switched off by disabling powers for their duty) at the kit of the ring's depth. `+wards` fits degree 2 on JAM, FIELD, ARMOR and INFO; `+skills` trains parry and dash.\n"
+        "Median sector danger and the worst window burst ratio (`burst_ratio_for`, parry and dash counted and switched off by disabling powers for their duty) at the kit of the ring's depth. `+wards` fits degree 2 on JAM, FIELD, ARMOR and INFO; `+organs` fits every organ of the catalog at level 2; `+skills` trains parry and dash.\n"
     );
     println!("| ring | tier | danger p50 | danger p90 | worst burst ratio p90 | cover |");
     println!("|---|---|---|---|---|---|");
@@ -609,6 +609,7 @@ fn print_channels(o: &Options, by_ring: &BTreeMap<i32, Vec<(u64, SectorReport)>>
             tier_bare(),
             typical.clone(),
             typical.warded(),
+            typical.grown(),
             typical.skilled(),
             typical.warded().skilled(),
             maxed.warded(),

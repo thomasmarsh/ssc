@@ -1466,6 +1466,10 @@ impl Game {
         let mut needles_snagged = false;
         let mut veil_sighted = false;
         let veil_sight = self.veil > 0.0;
+        // Pith spur: the ship's shots skip a share of a shield; motes take hostile shots.
+        let spur = self.spur_share();
+        let mut spurred = false;
+        let mut mote_taken = false;
         let mut egg_losses = Vec::new();
         let mut shot_paths: Vec<Vec<(Vec2, Vec2)>> = self
             .bullets
@@ -1740,8 +1744,23 @@ impl Game {
                     if dashing && !bullet.friendly && body.kind == BodyKind::Player {
                         grazes.push(bullet.position);
                     }
+                    // A mote takes the shot meant for the ship (never in grace or while a
+                    // dash graze already swallows it).
+                    let mote = !bullet.friendly
+                        && body.kind == BodyKind::Player
+                        && !dashing
+                        && guard <= 0.0
+                        && self.loadout.organs.motes >= 1.0;
+                    if mote {
+                        self.loadout.organs.motes -= 1.0;
+                        mote_taken = true;
+                        bullet.remaining = 0.0;
+                        impacts.push(bullet.position);
+                    }
+                    let strips = bullet.friendly && spur > 0.0 && body.shield > 0.0;
+                    spurred |= strips;
                     // Enemy fire is stopped by a fortress wall but never wears it down.
-                    let dealt = if !bullet.friendly && body.rock == RockKind::Wall {
+                    let dealt = if mote || (!bullet.friendly && body.rock == RockKind::Wall) {
                         0.0
                     } else {
                         damage_bypassing(
@@ -1758,7 +1777,7 @@ impl Game {
                                 &self.tune,
                             ),
                             guard,
-                            if bullet.friendly { 0.0 } else { bullet.pith },
+                            if bullet.friendly { spur } else { bullet.pith },
                             &self.tune,
                         )
                     };
@@ -1859,6 +1878,22 @@ impl Game {
             self.notify_once(
                 "NEEDLES SNAG IN THE SWARM  A NOVA OR BLAST CLEARS IT".into(),
                 upgrades::Rarity::Common,
+            );
+        }
+        if mote_taken {
+            let left = self.loadout.organs.motes.floor();
+            self.notify_once(
+                format!("MOTE CLOUD  A MOTE TOOK THE SHOT  {left:.0} LEFT, THEY GROW BACK"),
+                upgrades::Rarity::Rare,
+            );
+        }
+        if spurred {
+            self.notify_once(
+                format!(
+                    "PITH SPUR  SHOTS SKIP {:.0} PERCENT OF A SHIELD",
+                    spur * 100.0
+                ),
+                upgrades::Rarity::Rare,
             );
         }
         if veil_sighted {

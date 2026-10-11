@@ -150,6 +150,7 @@ impl Game {
             }
         }
         self.song_rings.retain(|r| r.radius < r.max);
+        let tympanum = self.tympanum_scale();
         for (out, strength, _) in hits {
             let invulnerability = self.player_invulnerability;
             let mut struck = false;
@@ -159,11 +160,11 @@ impl Game {
                 let guard = ship.rig.guard;
                 damage(
                     ship,
-                    power::SONG_DAMAGE * guard,
+                    power::SONG_DAMAGE * guard * tympanum,
                     invulnerability,
                     &self.tune,
                 );
-                ship.velocity += out * power::SONG_SHOVE;
+                ship.velocity += out * power::SONG_SHOVE * tympanum;
                 ship.velocity = ship.velocity.clamp_length_max(650.0);
                 struck = true;
             }

@@ -34,6 +34,12 @@ impl Game {
         if revealed {
             return None;
         }
+        // An Argus eye sees a lurefish for what it is when it comes close enough.
+        if let (Some(sight), Some(ship)) = (self.argus_sight(), self.player())
+            && ship.position.distance(body.position) < sight
+        {
+            return None;
+        }
         Some(if body.genome.mimic >= power::MIMIC_LURE {
             Disguise::Lure
         } else {

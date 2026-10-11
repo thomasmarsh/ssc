@@ -104,6 +104,13 @@ impl Piece {
                 Organ::Faraday => &[Tag::Jam],
                 Organ::Veil => &[Tag::Phase, Tag::Dash],
                 Organ::Skipjack => &[Tag::Blink, Tag::Dash],
+                Organ::ArgusEye | Organ::Gloom => &[Tag::Light],
+                Organ::Anchor | Organ::Tympanum => &[Tag::Field],
+                Organ::Cutter => &[Tag::Cord],
+                Organ::Spur => &[Tag::Needle],
+                Organ::Motes | Organ::Tonic | Organ::Gizzard => &[Tag::Bio],
+                Organ::Seam => &[Tag::Blink],
+                Organ::Gyro => &[Tag::Jam],
             },
             Self::Skill(s) => match s {
                 Skill::Parry => &[Tag::Parry],

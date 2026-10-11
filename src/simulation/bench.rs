@@ -769,6 +769,9 @@ impl Game {
                     if matches!(o, Organ::Veil | Organ::Skipjack) {
                         row.detail += " Effect needs DASH.";
                     }
+                    if let Some(wait) = self.organ_waits(o) {
+                        row.detail += &format!(" Waits: {}.", wait.to_lowercase());
+                    }
                 } else {
                     row.ok = false;
                     row.state = "NOT OWNED".into();
@@ -1249,7 +1252,7 @@ mod tests {
         let mut groups = vec![];
         let mut skills = vec![];
         let mut organs = vec![];
-        for _ in 0..23 {
+        for _ in 0..(Skill::ALL.len() + Organ::ALL.len()) {
             let row = selected(&game);
             if groups.last() != Some(&row.group) {
                 groups.push(row.group);
@@ -1271,7 +1274,7 @@ mod tests {
             BenchAction::Research(research::Tech::Fabrication)
         );
         game.bench_move(-1);
-        assert_eq!(selected(&game).action, BenchAction::Organ(Organ::Skipjack));
+        assert_eq!(selected(&game).action, BenchAction::Organ(Organ::Tympanum));
     }
     #[test]
     fn every_tab_boundary_has_one_selected_action() {
@@ -1508,10 +1511,10 @@ mod tests {
         assert_eq!(game.cargo.crystal, 9992.0);
         assert_eq!(game.cargo.fuel, 9980.0);
         game.bench_select(BenchAction::Organ(Organ::Faraday));
-        assert!(selected(&game).detail.contains("Replaces SKIP NODE"));
+        assert!(selected(&game).detail.contains("Replaces TYMPANUM"));
         game.bench_confirm();
         assert_eq!(game.loadout.organs.fitted(), [Organ::Faraday]);
-        game.bench_select(BenchAction::Organ(Organ::Skipjack));
+        game.bench_select(BenchAction::Organ(Organ::Tympanum));
         assert!(selected(&game).costs.is_empty());
         let before = game.cargo;
         game.bench_confirm();
@@ -1520,7 +1523,7 @@ mod tests {
         assert!(selected(&game).detail.contains("asleep"));
         game.bench_confirm();
         assert!(game.loadout.organs.fitted().is_empty());
-        assert!(game.loadout.organs.owns(Organ::Skipjack));
+        assert!(game.loadout.organs.owns(Organ::Tympanum));
     }
     #[test]
     fn stash_is_accessible_for_every_material_and_alt_elsewhere_never_mutates() {

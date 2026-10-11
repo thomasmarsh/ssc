@@ -781,7 +781,8 @@ impl Game {
         let sectors = ship.distance(beacon.position) / SECTOR_SIZE;
         let charge = (self.tune.travel_charge_base + self.tune.travel_charge_per_sector * sectors)
             .min(self.tune.travel_charge_max)
-            * self.loadout.skills.travel_charge_factor(&self.tune);
+            * self.loadout.skills.travel_charge_factor(&self.tune)
+            * self.seam_scale().0;
         Some(TravelQuote {
             sectors,
             volatiles: (self.tune.travel_volatiles_base
@@ -849,8 +850,16 @@ impl Game {
             total: quote.charge,
             quote,
         });
+        let seam = if self.seam_scale().0 < 1.0 {
+            "  SEAM NEEDLE THREADS IT"
+        } else {
+            ""
+        };
         self.notify(
-            format!("CHARGING  {:.0}s  damage breaks it", quote.charge.ceil()),
+            format!(
+                "CHARGING  {:.0}s  damage breaks it{seam}",
+                quote.charge.ceil()
+            ),
             Rarity::Rare,
         );
         Ok(quote)
@@ -959,7 +968,7 @@ impl Game {
         self.beam = None;
         self.mine_target = None;
         self.mine_clock = 0.0;
-        self.chart.cooldown = self.tune.travel_cooldown;
+        self.chart.cooldown = self.tune.travel_cooldown * self.seam_scale().1;
         self.chart.exposed = self.tune.travel_exposed;
         self.player_invulnerability = 0.0;
         if let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) {

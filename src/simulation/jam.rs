@@ -281,11 +281,16 @@ impl Game {
             return false;
         }
         let seconds = (seconds * scale * self.realm_effects().jam_time).clamp(0.1, power::JAM_MAX);
+        let (sway, may_flip) = self.gyro_scale();
         let j = &mut self.jam;
         j.confuse = seconds;
         j.confuse_total = seconds;
-        j.confuse_amp = amp.clamp(0.0, 1.0);
-        j.confuse_flip = if flip { power::CONFUSE_FLIP } else { 0.0 };
+        j.confuse_amp = (amp * sway).clamp(0.0, 1.0);
+        j.confuse_flip = if flip && may_flip {
+            power::CONFUSE_FLIP
+        } else {
+            0.0
+        };
         j.confuse_phase = phase;
         j.immunity = power::JAM_IMMUNITY;
         let at = self.player().map_or(Vec2::ZERO, |p| p.position);
@@ -308,13 +313,24 @@ impl Game {
         self.add_glitch(seconds, seed);
         // The glare's rules half (K8): the sonar is refused for the glitch, a dim field's stealth
         // is cancelled for a moment.
-        let sonar = seconds * self.tune.glare_sonar_share;
+        // The Argus eye keeps part of the sonar and the stealth (all of it at level 3).
+        let keep = self.argus_keep();
+        if keep <= 0.0 {
+            self.notify_once(
+                "GLARE  ARGUS EYE HOLDS THE SONAR AND THE STEALTH".into(),
+                upgrades::Rarity::Rare,
+            );
+            return true;
+        }
+        let sonar = seconds * self.tune.glare_sonar_share * keep;
         self.jam.glare_sonar = self.jam.glare_sonar.max(sonar);
-        self.jam.glare_dim = self.jam.glare_dim.max(self.tune.glare_dim_cancel);
-        self.notify_once(
-            format!("GLARE  SONAR BLIND {sonar:.1} S  STEALTH LIT"),
-            upgrades::Rarity::Rare,
-        );
+        self.jam.glare_dim = self.jam.glare_dim.max(self.tune.glare_dim_cancel * keep);
+        let text = if keep < 1.0 {
+            format!("GLARE  SONAR BLIND {sonar:.1} S  STEALTH LIT  ARGUS EYE CUTS IT")
+        } else {
+            format!("GLARE  SONAR BLIND {sonar:.1} S  STEALTH LIT")
+        };
+        self.notify_once(text, upgrades::Rarity::Rare);
         true
     }
 
@@ -445,8 +461,9 @@ impl Game {
         let Some(ship) = self.player().map(|p| p.position) else {
             return 1.0;
         };
-        let dark = self.dim_at(ship) / (1.0 - power::DIM_FLOOR);
-        1.0 + (1.0 / power::DIM_NOTICE - 1.0) * dark
+        // A dim field's darkness and a Gloom vesicle's do not add: the darker one counts.
+        let dark = (self.dim_at(ship) / (1.0 - power::DIM_FLOOR)).max(self.gloom_dark());
+        1.0 + (1.0 / power::DIM_NOTICE - 1.0) * dark.clamp(0.0, 1.0)
     }
 }
 

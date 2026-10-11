@@ -359,6 +359,23 @@ impl Tier {
         t
     }
 
+    /// The same kit with every organ of the catalog fitted at level 2 (CAPABILITIES K6): each
+    /// organ's cover rows add to the kit's degrees (capped at three), which is the whole of its
+    /// price against the powers it answers.
+    pub fn grown(&self) -> Tier {
+        let loadout = Loadout {
+            organs: crate::simulation::organs::Organs::grown(2),
+            ..Loadout::default()
+        };
+        let organs = cover_of(&loadout);
+        let mut t = self.clone();
+        for (at, add) in t.cover.iter_mut().zip(organs) {
+            *at = (*at + add).min(capability::MAX_DEGREE);
+        }
+        t.label = format!("{}+organs", self.label);
+        t
+    }
+
     /// The same kit with parry and dash fully trained.
     /// The same kit with a needle gun in hand (a cloud swallows it more often).
     pub fn needled(&self) -> Tier {
@@ -607,6 +624,11 @@ fn assess_genome(
             Power::Engulf => {
                 let rate = crate::power::ENGULF_DPS * (crate::power::ENGULF_DPS_GAIN + c.strength);
                 sources.push((capability::power::channel(c.power), rate * CONTACT_DUTY));
+                // The digest is also a drain a ward answers (the Gizzard, K6): a term on the
+                // channel, so a cover cuts it like any other power's flair.
+                let term = role(c.power).weight() * c.strength * tune.buff_extra_flair;
+                flair *= 1.0 + term;
+                terms.push((capability::power::channel(c.power), term));
                 continue;
             }
             _ => {}
@@ -1750,6 +1772,37 @@ mod tests {
             tier.cover[channel.unwrap().index()] = 3;
             assert!(o.power_for(&tier) < o.power);
         }
+    }
+
+    #[test]
+    fn every_ward_organ_cuts_the_power_of_the_carriers_it_answers_and_grown_cuts_danger() {
+        use crate::simulation::organs::{Aspect, ORGANS};
+        let bare = tier_bare();
+        for k in ORGANS.iter().filter(|k| k.aspect == Aspect::Ward) {
+            let mut g = crate::genome::Genome::bogey();
+            assert!(crate::power::stamp(&mut g, k.power, 0.9), "{:?}", k.power);
+            let o = lone(g);
+            let mut tier = bare.clone();
+            for c in capability::organ_covers(k.organ) {
+                tier.cover[c.channel.index()] = c.max;
+            }
+            assert!(
+                o.power_for(&tier) < o.power_for(&bare),
+                "{} does not cut a {:?} carrier",
+                k.label,
+                k.power
+            );
+        }
+        let grown = bare.grown();
+        assert!(grown.cover.iter().any(|&d| d > 0));
+        let mut cut = 0;
+        for s in sampled() {
+            assert!(s.danger_for(&grown) <= s.danger + 1e-4);
+            if s.danger_for(&grown) < s.danger - 1e-4 {
+                cut += 1;
+            }
+        }
+        assert!(cut > 0, "the organs should cheapen some sampled sector");
     }
 
     #[test]

@@ -483,16 +483,10 @@ impl Game {
     /// Every organ owned at its top level, and fitted as far as the slots go (the first graft
     /// would cost materials, so the fitting is done free).
     pub fn dev_grant_organs(&mut self) {
-        for (organ, genome) in [
-            (Organ::Remora, Genome::remora()),
-            (Organ::Faraday, Genome::stormcap()),
-            (Organ::Veil, Genome::veilwing()),
-            (Organ::Skipjack, Genome::skipjack()),
-        ] {
+        for organ in Organ::ALL {
+            let strain = Strain::typical(organ);
             for _ in 0..tuning::ORGAN_LEVELS {
-                self.loadout
-                    .organs
-                    .acquire(Strain::from_donor(organ, &genome), &self.tune);
+                self.loadout.organs.acquire(strain, &self.tune);
             }
         }
         let was_free = self.cargo.dev_free;

@@ -282,6 +282,48 @@ tuning_life::groups! {
         buff_extra_flair: f32 = 0.5, 0.0, 2.0, Ratio;
     }
 
+    // ---- the organ catalog (CAPABILITIES K6; see `organs`) ----
+    group "organ_catalog" {
+        /// Share a Gloom vesicle darkens a quiet ship per unit of strength (a dim field's own darkness takes the larger; at most full).
+        gloom_dark: f32 = 0.35, 0.0, 1.0, Ratio;
+        /// Share of a glare's sonar blind and lit stealth an Argus eye cuts per unit of strength (level 3 refuses them).
+        argus_cut: f32 = 0.5, 0.0, 1.0, Ratio;
+        /// Distance within which an Argus eye sees a lurefish for what it is, times strength.
+        argus_mimic_reach: f32 = 450.0, 0.0, 5000.0, Distance;
+        /// Share an Anchor cuts from every pull, push and shove per unit of strength (never below `anchor_floor` of it left).
+        anchor_cut: f32 = 0.3, 0.0, 1.0, Ratio;
+        /// Least share of a field's grip that is left under any Anchor.
+        anchor_floor: f32 = 0.15, 0.0, 1.0, Ratio;
+        /// Health of latched cord a Cord-cutter parts the moment it latches, per unit of strength (beside any shears).
+        cutter_hardness: f32 = 40.0, 0.0, 500.0, Amount;
+        /// Health a second a Cord-cutter wears off a stouter latched cord, per unit of strength.
+        cutter_rate: f32 = 35.0, 0.0, 1000.0, Amount;
+        /// Share of a shielded body's shield the ship's shots skip with a Pith spur, per unit of strength (at most `spur_max`).
+        spur_strip: f32 = 0.2, 0.0, 1.0, Ratio;
+        /// Most a Pith spur lets a shot skip.
+        spur_max: f32 = 0.6, 0.0, 1.0, Ratio;
+        /// Motes a Mote cloud keeps per unit of strength (each takes one hostile shot).
+        mote_count: f32 = 2.0, 0.0, 20.0, Amount;
+        /// Seconds a spent mote takes to grow back.
+        mote_regen: f32 = 8.0, 0.1, 600.0, Seconds;
+        /// Share a Seam needle cuts from a fast travel's charge-up, per unit of strength.
+        seam_charge_cut: f32 = 0.25, 0.0, 1.0, Ratio;
+        /// Share a Seam needle cuts from a fast travel's recharge, per unit of strength.
+        seam_cooldown_cut: f32 = 0.3, 0.0, 1.0, Ratio;
+        /// Most a Seam needle cuts from either.
+        seam_max: f32 = 0.75, 0.0, 1.0, Ratio;
+        /// Share a Gyro cuts from a confusion's sway per unit of strength (from level 2 it also never flips the turn).
+        gyro_cut: f32 = 0.4, 0.0, 1.0, Ratio;
+        /// Share a Tick tonic cuts from every hullworm's drain per unit of strength (at most `ward_max`).
+        tonic_cut: f32 = 0.35, 0.0, 1.0, Ratio;
+        /// Share a Gizzard cuts from a swallowing blob's digestion per unit of strength (at most `ward_max`).
+        gizzard_cut: f32 = 0.3, 0.0, 1.0, Ratio;
+        /// Share a Tympanum cuts from a song ring's blow and shove per unit of strength (at most `ward_max`).
+        tympanum_cut: f32 = 0.3, 0.0, 1.0, Ratio;
+        /// Most any one ward cuts from the hazard it answers (a ward answers, it never makes immune).
+        ward_max: f32 = 0.85, 0.0, 1.0, Ratio;
+    }
+
     // ---- the mining beam -------------------------------------------------------------------------
     group "mining" {
         /// Beam reach, from the ship's center to the rock's surface, before range upgrades.

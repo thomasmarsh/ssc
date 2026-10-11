@@ -11,11 +11,15 @@
 //! little biomass a minute and sleeps at an empty hold. A fresh bond works at once for a few
 //! minutes without a slot.
 //!
-//! Four organs, each from a built power: the Remora (hull regeneration, from the symbiote), the
-//! Faraday organ (jams and glitches run shorter, none at all at the top, from the Stormcap's
-//! emp), the Veil (a dash leaves the ship intangible for a moment, from the Veilwing's phase)
-//! and the Skipjack node (a dash hops a thin obstacle, from the blink). Numbers live in
-//! `tuning`. Nothing here is random: magnitudes come from genomes and a hash of the spawn.
+//! Fifteen organs, each from a built power. The first four: the Remora (hull regeneration, from
+//! the symbiote), the Faraday organ (jams and glitches run shorter, none at all at the top, from
+//! the Stormcap's emp), the Veil (a dash leaves the ship intangible for a moment, from the
+//! Veilwing's phase) and the Skipjack node (a dash hops a thin obstacle, from the blink). The
+//! catalog (CAPABILITIES K6) adds a ward or a gland for eleven more powers: the Argus eye
+//! (glare), Gloom vesicle (dim), Anchor (repel), Cord-cutter (weave), Pith spur (bypass), Mote
+//! cloud (split), Seam needle (rift), Gyro (confuse), Tick tonic (latch), Gizzard (engulf) and
+//! Tympanum (song). Every one is additive: owning it never makes anything worse. Numbers live
+//! in `tuning`. Nothing here is random: magnitudes come from genomes and a hash of the spawn.
 
 use super::tuning as t;
 use super::*;
@@ -30,6 +34,28 @@ pub enum Organ {
     Faraday,
     Veil,
     Skipjack,
+    /// Glare ward: a glare cannot blind the sonar or light the stealth, and mimics are seen.
+    ArgusEye,
+    /// Dim gland: a quiet ship is noticed from less far off, field or no field.
+    Gloom,
+    /// Repel ward: pulls, pushes and shoves lose their grip on the ship.
+    Anchor,
+    /// Weave ward: latched cords part at once or wear through faster.
+    Cutter,
+    /// Bypass gland: the ship's shots skip a share of a shield.
+    Spur,
+    /// Split ward: motes take hostile shots, one each, and grow back.
+    Motes,
+    /// Rift gland: fast travel charges and recharges faster.
+    Seam,
+    /// Confuse ward: the sway of a confusion shrinks, and never flips the turn at level 2.
+    Gyro,
+    /// Latch ward: a hullworm drains less.
+    Tonic,
+    /// Engulf ward: a swallowing blob digests the ship more slowly.
+    Gizzard,
+    /// Song ward: a song ring's blow and shove are cut.
+    Tympanum,
 }
 
 /// What an organ is to the capability poset (`docs/CAPABILITIES.md` section 4.5): a ward is a
@@ -53,8 +79,9 @@ pub struct OrganKind {
     pub harvest: bool,
 }
 
-/// The organ table, in `Organ` declaration order (a test pins it). Slices K6 adds rows here.
-pub const ORGANS: [OrganKind; 4] = [
+/// The organ table, in `Organ` declaration order (a test pins it). Powers without a row (warp,
+/// lens, mimic, cloud, devour, sling, rune) pay raw goods only.
+pub const ORGANS: [OrganKind; 15] = [
     OrganKind {
         organ: Organ::Remora,
         power: Power::Symbiote,
@@ -81,6 +108,83 @@ pub const ORGANS: [OrganKind; 4] = [
         power: Power::Blink,
         aspect: Aspect::Gland,
         label: "SKIP NODE",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::ArgusEye,
+        power: Power::Glare,
+        aspect: Aspect::Ward,
+        label: "ARGUS EYE",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Gloom,
+        power: Power::Dim,
+        aspect: Aspect::Gland,
+        label: "GLOOM VESICLE",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Anchor,
+        power: Power::Repel,
+        aspect: Aspect::Ward,
+        label: "ANCHOR",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Cutter,
+        power: Power::Weave,
+        aspect: Aspect::Ward,
+        label: "CORD-CUTTER",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Spur,
+        power: Power::Bypass,
+        aspect: Aspect::Gland,
+        label: "PITH SPUR",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Motes,
+        power: Power::Split,
+        aspect: Aspect::Ward,
+        label: "MOTE CLOUD",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Seam,
+        power: Power::Rift,
+        aspect: Aspect::Gland,
+        label: "SEAM NEEDLE",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Gyro,
+        power: Power::Confuse,
+        aspect: Aspect::Ward,
+        label: "GYRO",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Tonic,
+        power: Power::Latch,
+        aspect: Aspect::Ward,
+        label: "TICK TONIC",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Gizzard,
+        power: Power::Engulf,
+        aspect: Aspect::Ward,
+        label: "GIZZARD",
+        harvest: true,
+    },
+    OrganKind {
+        organ: Organ::Tympanum,
+        power: Power::Song,
+        aspect: Aspect::Ward,
+        label: "TYMPANUM",
         harvest: true,
     },
 ];
@@ -153,6 +257,43 @@ impl Organ {
                 tune.veil_time
             ),
             Self::Skipjack => format!("a dash hops walls under {:.0} thick", tune.skip_thick),
+            Self::ArgusEye => format!(
+                "a glare blinds the sonar and lights the stealth {:.0}% less (none at level 3), mimics within {:.0} are seen",
+                tune.argus_cut * 100.0,
+                tune.argus_mimic_reach
+            ),
+            Self::Gloom => format!(
+                "a quiet ship is {:.0}% darker to every hunter, shooting lights it",
+                tune.gloom_dark * 100.0
+            ),
+            Self::Anchor => format!(
+                "pulls, pushes and shoves grip {:.0}% less, beside ballast",
+                tune.anchor_cut * 100.0
+            ),
+            Self::Cutter => format!(
+                "latched cords up to {:.0} health part at once, stouter ones wear through at {:.0} a second",
+                tune.cutter_hardness, tune.cutter_rate
+            ),
+            Self::Spur => format!("shots skip {:.0}% of a shield", tune.spur_strip * 100.0),
+            Self::Motes => format!(
+                "{:.0} motes take one hostile shot each and grow back in {:.0}s",
+                tune.mote_count, tune.mote_regen
+            ),
+            Self::Seam => format!(
+                "fast travel charges {:.0}% faster and recharges {:.0}% faster (needs a BEACON)",
+                tune.seam_charge_cut * 100.0,
+                tune.seam_cooldown_cut * 100.0
+            ),
+            Self::Gyro => format!(
+                "confusion sways {:.0}% less, no turn flip from level 2",
+                tune.gyro_cut * 100.0
+            ),
+            Self::Tonic => format!("a hullworm drains {:.0}% less", tune.tonic_cut * 100.0),
+            Self::Gizzard => format!("digestion is {:.0}% slower", tune.gizzard_cut * 100.0),
+            Self::Tympanum => format!(
+                "a song ring's blow and shove are {:.0}% weaker",
+                tune.tympanum_cut * 100.0
+            ),
         }
     }
 }
@@ -180,6 +321,17 @@ impl Strain {
             level: 1,
             magnitude: magnitude.clamp(0.6, 1.6),
         }
+    }
+
+    /// A typical donor's strain of `organ`: its power at 0.8, a mid-sized body (developer
+    /// grants and catalog tests; no donor is needed).
+    pub fn typical(organ: Organ) -> Strain {
+        let mut donor = Genome {
+            radius: 14.0,
+            ..Genome::default()
+        };
+        organ.power().set(&mut donor, 0.8);
+        Strain::from_donor(organ, &donor)
     }
 
     /// The perk's strength: magnitude times the level's gain.
@@ -219,6 +371,9 @@ pub struct Organs {
     loan: Option<(Organ, f32)>,
     /// The hold is dry: fitted organs sleep.
     pub dormant: bool,
+    /// Motes of a working Mote cloud that are ready (each takes one hostile shot).
+    #[serde(default)]
+    pub(super) motes: f32,
 }
 
 impl Organs {
@@ -291,6 +446,21 @@ impl Organs {
                 .partial_cmp(&(b.level, b.magnitude))
                 .unwrap()
         })
+    }
+
+    /// Every organ owned and fitted at `level` and magnitude one: the reference kit of the threat
+    /// model's `+organs` tier (`threat::Tier::grown`). Not a game state.
+    pub fn grown(level: u8) -> Organs {
+        let mut organs = Organs::default();
+        for organ in Organ::ALL {
+            organs.owned[organ.index()] = Some(Strain {
+                organ,
+                level: level.clamp(1, t::ORGAN_LEVELS),
+                magnitude: 1.0,
+            });
+            organs.slots.push(organ);
+        }
+        organs
     }
 
     /// Fits `organ` into a slot (the oldest fitted one gives way when all `open` are taken) and
@@ -389,6 +559,10 @@ impl Game {
                 if !answers.is_empty() {
                     self.notify(format!("{name} ANSWERS {answers}"), upgrades::Rarity::Rare);
                 }
+                // A perk that waits on something else says what (never silent).
+                if let Some(wait) = self.organ_waits(found.organ) {
+                    self.notify(format!("{name} WAITS  {wait}"), upgrades::Rarity::Rare);
+                }
             }
             Found::Raised { from, to } => self.notify(
                 format!("{source}  {name} ORGAN {from} -> {to}"),
@@ -407,6 +581,17 @@ impl Game {
             }
         }
         result
+    }
+
+    /// What a perk is waiting on before it can do anything, if it waits: the Seam needle
+    /// threads a jump, so it needs the BEACON skill.
+    pub fn organ_waits(&self, organ: Organ) -> Option<&'static str> {
+        match organ {
+            Organ::Seam if self.loadout.skills.level(super::skills::Skill::Beacon) == 0 => {
+                Some("BUY BEACON: IT SHORTENS FAST TRAVEL")
+            }
+            _ => None,
+        }
     }
 
     /// A bond: the strain is owned and works at once for `bond_loan` seconds; a free slot takes
@@ -445,6 +630,15 @@ impl Game {
         } else {
             self.loadout.organs.dormant = false;
         }
+        // Motes grow back one at a time; a sleeping or unfitted cloud keeps none.
+        let capacity = self.mote_capacity();
+        let regen = dt / self.tune.mote_regen.max(0.1);
+        let organs = &mut self.loadout.organs;
+        organs.motes = if capacity > 0.0 {
+            (organs.motes + regen).min(capacity)
+        } else {
+            0.0
+        };
         let grade = self.equipment_grade();
         if let Some(rate) = self.loadout.organs.perk(Organ::Remora, &self.tune)
             && let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player)
@@ -518,6 +712,117 @@ impl Game {
             .organs
             .perk(Organ::Skipjack, &self.tune)
             .map(|s| self.tune.skip_thick * s)
+    }
+
+    /// Multiple of a hazard under a ward organ: one without it, `1 - cut * strength` with it,
+    /// never below `1 - ward_max` (a ward answers a hazard, it does not make the ship immune).
+    fn ward_scale(&self, organ: Organ, cut: f32) -> f32 {
+        match self.loadout.organs.perk(organ, &self.tune) {
+            None => 1.0,
+            Some(s) => (1.0 - cut * s).clamp(1.0 - self.tune.ward_max, 1.0),
+        }
+    }
+
+    /// Share of a glare's sonar blind and lit stealth that still lands (1 without an Argus eye,
+    /// 0 at its top level).
+    pub(super) fn argus_keep(&self) -> f32 {
+        match self.loadout.organs.active(Organ::ArgusEye) {
+            None => 1.0,
+            Some(strain) if strain.level >= t::ORGAN_LEVELS => 0.0,
+            Some(strain) => {
+                (1.0 - self.tune.argus_cut * strain.strength(&self.tune)).clamp(0.0, 1.0)
+            }
+        }
+    }
+
+    /// How far an Argus eye sees a lurefish for what it is, if the organ is working.
+    pub(super) fn argus_sight(&self) -> Option<f32> {
+        self.loadout
+            .organs
+            .perk(Organ::ArgusEye, &self.tune)
+            .map(|s| self.tune.argus_mimic_reach * s)
+    }
+
+    /// The darkness a Gloom vesicle gives a quiet ship, 0 to 1.
+    pub(super) fn gloom_dark(&self) -> f32 {
+        self.loadout
+            .organs
+            .perk(Organ::Gloom, &self.tune)
+            .map_or(0.0, |s| (self.tune.gloom_dark * s).clamp(0.0, 1.0))
+    }
+
+    /// Multiple of a field's grip on the ship under an Anchor (one without it).
+    pub(super) fn anchor_scale(&self) -> f32 {
+        match self.loadout.organs.perk(Organ::Anchor, &self.tune) {
+            None => 1.0,
+            Some(s) => (1.0 - self.tune.anchor_cut * s).clamp(self.tune.anchor_floor, 1.0),
+        }
+    }
+
+    /// What a Cord-cutter adds to the shears: (health parted at once, health worn a second).
+    pub(super) fn cutter_power(&self) -> Option<(f32, f32)> {
+        self.loadout
+            .organs
+            .perk(Organ::Cutter, &self.tune)
+            .map(|s| (self.tune.cutter_hardness * s, self.tune.cutter_rate * s))
+    }
+
+    /// Share of a shield the ship's shots skip under a Pith spur.
+    pub(super) fn spur_share(&self) -> f32 {
+        self.loadout
+            .organs
+            .perk(Organ::Spur, &self.tune)
+            .map_or(0.0, |s| {
+                (self.tune.spur_strip * s).clamp(0.0, self.tune.spur_max)
+            })
+    }
+
+    /// Motes a working Mote cloud keeps at most.
+    pub(super) fn mote_capacity(&self) -> f32 {
+        self.loadout
+            .organs
+            .perk(Organ::Motes, &self.tune)
+            .map_or(0.0, |s| (self.tune.mote_count * s).floor().max(1.0))
+    }
+
+    /// Multiples of a fast travel's charge-up and recharge under a Seam needle (one without).
+    pub(super) fn seam_scale(&self) -> (f32, f32) {
+        match self.loadout.organs.perk(Organ::Seam, &self.tune) {
+            None => (1.0, 1.0),
+            Some(s) => {
+                let cut = |c: f32| 1.0 - (c * s).clamp(0.0, self.tune.seam_max);
+                (
+                    cut(self.tune.seam_charge_cut),
+                    cut(self.tune.seam_cooldown_cut),
+                )
+            }
+        }
+    }
+
+    /// How much of a confusion's sway survives a Gyro, and whether it still flips the turn.
+    pub(super) fn gyro_scale(&self) -> (f32, bool) {
+        match self.loadout.organs.active(Organ::Gyro) {
+            None => (1.0, true),
+            Some(strain) => (
+                self.ward_scale(Organ::Gyro, self.tune.gyro_cut),
+                strain.level < 2,
+            ),
+        }
+    }
+
+    /// Multiple of a hullworm's drain under a Tick tonic.
+    pub(super) fn tonic_scale(&self) -> f32 {
+        self.ward_scale(Organ::Tonic, self.tune.tonic_cut)
+    }
+
+    /// Multiple of a swallowing blob's digestion under a Gizzard.
+    pub(super) fn gizzard_scale(&self) -> f32 {
+        self.ward_scale(Organ::Gizzard, self.tune.gizzard_cut)
+    }
+
+    /// Multiple of a song ring's blow and shove under a Tympanum.
+    pub(super) fn tympanum_scale(&self) -> f32 {
+        self.ward_scale(Organ::Tympanum, self.tune.tympanum_cut)
     }
 
     /// The organ the relic of sector `id` holds for this ship: the generated one, or the organ
@@ -1175,5 +1480,307 @@ mod tests {
             )
         };
         assert_eq!(run(), run());
+    }
+
+    // ---- the catalog (CAPABILITIES K6) ----
+
+    fn blind_seconds(game: &mut Game) -> f32 {
+        let mut t = 0.0;
+        while game.sonar_blinded() && t < 10.0 {
+            game.update_jam(DT, false);
+            t += DT;
+        }
+        t
+    }
+
+    #[test]
+    fn an_argus_eye_shortens_a_glares_blind_sonar_and_level_three_refuses_it() {
+        let glare = |level: Option<u8>| {
+            let mut game = stocked();
+            if let Some(level) = level {
+                fit(&mut game, Organ::ArgusEye, level, 1.0);
+            }
+            assert!(game.apply_glitch(1.5, 3));
+            blind_seconds(&mut game)
+        };
+        let (bare, one, two, three) = (glare(None), glare(Some(1)), glare(Some(2)), glare(Some(3)));
+        assert!(bare > 1.0, "{bare}");
+        assert!(one < bare && two < one, "{bare} {one} {two}");
+        assert_eq!(three, 0.0, "level 3 holds the sonar");
+        let mut game = stocked();
+        fit(&mut game, Organ::ArgusEye, 3, 1.0);
+        game.apply_glitch(1.5, 3);
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.starts_with("GLARE  ARGUS EYE HOLDS"))
+        );
+    }
+
+    #[test]
+    fn an_argus_eye_sees_a_lurefish_for_what_it_is_when_close() {
+        let mut g = Genome::default();
+        assert!(crate::power::stamp(&mut g, Power::Mimic, 0.5));
+        let mimic_at = |organ: bool, at: f32| {
+            let mut game = stocked();
+            if organ {
+                fit(&mut game, Organ::ArgusEye, 1, 1.0);
+            }
+            let id = crate::simulation::tests::spawn(
+                &mut game,
+                &crate::genome::Species::of(g),
+                Vec2::new(0.0, at),
+            );
+            let body = crate::simulation::tests::body(&game, id).clone();
+            game.disguise(&body).is_some()
+        };
+        assert!(mimic_at(false, 200.0), "posing");
+        assert!(!mimic_at(true, 200.0), "seen through close by");
+        assert!(mimic_at(true, 3000.0), "still posing far away");
+    }
+
+    #[test]
+    fn a_gloom_vesicle_darkens_a_quiet_ship_and_shooting_lights_it() {
+        let mut game = stocked();
+        assert_eq!(game.dim_notice(), 1.0);
+        fit(&mut game, Organ::Gloom, 1, 1.0);
+        let quiet = game.dim_notice();
+        assert!(quiet > 1.0, "{quiet}");
+        game.update_jam(DT, true);
+        assert_eq!(game.dim_notice(), 1.0, "a shooting ship is lit");
+        let mut deep = stocked();
+        fit(&mut deep, Organ::Gloom, 3, 1.0);
+        assert!(deep.dim_notice() > quiet);
+    }
+
+    #[test]
+    fn an_anchor_weakens_a_pushwhales_push_on_the_ship() {
+        let shoved = |anchor: bool| {
+            let mut game = stocked();
+            if anchor {
+                fit(&mut game, Organ::Anchor, 3, 1.0);
+            }
+            let mut whale = Genome::pushwhale();
+            whale.speed = 0.0;
+            whale.cruise = 0.0;
+            let id = crate::simulation::tests::spawn(
+                &mut game,
+                &crate::genome::Species::of(whale),
+                Vec2::new(0.0, 300.0),
+            );
+            crate::simulation::tests::set_player(&mut game, Vec2::new(0.0, 100.0), Vec2::ZERO);
+            // The speed the field's push has given the ship half a second in.
+            for _ in 0..(0.5 / DT) as usize {
+                game.bodies
+                    .retain(|b| b.kind == BodyKind::Player || b.id == id);
+                game.step(DT, Input::default());
+            }
+            game.player().unwrap().velocity.length()
+        };
+        let (bare, anchored) = (shoved(false), shoved(true));
+        assert!(bare > 20.0, "the field moved the ship: {bare}");
+        assert!(anchored < bare, "{anchored} against {bare}");
+        let mut game = stocked();
+        fit(&mut game, Organ::Anchor, 3, 1.0);
+        assert!(game.anchor_scale() >= game.tune.anchor_floor);
+    }
+
+    #[test]
+    fn a_cord_cutter_parts_a_weak_latched_cord_at_once_and_wears_a_stout_one() {
+        use crate::simulation::tether::{Cord, Tether};
+        let cut = |organ: Option<u8>, hardness: f32, steps: usize| {
+            let mut game = stocked();
+            if let Some(level) = organ {
+                fit(&mut game, Organ::Cutter, level, 1.0);
+            }
+            let owner = add(&mut game, BodyKind::Creature, Vec2::new(0.0, 600.0));
+            game.bodies
+                .iter_mut()
+                .find(|b| b.id == owner)
+                .unwrap()
+                .fire_cooldown = 1e6;
+            let cord = Cord {
+                hardness,
+                ..Cord::WEAK
+            };
+            let mut tether = Tether::latch_with(
+                owner,
+                Vec2::ZERO,
+                Vec2::Y,
+                0.0,
+                cord,
+                false,
+                &DEFAULT_TUNING,
+            );
+            tether.tip = None;
+            tether.rest = 560.0;
+            game.tethers.push(tether);
+            for _ in 0..steps {
+                game.step(DT, Input::default());
+            }
+            game.tethers.iter().all(|t| t.health <= 0.0) || game.tethers.is_empty()
+        };
+        assert!(!cut(None, 2.0, 3), "no organ, no shears: the cord holds");
+        assert!(cut(Some(1), 2.0, 3), "a weak cord parts at once");
+        assert!(!cut(Some(1), 8.0, 3), "a stout cord takes time");
+        assert!(cut(Some(1), 8.0, 600), "and wears through");
+        assert!(!cut(Some(1), 4.0, 3), "a middling cord is past level 1");
+        assert!(cut(Some(3), 4.0, 3), "level 3 parts it at once");
+    }
+
+    #[test]
+    fn a_pith_spur_lets_shots_skip_a_share_of_a_shield() {
+        let hit = |spur: bool| {
+            let mut game = stocked();
+            game.player_invulnerability = 1e9;
+            if spur {
+                fit(&mut game, Organ::Spur, 3, 1.0);
+            }
+            let id = add(&mut game, BodyKind::Creature, Vec2::new(0.0, 300.0));
+            let b = game.bodies.iter_mut().find(|b| b.id == id).unwrap();
+            b.shield = 100.0;
+            b.max_shield = 100.0;
+            b.health = 100.0;
+            b.max_health = 100.0;
+            b.pinned = true;
+            game.bullets.push(Bullet::friendly(
+                Vec2::new(0.0, 250.0),
+                Vec2::new(0.0, 400.0),
+                20.0,
+            ));
+            for _ in 0..20 {
+                game.step(DT, Input::default());
+            }
+            let b = game.bodies.iter().find(|b| b.id == id).unwrap();
+            (b.shield, b.health)
+        };
+        let ((s0, h0), (s1, h1)) = (hit(false), hit(true));
+        assert!(s0 < 100.0 && h0 >= 100.0 - 1e-3, "{s0} {h0}");
+        assert!(h1 < h0, "the spur reaches the hull: {h1} against {h0}");
+        assert!(s1 > s0, "and spares the shield: {s1} against {s0}");
+    }
+
+    #[test]
+    fn motes_take_hostile_shots_one_each_and_grow_back() {
+        let mut game = stocked();
+        fit(&mut game, Organ::Motes, 1, 1.0);
+        assert_eq!(game.mote_capacity(), DEFAULT_TUNING.mote_count);
+        for _ in 0..(DEFAULT_TUNING.mote_regen * 2.5 / DT) as usize {
+            game.update_organs(DT);
+        }
+        assert_eq!(game.loadout.organs.motes, DEFAULT_TUNING.mote_count);
+        let hull = game.player().unwrap().health + game.player().unwrap().shield;
+        let shoot = |game: &mut Game| {
+            let at = game.player().unwrap().position;
+            game.bullets.push(Bullet::hostile(
+                at + Vec2::new(60.0, 0.0),
+                Vec2::new(-300.0, 0.0),
+                3.0,
+                15.0,
+            ));
+            for _ in 0..30 {
+                game.step(DT, Input::default());
+            }
+        };
+        shoot(&mut game);
+        let after = game.player().unwrap().health + game.player().unwrap().shield;
+        assert_eq!(after, hull, "a mote took the shot");
+        assert!(game.loadout.organs.motes < DEFAULT_TUNING.mote_count);
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.starts_with("MOTE CLOUD"))
+        );
+        // Spent motes leave the next shot to land.
+        game.loadout.organs.motes = 0.0;
+        shoot(&mut game);
+        let hurt = game.player().unwrap().health + game.player().unwrap().shield;
+        assert!(hurt < hull);
+        // An unfitted cloud keeps none.
+        let mut none = stocked();
+        none.update_organs(DT);
+        assert_eq!(none.loadout.organs.motes, 0.0);
+    }
+
+    #[test]
+    fn a_seam_needle_cuts_the_jump_charge_and_recharge_and_says_it_waits_on_a_beacon() {
+        let mut game = stocked();
+        assert_eq!(game.seam_scale(), (1.0, 1.0));
+        game.take_strain(strain(Organ::Seam, 1, 1.0), "SPECIMEN");
+        assert!(
+            game.notices
+                .iter()
+                .any(|n| n.text.starts_with("SEAM NEEDLE WAITS"))
+        );
+        assert!(game.organ_waits(Organ::Seam).is_some());
+        fit(&mut game, Organ::Seam, 3, 1.0);
+        let (charge, cooldown) = game.seam_scale();
+        assert!(charge < 0.7 && cooldown < 0.7, "{charge} {cooldown}");
+        assert!(charge >= 1.0 - DEFAULT_TUNING.seam_max);
+        game.loadout.skills.raise(Skill::Beacon);
+        assert!(game.organ_waits(Organ::Seam).is_none());
+    }
+
+    #[test]
+    fn gyro_tonic_gizzard_and_tympanum_cut_what_they_answer_and_never_to_zero() {
+        let mut game = stocked();
+        game.cargo.crystal = 1000.0;
+        game.cargo.fuel = 1000.0;
+        assert_eq!(
+            (
+                game.tonic_scale(),
+                game.gizzard_scale(),
+                game.tympanum_scale()
+            ),
+            (1.0, 1.0, 1.0)
+        );
+        assert_eq!(game.gyro_scale(), (1.0, true));
+        game.loadout.skills.raise(Skill::Symbiosis);
+        game.loadout.skills.raise(Skill::Symbiosis);
+        game.loadout.skills.raise(Skill::Symbiosis);
+        for organ in [Organ::Gyro, Organ::Tonic, Organ::Gizzard] {
+            fit(&mut game, organ, 3, 1.6);
+        }
+        let floor = 1.0 - DEFAULT_TUNING.ward_max;
+        for scale in [
+            game.tonic_scale(),
+            game.gizzard_scale(),
+            game.gyro_scale().0,
+        ] {
+            assert!(scale < 1.0 && scale >= floor - 1e-6, "{scale}");
+        }
+        assert!(!game.gyro_scale().1, "level 2 and up never flips the turn");
+        // The confusion itself is weaker.
+        let mut bare = stocked();
+        assert!(bare.apply_confuse(0.6, true, 1.0, 1.0));
+        game.player_invulnerability = 0.0;
+        assert!(game.apply_confuse(0.6, true, 1.0, 1.0));
+        for _ in 0..5 {
+            bare.update_jam(DT, false);
+            game.update_jam(DT, false);
+        }
+        let (a, b) = (bare.jam_view(), game.jam_view());
+        assert!(a.confuse_offset.abs() > 0.0);
+        assert!(b.confuse_offset.abs() < a.confuse_offset.abs());
+    }
+
+    #[test]
+    fn every_catalog_row_pays_through_an_elder_and_a_carrier_deterministically() {
+        for k in ORGANS.iter().filter(|k| k.harvest) {
+            assert!(harvestable(k.power).any(|h| h.organ == k.organ));
+            let a = Strain::typical(k.organ);
+            assert_eq!(a, Strain::typical(k.organ));
+            assert!((0.6..=1.6).contains(&a.magnitude));
+            assert!(!k.organ.summary(&DEFAULT_TUNING).is_empty());
+            assert!(!k.organ.summary(&DEFAULT_TUNING).contains('\u{2014}'));
+        }
+        // Every row is a distinct power, so a carrier never pays two specimens of one kind.
+        for (i, a) in ORGANS.iter().enumerate() {
+            assert!(
+                ORGANS[..i].iter().all(|b| b.power != a.power),
+                "{}",
+                a.label
+            );
+        }
     }
 }

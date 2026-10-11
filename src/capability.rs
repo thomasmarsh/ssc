@@ -140,16 +140,28 @@ impl Channel {
             Self::Volley => "Hull and shield, parry, dash, or range that kills first.",
             Self::Mines => "Sonar to see sigils, then a shot to clear them.",
             Self::Bypass => "A deeper hull, or a parry that reflects the spear.",
-            Self::Jam => "A Faraday organ (immune at level 3), or leave the ring.",
+            Self::Jam => {
+                "A Faraday organ (immune at level 3), a Gyro for confusion, or leave the ring."
+            }
             Self::Phase => "Wait out the solid window; a Veil organ widens it.",
-            Self::Close => "Parry or dash through the tell, or a tail gun and field.",
-            Self::Field => "Ballast or a skip node; thrust alone only reduces the cost.",
-            Self::Cord => "Cord shears, a dash, or three shots on the cord.",
+            Self::Close => {
+                "Parry or dash through the tell, or a tail gun and field; a Seam needle shortens the escape."
+            }
+            Self::Field => "Ballast, an Anchor or a skip node; thrust alone only reduces the cost.",
+            Self::Cord => "Cord shears or a Cord-cutter, a dash, or three shots on the cord.",
             Self::Ram => "A lunatic field or ramming plating; mobility to stay clear.",
-            Self::Drain => "Dash off, a Remora mend, or siphon from kills.",
-            Self::Swarm => "Area weapons: nova, blast, missiles and mines.",
-            Self::Armor => "Lance (pierce) for bubbles, needles to strip shields, heavy hits.",
-            Self::Info => "Sonar reach and echo tiers; ping from outside the dark.",
+            Self::Drain => {
+                "Dash off, a Remora mend, a Tick tonic or a Gizzard, or siphon from kills."
+            }
+            Self::Swarm => {
+                "Area weapons: nova, blast, missiles and mines; a Mote cloud eats the first shots."
+            }
+            Self::Armor => {
+                "Lance (pierce) for bubbles, needles or a Pith spur to strip shields, heavy hits."
+            }
+            Self::Info => {
+                "Sonar reach and echo tiers, an Argus eye or a Gloom vesicle; ping from outside the dark."
+            }
         }
     }
 }
@@ -228,6 +240,47 @@ pub fn organ_covers(organ: Organ) -> &'static [Cover] {
             cover!(Close, 1, "hops clear of a charge"),
             cover!(Field, 1, "hops out of a pull"),
         ],
+        Organ::ArgusEye => &[cover!(
+            Info,
+            2,
+            "a glare blinds the sonar and lights the stealth less (not at all at level 3) and mimics are seen close up"
+        )],
+        Organ::Gloom => &[cover!(
+            Info,
+            1,
+            "a quiet ship is noticed from less far off, field or no field"
+        )],
+        Organ::Anchor => &[
+            cover!(Field, 2, "pulls, pushes and shoves lose their grip"),
+            cover!(Close, 1, "a drag or a shove cannot throw the ship"),
+        ],
+        Organ::Cutter => &[cover!(
+            Cord,
+            2,
+            "parts latched cords at once, with or without shears"
+        )],
+        Organ::Spur => &[cover!(
+            Armor,
+            2,
+            "shots skip a share of the shield they strike"
+        )],
+        Organ::Motes => &[
+            cover!(Volley, 1, "a mote takes one hostile shot and grows back"),
+            cover!(Swarm, 2, "motes eat the first shots of a crowd"),
+        ],
+        Organ::Seam => &[cover!(
+            Close,
+            1,
+            "a shorter jump charge leaves a lost fight sooner"
+        )],
+        Organ::Gyro => &[cover!(
+            Jam,
+            1,
+            "confusion sways less and never flips the turn"
+        )],
+        Organ::Tonic => &[cover!(Drain, 2, "a hullworm drains less")],
+        Organ::Gizzard => &[cover!(Drain, 1, "a swallowing blob digests more slowly")],
+        Organ::Tympanum => &[cover!(Field, 1, "a song ring's blow and shove are weaker")],
     }
 }
 
@@ -540,6 +593,40 @@ mod tests {
     }
 
     #[test]
+    fn every_ward_answers_the_channel_its_donor_feeds() {
+        use crate::simulation::organs::{Aspect, ORGANS};
+        for k in ORGANS.iter().filter(|k| k.aspect == Aspect::Ward) {
+            let fed = power::channel(k.power).expect("a ward's donor is hostile");
+            assert!(
+                organ_covers(k.organ).iter().any(|c| c.channel == fed),
+                "{} does not answer {fed:?}",
+                k.label
+            );
+        }
+    }
+
+    #[test]
+    fn every_organ_effect_is_named_by_its_channel_answer() {
+        // The need and answer strings name every catalog organ somewhere, so the readout can
+        // say what answers a channel.
+        let answers: String = Channel::ALL.iter().map(|c| c.answer()).collect();
+        for name in [
+            "Anchor",
+            "Cord-cutter",
+            "Mote cloud",
+            "Seam needle",
+            "Gyro",
+            "Tick tonic",
+            "Gizzard",
+            "Pith spur",
+            "Argus eye",
+            "Gloom vesicle",
+        ] {
+            assert!(answers.contains(name), "{name} is in no channel answer");
+        }
+    }
+
+    #[test]
     fn every_channel_has_need_and_answer() {
         for c in Channel::ALL {
             assert!(!c.need().is_empty() && !c.answer().is_empty());
@@ -581,14 +668,23 @@ mod tests {
         assert_eq!(Cap::new(2).plus(5).degree(), MAX_DEGREE);
     }
 
-    /// A loadout with Faraday owned at `level`, fitted or not (slots are private to `organs`,
-    /// so the state is built the way a save would).
+    /// A loadout with Faraday owned at `level`, fitted or not (built the way a save would: the
+    /// arrays are sized by the organ table, so the text is generated from it).
     fn with_faraday(level: u8, fitted: bool) -> Loadout {
         let slots = if fitted { "[Faraday]" } else { "[]" };
-        let text = format!(
-            "(owned:(None,Some((organ:Faraday,level:{level},magnitude:1.0)),None,None),\
-             slots:{slots},paid:(false,false,false,false),loan:None,dormant:false)"
-        );
+        let owned = Organ::ALL
+            .iter()
+            .map(|&o| {
+                if o == Organ::Faraday {
+                    format!("Some((organ:Faraday,level:{level},magnitude:1.0))")
+                } else {
+                    "None".to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let paid = vec!["false"; Organ::ALL.len()].join(",");
+        let text = format!("(owned:({owned}),slots:{slots},paid:({paid}),loan:None,dormant:false)");
         Loadout {
             organs: ron::from_str(&text).expect("organs"),
             ..Loadout::default()

@@ -1235,6 +1235,30 @@ mod tests {
     }
 
     #[test]
+    fn an_elder_carrying_any_catalog_power_pays_its_organ_once_without_a_roll() {
+        let id = find(SEED, Rank::Major);
+        let game = visit(id);
+        let base = the_apex(&game).clone();
+        for kind in organs::ORGANS.iter().filter(|k| k.harvest) {
+            let mut body = base.clone();
+            body.genome.clear_powers();
+            crate::power::Power::set(kind.power, &mut body.genome, 0.8);
+            let a = game.apex_loot(&body, &mut Rng::new(1), game.params());
+            let b = game.apex_loot(&body, &mut Rng::new(77), game.params());
+            assert_eq!(a, b, "{}: no roll", kind.label);
+            let paid = a
+                .iter()
+                .filter(|d| matches!(d, Item::Specimen(s) if s.organ == kind.organ))
+                .count();
+            assert_eq!(
+                paid, 1,
+                "{} is paid once by a {:?} elder",
+                kind.label, kind.power
+            );
+        }
+    }
+
+    #[test]
     fn a_slain_keeper_pays_its_ward_once_and_never_by_the_harvest_roll() {
         let id = find(SEED, Rank::Major);
         let mut game = visit(id);

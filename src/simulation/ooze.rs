@@ -522,6 +522,7 @@ impl Game {
             (b.position, b.velocity, b.radius)
         };
         let invulnerability = self.player_invulnerability;
+        let gizzard = self.gizzard_scale();
         let Some(ship) = self.bodies.iter_mut().find(|b| b.kind == BodyKind::Player) else {
             return 0.0;
         };
@@ -543,7 +544,7 @@ impl Game {
         let cap = power::ENGULF_PULL * thrust;
         ship.velocity += want.clamp_length_max(cap) * dt;
         // Digested: shield first (the usual damage rules), and the shield will not recharge.
-        let eaten = power::ENGULF_DPS * (power::ENGULF_DPS_GAIN + s) * dt;
+        let eaten = power::ENGULF_DPS * (power::ENGULF_DPS_GAIN + s) * dt * gizzard;
         let dealt = damage(ship, eaten, invulnerability, &self.tune);
         let at = ship.position;
         if let Some(e) = self.engulf.as_mut() {
