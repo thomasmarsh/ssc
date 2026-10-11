@@ -1,5 +1,5 @@
 //! Per-frame gizmo draw system.
-use super::draw_overlay::{draw_backdrop, draw_guides, draw_radar};
+use super::draw_overlay::{draw_backdrop, draw_guides, draw_motif, draw_radar};
 use super::draw_ship::{
     draw_beam, draw_boost, draw_dash, draw_echoes, draw_parry, draw_rig, draw_sigil,
 };
@@ -62,6 +62,7 @@ pub(crate) fn draw(
     };
     let jam = game.jam_view();
     draw_backdrop(&mut gizmos, camera, half, &sky, dark);
+    draw_motif(&mut gizmos, camera, half, &sky, game.time, dark);
     let f = Frame {
         game,
         session: &session,

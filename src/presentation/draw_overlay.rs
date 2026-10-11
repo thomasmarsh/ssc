@@ -296,6 +296,144 @@ pub(super) fn draw_backdrop(
     }
 }
 
+/// The ambient particles of the realm kind the ship is in (docs/LEGIBILITY.md 3.2): a shape and
+/// a motion per kind, thinned by the realm's presence so the border gradient is felt as a few
+/// motes, then a drift, then the full language. Derived from position and time only.
+pub(super) fn draw_motif(
+    gizmos: &mut Gizmos,
+    camera: Vec2,
+    half: Vec2,
+    sky: &ssc::backdrop::Backdrop,
+    time: f32,
+    dark: f32,
+) {
+    use ssc::backdrop::{Motif, motif_of};
+    let motif = motif_of(sky.realm);
+    let presence = sky.realm_ramp;
+    if motif == Motif::Plain || presence <= 0.0 {
+        return;
+    }
+    const CELL: f32 = 200.0;
+    let keep = (motif.per_cell() * presence).min(1.0);
+    let lit = 1.0 - dark;
+    let c = ssc::backdrop::hsl_lift(sky.realm_tint);
+    let reach = half + Vec2::splat(120.0);
+    let min = ((camera - reach) / CELL).floor().as_ivec2();
+    let max = ((camera + reach) / CELL).ceil().as_ivec2();
+    let color = |a: f32| Color::srgba(c[0], c[1], c[2], (a * lit).clamp(0.0, 1.0));
+    let salt = 0x4D4F_5449_4600_0000 ^ motif as u64;
+    for cx in min.x..=max.x {
+        for cy in min.y..=max.y {
+            let h = hash2(salt, cx, cy);
+            if (h >> 40) as f32 / 16_777_216.0 >= keep {
+                continue;
+            }
+            let unit = |shift: u32| (h >> shift & 0xFFFF) as f32 / 65535.0;
+            let (ux, uy, phase) = (unit(8), unit(24), unit(40) * std::f32::consts::TAU);
+            let origin = Vec2::new(cx as f32, cy as f32) * CELL;
+            // Drift speed (units per second); a mote wraps within its cell and fades at the wrap.
+            let velocity = match motif {
+                Motif::Curtains => Vec2::new(0.0, 7.0),
+                Motif::Ribbons => Vec2::new(16.0, 0.0),
+                Motif::Bands => Vec2::new(10.0, 0.0),
+                Motif::Pollen => Vec2::new(3.0, 6.0),
+                Motif::Leaning => Vec2::new(-12.0, 5.0),
+                _ => Vec2::ZERO,
+            };
+            let at = Vec2::new(
+                (ux * CELL + velocity.x * time).rem_euclid(CELL),
+                (uy * CELL + velocity.y * time).rem_euclid(CELL),
+            );
+            let fade = (std::f32::consts::PI * at.x / CELL).sin()
+                * (std::f32::consts::PI * at.y / CELL).sin();
+            let p = origin + at;
+            let slow = (time * 0.6 + phase).sin();
+            match motif {
+                Motif::Plain => {}
+                Motif::Curtains => {
+                    let sway = 8.0 * (time * 0.3 + phase).sin();
+                    gizmos.line_2d(p, p + Vec2::new(sway, 64.0), color(0.22 * fade));
+                }
+                Motif::Static => {
+                    // Scanline flickers that blink on and off at irregular ticks.
+                    let tick = (time * 9.0 + phase * 3.0) as i32;
+                    if hash2(salt, tick, cx ^ cy) & 3 == 0 {
+                        gizmos.line_2d(p, p + Vec2::new(0.0, 16.0), color(0.7));
+                        gizmos.line_2d(p + Vec2::X * 3.0, p + Vec2::new(3.0, 7.0), color(0.35));
+                    }
+                }
+                Motif::Leaning => {
+                    // Long curved streaks, all of a neighbourhood leaning the same way.
+                    let g = hash2(salt ^ 7, cx.div_euclid(3), cy.div_euclid(3));
+                    let turn =
+                        Vec2::from_angle((g >> 20 & 0x3FF) as f32 / 1024.0 * std::f32::consts::TAU);
+                    let mut prev = p;
+                    for k in 1..=5 {
+                        let u = k as f32 / 5.0;
+                        let local = Vec2::new(u * 90.0, 16.0 * (u * 3.1).sin());
+                        let q = p + turn.rotate(local);
+                        gizmos.line_2d(prev, q, color(0.28 * fade));
+                        prev = q;
+                    }
+                }
+                Motif::Ribbons => {
+                    for k in 0..6 {
+                        let q = p + Vec2::new(
+                            k as f32 * 8.0,
+                            7.0 * (time * 1.3 + phase + k as f32 * 0.7).sin(),
+                        );
+                        gizmos.line_2d(q, q + Vec2::X * 1.6, color(0.6 * fade));
+                    }
+                }
+                Motif::Glints => {
+                    let env = (time * 1.4 + phase).sin().max(0.0).powi(6);
+                    if env > 0.05 {
+                        let r = 4.0 + 9.0 * env;
+                        gizmos.line_2d(p - Vec2::X * r, p + Vec2::X * r, color(0.9 * env));
+                        gizmos.line_2d(p - Vec2::Y * r, p + Vec2::Y * r, color(0.9 * env));
+                        let d = Vec2::splat(r * 0.5);
+                        gizmos.line_2d(p - d, p + d, color(0.5 * env));
+                    }
+                }
+                Motif::Bands => {
+                    let y = 6.0 * slow;
+                    let a = 0.14 * (0.6 + 0.4 * slow) * fade;
+                    gizmos.line_2d(p + Vec2::Y * y, p + Vec2::new(150.0, y), color(a));
+                    gizmos.line_2d(
+                        p + Vec2::new(10.0, y + 5.0),
+                        p + Vec2::new(120.0, y + 5.0),
+                        color(a * 0.6),
+                    );
+                }
+                Motif::Pollen => {
+                    let q = p + Vec2::new(5.0 * (time * 0.5 + phase).sin(), 0.0);
+                    gizmos.circle_2d(q, 1.6, color(0.7 * fade)).resolution(6);
+                }
+                Motif::Threads => {
+                    let pulse = 0.5 + 0.5 * (time * 0.6 + phase).sin();
+                    let mut prev = p;
+                    for k in 1..=4 {
+                        let q = p + Vec2::new(
+                            5.0 * (time * 0.4 + phase + k as f32 * 0.8).sin(),
+                            -(k as f32) * 26.0,
+                        );
+                        gizmos.line_2d(prev, q, color(0.18 + 0.2 * pulse));
+                        prev = q;
+                    }
+                    gizmos
+                        .circle_2d(prev, 1.8, color(0.3 + 0.5 * pulse))
+                        .resolution(6);
+                }
+                Motif::Points => {
+                    let a = 0.55 + 0.45 * (time * 0.35 + phase).sin();
+                    gizmos.line_2d(p - Vec2::X * 3.0, p + Vec2::X * 3.0, color(a));
+                    gizmos.line_2d(p - Vec2::Y * 3.0, p + Vec2::Y * 3.0, color(a));
+                }
+            }
+        }
+    }
+}
+
 /// North-up scope centered on the ship, covering the simulated neighborhood.
 pub(super) fn draw_radar(
     gizmos: &mut Gizmos,

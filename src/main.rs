@@ -364,6 +364,7 @@ fn main() {
                 juice::update,
                 audio::apply_mute,
                 audio::play_cues,
+                audio::play_beds,
                 presentation::draw
                     .run_if(not(grammarview::gallery_active))
                     .run_if(not(bestiaryview::gallery_active)),

@@ -385,8 +385,8 @@ pub const CATALOG: [Spec; 10] = [
         title: "DEAD REACH",
         word: "Stillness",
         harsh: true,
-        hue: 0.08,
-        sat: 0.5,
+        hue: 0.01,
+        sat: 0.65,
         light: 0.5,
         roll: 1.0,
         primary: &[Axis::Utility, Axis::Mobility],
@@ -419,7 +419,7 @@ pub const CATALOG: [Spec; 10] = [
         title: "THE CRUSH",
         word: "Deep",
         harsh: true,
-        hue: 0.8,
+        hue: 0.82,
         sat: 0.5,
         light: 0.45,
         roll: 1.0,
@@ -448,8 +448,8 @@ pub const CATALOG: [Spec; 10] = [
         title: "HIVE MARCHES",
         word: "Hive",
         harsh: false,
-        hue: 0.14,
-        sat: 0.6,
+        hue: 0.08,
+        sat: 0.7,
         light: 0.55,
         roll: 1.0,
         primary: &[Axis::Defense],
@@ -479,8 +479,8 @@ pub const CATALOG: [Spec; 10] = [
         title: "IRON TIDE",
         word: "Bastion",
         harsh: true,
-        hue: 0.6,
-        sat: 0.12,
+        hue: 0.63,
+        sat: 0.5,
         light: 0.6,
         roll: 1.0,
         primary: &[Axis::Damage],
@@ -510,7 +510,7 @@ pub const CATALOG: [Spec; 10] = [
         title: "GLASS SEAS",
         word: "Glass",
         harsh: false,
-        hue: 0.5,
+        hue: 0.42,
         sat: 0.6,
         light: 0.7,
         roll: 1.0,
@@ -541,7 +541,7 @@ pub const CATALOG: [Spec; 10] = [
         title: "QUIET GOLD",
         word: "Gold",
         harsh: false,
-        hue: 0.12,
+        hue: 0.15,
         sat: 0.7,
         light: 0.62,
         roll: 0.8,
@@ -571,7 +571,7 @@ pub const CATALOG: [Spec; 10] = [
         title: "HUNGRY DEEP",
         word: "Maw",
         harsh: true,
-        hue: 0.0,
+        hue: 0.93,
         sat: 0.6,
         light: 0.45,
         roll: 0.9,
@@ -610,7 +610,7 @@ pub const CATALOG: [Spec; 10] = [
         title: "BRIGHT SILENCE",
         word: "Radiance",
         harsh: false,
-        hue: 0.16,
+        hue: 0.27,
         sat: 0.3,
         light: 0.85,
         roll: 0.8,
@@ -929,7 +929,7 @@ impl Realm {
     /// The tint of the realm as sRGB in [0, 1]: its kind's colour with a small shift per realm.
     pub fn tint(&self) -> [f32; 3] {
         let spec = self.spec();
-        let shift = ((self.key >> 20) & 0xFF) as f32 / 255.0 * 0.06 - 0.03;
+        let shift = ((self.key >> 20) & 0xFF) as f32 / 255.0 * 0.03 - 0.015;
         hsl(spec.hue + shift, spec.sat, spec.light)
     }
 
@@ -1646,5 +1646,32 @@ mod tests {
         assert_eq!(CATALOG[0].effects.affinity, Affinity::NEUTRAL);
         let veil = RealmKind::by_id("veil").unwrap().spec();
         assert!(veil.effects.affinity.weight(Power::Glare) > 2.0);
+    }
+
+    #[test]
+    fn the_kind_hues_are_spread_and_the_motifs_are_distinct() {
+        let kinds: Vec<_> = RealmKind::all().collect();
+        for (i, a) in kinds.iter().enumerate() {
+            for b in &kinds[i + 1..] {
+                let d = (a.spec().hue - b.spec().hue).abs();
+                let d = d.min(1.0 - d);
+                assert!(
+                    d >= 0.06,
+                    "{} and {} are {d} apart",
+                    a.spec().id,
+                    b.spec().id
+                );
+                assert_ne!(
+                    crate::backdrop::motif_of(*a),
+                    crate::backdrop::motif_of(*b),
+                    "{} and {} share a motif",
+                    a.spec().id,
+                    b.spec().id
+                );
+            }
+        }
+        // The Cradle's backdrop is exactly neutral of any realm presence.
+        let sky = crate::backdrop::backdrop_at(SEED, bevy::prelude::Vec2::ZERO);
+        assert_eq!(sky.realm_ramp, 0.0);
     }
 }

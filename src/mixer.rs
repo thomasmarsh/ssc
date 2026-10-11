@@ -8,8 +8,10 @@
 //!   (a nova ring) plays once, a little louder;
 //! - a voice budget sheds the least important sounds first when the mix is crowded.
 
+use crate::backdrop::Motif;
+use crate::capability::Channel;
 use crate::simulation::{Cue, Shape};
-use crate::synth::Sound;
+use crate::synth::{SAMPLE_RATE, Sound};
 use bevy::prelude::Vec2;
 use std::collections::HashMap;
 
@@ -419,6 +421,239 @@ impl Mixer {
     }
 }
 
+// ---- realm beds ------------------------------------------------------------------------------
+//
+// The ambient bed of a realm kind (docs/LEGIBILITY.md 3.2 and 3.3): a seamless loop that fades in
+// with the realm's presence (the band mapping of `backdrop::band_ramp`), so crossing into harder
+// ground changes the ambience gradually and the way back fades it out. Pure and deterministic.
+
+/// Seconds in one bed loop.
+pub const BED_SECONDS: f32 = 3.0;
+
+/// The loudest a kind's bed ever gets (linear, at full presence): quiet under the music.
+pub fn bed_peak(motif: Motif) -> f32 {
+    match motif {
+        Motif::Plain => 0.0,
+        Motif::Curtains => 0.16,
+        Motif::Static => 0.12,
+        Motif::Leaning => 0.2,
+        Motif::Ribbons => 0.12,
+        Motif::Glints => 0.1,
+        Motif::Bands => 0.1,
+        Motif::Pollen => 0.12,
+        Motif::Threads => 0.16,
+        Motif::Points => 0.04,
+    }
+}
+
+/// The bed's level for a realm presence in [0, 1]: about -26 dB at the end of the whisper,
+/// rising to the peak at the rim.
+pub fn bed_gain(motif: Motif, presence: f32) -> f32 {
+    bed_peak(motif) * presence.clamp(0.0, 1.0).powf(1.3)
+}
+
+fn bed_noise(n: usize, seed: u32) -> Vec<f32> {
+    let mut x = seed.wrapping_mul(2_654_435_761).wrapping_add(12_345);
+    (0..n)
+        .map(|_| {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (x >> 8) as f32 / 8_388_608.0 - 1.0
+        })
+        .collect()
+}
+
+/// A one-pole low-pass that wraps around, so a loop stays seamless.
+fn circular_lowpass(x: &[f32], a: f32) -> Vec<f32> {
+    let mut out = vec![0.0; x.len()];
+    let mut y = 0.0;
+    for pass in 0..2 {
+        for (i, v) in x.iter().enumerate() {
+            y += a * (v - y);
+            if pass == 1 {
+                out[i] = y;
+            }
+        }
+    }
+    out
+}
+
+/// The loop's samples for a motif (peak one; empty for the plain Cradle).
+pub fn bed_samples(motif: Motif) -> Vec<f32> {
+    use std::f32::consts::TAU;
+    if motif == Motif::Plain {
+        return Vec::new();
+    }
+    let n = (BED_SECONDS * SAMPLE_RATE as f32) as usize;
+    let time = |i: usize| i as f32 / SAMPLE_RATE as f32;
+    // A sine with a whole number of cycles in the loop, so it joins its own start.
+    let tone = |f: f32, i: usize| {
+        let f = (f * BED_SECONDS).round().max(1.0) / BED_SECONDS;
+        (TAU * f * time(i)).sin()
+    };
+    let hiss = bed_noise(n, motif as u32 + 1);
+    let soft = |a: f32| circular_lowpass(&hiss, a);
+    let mut out: Vec<f32> = match motif {
+        Motif::Plain => Vec::new(),
+        // A muffled pad: low tones under a lowpassed breath.
+        Motif::Curtains => {
+            let breath = soft(0.01);
+            (0..n)
+                .map(|i| {
+                    (0.5 * tone(55.0, i) + 0.3 * tone(82.5, i)) * (0.7 + 0.3 * tone(0.33, i))
+                        + 6.0 * breath[i]
+                })
+                .collect()
+        }
+        // A high crackle with irregular ticks.
+        Motif::Static => {
+            let low = soft(0.3);
+            (0..n)
+                .map(|i| {
+                    let t = time(i);
+                    let tick = (0..7)
+                        .map(|k| {
+                            let at = (k as f32 * 0.43 + 0.11 * ((k * k) % 5) as f32) % BED_SECONDS;
+                            let d = (t - at).rem_euclid(BED_SECONDS);
+                            (-d * 90.0).exp()
+                        })
+                        .sum::<f32>();
+                    (hiss[i] - low[i]) * (0.12 + 1.6 * tick.min(1.0))
+                })
+                .collect()
+        }
+        // A sub rumble, two close tones beating.
+        Motif::Leaning => {
+            let rumble = soft(0.004);
+            (0..n)
+                .map(|i| tone(38.0, i) + 0.8 * tone(41.0, i) + 14.0 * rumble[i])
+                .collect()
+        }
+        // A chorus hum: a detuned cluster with a flutter.
+        Motif::Ribbons => (0..n)
+            .map(|i| {
+                let cluster = [170.0, 176.0, 183.0, 191.0, 203.0]
+                    .iter()
+                    .map(|f| tone(*f, i))
+                    .sum::<f32>();
+                cluster * (0.65 + 0.35 * tone(6.0, i))
+            })
+            .collect(),
+        // A metallic ring: inharmonic partials on a slow tide-like swell.
+        Motif::Glints => (0..n)
+            .map(|i| {
+                let swell = 0.5 + 0.5 * tone(1.0 / BED_SECONDS, i);
+                (tone(330.0, i) + 0.5 * tone(910.0, i) + 0.25 * tone(1782.0, i)) * swell * swell
+            })
+            .collect(),
+        // Sparse glassy chimes.
+        Motif::Bands => (0..n)
+            .map(|i| {
+                let t = time(i);
+                [(0.2, 1320.0), (1.1, 1760.0), (2.0, 990.0)]
+                    .iter()
+                    .map(|(at, f)| {
+                        let d = (t - at).rem_euclid(BED_SECONDS);
+                        tone(*f, i) * (-d * 4.0).exp()
+                    })
+                    .sum::<f32>()
+            })
+            .collect(),
+        // A soft major pad.
+        Motif::Pollen => (0..n)
+            .map(|i| {
+                (tone(220.0, i) + 0.8 * tone(277.0, i) + 0.7 * tone(330.0, i))
+                    * (0.8 + 0.2 * tone(0.67, i))
+            })
+            .collect(),
+        // A slow creaking throb.
+        Motif::Threads => {
+            let creak = soft(0.006);
+            (0..n)
+                .map(|i| {
+                    let throb = 0.55 + 0.45 * tone(0.67, i);
+                    (tone(48.0, i) + 0.4 * tone(96.0, i)) * throb + 10.0 * creak[i] * throb
+                })
+                .collect()
+        }
+        // Near silence: a thin high tone, so the sonar ping rings loud against it.
+        Motif::Points => (0..n)
+            .map(|i| tone(2400.0, i) * (0.5 + 0.5 * tone(0.33, i)) + 0.3 * tone(60.0, i))
+            .collect(),
+    };
+    let peak = out.iter().fold(0.0f32, |p, s| p.max(s.abs())).max(1e-6);
+    for s in &mut out {
+        *s /= peak;
+    }
+    out
+}
+
+// ---- channel cue grammar -----------------------------------------------------------------------
+
+/// The telegraph shape a channel's creatures wear (docs/LEGIBILITY.md 3.4): the shared grammar
+/// over the existing bestiary tells, so the player learns one vocabulary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CueShape {
+    /// A ring charging at the muzzle.
+    ChargingRing,
+    /// A blinking lamp on a laid mine.
+    Lamp,
+    /// No tell: the route itself is the answer.
+    Open,
+    /// A sparking crown that brightens through the tell.
+    SparkCrown,
+    /// A flicker between solid and outline.
+    Flicker,
+    /// A paired dart with an afterimage.
+    PairedDart,
+    /// Bodies leaning and dust bending.
+    LeanDust,
+    /// A thread glint between two bodies.
+    ThreadGlint,
+    /// A slow heavy shoulder and a dust trail.
+    ShoulderDust,
+    /// A pale suction mark and a dimming glow.
+    SuctionMark,
+    /// A chorus of small lights.
+    ChorusHum,
+    /// A bubble or plate sheen.
+    PlateSheen,
+    /// A haze with muffled returns.
+    Haze,
+}
+
+/// One channel's cue: its shape, how far its hue sits from the creature's own, and its sound.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChannelCue {
+    pub shape: CueShape,
+    /// Shift of the cue's hue from the realm kind that owns the channel, in turns.
+    pub hue_shift: f32,
+    pub sound: Option<Sound>,
+}
+
+/// The cue grammar as data, one row per channel.
+pub fn channel_cue(channel: Channel) -> ChannelCue {
+    let row = |shape, hue_shift, sound| ChannelCue {
+        shape,
+        hue_shift,
+        sound,
+    };
+    match channel {
+        Channel::Volley => row(CueShape::ChargingRing, 0.0, None),
+        Channel::Mines => row(CueShape::Lamp, 0.0, Some(Sound::Mine)),
+        Channel::Bypass => row(CueShape::Open, 0.0, None),
+        Channel::Jam => row(CueShape::SparkCrown, 0.0, Some(Sound::JamCharge)),
+        Channel::Phase => row(CueShape::Flicker, 0.05, Some(Sound::PhaseSolid)),
+        Channel::Close => row(CueShape::PairedDart, 0.0, Some(Sound::Blink)),
+        Channel::Field => row(CueShape::LeanDust, 0.0, None),
+        Channel::Cord => row(CueShape::ThreadGlint, 0.04, Some(Sound::Latch)),
+        Channel::Ram => row(CueShape::ShoulderDust, 0.0, None),
+        Channel::Drain => row(CueShape::SuctionMark, -0.04, None),
+        Channel::Swarm => row(CueShape::ChorusHum, 0.0, None),
+        Channel::Armor => row(CueShape::PlateSheen, 0.0, Some(Sound::Deflect)),
+        Channel::Info => row(CueShape::Haze, 0.0, Some(Sound::Echo)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,6 +717,45 @@ mod tests {
         for i in 0..200 {
             let plays = mixer.plan(i as f32, 0, Vec2::ZERO, &[enemy(Vec2::X * 50.0)]);
             assert!((0.94..=1.06).contains(&plays[0].speed));
+        }
+    }
+
+    #[test]
+    fn every_kind_has_a_seamless_bounded_bed_that_fades_in_gradually() {
+        use crate::realm::{CATALOG, RealmKind};
+        for kind in RealmKind::all() {
+            let motif = crate::backdrop::motif_of(kind);
+            let bed = bed_samples(motif);
+            assert_eq!(bed, bed_samples(motif));
+            if motif == Motif::Plain {
+                assert!(bed.is_empty() && bed_gain(motif, 1.0) == 0.0);
+                assert_eq!(kind.spec().id, "cradle");
+                continue;
+            }
+            assert!(bed.iter().all(|s| s.is_finite() && s.abs() <= 1.0001));
+            assert!(bed.iter().any(|s| s.abs() > 0.99), "{motif:?} is silent");
+            // Loops join: the step across the seam is no bigger than a step inside.
+            let inside = bed
+                .windows(2)
+                .map(|w| (w[1] - w[0]).abs())
+                .fold(0.0f32, f32::max);
+            let seam = (bed[0] - bed[bed.len() - 1]).abs();
+            assert!(seam <= inside * 1.5 + 0.02, "{motif:?} clicks at the seam");
+            assert!(bed_gain(motif, 0.1) < bed_gain(motif, 0.5));
+            assert!(bed_gain(motif, 0.5) < bed_gain(motif, 1.0));
+            assert!(bed_gain(motif, 0.1) < 0.1 * bed_peak(motif));
+        }
+        assert_eq!(CATALOG.len(), RealmKind::all().count());
+    }
+
+    #[test]
+    fn every_channel_has_a_cue_and_the_shapes_are_distinct() {
+        let mut shapes = std::collections::HashSet::new();
+        for c in Channel::ALL {
+            assert!(
+                shapes.insert(format!("{:?}", channel_cue(c).shape)),
+                "{c:?}"
+            );
         }
     }
 }

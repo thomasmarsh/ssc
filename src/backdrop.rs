@@ -10,6 +10,7 @@
 
 use crate::biome::BiomeKind;
 use crate::range::ecology;
+use crate::realm::RealmKind;
 use crate::region::{RegionKind, region};
 use crate::world::{SECTOR_SIZE, SectorId, hash2};
 use bevy::prelude::Vec2;
@@ -28,20 +29,138 @@ pub const ROCK: [f32; 3] = [0.76, 0.65, 0.54];
 pub const STAR_BASE: [f32; 3] = [0.5, 0.64, 0.78];
 
 /// How much of a realm's colour the nebula takes on, at full strength.
-pub const REALM_TINT: f32 = 0.45;
+pub const REALM_TINT: f32 = 0.6;
 
+/// The opacity scale of a cloud layer in plain country. A realm lifts it (`REALM_BOOST`), so the
+/// Cradle and every unclaimed place keep exactly this look.
+pub const BASE_LAYER_ALPHA: f32 = 0.075;
+/// How much a realm at full presence lifts the cloud opacity scale.
+pub const REALM_BOOST: f32 = 0.4;
 /// No cloud layer is ever more opaque than this: ships, rocks and shots stay legible.
-pub const MAX_LAYER_ALPHA: f32 = 0.075;
+pub const MAX_LAYER_ALPHA: f32 = 0.1;
 /// Dark layers may be a little more opaque: they cut rather than glow.
 pub const MAX_STREAK_ALPHA: f32 = 0.16;
 /// The smooth colour wash and the vignette are capped too.
-pub const MAX_WASH_ALPHA: f32 = 0.09;
+pub const MAX_WASH_ALPHA: f32 = 0.12;
+/// The opacity of a realm's own colour wash at full presence.
+pub const REALM_WASH: f32 = 0.05;
 pub const MAX_VIGNETTE_ALPHA: f32 = 0.3;
 /// Side of the generated noise textures, in texels.
 pub const TEXTURE_SIZE: usize = 256;
 /// How much of a border's blend happens near it: the blend is eased over the middle
 /// `2 * BLEND_HALF` of the way between two sector centres.
 const BLEND_HALF: f32 = 0.3;
+
+// ---------------------------------------------------------------------------------------------
+// Realm kind look: the border gradient and the motifs (docs/LEGIBILITY.md 3.2 and 3.3)
+// ---------------------------------------------------------------------------------------------
+
+/// The four perceptible bands of a realm's presence (`intensity`): the player feels the
+/// approach, never reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AreaBand {
+    Whisper,
+    Sign,
+    Rim,
+    Core,
+}
+
+impl AreaBand {
+    pub fn of(intensity: f32) -> AreaBand {
+        match intensity {
+            i if i < 0.15 => AreaBand::Whisper,
+            i if i < 0.5 => AreaBand::Sign,
+            i if i < 0.85 => AreaBand::Rim,
+            _ => AreaBand::Core,
+        }
+    }
+}
+
+/// Maps a realm's intensity onto its presence on screen (wash, motif density, bed level): 10
+/// percent at the end of the whisper, half at the end of the sign, full at the rim's far end.
+/// Piecewise linear, so it is continuous across sector lines, and the same for every kind.
+pub fn band_ramp(intensity: f32) -> f32 {
+    const POINTS: [(f32, f32); 5] = [(0.0, 0.0), (0.15, 0.1), (0.5, 0.5), (0.85, 1.0), (1.0, 1.0)];
+    let i = intensity.clamp(0.0, 1.0);
+    for pair in POINTS.windows(2) {
+        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
+        if i <= x1 {
+            return y0 + (y1 - y0) * (i - x0) / (x1 - x0);
+        }
+    }
+    1.0
+}
+
+/// The ambient particle language of a realm kind: a shape and a motion, so the kinds survive the
+/// cloud alpha cap and color-blind play (never colour alone).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Motif {
+    /// The Cradle: nothing added (the plankton of the field are its motif).
+    Plain,
+    /// The Veil: slow vertical dust curtains.
+    Curtains,
+    /// Dead Reach: short scanline flickers.
+    Static,
+    /// The Crush: long curved streaks leaning to a well.
+    Leaning,
+    /// Hive Marches: chains of tiny motes in ribbons.
+    Ribbons,
+    /// Iron Tide: hard specular glints.
+    Glints,
+    /// Glass Seas: translucent bands that shimmer.
+    Bands,
+    /// Quiet Gold: slow golden pollen.
+    Pollen,
+    /// Hungry Deep: hanging threads with slow pulses.
+    Threads,
+    /// Bright Silence: stark point lights in a bare field.
+    Points,
+}
+
+/// The motif of a realm kind.
+pub fn motif_of(kind: RealmKind) -> Motif {
+    match kind.spec().id {
+        "veil" => Motif::Curtains,
+        "dead_reach" => Motif::Static,
+        "crush" => Motif::Leaning,
+        "hive" => Motif::Ribbons,
+        "iron_tide" => Motif::Glints,
+        "glass_seas" => Motif::Bands,
+        "quiet_gold" => Motif::Pollen,
+        "hungry_deep" => Motif::Threads,
+        "bright_silence" => Motif::Points,
+        _ => Motif::Plain,
+    }
+}
+
+impl Motif {
+    /// How a kind reshapes the field at full presence: (cloud amount, star amount) scales.
+    /// Hungry Deep is a dark, thin field; Bright Silence removes detail.
+    fn field_scale(self) -> (f32, f32) {
+        match self {
+            Motif::Threads => (0.75, 0.8),
+            Motif::Points => (0.4, 0.6),
+            Motif::Bands => (0.9, 1.0),
+            _ => (1.0, 1.0),
+        }
+    }
+
+    /// Particles per 200 by 200 units at full presence (the field is hashed on that grid).
+    pub fn per_cell(self) -> f32 {
+        match self {
+            Motif::Plain => 0.0,
+            Motif::Curtains => 0.35,
+            Motif::Static => 0.6,
+            Motif::Leaning => 0.5,
+            Motif::Ribbons => 0.45,
+            Motif::Glints => 0.5,
+            Motif::Bands => 0.25,
+            Motif::Pollen => 0.7,
+            Motif::Threads => 0.4,
+            Motif::Points => 0.2,
+        }
+    }
+}
 
 /// The four noise textures the renderer tiles. Every one is seamless.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,6 +243,11 @@ pub struct Backdrop {
     pub vignette: f32,
     /// The kind of region of the nearest sector.
     pub kind: RegionKind,
+    /// The realm kind whose presence is strongest here, its colour, and its presence in [0, 1]
+    /// after the band mapping (`band_ramp`): the border gradient, zero in the Cradle.
+    pub realm: RealmKind,
+    pub realm_tint: [f32; 3],
+    pub realm_ramp: f32,
 }
 
 impl Backdrop {
@@ -150,6 +274,9 @@ impl Backdrop {
         core: 0.0,
         vignette: 0.0,
         kind: RegionKind::Home,
+        realm: RealmKind::CRADLE,
+        realm_tint: [0.3, 0.4, 0.6],
+        realm_ramp: 0.0,
     };
 
     /// The renderer's recipe: a colour and an opacity (never above `MAX_LAYER_ALPHA`) for each
@@ -158,24 +285,23 @@ impl Backdrop {
         let cap = |a: f32| a.clamp(0.0, MAX_LAYER_ALPHA);
         let t = self.texture;
         let d = self.density;
+        // A realm lifts the scale a little (up to the cap); plain country keeps the base.
+        let base = BASE_LAYER_ALPHA * (1.0 + REALM_BOOST * self.realm_ramp);
         let mid = mix3(self.tint, self.secondary, 0.45);
         let warm = [1.0, 0.72, 0.4];
         let gold = [0.96, 0.77, 0.26];
         let lift = |c: [f32; 3], t: f32| mix3(c, [1.0, 1.0, 1.0], t);
         Layers {
-            far_wisp: rgba(self.tint, cap(MAX_LAYER_ALPHA * d * (0.25 + 0.75 * t.wisp))),
-            mid_wisp: rgba(mid, cap(MAX_LAYER_ALPHA * 0.8 * d * t.wisp)),
+            far_wisp: rgba(self.tint, cap(base * d * (0.25 + 0.75 * t.wisp))),
+            mid_wisp: rgba(mid, cap(base * 0.8 * d * t.wisp)),
             mid_streak: rgba(
                 [0.015, 0.008, 0.025],
-                (1.5 * MAX_LAYER_ALPHA * d * t.streak).clamp(0.0, MAX_STREAK_ALPHA),
+                (1.5 * base * d * t.streak).clamp(0.0, MAX_STREAK_ALPHA),
             ),
-            mid_filament: rgba(
-                lift(self.tint, 0.3),
-                cap(MAX_LAYER_ALPHA * 1.1 * d * t.filament),
-            ),
+            mid_filament: rgba(lift(self.tint, 0.3), cap(base * 1.1 * d * t.filament)),
             near_grit: rgba(
                 mix3([0.62, 0.52, 0.42], self.tint, 0.25),
-                cap(MAX_LAYER_ALPHA * (0.35 * t.grit * d + 0.35 * self.dust)),
+                cap(base * (0.35 * t.grit * d + 0.35 * self.dust)),
             ),
             wash: wash(&[
                 (self.haze_tint, 0.03 * self.haze),
@@ -184,6 +310,7 @@ impl Backdrop {
                 (warm, 0.08 * self.glow),
                 (lift(mix3(gold, self.tint, 0.4), 0.35), 0.06 * self.core),
                 (gold, 0.02 * self.vignette),
+                (lift(self.realm_tint, 0.15), REALM_WASH * self.realm_ramp),
             ]),
             vignette: self.vignette,
         }
@@ -255,6 +382,21 @@ pub fn hsl(h: f32, s: f32, l: f32) -> [f32; 3] {
     [r + m, g + m, b + m]
 }
 
+/// A realm's colour lifted so its motes read against space (the nebula wash stays quiet).
+pub fn hsl_lift(c: [f32; 3]) -> [f32; 3] {
+    let top = c[0].max(c[1]).max(c[2]).max(0.01);
+    let k = (0.85 / top).max(1.0);
+    mix3(
+        [
+            (c[0] * k).min(1.0),
+            (c[1] * k).min(1.0),
+            (c[2] * k).min(1.0),
+        ],
+        [1.0, 1.0, 1.0],
+        0.15,
+    )
+}
+
 /// One sector's character, before blending.
 #[derive(Clone, Copy, Debug)]
 struct Look {
@@ -269,6 +411,9 @@ struct Look {
     star_tint: [f32; 3],
     key: u64,
     kind: RegionKind,
+    realm: RealmKind,
+    realm_tint: [f32; 3],
+    realm_ramp: f32,
     claim: f32,
     core: f32,
     apex: f32,
@@ -320,7 +465,9 @@ fn look(seed: u64, id: SectorId) -> Look {
     // The realm colours the whole continent: its tint over every place in it, as strongly as
     // its effects apply (nothing in the starter realm).
     let realm = crate::realm::weighting(seed, id);
-    tint = mix3(tint, realm.tint(), REALM_TINT * realm.intensity);
+    let ramp = band_ramp(realm.intensity);
+    let realm_tint = realm.tint();
+    tint = mix3(tint, realm_tint, REALM_TINT * ramp);
     let mut look = Look {
         tint,
         secondary,
@@ -333,6 +480,9 @@ fn look(seed: u64, id: SectorId) -> Look {
         star_tint: STAR_BASE,
         key: reg.key,
         kind: reg.kind,
+        realm: realm.kind,
+        realm_tint,
+        realm_ramp: ramp,
         claim: 0.0,
         core: 0.0,
         apex: match crate::apex::rank(seed, id) {
@@ -393,6 +543,10 @@ fn look(seed: u64, id: SectorId) -> Look {
             }
         }
     }
+    // The realm's own character on the field (nothing where its presence is nil).
+    let (cloud, stars) = motif_of(realm.kind).field_scale();
+    look.density *= 1.0 + (cloud - 1.0) * ramp;
+    look.star_density *= 1.0 + (stars - 1.0) * ramp;
     look.star_tint = mix3(STAR_BASE, mix3(look.tint, [1.0, 1.0, 1.0], 0.5), 0.35);
     look
 }
@@ -511,7 +665,39 @@ pub fn backdrop_at(seed: u64, pos: Vec2) -> Backdrop {
             (-d * d).exp()
         })
         .fold(0.0, f32::max);
+    // The realm with the most presence among the corners, and that presence (blended over
+    // the corners of the same kind, so it is continuous: realms meet where both are nil).
+    let mut presence = [(RealmKind::CRADLE, 0.0f32); 4];
+    for (slot, (l, w)) in presence.iter_mut().zip(looks.iter().zip(w)) {
+        *slot = (l.realm, l.realm_ramp * w);
+    }
+    let strongest = presence
+        .iter()
+        .copied()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map_or(RealmKind::CRADLE, |p| p.0);
+    let realm_ramp: f32 = presence
+        .iter()
+        .filter(|p| p.0 == strongest)
+        .map(|p| p.1)
+        .sum();
+    let realm_tint = {
+        let mut out = [0.0; 3];
+        let mut total = 1e-6;
+        for (l, p) in looks.iter().zip(presence) {
+            if p.0 == strongest && p.1 > 0.0 {
+                total += p.1;
+                for (o, v) in out.iter_mut().zip(l.realm_tint) {
+                    *o += v * p.1;
+                }
+            }
+        }
+        out.map(|v| v / total)
+    };
     Backdrop {
+        realm: strongest,
+        realm_tint,
+        realm_ramp: realm_ramp.clamp(0.0, 1.0),
         tint: sum3(&|l| l.tint),
         secondary: sum3(&|l| l.secondary),
         density: sum(&|l| l.density),

@@ -4,12 +4,14 @@
 use crate::Session;
 use bevy::{
     audio::{
-        AudioPlayer, AudioSource, GlobalVolume, PlaybackMode, PlaybackSettings, SpatialListener,
-        Volume,
+        AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, GlobalVolume, PlaybackMode,
+        PlaybackSettings, SpatialListener, Volume,
     },
     prelude::*,
 };
-use ssc::mixer::Mixer;
+use ssc::backdrop::{self, Motif};
+use ssc::mixer::{self, Mixer};
+use ssc::realm::RealmKind;
 use ssc::synth::{self, Sound};
 use std::collections::HashMap;
 
@@ -21,6 +23,10 @@ pub struct Bank(HashMap<Sound, Handle<AudioSource>>);
 /// Marks a sounding effect, so the mixer can see how crowded it is.
 #[derive(Component)]
 pub struct Voice;
+
+/// One realm kind's looping ambience; its level follows the realm's presence at the ship.
+#[derive(Component)]
+pub struct Bed(Motif);
 
 #[derive(Resource, Default)]
 pub struct Audio {
@@ -45,6 +51,47 @@ pub fn setup(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>) {
     // Emitters are placed on a unit circle around the listener purely to pan them;
     // distance falloff is the mixer's job.
     commands.spawn((SpatialListener::new(0.2), Transform::default()));
+    // The realm beds: one silent loop per kind, raised and lowered as the ship crosses the
+    // border gradient (`play_beds`).
+    for kind in RealmKind::all() {
+        let motif = backdrop::motif_of(kind);
+        let samples = mixer::bed_samples(motif);
+        if samples.is_empty() {
+            continue;
+        }
+        let handle = sources.add(AudioSource {
+            bytes: synth::wav(&samples).into(),
+        });
+        commands.spawn((
+            Bed(motif),
+            AudioPlayer::new(handle),
+            PlaybackSettings {
+                mode: PlaybackMode::Loop,
+                volume: Volume::Linear(0.0),
+                ..default()
+            },
+        ));
+    }
+}
+
+/// Eases each realm bed toward the level its presence asks: continuous in the realm's
+/// intensity, so the ambience arrives gradually and leaves as the way back is taken.
+pub fn play_beds(session: Res<Session>, time: Res<Time>, mut beds: Query<(&Bed, &mut AudioSink)>) {
+    let sky = backdrop::backdrop_at(session.game.seed(), session.game.focus);
+    let motif = backdrop::motif_of(sky.realm);
+    let step = (time.delta_secs() * 0.8).min(1.0);
+    for (Bed(own), mut sink) in &mut beds {
+        let target = if *own == motif {
+            mixer::bed_gain(*own, sky.realm_ramp)
+        } else {
+            0.0
+        };
+        let now = match sink.volume() {
+            Volume::Linear(v) => v,
+            other => other.to_linear(),
+        };
+        sink.set_volume(Volume::Linear(now + (target - now) * step));
+    }
 }
 
 pub fn apply_mute(audio: Res<Audio>, mut global: ResMut<GlobalVolume>) {
