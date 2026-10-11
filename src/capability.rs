@@ -706,4 +706,214 @@ mod tests {
             );
         }
     }
+
+    // ---- K9: properties and certificates over a generated window (docs/CAPABILITIES.md 2.4, 3.5)
+
+    use crate::apex::Archetype;
+    use crate::readout::{AreaProfile, AreaReadout, Verdict};
+    use crate::realm::{self, RealmKind};
+    use crate::simulation::organs;
+    use crate::simulation::tuning::Tunables;
+    use crate::world::SectorId;
+    use std::collections::{HashMap, HashSet};
+
+    const SEEDS: [u64; 4] = [crate::config::MASTER_SEED, 1, 7, 0xC0FFEE];
+    /// The lock core: where a realm's effects are at full strength (`realm::KEEPER_BAND`'s ceiling).
+    const LOCK_CORE: f32 = 0.85;
+
+    fn window() -> impl Iterator<Item = SectorId> {
+        (-100..100).flat_map(|x| (-100..100).map(move |y| SectorId { x, y }))
+    }
+
+    /// The best a ward donor pays on `channel`: an organ some carrier of `power` may leave.
+    fn ward_from(power: Power, channel: Channel) -> Option<Organ> {
+        organs::harvestable(power).map(|k| k.organ).find(|&o| {
+            organ_covers(o)
+                .iter()
+                .any(|c| c.channel == channel && c.max >= 2)
+        })
+    }
+
+    /// Degree a build can reach on `channel` with traits and skills alone (no kill needed:
+    /// supplier parts and research nodes), stacked as `coverage` stacks them.
+    fn non_kill_degree(channel: Channel) -> u8 {
+        let mut cap = Cap::new(0);
+        for &t in &Trait::ALL {
+            for c in trait_covers(t).iter().filter(|c| c.channel == channel) {
+                cap = cap.plus(c.max);
+            }
+        }
+        for &s in &Skill::ALL {
+            for c in skill_covers(s).iter().filter(|c| c.channel == channel) {
+                cap = cap.plus(c.max);
+            }
+        }
+        cap.degree()
+    }
+
+    #[test]
+    fn at_most_four_gate_channels_exist() {
+        let gates: Vec<Channel> = Channel::ALL.into_iter().filter(|c| c.can_gate()).collect();
+        assert!(gates.len() <= 4, "{gates:?}");
+        // Whatever a readout blocks on is one of them (a tactic or a tax never blocks).
+        let tune = Tunables::default();
+        for seed in SEEDS {
+            for id in window().step_by(7) {
+                let p = AreaProfile::of(seed, id);
+                if let Verdict::Blocked(c) =
+                    AreaReadout::read(&p, &Loadout::default(), 10.0, &tune, false).verdict
+                {
+                    assert!(c.can_gate(), "{id:?} blocks on {c:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_archetype_has_its_own_verb() {
+        let mut seen: HashMap<&str, Archetype> = HashMap::new();
+        for a in Archetype::ALL {
+            assert!(!a.verb().trim().is_empty(), "{a:?} has no verb");
+            let clash = seen.insert(a.verb(), a);
+            assert!(clash.is_none(), "{a:?} shares a verb with {clash:?}");
+        }
+    }
+
+    /// One certificate per gate: a ward that a realm keeper pays on a rim, and a way that needs
+    /// no kill (a supplier part or a research node, GAME_LOOP section 5).
+    #[test]
+    fn every_gate_has_a_ward_source_and_a_non_kill_alternative() {
+        let gates: Vec<Channel> = Channel::ALL.into_iter().filter(|c| c.can_gate()).collect();
+        let carried: Vec<Power> = RealmKind::all()
+            .filter(|k| *k != RealmKind::CRADLE)
+            .filter_map(|k| k.spec().keeper.map(|(_, p)| p))
+            .collect();
+        for gate in gates {
+            let wards: Vec<Organ> = carried.iter().filter_map(|&p| ward_from(p, gate)).collect();
+            assert!(!wards.is_empty(), "{gate:?}: no keeper pays a ward");
+            assert!(
+                non_kill_degree(gate) >= 2,
+                "{gate:?}: no non-kill alternative reaches degree 2"
+            );
+        }
+    }
+
+    /// The key is outside the lock: every realm with a keeper row keeps its keeper on a rim,
+    /// inside its own realm, below the lock core, and a keeper on a gate channel pays a ward there or the channel has a non-kill route.
+    #[test]
+    fn the_key_stands_outside_the_lock() {
+        let mut keepers = 0;
+        for seed in SEEDS {
+            let mut realms: HashSet<u64> = HashSet::new();
+            for id in window().step_by(3) {
+                let here = realm::realm(seed, id);
+                if !realms.insert(here.key) || here.kind == RealmKind::CRADLE {
+                    continue;
+                }
+                let Some((archetype, power)) = here.spec().keeper else {
+                    continue;
+                };
+                let k = realm::keeper_of(seed, id)
+                    .unwrap_or_else(|| panic!("{} has no keeper site", here.name));
+                assert_eq!((k.archetype, k.power), (archetype, power));
+                let site = realm::realm(seed, k.sector);
+                assert_eq!(site.key, here.key, "{}: key in its own realm", here.name);
+                assert!(
+                    site.intensity < LOCK_CORE,
+                    "{}: key at intensity {} is inside the lock",
+                    here.name,
+                    site.intensity
+                );
+                assert_eq!(realm::keeper_at(seed, k.sector), Some(k));
+                if let Some(channel) = power::channel(power).filter(|c| c.can_gate()) {
+                    assert!(
+                        ward_from(power, channel).is_some() || non_kill_degree(channel) >= 2,
+                        "{}: keeper pays no ward for {channel:?} and no alternative",
+                        here.name
+                    );
+                }
+                keepers += 1;
+            }
+        }
+        assert!(keepers >= 8, "only {keepers} keepers in four windows");
+    }
+
+    #[test]
+    fn home_and_the_cradle_are_open_and_neutral() {
+        let tune = Tunables::default();
+        for seed in SEEDS {
+            let home = SectorId { x: 0, y: 0 };
+            assert_eq!(realm::realm(seed, home).kind, RealmKind::CRADLE);
+            for id in window().filter(|id| realm::realm(seed, *id).kind == RealmKind::CRADLE) {
+                assert!(realm::effects(seed, id).is_neutral(), "{id:?}");
+                assert!(realm::keeper_of(seed, id).is_none(), "{id:?}");
+            }
+            for x in -6..=6 {
+                for y in -6..=6 {
+                    let id = SectorId { x, y };
+                    assert_eq!(realm::realm(seed, id).kind, RealmKind::CRADLE);
+                    let p = AreaProfile::of(seed, id);
+                    let r = AreaReadout::read(&p, &Loadout::default(), 10.0, &tune, false);
+                    assert!(
+                        !matches!(r.verdict, Verdict::Blocked(_)),
+                        "{id:?} is blocked next to HOME"
+                    );
+                }
+            }
+            let p = AreaProfile::of(seed, home);
+            let r = AreaReadout::read(&p, &Loadout::default(), 10.0, &tune, false);
+            assert_eq!(r.verdict, Verdict::Open, "HOME is Open");
+        }
+    }
+
+    /// A blocked sector always has an answer (a ward a keeper pays or a non-kill route to
+    /// degree 2) and a way around: some unblocked sector is reachable without crossing the
+    /// lock (found by a bounded flood outward from the sector).
+    #[test]
+    fn no_sector_is_blocked_without_a_skirt_or_an_answer() {
+        let tune = Tunables::default();
+        let blocked = |seed: u64, id: SectorId| -> Option<Channel> {
+            let p = AreaProfile::of(seed, id);
+            match AreaReadout::read(&p, &Loadout::default(), 10.0, &tune, false).verdict {
+                Verdict::Blocked(c) => Some(c),
+                _ => None,
+            }
+        };
+        for seed in SEEDS {
+            for id in window().step_by(2) {
+                let Some(c) = blocked(seed, id) else {
+                    continue;
+                };
+                let kept =
+                    realm::keeper_of(seed, id).is_some_and(|k| ward_from(k.power, c).is_some());
+                assert!(
+                    kept || non_kill_degree(c) >= 2,
+                    "{seed} {id:?} blocked on {c:?} with no ward and no alternative"
+                );
+                let mut seen: HashSet<SectorId> = HashSet::from([id]);
+                let mut frontier = vec![id];
+                let mut out = false;
+                'flood: while let Some(at) = frontier.pop() {
+                    if seen.len() > 4000 {
+                        break;
+                    }
+                    for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                        let n = SectorId {
+                            x: at.x + dx,
+                            y: at.y + dy,
+                        };
+                        if !seen.insert(n) {
+                            continue;
+                        }
+                        if blocked(seed, n).is_none() {
+                            out = true;
+                            break 'flood;
+                        }
+                        frontier.push(n);
+                    }
+                }
+                assert!(out, "{seed} {id:?} blocked on {c:?} with no skirt");
+            }
+        }
+    }
 }
